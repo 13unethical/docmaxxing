@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+{% block title %}Academic Document Studio{% endblock %}
+{% block page_header %}
+      <header class="top home-hero">
+        <h1>Academic Document Studio</h1>
+      </header>
+{% endblock %}
+{% block content %}
+      <div class="home-layout">
+      <div class="home-upload-zones" aria-label="Upload areas">
+        <div class="home-setup-column">
+        <section class="card home-zone-card home-brief-card" aria-labelledby="brief-label">
+          <div class="home-zone-head">
+            <h2 class="card-title" id="brief-label">Assignment Brief / Rubric</h2>
+            <p class="upload-zone-lede">Paste your assignment instructions here — <strong>not your essay</strong>.</p>
+            <p class="upload-zone-formats"><span class="upload-zone-formats-label">Supported formats:</span> PDF, DOCX, TXT, JPG, PNG</p>
+          </div>
+          <div class="req-chat-section" aria-labelledby="brief-input-label">
+            <p class="upload-zone-sr-label" id="brief-input-label">Brief input</p>
+            <div class="req-chat-composer">
+              <input
+                type="file"
+                id="requirements_attach"
+                class="req-chat-file-input"
+                accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,text/plain"
+                tabindex="-1"
+                aria-hidden="true"
+              />
+              <button
+                type="button"
+                class="req-chat-icon-btn req-chat-plus"
+                id="requirements_attach_btn"
+                aria-label="Attach brief file (PDF, DOCX, TXT, JPG, PNG)"
+                title="Attach brief: PDF, DOCX, TXT, JPG, PNG"
+              >
+                <span class="req-chat-plus-icon" aria-hidden="true">+</span>
+              </button>
+              <textarea
+                id="requirements_text"
+                class="req-chat-textarea"
+                rows="1"
+                placeholder="Paste rubric or brief — or attach PDF, DOCX, TXT, JPG, PNG…"
+                autocomplete="off"
+              ></textarea>
+              <button
+                type="button"
+                class="req-chat-icon-btn req-chat-send"
+                id="analyze_requirements_btn"
+                aria-label="Auto Setup Format from brief"
+                title="Auto Setup Format"
+              >
+                <svg class="req-chat-send-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <path
+                    d="M12 5v12M12 5l4.5 4.5M12 5L7.5 9.5"
+                    stroke="currentColor"
+                    stroke-width="2.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </button>
+            </div>
+            <p id="requirements_status" class="req-chat-status req-status" role="status"></p>
+          </div>
+        </section>
+
+        <section class="card settings-section text-settings-card" aria-labelledby="text-settings">
+          <h2 class="card-title" id="text-settings">Text</h2>
+          <div class="field text-preset-field" role="group" aria-label="Academic style preset">
+            <span class="label">Academic preset</span>
+            <div class="preset-row preset-row--text">
+              <button type="button" class="preset-chip" data-preset="harvard">Harvard</button>
+              <button type="button" class="preset-chip" data-preset="apa">APA</button>
+              <button type="button" class="preset-chip" data-preset="mla">MLA</button>
+              <button type="button" class="preset-chip preset-chip--ghost" data-preset="custom">Custom</button>
+            </div>
+          </div>
+          <div class="field-row two">
+            <label class="field">
+              <span class="label">Font</span>
+              <select id="font_family">
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Arial">Arial</option>
+                <option value="Calibri">Calibri</option>
+                <option value="Cambria">Cambria</option>
+                <option value="Georgia">Georgia</option>
+                <option value="Verdana">Verdana</option>
+                <option value="Tahoma">Tahoma</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">Size (pt)</span>
+              <select id="font_size">
+                <option value="10">10</option>
+                <option value="11">11</option>
+                <option value="12" selected>12</option>
+                <option value="13">13</option>
+                <option value="14">14</option>
+                <option value="16">16</option>
+                <option value="18">18</option>
+                <option value="20">20</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-row two">
+            <label class="field">
+              <span class="label">Line spacing</span>
+              <select id="line_spacing">
+                <option value="1.0">1.0</option>
+                <option value="1.15">1.15</option>
+                <option value="1.5" selected>1.5</option>
+                <option value="2.0">2.0</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">Alignment</span>
+              <select id="alignment">
+                <option value="left">Left</option>
+                <option value="justify">Justify</option>
+              </select>
+            </label>
+          </div>
+          <fieldset class="field toggles">
+            <legend class="label">Headings</legend>
+            <label class="check">
+              <input type="checkbox" id="auto_headings" checked />
+              <span>Auto-detect headings → Word <strong>Heading 1–3</strong> styles</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="heading_all_caps" />
+              <span>Make detected headings <strong>ALL CAPS</strong></span>
+            </label>
+          </fieldset>
+          <label class="check">
+            <input type="checkbox" id="first_line_indent" />
+            <span>First-line indent (0.5″) on body paragraphs</span>
+          </label>
+        </section>
+        </div>
+
+        <section class="card home-zone-card home-document-card" aria-labelledby="document-label">
+          <div class="home-zone-head">
+            <h2 class="card-title" id="document-label">Document</h2>
+            <p class="upload-zone-lede">Upload or paste the essay, report, or assignment you want to format.</p>
+            <p class="upload-zone-formats"><span class="upload-zone-formats-label">Supported:</span> DOCX, PDF</p>
+          </div>
+          <label class="field">
+            <span class="label">Upload file</span>
+            <input
+              type="file"
+              id="file"
+              accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+            />
+          </label>
+          <label class="field home-document-paste">
+            <span class="label">Or paste plain text</span>
+            <textarea
+              id="pasted_text"
+              rows="8"
+              placeholder="Separate paragraphs with a blank line…"
+            ></textarea>
+          </label>
+          <button type="button" class="btn-secondary btn-preview-toggle" id="preview_changes_btn">
+            Refresh preview
+          </button>
+        </section>
+      </div>
+
+      <div class="grid-main home-format-grid">
+        <div class="settings-stack">
+          <div class="settings-row-two">
+            <details class="card settings-section settings-accordion" aria-labelledby="layout-settings">
+              <summary class="settings-summary" id="layout-settings">
+                <span class="settings-summary-title">Layout</span>
+                <span class="settings-summary-hint">Margins, page numbers, spacing</span>
+              </summary>
+              <div class="settings-body">
+                <div class="field-row two">
+                  <label class="field">
+                    <span class="label">Margins</span>
+                    <select id="margin_preset">
+                      <option value="normal">Normal (1″)</option>
+                      <option value="narrow">Narrow (0.5″)</option>
+                      <option value="wide">Wide (1.5″)</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="label">Page numbers</span>
+                    <select id="page_number_position">
+                      <option value="none">None</option>
+                      <option value="top_left">Top left</option>
+                      <option value="top_right">Top right</option>
+                      <option value="bottom_left">Bottom left</option>
+                      <option value="bottom_right">Bottom right</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="field-row two">
+                  <label class="field">
+                    <span class="label">Space before (pt)</span>
+                    <select id="space_before_pt">
+                      <option value="0" selected>0</option>
+                      <option value="6">6</option>
+                      <option value="12">12</option>
+                      <option value="18">18</option>
+                      <option value="24">24</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="label">Space after (pt)</span>
+                    <select id="space_after_pt">
+                      <option value="0">0</option>
+                      <option value="6">6</option>
+                      <option value="12" selected>12</option>
+                      <option value="18">18</option>
+                      <option value="24">24</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            </details>
+
+            <details class="card settings-section settings-accordion" aria-labelledby="adv-settings">
+              <summary class="settings-summary" id="adv-settings">
+                <span class="settings-summary-title">Advanced</span>
+                <span class="settings-summary-hint">Cleanup and special rules</span>
+              </summary>
+              <div class="settings-body">
+                <fieldset class="field toggles">
+                  <legend class="label">Whitespace cleanup</legend>
+                  <label class="check">
+                    <input type="checkbox" id="clean_extra_spaces" />
+                    <span>Collapse repeated spaces</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" id="clean_extra_linebreaks" />
+                    <span>Trim extra blank lines</span>
+                  </label>
+                </fieldset>
+                <label class="check">
+                  <input type="checkbox" id="auto_justify_refs" checked />
+                  <span>Justify body text after references</span>
+                </label>
+              </div>
+            </details>
+          </div>
+
+          <details class="card settings-accordion home-cover-card">
+            <summary class="settings-summary">
+              <span class="settings-summary-title">Cover Page (optional)</span>
+              <span class="settings-summary-hint">Add basic submission details</span>
+            </summary>
+            <div class="settings-body">
+              <label class="check cover-toggle">
+                <input type="checkbox" id="include_cover_page" />
+                <span>Include title page in formatted document</span>
+              </label>
+              <label class="field">
+                <span class="label">Assignment Title</span>
+                <input type="text" id="cover_assignment_title" placeholder="Essay title or assignment name" />
+              </label>
+              <div class="field-row two">
+                <label class="field">
+                  <span class="label">Student Name</span>
+                  <input type="text" id="cover_student_name" placeholder="Jane Smith" />
+                </label>
+                <label class="field">
+                  <span class="label">Student ID</span>
+                  <input type="text" id="cover_student_id" placeholder="202400123" />
+                </label>
+              </div>
+              <div class="field-row two">
+                <label class="field">
+                  <span class="label">University</span>
+                  <input type="text" id="cover_university" placeholder="University Name" />
+                </label>
+                <label class="field">
+                  <span class="label">Module</span>
+                  <input type="text" id="cover_module" placeholder="Module title/code" />
+                </label>
+              </div>
+              <div class="field-row two">
+                <label class="field">
+                  <span class="label">Lecturer</span>
+                  <input type="text" id="cover_lecturer" placeholder="Dr. Brown" />
+                </label>
+                <label class="field">
+                  <span class="label">Submission Date</span>
+                  <input type="date" id="cover_submission_date" />
+                </label>
+              </div>
+            </div>
+          </details>
+
+          <button type="button" class="cta" id="format_btn">Format document</button>
+          <p id="format_status" class="format-status status" role="status" aria-live="polite"></p>
+        </div>
+      </div>
+
+      <section class="card preview-section" id="home_preview_section" aria-live="polite">
+        <h2 class="card-title">Before / After preview</h2>
+        <div class="preview-pair" data-preview-container>
+          <div class="preview-card">
+            <p class="preview-label">Before</p>
+            <p class="preview-sublabel">Original</p>
+            <div class="preview-frame" data-preview-before></div>
+          </div>
+          <div class="preview-card preview-card--after">
+            <p class="preview-label">After</p>
+            <p class="preview-sublabel">Formatted</p>
+            <div class="preview-frame" data-preview-after></div>
+          </div>
+        </div>
+        <h3 class="preview-diff-title">Changes applied</h3>
+        <ul class="preview-diff-list" data-preview-diff></ul>
+      </section>
+      </div>
+{% endblock %}
+{% block scripts %}
+    <script src="{{ url_for('static', filename='assignment-templates.js') }}"></script>
+    <script src="{{ url_for('static', filename='preview.js') }}"></script>
+    <script src="{{ url_for('static', filename='home.js') }}"></script>
+{% endblock %}

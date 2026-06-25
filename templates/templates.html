@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}Templates — DocStudio{% endblock %}
+{% block page_header %}
+      <header class="top">
+        <p class="brand">Templates</p>
+        <h1>Apply assignment formatting</h1>
+        <p class="lede">Choose an assignment type, preview the style, and export your formatted file.</p>
+        <p id="templates_active_badge" class="home-template-badge hidden" role="status"></p>
+      </header>
+{% endblock %}
+{% block content %}
+      <div class="templates-workflow">
+        <section class="card templates-input-card" aria-labelledby="tpl-input-label">
+          <h2 class="card-title" id="tpl-input-label">1. Your document</h2>
+          <label class="field">
+            <span class="label">Upload <code>.docx</code> or <code>.pdf</code></span>
+            <input
+              type="file"
+              id="tpl_file"
+              accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+            />
+          </label>
+          <label class="field">
+            <span class="label">Or paste plain text</span>
+            <textarea
+              id="tpl_pasted_text"
+              rows="8"
+              placeholder="Separate paragraphs with a blank line…"
+            ></textarea>
+          </label>
+        </section>
+
+        <section class="card templates-template-card" aria-labelledby="tpl-select-label">
+          <h2 class="card-title" id="tpl-select-label">2. Assignment type</h2>
+          <label class="field">
+            <span class="label">Template</span>
+            <select id="template_select" aria-describedby="template_select_hint">
+              <option value="">Choose assignment type…</option>
+            </select>
+          </label>
+          <p class="card-hint" id="template_select_hint">Each template loads recommended settings automatically.</p>
+          <button type="button" class="cta templates-apply-btn" id="apply_template_btn" disabled>
+            Apply template
+          </button>
+
+          <details class="template-details" id="template_details">
+            <summary>About this template</summary>
+            <div class="template-details-body" id="template_details_body"></div>
+          </details>
+        </section>
+
+        <section
+          class="card templates-settings-card hidden"
+          id="templates_settings_section"
+          aria-labelledby="tpl-settings-label"
+        >
+          <h2 class="card-title" id="tpl-settings-label">3. Formatting settings</h2>
+          <p class="card-hint">Fine-tune if needed. Changes sync with Format page.</p>
+
+          <div class="field-row two">
+            <label class="field">
+              <span class="label">Font</span>
+              <select id="font_family">
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Arial">Arial</option>
+                <option value="Calibri">Calibri</option>
+                <option value="Cambria">Cambria</option>
+                <option value="Georgia">Georgia</option>
+                <option value="Verdana">Verdana</option>
+                <option value="Tahoma">Tahoma</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">Size (pt)</span>
+              <select id="font_size">
+                <option value="10">10</option>
+                <option value="11">11</option>
+                <option value="12" selected>12</option>
+                <option value="13">13</option>
+                <option value="14">14</option>
+                <option value="16">16</option>
+                <option value="18">18</option>
+                <option value="20">20</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-row two">
+            <label class="field">
+              <span class="label">Line spacing</span>
+              <select id="line_spacing">
+                <option value="1.0">1.0</option>
+                <option value="1.15">1.15</option>
+                <option value="1.5" selected>1.5</option>
+                <option value="2.0">2.0</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">Alignment</span>
+              <select id="alignment">
+                <option value="left">Left</option>
+                <option value="justify">Justify</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-row two">
+            <label class="field">
+              <span class="label">Margins</span>
+              <select id="margin_preset">
+                <option value="normal">Normal (1″)</option>
+                <option value="narrow">Narrow (0.5″)</option>
+                <option value="wide">Wide (1.5″)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">Page numbers</span>
+              <select id="page_number_position">
+                <option value="none">None</option>
+                <option value="top_left">Top left</option>
+                <option value="top_right">Top right</option>
+                <option value="bottom_left">Bottom left</option>
+                <option value="bottom_right">Bottom right</option>
+              </select>
+            </label>
+          </div>
+          <div class="field-row two">
+            <label class="field">
+              <span class="label">Space before (pt)</span>
+              <select id="space_before_pt">
+                <option value="0" selected>0</option>
+                <option value="6">6</option>
+                <option value="12">12</option>
+                <option value="18">18</option>
+                <option value="24">24</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">Space after (pt)</span>
+              <select id="space_after_pt">
+                <option value="0">0</option>
+                <option value="6">6</option>
+                <option value="12" selected>12</option>
+                <option value="18">18</option>
+                <option value="24">24</option>
+              </select>
+            </label>
+          </div>
+          <fieldset class="field toggles">
+            <legend class="label">Headings &amp; body</legend>
+            <label class="check">
+              <input type="checkbox" id="auto_headings" checked />
+              <span>Auto-detect headings → Word <strong>Heading 1–3</strong> styles</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="heading_all_caps" />
+              <span>Make detected headings <strong>ALL CAPS</strong></span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="first_line_indent" />
+              <span>First-line indent (0.5″) on body paragraphs</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="auto_justify_refs" checked />
+              <span>After <strong>References</strong>, justify body text</span>
+            </label>
+          </fieldset>
+          <fieldset class="field toggles">
+            <legend class="label">Whitespace cleanup (optional)</legend>
+            <label class="check">
+              <input type="checkbox" id="clean_extra_spaces" />
+              <span>Collapse double/triple spaces → single space</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="clean_extra_linebreaks" />
+              <span>Trim extra blank lines / line breaks inside paragraphs</span>
+            </label>
+          </fieldset>
+        </section>
+      </div>
+
+      <section class="card preview-section hidden" id="template_preview_section" aria-live="polite">
+        <h2 class="card-title">Before / After preview</h2>
+        <p class="card-hint" id="template_preview_hint">Compare original formatting with the applied template.</p>
+        <div class="preview-pair" data-preview-container>
+          <div class="preview-card">
+            <p class="preview-label">Before</p>
+            <p class="preview-sublabel">Original formatting</p>
+            <div class="preview-frame" data-preview-before></div>
+          </div>
+          <div class="preview-card preview-card--after">
+            <p class="preview-label">After</p>
+            <p class="preview-sublabel">With template settings</p>
+            <div class="preview-frame" data-preview-after></div>
+          </div>
+        </div>
+        <h3 class="preview-diff-title">Changes applied</h3>
+        <ul class="preview-diff-list" data-preview-diff></ul>
+      </section>
+
+      <section class="templates-actions card" aria-labelledby="tpl-export-label">
+        <h2 class="card-title" id="tpl-export-label">4. Export</h2>
+        <button type="button" class="cta" id="tpl_format_btn" disabled>Download formatted document</button>
+        <p id="tpl_format_status" class="format-status status" role="status" aria-live="polite"></p>
+      </section>
+{% endblock %}
+{% block scripts %}
+    <script src="{{ url_for('static', filename='assignment-templates.js') }}"></script>
+    <script src="{{ url_for('static', filename='preview.js') }}"></script>
+    <script src="{{ url_for('static', filename='templates-page.js') }}"></script>
+{% endblock %}

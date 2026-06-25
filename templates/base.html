@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}DocStudio{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  </head>
+  <body>
+    {% set _nav = nav_active|default('home') %}
+    <div class="page-container">
+      <header class="site-header">
+        <div class="nav-inner">
+          <a href="{{ url_for('index') }}" class="nav-brand" aria-label="DocStudio Home">
+            <svg
+              class="nav-brand-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                d="M7 3.75h7l4.25 4.25V20.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5V5.25A1.5 1.5 0 0 1 7 3.75Z"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linejoin="round"
+              />
+              <path d="M14 3.75V8h4.25" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+              <path d="M8.75 11h6.5M8.75 14.5h6.5M8.75 18h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            </svg>
+            <span>DocStudio</span>
+          </a>
+          <nav class="top-nav" aria-label="Main navigation">
+            <a
+              href="{{ url_for('index') }}"
+              class="nav-link{% if _nav == 'home' %} is-active{% endif %}"
+              {% if _nav == 'home' %}aria-current="page"{% endif %}
+              ><svg
+                class="nav-link-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path
+                  d="M7.5 3.75h6.5L19 8.75V20a1.25 1.25 0 0 1-1.25 1.25h-10.5A1.25 1.25 0 0 1 6 20V5a1.25 1.25 0 0 1 1.5-1.25Z"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linejoin="round"
+                />
+                <path d="M14 3.75V8.75H19" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+              </svg>
+              <span>Format</span></a
+            >
+            <a
+              href="{{ url_for('check') }}"
+              class="nav-link{% if _nav == 'check' %} is-active{% endif %}"
+              {% if _nav == 'check' %}aria-current="page"{% endif %}
+              >Check</a
+            >
+            <a
+              href="{{ url_for('templates') }}"
+              class="nav-link{% if _nav == 'templates' %} is-active{% endif %}"
+              {% if _nav == 'templates' %}aria-current="page"{% endif %}
+              >Templates</a
+            >
+            <a
+              href="{{ url_for('references') }}"
+              class="nav-link{% if _nav == 'references' %} is-active{% endif %}"
+              {% if _nav == 'references' %}aria-current="page"{% endif %}
+              >References</a
+            >
+          </nav>
+        </div>
+      </header>
+
+      <main class="shell main-wrap">
+        {% block page_header %}{% endblock %}
+        {% block content %}{% endblock %}
+      </main>
+
+      <footer class="foot site-footer shell">
+        <p>
+          Formatting and document checks run locally. Optional &ldquo;Auto Setup Format&rdquo; may call OpenAI;
+          reference metadata uses free public APIs (Crossref, Open Library).
+        </p>
+      </footer>
+    </div>
+
+    <div
+      id="support_chat_layer"
+      class="support-chat-layer"
+      aria-hidden="true"
+      data-support-layer
+    >
+      <div class="support-chat-backdrop" data-support-close tabindex="-1" aria-hidden="true"></div>
+      <div
+        class="support-chat-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="support_chat_title"
+      >
+        <div class="support-chat-panel-header">
+          <h2 class="support-chat-panel-title" id="support_chat_title">How can we help?</h2>
+          <button type="button" class="support-chat-close" data-support-close aria-label="Close chat">&times;</button>
+        </div>
+        <p id="support_chat_status" class="support-chat-status" role="status" aria-live="polite"></p>
+        <label class="support-chat-sr-only" for="support_chat_message">Your message</label>
+        <textarea
+          id="support_chat_message"
+          class="support-chat-textarea"
+          rows="4"
+          placeholder="Tell us what to improve..."
+        ></textarea>
+        <button type="button" class="support-chat-send" id="support_chat_send">Send</button>
+      </div>
+    </div>
+
+    <button
+      type="button"
+      id="support_chat_toggle"
+      class="support-chat-fab"
+      aria-label="Open support chat"
+      aria-expanded="false"
+      aria-controls="support_chat_layer"
+    >
+      <svg class="support-chat-fab-icon" width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path
+          d="M12 3C7.03 3 3 6.58 3 11c0 2.13 1.03 4.06 2.69 5.5L4 21l4.73-1.55C10.22 20.15 11.1 20.3 12 20.3c4.97 0 9-3.58 9-8s-4.03-8-9-8z"
+          stroke="currentColor"
+          stroke-width="1.75"
+          stroke-linejoin="round"
+        />
+        <path d="M8.5 11h.01M12 11h.01M15.5 11h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      </svg>
+    </button>
+
+    <script src="{{ url_for('static', filename='ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='common.js') }}"></script>
+    <script src="{{ url_for('static', filename='support-chat.js') }}"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

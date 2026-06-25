@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}References — DocStudio{% endblock %}
+{% block page_header %}
+      <header class="top">
+        <p class="brand">Citations</p>
+        <h1>References &amp; citations</h1>
+        <p class="lede">Generate sources quickly, save them, and use them when formatting your document.</p>
+      </header>
+{% endblock %}
+{% block content %}
+      <section class="card ref-gen-card" aria-labelledby="ref-gen-label">
+        <div class="ref-gen-header">
+          <h2 class="card-title" id="ref-gen-label">Generate reference</h2>
+          <label class="field ref-style-inline">
+            <span class="label">Citation style</span>
+            <select id="citation_style" name="citation_style">
+              <option value="APA">APA 7</option>
+              <option value="Harvard">Harvard</option>
+              <option value="MLA">MLA</option>
+              <option value="Chicago">Chicago</option>
+              <option value="IEEE">IEEE</option>
+              <option value="Vancouver">Vancouver</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="ref-tabs" role="tablist" aria-label="Reference input type">
+          <button type="button" class="ref-tab is-active" role="tab" aria-selected="true" data-ref-tab="url">URL</button>
+          <button type="button" class="ref-tab" role="tab" aria-selected="false" data-ref-tab="doi">DOI</button>
+          <button type="button" class="ref-tab" role="tab" aria-selected="false" data-ref-tab="isbn">ISBN</button>
+          <button type="button" class="ref-tab" role="tab" aria-selected="false" data-ref-tab="title">Title + Author</button>
+          <button type="button" class="ref-tab" role="tab" aria-selected="false" data-ref-tab="manual">Manual</button>
+          <button type="button" class="ref-tab" role="tab" aria-selected="false" data-ref-tab="paste">Scholar / Paste</button>
+        </div>
+
+        <div class="ref-tab-panels">
+          <div class="ref-tab-panel is-active" data-ref-panel="url">
+            <label class="field">
+              <span class="label">Page URL</span>
+              <input type="url" id="ref_url_input" placeholder="https://example.org/article" autocomplete="off" />
+            </label>
+          </div>
+          <div class="ref-tab-panel" data-ref-panel="doi">
+            <label class="field">
+              <span class="label">DOI</span>
+              <input type="text" id="ref_doi_input" placeholder="10.1000/xyz123" autocomplete="off" />
+            </label>
+          </div>
+          <div class="ref-tab-panel" data-ref-panel="isbn">
+            <label class="field">
+              <span class="label">ISBN</span>
+              <input type="text" id="ref_isbn_input" placeholder="978-0-123456-78-9" autocomplete="off" />
+            </label>
+          </div>
+          <div class="ref-tab-panel" data-ref-panel="title">
+            <div class="field-row two">
+              <label class="field">
+                <span class="label">Title</span>
+                <input type="text" id="ref_title_input" placeholder="Article or book title" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span class="label">Author (optional)</span>
+                <input type="text" id="ref_author_input" placeholder="Smith, J." autocomplete="off" />
+              </label>
+            </div>
+          </div>
+          <div class="ref-tab-panel" data-ref-panel="manual">
+            <div class="field-row two">
+              <label class="field"><span class="label">Author(s)</span><input type="text" id="man_authors" placeholder="Smith, J.; Jones, A." /></label>
+              <label class="field"><span class="label">Year</span><input type="text" id="man_year" placeholder="2024" /></label>
+            </div>
+            <label class="field"><span class="label">Title</span><input type="text" id="man_title" placeholder="Title" /></label>
+            <div class="field-row two">
+              <label class="field"><span class="label">Journal</span><input type="text" id="man_journal" /></label>
+              <label class="field"><span class="label">Publisher</span><input type="text" id="man_publisher" /></label>
+            </div>
+            <div class="field-row two">
+              <label class="field"><span class="label">Volume</span><input type="text" id="man_volume" /></label>
+              <label class="field"><span class="label">Issue</span><input type="text" id="man_issue" /></label>
+            </div>
+            <div class="field-row two">
+              <label class="field"><span class="label">Pages</span><input type="text" id="man_pages" placeholder="45-60" /></label>
+              <label class="field"><span class="label">DOI</span><input type="text" id="man_doi" /></label>
+            </div>
+            <label class="field"><span class="label">URL</span><input type="url" id="man_url" placeholder="https://…" /></label>
+          </div>
+          <div class="ref-tab-panel" data-ref-panel="paste">
+            <label class="field">
+              <span class="label">Paste from Google Scholar, Crossref, or a library database</span>
+              <textarea id="ref_paste_input" rows="4" placeholder="Paste a full or partial reference line…"></textarea>
+            </label>
+          </div>
+        </div>
+
+        <button type="button" class="btn-check ref-generate-main" id="ref_generate_btn">Generate reference</button>
+        <div id="ref_gen_status" class="req-status" role="status"></div>
+
+        <div class="ref-preview-wrap hidden" id="ref_preview_wrap">
+          <p class="label">Generated citation</p>
+          <div class="ref-preview-row">
+            <div class="ref-preview" id="ref_preview"></div>
+            <button type="button" class="btn-copy" id="ref_copy_btn" title="Copy citation">Copy</button>
+          </div>
+          <div class="ref-preview-actions">
+            <button type="button" class="btn-add-ref" id="ref_add_btn">Add to references</button>
+          </div>
+        </div>
+
+        <div class="ref-saved-wrap">
+          <p class="label">Saved references (<span id="ref_count">0</span>)</p>
+          <ul class="ref-list" id="references_list" aria-label="Saved references"></ul>
+          <p class="ref-empty-state hidden" id="ref_empty_state">No references yet. Generate one above and click Add.</p>
+          <button type="button" class="btn-clear-refs hidden" id="ref_clear_all_btn">Clear all</button>
+        </div>
+      </section>
+
+      <section class="card intext-card" aria-labelledby="intext-label">
+        <h2 class="card-title" id="intext-label">In-text citation helper</h2>
+        <div class="field-row two">
+          <label class="field">
+            <span class="label">Author</span>
+            <input type="text" id="intext_author" placeholder="Smith, J." autocomplete="off" />
+          </label>
+          <label class="field">
+            <span class="label">Year</span>
+            <input type="text" id="intext_year" placeholder="2024" autocomplete="off" />
+          </label>
+        </div>
+        <div class="field-row two">
+          <label class="field">
+            <span class="label">Page (optional)</span>
+            <input type="text" id="intext_page" placeholder="14" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span class="label">Style</span>
+            <select id="intext_style">
+              <option value="APA">APA</option>
+              <option value="Harvard">Harvard</option>
+              <option value="MLA">MLA</option>
+              <option value="Chicago">Chicago</option>
+              <option value="IEEE">IEEE</option>
+              <option value="Vancouver">Vancouver</option>
+            </select>
+          </label>
+        </div>
+        <label class="check intext-quote-check">
+          <input type="checkbox" id="intext_direct_quote" />
+          <span>Direct quote (include page in APA)</span>
+        </label>
+        <button type="button" class="btn-secondary" id="intext_generate_btn">Generate in-text citations</button>
+        <div id="intext_status" class="req-status" role="status"></div>
+        <div id="intext_results" class="intext-results hidden">
+          <div class="intext-result-grid" id="intext_result_grid"></div>
+        </div>
+      </section>
+{% endblock %}
+{% block scripts %}
+    <script src="{{ url_for('static', filename='references.js') }}"></script>
+{% endblock %}

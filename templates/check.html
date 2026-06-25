@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}Check — Document Studio{% endblock %}
+{% block page_header %}
+      <header class="top">
+        <p class="brand">Check</p>
+        <h1>Check your document</h1>
+        <p class="lede">Review readiness, spot issues quickly, and fix the highest-impact problems first.</p>
+      </header>
+{% endblock %}
+{% block content %}
+      <div class="check-input-grid">
+        <section class="card check-card" aria-labelledby="check-req-label">
+          <h2 class="card-title" id="check-req-label">1. Requirements</h2>
+          <label class="field">
+            <span class="label">Assignment brief / rubric</span>
+            <textarea
+              id="check_requirements"
+              rows="7"
+              placeholder="Paste requirements (word limit, style, spacing, sections)..."
+            ></textarea>
+          </label>
+          <label class="field">
+            <span class="label">Upload brief (optional)</span>
+            <input
+              type="file"
+              id="check_requirements_file"
+              accept=".docx,.pdf,.txt,.md,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,image/jpeg,image/png"
+            />
+          </label>
+        </section>
+
+        <section class="card check-card" aria-labelledby="check-doc-label">
+          <h2 class="card-title" id="check-doc-label">2. Document Input</h2>
+          <label class="field">
+            <span class="label">Document type</span>
+            <select id="check_doc_type" class="check-select">
+              <option value="essay">Essay</option>
+              <option value="report">Report</option>
+              <option value="literature_review">Literature Review</option>
+              <option value="research_paper">Research Paper</option>
+              <option value="case_study">Case Study</option>
+              <option value="reflection">Reflection</option>
+              <option value="learning_journal">Learning Journal</option>
+              <option value="dissertation_chapter">Dissertation Chapter</option>
+              <option value="thesis_chapter">Thesis chapter</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="label">Paste your document text</span>
+            <textarea
+              id="check_pasted_text"
+              rows="9"
+              placeholder="Paste the full draft text..."
+            ></textarea>
+          </label>
+          <label class="field">
+            <span class="label">Upload <code>.docx</code> or <code>.pdf</code> (optional)</span>
+            <input
+              type="file"
+              id="check_file"
+              accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+            />
+          </label>
+          <button type="button" class="btn-check" id="check_document_btn">Check document</button>
+          <div id="check_status" class="req-status" role="status"></div>
+        </section>
+      </div>
+
+      <section id="check_results" class="check-results hidden" aria-live="polite">
+        <div class="check-score-card card check-summary-top-card">
+          <h2 class="card-title">3. Analysis Results</h2>
+          <div class="check-score-row">
+            <div class="check-score-ring-wrap" aria-hidden="true">
+              <svg class="check-score-ring" viewBox="0 0 120 120">
+                <circle class="check-score-ring-bg" cx="60" cy="60" r="52" />
+                <circle class="check-score-ring-fill" id="check_score_ring" cx="60" cy="60" r="52" />
+              </svg>
+              <span class="check-score-value" id="check_score_value">—</span>
+            </div>
+            <div class="check-score-meta">
+              <p class="check-summary-label">Overall readiness score</p>
+              <p class="check-verdict" id="check_verdict">—</p>
+              <p class="check-summary" id="check_summary"></p>
+            </div>
+          </div>
+          <div class="check-main-problems">
+            <p class="check-summary-label">Main problems to fix</p>
+            <ol id="check_top_problems" class="check-next-list"></ol>
+          </div>
+        </div>
+
+        <div class="card check-analysis-nav-card">
+          <div class="check-analysis-tabs" role="tablist" aria-label="Analysis sections">
+            <button type="button" class="check-analysis-tab is-active" role="tab" data-analysis-tab="parser">Requirements Parser</button>
+            <button type="button" class="check-analysis-tab" role="tab" data-analysis-tab="structure">Structure Recovery</button>
+            <button type="button" class="check-analysis-tab" role="tab" data-analysis-tab="formatting">Formatting Check</button>
+            <button type="button" class="check-analysis-tab" role="tab" data-analysis-tab="citation">Citation Check</button>
+            <button type="button" class="check-analysis-tab" role="tab" data-analysis-tab="compliance">Compliance Score</button>
+            <button type="button" class="check-analysis-tab" role="tab" data-analysis-tab="actions">Action Plan</button>
+          </div>
+        </div>
+
+        <div class="check-analysis-panels">
+          <section class="card check-analysis-panel is-active" data-analysis-panel="parser">
+            <div id="detected_requirements_card" class="check-detected-card hidden">
+              <div class="check-detected-head">
+                <div>
+                  <h3 class="check-section-title">Detected requirements</h3>
+                  <p class="card-hint" id="detected_requirements_summary"></p>
+                </div>
+                <button type="button" class="btn-secondary check-apply-btn" id="apply_detected_requirements_btn" disabled>
+                  Apply to Format page
+                </button>
+              </div>
+              <dl id="detected_requirements_list" class="check-detected-list"></dl>
+            </div>
+            <p id="check_parser_empty" class="card-hint">Run Check to detect formatting requirements from your brief.</p>
+          </section>
+
+          <section class="card check-analysis-panel" data-analysis-panel="structure">
+            <div class="structure-card">
+              <div class="structure-head">
+                <h3 class="check-section-title">Structure Recovery</h3>
+                <div class="structure-score" aria-label="Structure Health Score">
+                  <span id="structure_health_score">—</span>
+                  <small>Structure Health</small>
+                </div>
+              </div>
+              <details class="check-detail" open>
+                <summary>Recovered structure</summary>
+                <p id="structure_recovery_meta" class="card-hint"></p>
+                <ol id="structure_tree" class="structure-tree"></ol>
+              </details>
+              <details class="check-detail" open>
+                <summary>Sections</summary>
+                <div class="structure-grid">
+                  <section class="structure-panel" aria-labelledby="structure-detected-title">
+                    <h4 id="structure-detected-title">Detected</h4>
+                    <ul id="structure_detected_sections" class="structure-list"></ul>
+                  </section>
+                  <section class="structure-panel" aria-labelledby="structure-missing-title">
+                    <h4 id="structure-missing-title">Missing</h4>
+                    <ul id="structure_missing_sections" class="structure-list"></ul>
+                  </section>
+                </div>
+              </details>
+              <details class="check-detail">
+                <summary>Paragraph and heading issues</summary>
+                <div class="structure-grid">
+                  <section class="structure-panel" aria-labelledby="structure-paragraph-title">
+                    <h4 id="structure-paragraph-title">Paragraph</h4>
+                    <ul id="structure_paragraph_issues" class="structure-list"></ul>
+                  </section>
+                  <section class="structure-panel" aria-labelledby="structure-heading-title">
+                    <h4 id="structure-heading-title">Heading</h4>
+                    <ul id="structure_heading_issues" class="structure-list"></ul>
+                  </section>
+                </div>
+              </details>
+              <details class="check-detail">
+                <summary>Restore suggestions</summary>
+                <div class="structure-suggestions">
+                  <ul id="structure_suggestions" class="structure-suggestion-list"></ul>
+                </div>
+              </details>
+            </div>
+          </section>
+
+          <section class="card check-analysis-panel" data-analysis-panel="formatting">
+            <h3 class="check-section-title">Formatting Check</h3>
+            <details class="check-detail" open>
+              <summary>Category scores</summary>
+              <ul id="check_categories_list" class="check-categories-list"></ul>
+            </details>
+            <details class="check-detail">
+              <summary>What is good / needs work</summary>
+              <div class="check-two-col">
+                <div class="check-good-card">
+                  <h4 class="check-section-title check-good-title">What is good</h4>
+                  <ul id="check_positives_list" class="check-bullet-list"></ul>
+                </div>
+                <div class="check-work-card">
+                  <h4 class="check-section-title check-work-title">What needs work</h4>
+                  <ul id="check_needs_list" class="check-bullet-list"></ul>
+                </div>
+              </div>
+            </details>
+            <details class="check-detail">
+              <summary>Issue cards</summary>
+              <div id="check_issues_list" class="check-issues-list"></div>
+            </details>
+          </section>
+
+          <section class="card check-analysis-panel" data-analysis-panel="citation">
+            <h3 class="check-section-title">Citation Check</h3>
+            <ul id="check_citation_list" class="check-bullet-list"></ul>
+          </section>
+
+          <section class="card check-analysis-panel" data-analysis-panel="compliance">
+            <h3 class="check-section-title">Compliance Score</h3>
+            <p class="check-summary" id="check_compliance_text"></p>
+            <ul id="check_compliance_list" class="check-bullet-list"></ul>
+          </section>
+
+          <section class="card check-analysis-panel" data-analysis-panel="actions">
+            <h3 class="check-section-title">Action Plan</h3>
+            <ol id="check_next_steps" class="check-next-list"></ol>
+          </section>
+        </div>
+
+        <div class="card check-next-card">
+          <h3 class="check-section-title">What to fix first</h3>
+          <ol id="check_fix_first" class="check-next-list"></ol>
+        </div>
+      </section>
+{% endblock %}
+{% block scripts %}
+    <script src="{{ url_for('static', filename='check.js') }}"></script>
+{% endblock %}
