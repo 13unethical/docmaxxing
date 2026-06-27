@@ -1192,9 +1192,10 @@ def check_document(
     requirements: str = "",
     doc: Document | None = None,
     document_type: str = "other",
+    parsed_requirements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Full check: parse requirements, run heuristics, return score + issue cards.
+    Full check: requirements → metrics → per-requirement validation → weighted score.
     """
     doc_type = (document_type or "other").lower().replace(" ", "_")
     if doc_type not in DOC_TYPES:
@@ -1210,7 +1211,6 @@ def check_document(
         }
 
     parsed = parse_requirements_for_check(requirements)
-    sections = _track_sections(paragraphs)
     wc = _word_count(text)
     structure_analysis = analyze_structure_recovery(
         text=text,
@@ -1220,74 +1220,49 @@ def check_document(
         doc=doc,
     )
 
-    issues = _run_content_checks(
+    from services.check_pipeline import run_check_pipeline
+
+    pipeline = run_check_pipeline(
         text=text,
-        paragraphs=paragraphs,
         requirements=requirements,
-        parsed=parsed,
-        doc_type=doc_type,
-        sections=sections,
+        paragraphs=paragraphs,
+        doc=doc,
+        document_type=doc_type,
+        structure_tree=structure_analysis.get("structure_tree"),
+        parsed_requirements=parsed_requirements,
     )
 
-    # Formatting from .docx via existing analyzer
-    expected = normalize_expected(
-        {
-            "font_family": parsed.get("font_family"),
-            "font_size": parsed.get("font_size"),
-            "line_spacing": parsed.get("line_spacing"),
-            "alignment": parsed.get("alignment"),
-            "require_page_numbers": parsed.get("page_numbers") is True,
-            "first_line_indent": parsed.get("first_line_indent"),
-            "expect_references_section": parsed.get("reference_list_required") is not False,
-            "check_intro_conclusion": doc_type
-            in ("essay", "report", "research_paper", "literature_review", "thesis_chapter"),
-        }
-    )
-    legacy = analyze_document(text=text, doc=doc, expected=expected)
-    _map_legacy = {
-        "missing_references": ("references", "Missing references section"),
-        "references_incomplete": ("references", "References list incomplete"),
-        "missing_introduction": ("structure", "No Introduction section"),
-        "missing_conclusion": ("structure", "No Conclusion section"),
-        "font_mismatch": ("formatting", "Font mismatch"),
-        "font_size_mismatch": ("formatting", "Font size mismatch"),
-        "spacing_error": ("formatting", "Line spacing mismatch"),
-        "alignment_error": ("formatting", "Alignment mismatch"),
-        "indentation_error": ("formatting", "First-line indent missing"),
-        "missing_page_numbers": ("formatting", "Page numbers missing"),
-        "heading_style": ("headings", "Heading style in Word"),
-        "paragraph_spacing": ("spacing_layout", "Paragraph spacing"),
-        "thin_structure": ("structure", "Thin structure"),
-    }
-    existing_titles = {(i.get("title") or "").lower() for i in issues}
-    for leg in legacy.get("issues") or []:
-        kind = leg.get("type") or ""
-        cat, title = _map_legacy.get(kind, ("formatting", kind.replace("_", " ").title()))
-        if title.lower() in existing_titles:
-            continue
-        sev = leg.get("severity") or "medium"
-        fix_hints = {
-            "missing_references": "Add a References section at the end with full citations.",
-            "font_mismatch": "Apply the required font throughout in Word (Select All → Font).",
-            "font_size_mismatch": "Set body text to the required point size.",
-            "spacing_error": "Set line spacing to match the brief (e.g. double = 2.0).",
-            "alignment_error": "Justify or left-align body paragraphs as required.",
-            "missing_page_numbers": "Insert page numbers in the header or footer.",
-        }
-        issues.append(
-            _issue(
-                category=cat,
-                severity=sev,
-                title=title,
-                message=leg.get("message") or title,
-                fix=fix_hints.get(kind, "Adjust formatting to match the assignment requirements."),
-                penalty={"high": 18, "medium": 12, "low": 6}.get(sev, 10),
-            )
-        )
+    score = pipeline["score"]
+    verdict = pipeline["verdict"]
+    categories = pipeline["categories"]
+    issues = pipeline["issues"]
+    explanation = pipeline["explanation"]
+    validations = pipeline["validations"]
+    action_plan = pipeline["action_plan"]
+    structured = pipeline["structured_requirements"]
+    metrics = pipeline["metrics"]
 
-    if doc is None and any(
-        parsed.get(k) for k in ("font_family", "font_size", "line_spacing", "page_numbers")
-    ):
+    has_refs = bool(metrics.get("has_references_section"))
+    heading_count = int(metrics.get("heading_count") or 0)
+    positives, needs_work = _positives_and_needs(paragraphs, issues, wc, has_refs, heading_count)
+
+    next_steps = [
+        f"Step {s['step_number']}: {s['action']} (est. +{s['estimated_improvement']} pts)"
+        for s in action_plan
+    ]
+    if not next_steps:
+        next_steps = _next_steps(issues)
+    for rec in explanation.get("action_plan_narrative") or []:
+        if rec and rec not in next_steps:
+            next_steps.append(rec)
+        if len(next_steps) >= 6:
+            break
+
+    summary = explanation.get("summary") or (
+        f"Readiness score: {score}/100 ({verdict}). About {wc:,} words in {len(paragraphs)} paragraphs."
+    )
+
+    if doc is None and any(structured.get(k) for k in ("font_family", "font_size", "line_spacing", "page_numbers_required")):
         issues.append(
             _issue(
                 category="formatting",
@@ -1295,62 +1270,38 @@ def check_document(
                 title="Upload .docx for layout checks",
                 message="Font, margins, and page numbers can only be verified from a Word file.",
                 fix="Upload your .docx copy to validate formatting against the brief.",
-                penalty=3,
+                penalty=0,
             )
         )
-
-    categories = _category_scores(issues)
-    score = _overall_score(categories)
-    verdict = _verdict(score)
-    has_refs = _has_section(paragraphs, REFS_HEADINGS)
-    heading_count = sum(1 for p in paragraphs if is_heading_like(p))
-    positives, needs_work = _positives_and_needs(paragraphs, issues, wc, has_refs, heading_count)
-    next_steps = _next_steps(issues)
-    gemini = _gemini_insights(
-        text=text,
-        requirements=requirements,
-        issues=issues,
-        structure_analysis=structure_analysis,
-        document_type=doc_type,
-    )
-    for recommendation in gemini.get("formatting_recommendations") or []:
-        if recommendation and recommendation not in next_steps:
-            next_steps.append(recommendation)
-        if len(next_steps) >= 5:
-            break
-
-    summary_parts = [
-        f"Overall score: {score}/100 ({verdict}).",
-        f"About {wc:,} words in {len(paragraphs)} paragraphs.",
-    ]
-    if issues:
-        high = sum(1 for i in issues if i.get("severity") == "high")
-        if high:
-            summary_parts.append(f"{high} high-priority issue(s) need attention before submission.")
-        else:
-            summary_parts.append("Most issues are fixable with targeted edits — see cards below.")
-    else:
-        summary_parts.append("No major problems detected for the checks we can run on this input.")
 
     return {
         "score": score,
         "verdict": verdict,
-        "summary": " ".join(summary_parts),
+        "summary": summary,
         "categories": categories,
         "positives": positives,
         "needs_work": needs_work,
         "issues": issues,
         "next_steps": next_steps,
         "structure_analysis": structure_analysis,
-        "gemini_diagnostics": gemini.get("gemini_diagnostics"),
+        "validations": validations,
+        "action_plan": action_plan,
+        "priorities": pipeline["priorities"],
+        "gemini_diagnostics": explanation.get("gemini_diagnostics"),
         "meta": {
             "word_count": wc,
             "paragraph_count": len(paragraphs),
             "document_type": doc_type,
-            "document_classification": gemini.get("document_classification"),
-            "compliance_analysis": gemini.get("compliance_analysis"),
-            "formatting_recommendations": gemini.get("formatting_recommendations"),
-            "parsed_requirements": parsed,
-            "notes": legacy.get("notes") or [],
+            "document_classification": {
+                "document_type": doc_type,
+                "confidence": 0.0,
+                "source": explanation.get("source") or "local",
+            },
+            "compliance_analysis": explanation.get("compliance_analysis"),
+            "formatting_recommendations": explanation.get("formatting_recommendations"),
+            "parsed_requirements": structured,
+            "structured_requirements": structured,
+            "metrics": metrics,
+            "notes": [],
         },
     }

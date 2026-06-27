@@ -1898,6 +1898,145 @@ body.support-chat-open {
   color: var(--muted);
 }
 
+.check-validations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.check-validation-row {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 0.85rem;
+  background: #fafbfd;
+}
+
+.check-validation-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.check-validation-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.check-validation-status {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+}
+
+.check-validation-status.is-pass {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.check-validation-status.is-fail {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.check-validation-status.is-partial {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.check-validation-status.is-confirm {
+  background: #e0e7ff;
+  color: #4338ca;
+}
+
+.check-validation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.check-validation-grid strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.check-validation-bar-wrap {
+  margin-top: 0.45rem;
+  height: 6px;
+  background: #e5e7eb;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.check-validation-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: #059669;
+}
+
+.check-validation-bar.bar-low {
+  background: #dc2626;
+}
+
+.check-validation-bar.bar-mid {
+  background: #d97706;
+}
+
+.check-section-checklist {
+  margin: 0.45rem 0 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.check-section-checklist li.is-ok::before {
+  content: "✔ ";
+  color: #059669;
+}
+
+.check-section-checklist li.is-miss::before {
+  content: "✘ ";
+  color: #dc2626;
+}
+
+.check-action-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.check-action-step {
+  border-left: 3px solid var(--accent, #2563eb);
+  padding: 0.5rem 0 0.5rem 0.85rem;
+}
+
+.check-action-step.is-critical {
+  border-left-color: #dc2626;
+}
+
+.check-action-step-title {
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.check-action-step-meta {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.check-next-list-secondary {
+  margin-top: 0.5rem;
+  opacity: 0.85;
+}
+
 .check-two-col {
   display: grid;
   grid-template-columns: 1fr;

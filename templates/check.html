@@ -200,12 +200,20 @@
           <section class="card check-analysis-panel" data-analysis-panel="compliance">
             <h3 class="check-section-title">Compliance Score</h3>
             <p class="check-summary" id="check_compliance_text"></p>
-            <ul id="check_compliance_list" class="check-bullet-list"></ul>
+            <details class="check-detail" open>
+              <summary>Requirement validation</summary>
+              <div id="check_validations_list" class="check-validations-list"></div>
+            </details>
+            <details class="check-detail">
+              <summary>Category breakdown</summary>
+              <ul id="check_compliance_list" class="check-bullet-list"></ul>
+            </details>
           </section>
 
           <section class="card check-analysis-panel" data-analysis-panel="actions">
             <h3 class="check-section-title">Action Plan</h3>
-            <ol id="check_next_steps" class="check-next-list"></ol>
+            <div id="check_action_plan" class="check-action-plan"></div>
+            <ol id="check_next_steps" class="check-next-list check-next-list-secondary"></ol>
           </section>
         </div>
 

@@ -565,6 +565,13 @@ def api_check_document():
     requirements = (request.form.get("requirements") or "").strip()
     pasted = (request.form.get("pasted_text") or "").strip()
     doc_type = (request.form.get("document_type") or "other").strip()
+    parsed_requirements = None
+    raw_parsed = request.form.get("parsed_requirements")
+    if raw_parsed:
+        try:
+            parsed_requirements = json.loads(raw_parsed)
+        except (json.JSONDecodeError, TypeError):
+            parsed_requirements = None
 
     if len(requirements) > MAX_TEXT_CHARS:
         return jsonify({"error": f"Requirements text is too long (max {MAX_TEXT_CHARS:,} characters)."}), 400
@@ -615,6 +622,7 @@ def api_check_document():
             requirements=requirements,
             doc=doc,
             document_type=doc_type,
+            parsed_requirements=parsed_requirements,
         )
     except Exception:  # noqa: BLE001
         app.logger.exception("check-document failed")

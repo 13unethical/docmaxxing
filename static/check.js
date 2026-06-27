@@ -22,6 +22,8 @@
   var summaryEl = $("check_summary");
   var complianceText = $("check_compliance_text");
   var complianceList = $("check_compliance_list");
+  var validationsList = $("check_validations_list");
+  var actionPlanEl = $("check_action_plan");
   var citationList = $("check_citation_list");
   var categoriesList = $("check_categories_list");
   var positivesList = $("check_positives_list");
@@ -298,25 +300,35 @@
   }
 
   function renderCitationAndCompliance(data) {
-    var parsed = (data.meta && data.meta.parsed_requirements) || {};
+    var parsed = (data.meta && data.meta.structured_requirements) || (data.meta && data.meta.parsed_requirements) || {};
     var citeStyle = parsed.citation_style || "Not detected";
     var citationNotes = [];
-    var issues = (data.issues || []).filter(function (issue) {
-      var txt = [issue.title || "", issue.message || "", issue.fix || ""].join(" ").toLowerCase();
-      return txt.indexOf("citation") !== -1 || txt.indexOf("reference") !== -1 || txt.indexOf("apa") !== -1 || txt.indexOf("mla") !== -1 || txt.indexOf("harvard") !== -1;
+    var validations = data.validations || [];
+    var citeVal = validations.find(function (v) {
+      return v && v.id === "in_text_citations";
     });
     citationNotes.push("Required style: " + citeStyle);
-    if (issues.length) {
-      issues.slice(0, 4).forEach(function (issue) {
-        citationNotes.push((issue.title || "Citation issue") + ": " + (issue.fix || issue.message || "Review citation formatting."));
-      });
-    } else {
-      citationNotes.push("No major citation-specific issues were flagged in this pass.");
+    if (citeVal) {
+      citationNotes.push(
+        "In-text citations: " + (citeVal.detected || "—") + " · Completion: " + (citeVal.completion_pct || 0) + "%"
+      );
+      if (citeVal.details && citeVal.details.apa_compliance_pct != null) {
+        citationNotes.push("Overall APA compliance: " + citeVal.details.apa_compliance_pct + "%");
+      }
+    }
+    var refVal = validations.find(function (v) {
+      return v && v.id === "references";
+    });
+    if (refVal) {
+      citationNotes.push("References: " + refVal.detected + " / " + refVal.required + " required");
+    }
+    if (!citeVal && !refVal) {
+      citationNotes.push("Run Check with assignment requirements to validate citations.");
     }
     renderBulletList(citationList, citationNotes, "No citation notes.");
 
     if (complianceText) {
-      complianceText.textContent = "Overall readiness is " + (data.score || 0) + "/100 (" + (data.verdict || "—") + ").";
+      complianceText.textContent = "Readiness score is " + (data.score || 0) + "/100 (" + (data.verdict || "—") + "). Each requirement contributes weighted points based on completion %.";
     }
     var complianceItems = [];
     var categories = data.categories || {};
@@ -328,6 +340,123 @@
       complianceItems.push((item.label || key) + ": " + (item.score || 0) + "/100");
     });
     renderBulletList(complianceList, complianceItems, "No compliance details available.");
+    renderValidations(data.validations || []);
+  }
+
+  function statusClass(status) {
+    var s = (status || "").toUpperCase();
+    if (s === "PASS") {
+      return "is-pass";
+    }
+    if (s === "NEEDS_CONFIRMATION") {
+      return "is-confirm";
+    }
+    if (s === "PARTIAL") {
+      return "is-partial";
+    }
+    return "is-fail";
+  }
+
+  function renderValidations(validations) {
+    if (!validationsList) {
+      return;
+    }
+    validationsList.innerHTML = "";
+    if (!validations.length) {
+      var empty = document.createElement("p");
+      empty.className = "card-hint";
+      empty.textContent = "No requirement validations available.";
+      validationsList.appendChild(empty);
+      return;
+    }
+    validations.forEach(function (v) {
+      if (!v || !v.weight) {
+        return;
+      }
+      var row = document.createElement("article");
+      row.className = "check-validation-row";
+      var head = document.createElement("div");
+      head.className = "check-validation-head";
+      var label = document.createElement("span");
+      label.className = "check-validation-label";
+      label.textContent = v.label || v.id || "Requirement";
+      var badge = document.createElement("span");
+      badge.className = "check-validation-status " + statusClass(v.status);
+      badge.textContent = v.status || "—";
+      head.appendChild(label);
+      head.appendChild(badge);
+      var grid = document.createElement("div");
+      grid.className = "check-validation-grid";
+      grid.innerHTML =
+        "<span>Required: <strong>" + (v.required || "—") + "</strong></span>" +
+        "<span>Detected: <strong>" + (v.detected || "—") + "</strong></span>" +
+        "<span>Completion: <strong>" + (v.completion_pct != null ? v.completion_pct : 0) + "%</strong></span>" +
+        "<span>Weight: <strong>" + (v.weight || 0) + " pts</strong></span>" +
+        "<span>Points: <strong>" + (v.points_earned != null ? v.points_earned : 0) + "/" + (v.points_possible || v.weight) + "</strong></span>";
+      if (v.confidence != null && v.confidence < 0.7) {
+        grid.innerHTML += "<span>Confidence: <strong>" + Math.round(Number(v.confidence) * 100) + "%</strong></span>";
+      }
+      var barWrap = document.createElement("div");
+      barWrap.className = "check-validation-bar-wrap";
+      var bar = document.createElement("div");
+      bar.className = "check-validation-bar";
+      var pct = Math.max(0, Math.min(100, Number(v.completion_pct) || 0));
+      bar.style.width = pct + "%";
+      if (pct < 55) {
+        bar.classList.add("bar-low");
+      } else if (pct < 75) {
+        bar.classList.add("bar-mid");
+      }
+      barWrap.appendChild(bar);
+      row.appendChild(head);
+      row.appendChild(grid);
+      row.appendChild(barWrap);
+      if (v.details && v.details.checklist && v.details.checklist.length) {
+        var ul = document.createElement("ul");
+        ul.className = "check-section-checklist";
+        v.details.checklist.forEach(function (item) {
+          var li = document.createElement("li");
+          li.className = item.present ? "is-ok" : "is-miss";
+          li.textContent = item.section || "Section";
+          ul.appendChild(li);
+        });
+        row.appendChild(ul);
+      }
+      validationsList.appendChild(row);
+    });
+  }
+
+  function renderActionPlan(plan) {
+    if (!actionPlanEl) {
+      return;
+    }
+    actionPlanEl.innerHTML = "";
+    if (!plan || !plan.length) {
+      var empty = document.createElement("p");
+      empty.className = "card-hint";
+      empty.textContent = "No action steps — requirements appear met.";
+      actionPlanEl.appendChild(empty);
+      return;
+    }
+    plan.forEach(function (step) {
+      if (!step) {
+        return;
+      }
+      var block = document.createElement("article");
+      block.className = "check-action-step" + (step.priority === "critical" ? " is-critical" : "");
+      var title = document.createElement("p");
+      title.className = "check-action-step-title";
+      title.textContent = "Step " + (step.step_number || "—") + ": " + (step.title || "Fix");
+      var action = document.createElement("p");
+      action.textContent = step.action || "";
+      var meta = document.createElement("p");
+      meta.className = "check-action-step-meta";
+      meta.textContent = "Estimated improvement: +" + (step.estimated_improvement || 0) + " points";
+      block.appendChild(title);
+      block.appendChild(action);
+      block.appendChild(meta);
+      actionPlanEl.appendChild(block);
+    });
   }
 
   function setupAnalysisTabs() {
@@ -660,6 +789,9 @@
       if (file) {
         fd.append("file", file);
       }
+      if (extractedData && extractedData.requirements) {
+        fd.append("parsed_requirements", JSON.stringify(extractedData.requirements));
+      }
 
       var res = await fetch("/api/check-document", { method: "POST", body: fd });
       var data = {};
@@ -693,6 +825,7 @@
       renderBulletList(positivesList, data.positives, "Run Check again after fixes to see strengths.");
       renderBulletList(needsList, data.needs_work, "No major gaps flagged in these categories.");
       renderIssues(data.issues);
+      renderActionPlan(data.action_plan);
       renderNextSteps(data.next_steps);
       renderBulletList(topProblems, pickMainProblems(data), "No critical issues detected.");
       renderBulletList(fixFirst, data.next_steps, "Review the issue cards and adjust your draft.");
