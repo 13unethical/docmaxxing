@@ -31,6 +31,7 @@ from formatter.headings import (
 from formatter.layout import apply_margin_preset
 from formatter.page_numbers import apply_page_numbers_to_document
 from formatter.paragraph_style import format_paragraph
+from formatter.requirement_headings import expand_requirement_heading_paragraphs, normalize_document_internal_spaces
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,8 @@ class FormatJob:
     auto_headings: bool
     heading_all_caps: bool
     auto_justify_refs: bool
+    requirement_headings: bool = False
+    heading_size_pt: int = 16
 
 
 def _expand_embedded_heading_paragraphs(document: Document) -> None:
@@ -76,6 +79,7 @@ def format_document_full(
     structure_debug: bool = False,
     recovery_mode: str = "",
     ai_powered: bool = False,
+    required_sections: list[str] | None = None,
 ) -> StructureRecoveryDebugReport | None:
     apply_margin_preset(document, job.margin_preset)
     apply_page_numbers_to_document(document, job.page_number_position)
@@ -92,8 +96,15 @@ def format_document_full(
         ai_powered=ai_powered,
     )
 
-    if job.auto_headings and not paragraph_assignments:
+    normalize_document_internal_spaces(document)
+
+    section_labels = list(required_sections or [])
+    if section_labels and job.requirement_headings and not paragraph_assignments:
+        expand_requirement_heading_paragraphs(document, section_labels)
+    elif job.auto_headings and not paragraph_assignments:
         _expand_embedded_heading_paragraphs(document)
+
+    req_label_set = frozenset(s.lower() for s in section_labels) if section_labels else None
 
     for idx, paragraph in enumerate(document.paragraphs):
         text = paragraph.text
@@ -115,14 +126,17 @@ def format_document_full(
         heuristic_level = 0
         if assignment is None or not assignment.is_ai_locked:
             heuristic_level = detect_heading_level(
-                text, job.auto_headings, is_first_nonempty=is_first_nonempty
+                text,
+                job.auto_headings or job.requirement_headings,
+                is_first_nonempty=is_first_nonempty,
+                requirement_labels=req_label_set,
             )
 
         level, source_used, recovered_level = resolve_paragraph_heading_level(
             assignment=assignment,
             word_style_level=word_style_level,
             heuristic_level=heuristic_level,
-            auto_headings=job.auto_headings,
+            auto_headings=job.auto_headings or job.requirement_headings,
         )
 
         if level > 0:
@@ -157,6 +171,7 @@ def format_document_full(
             space_before_pt=job.space_before_pt,
             space_after_pt=job.space_after_pt,
             heading_level=level,
+            heading_size_pt=job.heading_size_pt,
         )
 
     if structure_debug and debug_report.headings:

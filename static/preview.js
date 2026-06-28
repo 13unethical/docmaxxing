@@ -248,7 +248,11 @@
       afterPromise = fetch("/api/preview-formatted", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: sample, settings: settings || {} }),
+        body: JSON.stringify({
+          text: sample,
+          settings: settings || {},
+          requirements_text: (settings && settings.requirements_text) || "",
+        }),
       })
         .then(function (res) {
           return res.json().then(function (data) {

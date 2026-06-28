@@ -183,7 +183,7 @@
     refreshHomePreview();
   }
 
-  ["font_family", "font_size", "line_spacing", "alignment", "first_line_indent", "auto_headings"].forEach(
+  ["font_family", "font_size", "line_spacing", "alignment", "first_line_indent", "auto_headings", "requirement_headings", "heading_size_pt"].forEach(
     function (id) {
       var el = $(id);
       if (el && previewSection && !previewSection.classList.contains("hidden")) {
@@ -232,12 +232,17 @@
       return;
     }
     el.style.height = "auto";
-    /* Keep single-line bar feel (max ~2.5rem) */
-    el.style.height = Math.min(el.scrollHeight, 42) + "px";
+    var maxPx = Math.min(window.innerHeight * 0.45, 288);
+    el.style.height = Math.min(el.scrollHeight, maxPx) + "px";
+    var composer = el.closest(".req-chat-composer");
+    if (composer) {
+      composer.classList.toggle("is-expanded", el.scrollHeight > 48);
+    }
   }
 
   if (requirementsText) {
     requirementsText.addEventListener("input", autosizeReqTextarea);
+    autosizeReqTextarea();
     requirementsText.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();

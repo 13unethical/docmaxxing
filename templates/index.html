@@ -10,11 +10,7 @@
       <div class="home-upload-zones" aria-label="Upload areas">
         <div class="home-setup-column">
         <section class="card home-zone-card home-brief-card" aria-labelledby="brief-label">
-          <div class="home-zone-head">
-            <h2 class="card-title" id="brief-label">Assignment Brief / Rubric</h2>
-            <p class="upload-zone-lede">Paste your assignment instructions here — <strong>not your essay</strong>.</p>
-            <p class="upload-zone-formats"><span class="upload-zone-formats-label">Supported formats:</span> PDF, DOCX, TXT, JPG, PNG</p>
-          </div>
+          <h2 class="card-title" id="brief-label">Assignment Brief / Rubric</h2>
           <div class="req-chat-section" aria-labelledby="brief-input-label">
             <p class="upload-zone-sr-label" id="brief-input-label">Brief input</p>
             <div class="req-chat-composer">
@@ -229,7 +225,7 @@
                 <fieldset class="field toggles">
                   <legend class="label">Whitespace cleanup</legend>
                   <label class="check">
-                    <input type="checkbox" id="clean_extra_spaces" />
+                    <input type="checkbox" id="clean_extra_spaces" checked />
                     <span>Collapse repeated spaces</span>
                   </label>
                   <label class="check">
@@ -241,6 +237,27 @@
                   <input type="checkbox" id="auto_justify_refs" checked />
                   <span>Justify body text after references</span>
                 </label>
+                <fieldset class="field toggles">
+                  <legend class="label">Requirement headings</legend>
+                  <label class="check">
+                    <input type="checkbox" id="requirement_headings" checked />
+                    <span>Extract section headings from the <strong>assignment brief</strong> (each section once — fixes humanizer merges like “Introduction AI…”)</span>
+                  </label>
+                  <label class="field field--heading-size">
+                    <span class="label label-with-icon">
+                      <svg class="field-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M4 6h16M4 12h10M4 18h7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                      Heading size (pt)
+                    </span>
+                    <select id="heading_size_pt">
+                      <option value="14">14</option>
+                      <option value="16" selected>16</option>
+                      <option value="18">18</option>
+                      <option value="20">20</option>
+                    </select>
+                  </label>
+                </fieldset>
               </div>
             </details>
           </div>

@@ -311,6 +311,10 @@ h3 a:visited {
   background: linear-gradient(180deg, #fffbeb 0%, var(--surface) 2.5rem);
 }
 
+.home-brief-card > .card-title {
+  margin: 0 0 0.65rem;
+}
+
 .home-document-card {
   border-top: 3px solid var(--accent);
   background: linear-gradient(180deg, #eff6ff 0%, var(--surface) 2.5rem);
@@ -686,9 +690,9 @@ fieldset.toggles {
 .req-chat-composer {
   display: flex;
   flex-flow: row nowrap;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.2rem;
-  padding: 0.28rem 0.35rem 0.28rem 0.4rem;
+  padding: 0.35rem 0.35rem 0.35rem 0.4rem;
   background: var(--surface);
   border: 1px solid #e2e8f0;
   border-radius: 1.35rem;
@@ -715,6 +719,7 @@ fieldset.toggles {
   flex: 0 0 auto;
   width: clamp(2rem, 7vw, 2.4rem);
   height: clamp(2rem, 7vw, 2.4rem);
+  margin-top: 0.05rem;
   border: none;
   border-radius: 50%;
   background: transparent;
@@ -764,13 +769,14 @@ fieldset.toggles {
   background: transparent;
   font: inherit;
   font-size: 0.92rem;
-  line-height: 1.4;
+  line-height: 1.45;
   padding: 0.4rem 0.3rem;
   resize: none;
-  max-height: 2.5rem;
   min-height: 2.2rem;
+  max-height: min(18rem, 45vh);
   color: var(--text);
   overflow-y: auto;
+  field-sizing: content;
 }
 
 .req-chat-textarea:focus {
@@ -1372,7 +1378,7 @@ body.support-chat-open {
   .req-chat-textarea {
     font-size: 0.88rem;
     min-height: 2rem;
-    max-height: 2.35rem;
+    max-height: min(14rem, 40vh);
     padding: 0.35rem 0.25rem;
   }
 
@@ -1891,14 +1897,21 @@ body.support-chat-open {
   background: #dc2626;
 }
 
-.check-category-score {
-  font-weight: 700;
-  min-width: 2rem;
-  text-align: right;
-  color: var(--muted);
+.field--heading-size {
+  margin-top: 0.65rem;
 }
 
-.check-validations-list {
+.label-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.field-icon {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
   display: flex;
   flex-direction: column;
   gap: 0.65rem;

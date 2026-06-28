@@ -70,6 +70,7 @@ def format_paragraph(
     space_before_pt: int,
     space_after_pt: int,
     heading_level: int,
+    heading_size_pt: int = ACADEMIC_HEADING_PT,
 ) -> None:
     """
     One paragraph’s layout + fonts.
@@ -105,4 +106,4 @@ def format_paragraph(
     if heading_level == 0:
         apply_font_to_runs(paragraph, font_name, font_size_pt)
     else:
-        _apply_academic_heading_runs(paragraph, font_name, ACADEMIC_HEADING_PT)
+        _apply_academic_heading_runs(paragraph, font_name, heading_size_pt)

@@ -63,8 +63,11 @@
       auto_headings: $("auto_headings") ? !!$("auto_headings").checked : true,
       heading_all_caps: $("heading_all_caps") ? !!$("heading_all_caps").checked : false,
       auto_justify_refs: $("auto_justify_refs") ? !!$("auto_justify_refs").checked : true,
-      clean_extra_spaces: $("clean_extra_spaces") ? !!$("clean_extra_spaces").checked : false,
+      requirement_headings: $("requirement_headings") ? !!$("requirement_headings").checked : true,
+      heading_size_pt: ($("heading_size_pt") && $("heading_size_pt").value) || "16",
+      clean_extra_spaces: $("clean_extra_spaces") ? !!$("clean_extra_spaces").checked : true,
       clean_extra_linebreaks: $("clean_extra_linebreaks") ? !!$("clean_extra_linebreaks").checked : false,
+      requirements_text: ($("requirements_text") && $("requirements_text").value.trim()) || "",
     };
   }
 
@@ -96,6 +99,7 @@
       page_number_position: "page_number_position",
       space_before_pt: "space_before_pt",
       space_after_pt: "space_after_pt",
+      heading_size_pt: "heading_size_pt",
     };
     Object.keys(map).forEach(function (k) {
       if (cfg[k] != null && $(map[k])) {
@@ -112,6 +116,7 @@
       "auto_headings",
       "heading_all_caps",
       "auto_justify_refs",
+      "requirement_headings",
       "clean_extra_spaces",
       "clean_extra_linebreaks",
       "include_cover_page",
@@ -176,6 +181,8 @@
       "auto_headings",
       "heading_all_caps",
       "auto_justify_refs",
+      "requirement_headings",
+      "heading_size_pt",
       "clean_extra_spaces",
       "clean_extra_linebreaks",
       "include_cover_page",
@@ -422,11 +429,17 @@
       fd.append("page_number_position", cfg.page_number_position);
       fd.append("space_before_pt", cfg.space_before_pt);
       fd.append("space_after_pt", cfg.space_after_pt);
+      fd.append("heading_size_pt", cfg.heading_size_pt);
+      var reqText = document.getElementById("requirements_text");
+      if (reqText && reqText.value.trim()) {
+        fd.append("requirements_text", reqText.value.trim());
+      }
 
       appendCheckboxToFormData(fd, "first_line_indent", "first_line_indent");
       appendCheckboxToFormData(fd, "auto_headings", "auto_headings");
       appendCheckboxToFormData(fd, "heading_all_caps", "heading_all_caps");
       appendCheckboxToFormData(fd, "auto_justify_refs", "auto_justify_refs");
+      appendCheckboxToFormData(fd, "requirement_headings", "requirement_headings");
       appendCheckboxToFormData(fd, "clean_extra_spaces", "clean_extra_spaces");
       appendCheckboxToFormData(fd, "clean_extra_linebreaks", "clean_extra_linebreaks");
       appendCoverPageToFormData(fd);

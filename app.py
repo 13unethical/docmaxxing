@@ -139,6 +139,8 @@ def parse_job(form) -> FormatJob:
         auto_headings=_truthy(form, "auto_headings"),
         heading_all_caps=_truthy(form, "heading_all_caps"),
         auto_justify_refs=_truthy(form, "auto_justify_refs"),
+        requirement_headings=_truthy(form, "requirement_headings"),
+        heading_size_pt=_int_clamped(str(form.get("heading_size_pt", "16")), 16, 12, 24),
     )
 
 
@@ -707,8 +709,19 @@ def preview_formatted():
     settings = payload.get("settings") or {}
     job = parse_job(settings)
     document_type = (payload.get("document_type") or settings.get("document_type") or "").strip() or None
+    required_sections: list[str] = []
+    brief = (payload.get("requirements_text") or settings.get("requirements_text") or "").strip()
+    if brief:
+        from formatter.requirement_headings import extract_format_section_labels
+
+        required_sections = extract_format_section_labels(brief)
     try:
-        html = build_formatted_preview_html(text, job, document_type=document_type)
+        html = build_formatted_preview_html(
+            text,
+            job,
+            document_type=document_type,
+            required_sections=required_sections if job.requirement_headings else None,
+        )
     except Exception as exc:
         app.logger.exception("preview-formatted failed")
         return jsonify({"error": str(exc)}), 500
@@ -808,6 +821,13 @@ def format_document():
             os.environ.get("STRUCTURE_RECOVERY_DEBUG", "").strip().lower() in {"1", "true", "yes"}
             or _truthy(request.form, "structure_recovery_debug")
         )
+        brief = (request.form.get("requirements_text") or "").strip()
+        required_sections: list[str] = []
+        if brief:
+            from formatter.requirement_headings import extract_format_section_labels
+
+            required_sections = extract_format_section_labels(brief)
+
         debug_report = format_document_full(
             doc,
             job,
@@ -815,6 +835,7 @@ def format_document():
             structure_debug=structure_debug,
             recovery_mode=str((recovery or {}).get("recovery_mode") or ""),
             ai_powered=bool((recovery or {}).get("ai_powered")),
+            required_sections=required_sections if job.requirement_headings else None,
         )
 
         ref_lines = [r.strip() for r in request.form.getlist("references") if r.strip()]

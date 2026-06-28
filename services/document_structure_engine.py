@@ -167,6 +167,7 @@ def detect_heading_level(
     auto_detect: bool,
     *,
     is_first_nonempty: bool = False,
+    requirement_labels: frozenset[str] | None = None,
 ) -> int:
     """
     Return 0 = body; 1 = document title; 2 = major section; 3 = subsection.
@@ -192,6 +193,13 @@ def detect_heading_level(
         return 2
 
     normalized = normalize_paragraph_text(check)
+
+    if requirement_labels and normalized in requirement_labels:
+        return 2
+    if requirement_labels:
+        for label in requirement_labels:
+            if normalized == label or normalized.replace("-", " ") == label.replace("-", " "):
+                return 2
 
     if is_first_nonempty and not has_embedded_body:
         words = stripped.split()

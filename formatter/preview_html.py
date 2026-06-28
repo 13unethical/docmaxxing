@@ -9,7 +9,6 @@ from docx import Document
 from formatter.document_io import build_document_from_inputs
 from formatter.heading_plan import ParagraphHeadingAssignment
 from formatter.headings import heading_level_from_word_style
-from formatter.paragraph_style import ACADEMIC_HEADING_PT
 from formatter.pipeline import FormatJob, format_document_full
 from formatter.structure_rebuild import rebuild_document_from_recovery
 from services.document_structure_engine import recover_structure
@@ -20,6 +19,7 @@ def build_formatted_preview_html(
     job: FormatJob,
     *,
     document_type: str | None = None,
+    required_sections: list[str] | None = None,
 ) -> str:
     """
     Run structure recovery (when enabled) and formatting, then render After-preview HTML.
@@ -35,7 +35,7 @@ def build_formatted_preview_html(
             if apply_result:
                 paragraph_assignments = apply_result.assignments
 
-    format_document_full(doc, job, paragraph_assignments)
+    format_document_full(doc, job, paragraph_assignments, required_sections=required_sections)
     return _document_to_preview_html(doc, job)
 
 
@@ -43,6 +43,7 @@ def _document_to_preview_html(doc: Document, job: FormatJob) -> str:
     body_pt = job.font_size_pt
     font = job.font_family
     lh = job.line_spacing
+    heading_pt = job.heading_size_pt
     body_align = "justify" if job.alignment == "justify" else "left"
     indent = "2em" if job.first_line_indent else "0"
     parts: list[str] = []
@@ -55,7 +56,7 @@ def _document_to_preview_html(doc: Document, job: FormatJob) -> str:
         if level > 0:
             parts.append(
                 f'<h3 class="preview-p preview-p--heading" style="'
-                f"font-family:{escape(font)},serif;font-size:{ACADEMIC_HEADING_PT}pt;"
+                f"font-family:{escape(font)},serif;font-size:{heading_pt}pt;"
                 f"font-weight:700;text-align:left;line-height:{lh};"
                 f'margin:0.85rem 0 0.35rem;">{escape(stripped)}</h3>'
             )
