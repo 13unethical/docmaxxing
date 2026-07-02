@@ -87,10 +87,14 @@ def format_paragraph(
             pass
 
     pf = paragraph.paragraph_format
-    _set_line_spacing(pf, line_spacing)
     if heading_level > 0:
+        pf.line_spacing_rule = WD_LINE_SPACING.SINGLE
+        pf.line_spacing = None
         pf.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        pf.keep_with_next = True
+        pf.page_break_before = False
     else:
+        _set_line_spacing(pf, line_spacing)
         pf.alignment = alignment
     pf.space_before = Pt(space_before_pt)
     pf.space_after = Pt(space_after_pt)

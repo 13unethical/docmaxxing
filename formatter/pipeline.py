@@ -28,6 +28,7 @@ from formatter.headings import (
     is_references_heading,
     split_embedded_heading_paragraph,
 )
+from formatter.heading_spacing import resolve_paragraph_spacing
 from formatter.layout import apply_margin_preset
 from formatter.page_numbers import apply_page_numbers_to_document
 from formatter.paragraph_style import format_paragraph
@@ -89,8 +90,6 @@ def format_document_full(
     )
     indent_body = 0.5 if job.first_line_indent else None
 
-    in_refs_section = False
-    seen_nonempty_paragraph = False
     debug_report = StructureRecoveryDebugReport(
         recovery_mode=recovery_mode,
         ai_powered=ai_powered,
@@ -106,16 +105,23 @@ def format_document_full(
 
     req_label_set = frozenset(s.lower() for s in section_labels) if section_labels else None
 
+    @dataclass
+    class _ParaPlan:
+        paragraph: Paragraph
+        level: int
+        stripped: str
+        source_used: str
+        recovered_level: int | None
+        assignment: ParagraphHeadingAssignment | None
+
+    plans: list[_ParaPlan] = []
+    seen_nonempty_paragraph = False
     for idx, paragraph in enumerate(document.paragraphs):
         text = paragraph.text
         stripped = text.strip()
         is_first_nonempty = bool(stripped) and not seen_nonempty_paragraph
         if stripped:
             seen_nonempty_paragraph = True
-
-        refs_title = is_references_heading(text)
-        if refs_title:
-            in_refs_section = True
 
         assignment = None
         if paragraph_assignments and idx < len(paragraph_assignments):
@@ -138,15 +144,43 @@ def format_document_full(
             heuristic_level=heuristic_level,
             auto_headings=job.auto_headings or job.requirement_headings,
         )
+        plans.append(
+            _ParaPlan(
+                paragraph=paragraph,
+                level=level,
+                stripped=stripped,
+                source_used=source_used,
+                recovered_level=recovered_level,
+                assignment=assignment,
+            )
+        )
+
+    in_refs_section = False
+    for idx, plan in enumerate(plans):
+        paragraph = plan.paragraph
+        level = plan.level
+        stripped = plan.stripped
+        text = paragraph.text
+        prev_level = plans[idx - 1].level if idx > 0 else 0
+        next_level = plans[idx + 1].level if idx + 1 < len(plans) else 0
+        prev_has_text = bool(plans[idx - 1].stripped) if idx > 0 else False
+
+        refs_title = is_references_heading(text)
+        if refs_title:
+            in_refs_section = True
 
         if level > 0:
             diag = HeadingApplyDiagnostic(
                 paragraph=stripped[:200],
-                source=source_used,
+                source=plan.source_used,
                 level=level,
-                recovered_level=recovered_level,
+                recovered_level=plan.recovered_level,
                 applied_style=applied_style_name(level),
-                confidence=assignment.confidence if assignment and source_used == "ai" else None,
+                confidence=(
+                    plan.assignment.confidence
+                    if plan.assignment and plan.source_used == "ai"
+                    else None
+                ),
             )
             debug_report.headings.append(diag)
             payload = diag.to_dict()
@@ -160,6 +194,17 @@ def format_document_full(
         if job.auto_justify_refs and in_refs_section and level == 0 and not refs_title:
             align = WD_ALIGN_PARAGRAPH.JUSTIFY
 
+        space_before_pt, space_after_pt = resolve_paragraph_spacing(
+            level=level,
+            prev_level=prev_level,
+            next_level=next_level,
+            prev_has_text=prev_has_text,
+            font_size_pt=job.font_size_pt,
+            line_spacing=job.line_spacing,
+            body_space_before_pt=job.space_before_pt,
+            body_space_after_pt=job.space_after_pt,
+        )
+
         format_paragraph(
             paragraph,
             document,
@@ -168,8 +213,8 @@ def format_document_full(
             line_spacing=job.line_spacing,
             alignment=align,
             first_line_indent_inches=indent_body if level == 0 else None,
-            space_before_pt=job.space_before_pt,
-            space_after_pt=job.space_after_pt,
+            space_before_pt=space_before_pt,
+            space_after_pt=space_after_pt,
             heading_level=level,
             heading_size_pt=job.heading_size_pt,
         )
