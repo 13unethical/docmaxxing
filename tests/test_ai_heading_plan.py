@@ -6,7 +6,8 @@ import io
 
 from docx import Document
 
-from formatter import FormatJob, format_document_full
+from tests.conftest import run_format_pipeline
+from formatter import FormatJob
 from formatter.heading_plan import ParagraphHeadingAssignment, resolve_paragraph_heading_level
 from formatter.structure_rebuild import rebuild_document_from_recovery
 from services.ai_structure_recovery import ai_result_to_recovery_payload
@@ -130,6 +131,8 @@ def test_ai_level_2_survives_to_docx_heading_2():
         heading_all_caps=False,
         auto_justify_refs=False,
     )
+    from formatter import format_document_full
+
     debug = format_document_full(
         doc,
         job,
@@ -175,7 +178,7 @@ def test_heuristic_embedded_journal_entry_splits_and_styles():
         heading_all_caps=False,
         auto_justify_refs=False,
     )
-    format_document_full(doc, job, None)
+    run_format_pipeline(doc, job)
     texts = [p.text for p in doc.paragraphs]
     assert texts[0] == "Journal Entry 4: Comparison of Two Historical Concepts"
     assert texts[1].startswith("When comparing")

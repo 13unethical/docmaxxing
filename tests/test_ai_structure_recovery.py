@@ -6,7 +6,7 @@ import io
 
 from docx import Document
 
-from formatter.pipeline import FormatJob, format_document_full
+from formatter import FormatJob, format_document_full
 from formatter.structure_rebuild import rebuild_document_from_recovery
 from services.ai_structure_recovery import ai_result_to_recovery_payload
 

@@ -43,6 +43,27 @@ _JOURNAL_ENTRY_HEADING_RE = re.compile(
     r"^journal entry\s+\d+(?:\s*:\s*|\s+)(?=\S)",
     re.IGNORECASE,
 )
+_BODY_PARAGRAPH_HEADING_RE = re.compile(
+    r"^body\s+paragraph\s+\d+(?:\s*:\s*[\w'\u2019-]+(?:\s+[\w'\u2019-]+)*)?",
+    re.IGNORECASE,
+)
+_JOURNAL_ENTRY_PREFIX_RE = re.compile(r"^journal entry\s+\d+", re.IGNORECASE)
+_BODY_PARAGRAPH_PREFIX_RE = re.compile(r"^body\s+paragraph\s+\d+", re.IGNORECASE)
+_BODY_SENTENCE_START_RE = re.compile(
+    r"\s+(?:Today|This|The|Artificial|One|Even|Many|Some|These|There|In|Our|We|They|It|As|When|While|"
+    r"Universities|Students|Governments|Another|Finally|Smith|Crompton|Luckin|Northbridge)\b",
+    re.IGNORECASE,
+)
+_CITATION_START = re.compile(
+    r"^(?:[A-Z][A-Za-z\-']+(?:\s+et\s+al\.)?,\s*[A-Z]\.?|\[\d+\]|\d+\.\s+[A-Z])",
+)
+_MERGE_SECTION_LABELS = (
+    "literature review",
+    "learning outcomes",
+    "executive summary",
+    "concluding paragraph",
+    *sorted(COMMON_HEADINGS, key=len, reverse=True),
+)
 _SECTION_LABEL_HEADING_RE = re.compile(
     r"^(section|part|chapter|unit|module|week|entry)\s+\d+\s*:",
     re.IGNORECASE,
@@ -113,21 +134,132 @@ def is_learning_journal_heading_line(line: str) -> bool:
     return False
 
 
+def _looks_like_heading_subtitle_continuation(text: str) -> bool:
+    """Title-case phrase still part of a heading, not merged body."""
+    t = text.strip()
+    if not t or t.rstrip().endswith("."):
+        return False
+    words = t.split()
+    if len(words) > 15:
+        return False
+    if len(words) >= 2 and words[1][0].islower():
+        return False
+    title_like = sum(
+        1
+        for w in words
+        if w[0].isupper() or w.lower() in _BODY_STOPWORDS or w.isdigit()
+    )
+    return title_like >= len(words) * 0.7
+
+
+def _looks_like_merged_body(text: str) -> bool:
+    """True when text after a heading prefix looks like body, not another heading."""
+    if not text or len(text) < 8:
+        return False
+    if _CITATION_START.match(text):
+        return True
+    if _looks_like_heading_subtitle_continuation(text):
+        return False
+    return bool(re.match(r"^[A-Z]", text))
+
+
+def _split_prefix_regex(stripped: str, pattern: re.Pattern[str]) -> tuple[str, str | None]:
+    m = pattern.match(stripped)
+    if not m:
+        return stripped, None
+    body = stripped[m.end() :].strip()
+    if body and _looks_like_merged_body(body):
+        return stripped[: m.end()].strip(), body
+    return stripped, None
+
+
+def _split_labeled_heading_merged(
+    stripped: str,
+    prefix_re: re.Pattern[str],
+) -> tuple[str, str | None]:
+    """Split 'Journal Entry 1: Title Today…' / 'Body Paragraph 1: Title Artificial…' on space merge."""
+    m = prefix_re.match(stripped)
+    if not m:
+        return stripped, None
+    rest = stripped[m.end() :]
+    if not rest.strip():
+        return stripped, None
+
+    colon = re.match(r"\s*:\s*", rest)
+    if colon:
+        after_colon = rest[colon.end() :]
+        body_match = _BODY_SENTENCE_START_RE.search(after_colon)
+        if body_match and body_match.start() > 0:
+            heading_end = m.end() + colon.end() + body_match.start()
+            heading = stripped[:heading_end].strip()
+            body = stripped[heading_end:].strip()
+            if body and _looks_like_merged_body(body):
+                return heading, body
+        return stripped, None
+
+    body_match = _BODY_SENTENCE_START_RE.search(rest)
+    if body_match:
+        heading_end = m.end() + body_match.start()
+        heading = stripped[:heading_end].strip()
+        body = stripped[heading_end:].strip()
+        if body and _looks_like_merged_body(body):
+            return heading, body
+    return stripped, None
+
+
+def _split_references_merged(stripped: str) -> tuple[str, str | None]:
+    for label in ("References", "Bibliography", "Works Cited"):
+        m = re.match(rf"^{re.escape(label)}\s+", stripped, re.IGNORECASE)
+        if not m:
+            continue
+        body = stripped[m.end() :].strip()
+        if body and (_CITATION_START.match(body) or _looks_like_merged_body(body)):
+            return stripped[: m.end()].strip(), body
+    return stripped, None
+
+
+def _split_common_section_merged(stripped: str) -> tuple[str, str | None]:
+    for label in _MERGE_SECTION_LABELS:
+        m = re.match(rf"^{re.escape(label)}\s+", stripped, re.IGNORECASE)
+        if not m:
+            continue
+        body = stripped[m.end() :].strip()
+        if body and _looks_like_merged_body(body):
+            return stripped[: m.end()].strip(), body
+    return stripped, None
+
+
 def split_embedded_heading_paragraph(text: str) -> tuple[str, str | None]:
     """
-    When a paragraph starts with a heading line and continues with body text on
-    the next line, return (heading_line, body_text). Otherwise return (text, None).
+    When a paragraph combines a heading with body text, return (heading, body).
+
+    Handles newline-separated lines and humanizer space-merged paragraphs.
     """
     stripped = text.strip()
-    if "\n" not in stripped:
+    if not stripped:
         return stripped, None
-    first_line, rest = stripped.split("\n", 1)
-    first_line = first_line.strip()
-    rest = rest.strip()
-    if not first_line or not rest:
-        return stripped, None
-    if is_heading_like(first_line) or _JOURNAL_ENTRY_HEADING_RE.match(first_line):
-        return first_line, rest
+
+    if "\n" in stripped:
+        first_line, rest = stripped.split("\n", 1)
+        first_line = first_line.strip()
+        rest = rest.strip()
+        if first_line and rest and (
+            is_heading_like(first_line)
+            or _JOURNAL_ENTRY_HEADING_RE.match(first_line)
+            or _BODY_PARAGRAPH_HEADING_RE.match(first_line)
+        ):
+            return first_line, rest
+
+    for splitter in (
+        lambda s: _split_labeled_heading_merged(s, _JOURNAL_ENTRY_PREFIX_RE),
+        lambda s: _split_labeled_heading_merged(s, _BODY_PARAGRAPH_PREFIX_RE),
+        _split_references_merged,
+        _split_common_section_merged,
+    ):
+        heading, body = splitter(stripped)
+        if body is not None:
+            return heading, body
+
     return stripped, None
 
 
@@ -143,6 +275,7 @@ def is_heading_like(text: str) -> bool:
         return False
     if (
         _JOURNAL_ENTRY_HEADING_RE.match(t)
+        or _BODY_PARAGRAPH_HEADING_RE.match(t)
         or _SECTION_LABEL_HEADING_RE.match(t)
         or _NUMBERED_SECTION_HEADING_RE.match(t)
         or is_learning_journal_heading_line(t)
@@ -185,6 +318,8 @@ def detect_heading_level(
 
     if _JOURNAL_ENTRY_HEADING_RE.match(check) or _SECTION_LABEL_HEADING_RE.match(check):
         return 2
+    if _BODY_PARAGRAPH_HEADING_RE.match(check):
+        return 2
     if is_learning_journal_heading_line(check):
         return 2
     if _NUMBERED_SECTION_HEADING_RE.match(check):
@@ -202,12 +337,13 @@ def detect_heading_level(
                 return 2
 
     if is_first_nonempty and not has_embedded_body:
-        words = stripped.split()
+        title_text = stripped.rstrip().rstrip(".")
+        words = title_text.split()
         if (
-            len(words) >= 6
-            and not stripped.rstrip().endswith(".")
+            len(words) >= 4
             and normalized not in COMMON_HEADINGS
             and normalized not in REFS_HEADINGS
+            and _looks_like_title(stripped)
         ):
             return 1
 
@@ -710,14 +846,38 @@ def _infer_document_type(paragraphs: list[str], hint: str | None) -> tuple[str, 
 
 
 def _looks_like_title(paragraph: str) -> bool:
-    words = paragraph.split()
-    if not 2 <= len(words) <= 22:
-        return False
-    if paragraph.rstrip().endswith("."):
+    text = paragraph.strip().rstrip(".")
+    words = text.split()
+    if not 3 <= len(words) <= 22:
         return False
     if len(_IN_TEXT_CITATION.findall(paragraph)) >= 2:
         return False
-    if _word_count(paragraph) > 30:
+    if _word_count(text) > 30:
+        return False
+    if words[0] and words[0][0].islower():
+        return False
+    title_stop_words = {
+        "a",
+        "an",
+        "and",
+        "at",
+        "by",
+        "for",
+        "from",
+        "in",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+    }
+    lowercase_content = sum(
+        1
+        for w in words[1:]
+        if w and w[0].islower() and w.lower() not in title_stop_words
+    )
+    if lowercase_content >= 2:
         return False
     return True
 

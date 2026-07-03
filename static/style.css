@@ -2498,12 +2498,22 @@ body.support-chat-open {
   margin: 0 0 0.65rem;
 }
 
+.preview-p--title,
+.preview-doc h2.preview-p--title {
+  font-size: 16pt;
+  font-weight: 700;
+  text-align: center;
+  color: #000;
+  text-decoration: none;
+}
+
 .preview-p--heading,
 .preview-doc h3 {
-  margin: 0.85rem 0 0.35rem;
   font-size: 16pt;
   font-weight: 700;
   text-align: left;
+  color: #000;
+  text-decoration: none;
 }
 
 .preview-diff-title {

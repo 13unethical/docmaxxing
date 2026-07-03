@@ -13,6 +13,7 @@
 
   var PRESETS = {
     harvard: {
+      format_style: "harvard",
       font_family: "Times New Roman",
       font_size: "12",
       line_spacing: "1.5",
@@ -29,6 +30,7 @@
       clean_extra_linebreaks: false,
     },
     apa: {
+      format_style: "apa7",
       font_family: "Times New Roman",
       font_size: "12",
       line_spacing: "2.0",
@@ -45,6 +47,7 @@
       clean_extra_linebreaks: false,
     },
     mla: {
+      format_style: "mla9",
       font_family: "Times New Roman",
       font_size: "12",
       line_spacing: "2.0",

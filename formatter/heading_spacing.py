@@ -1,25 +1,15 @@
-"""Academic heading spacing — paragraph properties, not blank lines."""
+"""Heading spacing — delegates to the formatting style engine."""
 
 from __future__ import annotations
 
-HEADING_SPACE_AFTER_PT = 0
-
-
-def body_line_height_pt(font_size_pt: int, line_spacing: float) -> int:
-    """One body line height in points."""
-    return max(6, int(round(font_size_pt * line_spacing)))
+from formatter.style_engine import resolve_contextual_spacing
+from styles import load_profile
+from styles.profile import ACADEMIC_HEADING2_SPACE_BEFORE_PT
 
 
 def heading_space_before_pt(font_size_pt: int, line_spacing: float) -> int:
-    """
-    Space before a heading that follows body text.
-
-    Double-spaced body already starts on the next line, so extra space_before
-    would look like a double blank line. Single / 1.5 spacing needs one line gap.
-    """
-    if line_spacing >= 1.99:
-        return 0
-    return body_line_height_pt(font_size_pt, line_spacing)
+    """Major heading (Heading 2) space before — fixed academic rule."""
+    return ACADEMIC_HEADING2_SPACE_BEFORE_PT
 
 
 def resolve_paragraph_spacing(
@@ -32,27 +22,41 @@ def resolve_paragraph_spacing(
     line_spacing: float,
     body_space_before_pt: int,
     body_space_after_pt: int,
+    format_style: str = "harvard",
 ) -> tuple[int, int]:
-    """
-    Space before/after for one paragraph.
+    """Backward-compatible wrapper — spacing comes from the active profile."""
+    profile = load_profile(format_style)
+    if body_space_before_pt or body_space_after_pt:
+        from dataclasses import replace
 
-    Headings get one line of space before when the previous block is body text.
-    Body text before a heading gets no extra space after (gap lives on the heading).
-    """
-    if level > 0:
-        after_body = prev_level == 0 and prev_has_text
-        space_before = (
-            heading_space_before_pt(font_size_pt, line_spacing) if after_body else 0
+        profile = replace(
+            profile,
+            body=replace(
+                profile.body,
+                contextual=replace(
+                    profile.body.contextual,
+                    body_space_before_pt=body_space_before_pt or profile.body.contextual.body_space_before_pt,
+                    body_space_after_pt=body_space_after_pt or profile.body.contextual.body_space_after_pt,
+                ),
+            ),
         )
-        return space_before, HEADING_SPACE_AFTER_PT
-
-    space_before = body_space_before_pt
-    if next_level > 0:
-        space_after = 0
-    elif body_space_after_pt > 0:
-        space_after = body_space_after_pt
-    elif line_spacing < 1.99:
-        space_after = min(12, body_line_height_pt(font_size_pt, line_spacing))
-    else:
-        space_after = 0
-    return space_before, space_after
+    if level > 0:
+        role = "heading2"
+        if level == 1:
+            role = "title"
+        elif level == 3:
+            role = "heading3"
+        return resolve_contextual_spacing(
+            profile,
+            role=role,
+            prev_level=prev_level,
+            next_level=next_level,
+            prev_has_text=prev_has_text,
+        )
+    return resolve_contextual_spacing(
+        profile,
+        role="body",
+        prev_level=prev_level,
+        next_level=next_level,
+        prev_has_text=prev_has_text,
+    )

@@ -23,10 +23,10 @@ from docx import Document
 from flask import Flask, jsonify, render_template, request, send_file
 
 from formatter import FormatJob, format_document_full
+from formatter.document_reconstruction import reconstruct_document_before_format
 from formatter.cover_page import CoverPageData, prepend_cover_page
 from formatter.heading_plan import ParagraphHeadingAssignment
 from formatter.preview_html import build_formatted_preview_html
-from formatter.structure_rebuild import rebuild_document_from_recovery
 from formatter.references_section import append_references_section
 from formatter.document_io import (
     build_document_from_inputs,
@@ -126,6 +126,13 @@ def parse_job(form) -> FormatJob:
     before_pt = _int_clamped(str(form.get("space_before_pt", "0")), 0, 0, 72)
     after_pt = _int_clamped(str(form.get("space_after_pt", "0")), 0, 0, 72)
 
+    format_style = (
+        form.get("format_style")
+        or form.get("style_preset")
+        or form.get("citation_style")
+        or "harvard"
+    )
+
     return FormatJob(
         font_family=font,
         font_size_pt=size,
@@ -141,6 +148,7 @@ def parse_job(form) -> FormatJob:
         auto_justify_refs=_truthy(form, "auto_justify_refs"),
         requirement_headings=_truthy(form, "requirement_headings"),
         heading_size_pt=_int_clamped(str(form.get("heading_size_pt", "16")), 16, 12, 24),
+        format_style=str(format_style),
     )
 
 
@@ -796,15 +804,26 @@ def format_document():
             fallback_paragraphs = paragraphs_from_text(pasted_raw)
 
         paragraph_assignments: list[ParagraphHeadingAssignment] | None = None
-        recovery: dict[str, Any] | None = None
-        apply_result = None
-        if job.auto_headings:
-            doc_type = (request.form.get("document_type") or "other").strip() or None
-            recovery = recover_structure(doc=doc, document_type=doc_type)
-            if not recovery.get("error") and recovery.get("recovery_mode") == "ai_reconstructed":
-                apply_result = rebuild_document_from_recovery(doc, recovery)
-                if apply_result:
-                    paragraph_assignments = apply_result.assignments
+        recovery_mode = ""
+        ai_powered = False
+        doc_type = (request.form.get("document_type") or "other").strip() or None
+        brief = (request.form.get("requirements_text") or "").strip()
+        required_sections: list[str] = []
+        if brief:
+            from formatter.requirement_headings import extract_format_section_labels
+
+            required_sections = extract_format_section_labels(brief)
+
+        if job.auto_headings or job.requirement_headings:
+            recon = reconstruct_document_before_format(
+                doc,
+                document_type=doc_type,
+                required_sections=required_sections if job.requirement_headings else None,
+                prefer_ai=job.auto_headings,
+            )
+            paragraph_assignments = recon.assignments
+            recovery_mode = recon.recovery_mode
+            ai_powered = recon.ai_powered
 
         before_cover_paragraph_count = len(doc.paragraphs)
         cover = parse_cover_page(request.form, fallback_paragraphs=fallback_paragraphs)
@@ -821,21 +840,14 @@ def format_document():
             os.environ.get("STRUCTURE_RECOVERY_DEBUG", "").strip().lower() in {"1", "true", "yes"}
             or _truthy(request.form, "structure_recovery_debug")
         )
-        brief = (request.form.get("requirements_text") or "").strip()
-        required_sections: list[str] = []
-        if brief:
-            from formatter.requirement_headings import extract_format_section_labels
-
-            required_sections = extract_format_section_labels(brief)
 
         debug_report = format_document_full(
             doc,
             job,
             paragraph_assignments,
             structure_debug=structure_debug,
-            recovery_mode=str((recovery or {}).get("recovery_mode") or ""),
-            ai_powered=bool((recovery or {}).get("ai_powered")),
-            required_sections=required_sections if job.requirement_headings else None,
+            recovery_mode=recovery_mode,
+            ai_powered=ai_powered,
         )
 
         ref_lines = [r.strip() for r in request.form.getlist("references") if r.strip()]

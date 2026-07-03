@@ -28,6 +28,15 @@ class ParagraphHeadingAssignment:
     def is_ai_locked(self) -> bool:
         return self.source == "ai" and isinstance(self.level, int) and self.level > 0
 
+    @property
+    def is_structure_locked(self) -> bool:
+        """Heading level fixed by structure recovery (AI or reconstruction engine)."""
+        return (
+            isinstance(self.level, int)
+            and self.level > 0
+            and self.source in {"ai", "reconstructed"}
+        )
+
 
 @dataclass
 class StructureApplyResult:
@@ -88,8 +97,8 @@ def resolve_paragraph_heading_level(
 
     recovered_level is the AI-planned level when source is ai, else None.
     """
-    if assignment and assignment.is_ai_locked:
-        return assignment.level, "ai", assignment.level
+    if assignment and assignment.is_structure_locked:
+        return assignment.level, assignment.source, assignment.level
 
     if word_style_level is not None and word_style_level > 0:
         return word_style_level, "word_style", None

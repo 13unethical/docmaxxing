@@ -64,7 +64,7 @@
       heading_all_caps: $("heading_all_caps") ? !!$("heading_all_caps").checked : false,
       auto_justify_refs: $("auto_justify_refs") ? !!$("auto_justify_refs").checked : true,
       requirement_headings: $("requirement_headings") ? !!$("requirement_headings").checked : true,
-      heading_size_pt: ($("heading_size_pt") && $("heading_size_pt").value) || "16",
+      format_style: ($("format_style") && $("format_style").value) || "harvard",
       clean_extra_spaces: $("clean_extra_spaces") ? !!$("clean_extra_spaces").checked : true,
       clean_extra_linebreaks: $("clean_extra_linebreaks") ? !!$("clean_extra_linebreaks").checked : false,
       requirements_text: ($("requirements_text") && $("requirements_text").value.trim()) || "",
@@ -430,6 +430,7 @@
       fd.append("space_before_pt", cfg.space_before_pt);
       fd.append("space_after_pt", cfg.space_after_pt);
       fd.append("heading_size_pt", cfg.heading_size_pt);
+      fd.append("format_style", cfg.format_style || citationStyleForFormat());
       var reqText = document.getElementById("requirements_text");
       if (reqText && reqText.value.trim()) {
         fd.append("requirements_text", reqText.value.trim());

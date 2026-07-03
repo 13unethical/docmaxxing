@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 
 from formatter.cover_page import CoverPageData, prepend_cover_page
 from formatter.headings import detect_heading_level
-from formatter.pipeline import FormatJob, format_document_full
+from formatter import FormatJob, format_document_full
 from formatter.references_section import append_references_section
 from services.document_analyzer import _docx_has_page_number_field
 
@@ -33,10 +33,12 @@ class DocSpec:
 
 
 def _job(**kwargs) -> FormatJob:
+    ls = kwargs.get("line_spacing", 2.0)
+    default_style = "harvard" if ls < 1.99 else "apa7"
     return FormatJob(
         font_family=kwargs.get("font_family", "Times New Roman"),
         font_size_pt=kwargs.get("font_size_pt", 12),
-        line_spacing=kwargs.get("line_spacing", 2.0),
+        line_spacing=ls,
         alignment=kwargs.get("alignment", "left"),
         first_line_indent=kwargs.get("first_line_indent", False),
         space_before_pt=kwargs.get("space_before_pt", 0),
@@ -46,6 +48,7 @@ def _job(**kwargs) -> FormatJob:
         auto_headings=True,
         heading_all_caps=False,
         auto_justify_refs=True,
+        format_style=kwargs.get("format_style", default_style),
     )
 
 
@@ -169,6 +172,7 @@ def build_specs() -> list[DocSpec]:
                 alignment="justify",
                 space_after_pt=12,
                 page_number_position="bottom_right",
+                format_style="harvard",
             ),
             paragraphs=[
                 "Supply Chain Resilience at Northbridge Manufacturing Limited",

@@ -5,7 +5,8 @@ from __future__ import annotations
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-from formatter import FormatJob, format_document_full
+from formatter import FormatJob
+from tests.conftest import run_format_pipeline
 from formatter.requirement_headings import (
     extract_format_section_labels,
     expand_requirement_heading_paragraphs,
@@ -92,8 +93,9 @@ def test_format_pipeline_splits_merged_headings():
         auto_justify_refs=False,
         requirement_headings=True,
         heading_size_pt=18,
+        format_style="custom",
     )
-    format_document_full(doc, job, None, required_sections=labels)
+    run_format_pipeline(doc, job, document_type="essay", required_sections=labels)
     texts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     assert texts[0] == "Introduction"
     assert any(t.lower().startswith("body paragraph 1") for t in texts)

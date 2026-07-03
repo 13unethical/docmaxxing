@@ -350,11 +350,16 @@ def expand_requirement_heading_paragraphs(document, labels: list[str]) -> int:
     """Split merged requirement headings; each required section at most once in the document."""
     if not labels:
         return 0
+    from formatter.headings import heading_level_from_word_style
+
     used_labels: set[str] = set()
     inserted = 0
     idx = 0
     while idx < len(document.paragraphs):
         paragraph = document.paragraphs[idx]
+        if heading_level_from_word_style(paragraph) is not None:
+            idx += 1
+            continue
         segments = split_paragraph_by_requirement_headings(
             paragraph.text, labels, used_labels=used_labels
         )
