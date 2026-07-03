@@ -724,11 +724,23 @@ def preview_formatted():
 
         required_sections = extract_format_section_labels(brief)
     try:
+        clean_spaces = (
+            _truthy(settings, "clean_extra_spaces")
+            if "clean_extra_spaces" in settings
+            else True
+        )
+        clean_breaks = (
+            _truthy(settings, "clean_extra_linebreaks")
+            if "clean_extra_linebreaks" in settings
+            else False
+        )
         html = build_formatted_preview_html(
             text,
             job,
             document_type=document_type,
             required_sections=required_sections if job.requirement_headings else None,
+            cleaning_spaces=clean_spaces,
+            cleaning_breaks=clean_breaks,
         )
     except Exception as exc:
         app.logger.exception("preview-formatted failed")

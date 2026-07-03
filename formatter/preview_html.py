@@ -19,12 +19,19 @@ def build_formatted_preview_html(
     *,
     document_type: str | None = None,
     required_sections: list[str] | None = None,
+    cleaning_spaces: bool = True,
+    cleaning_breaks: bool = False,
 ) -> str:
     """
     Run structure recovery (when enabled) and formatting, then render After-preview HTML.
     Matches the downloaded .docx styling path.
     """
-    doc = build_document_from_inputs(pasted_raw=text, file_bytes=None)
+    doc = build_document_from_inputs(
+        pasted_raw=text,
+        file_bytes=None,
+        cleaning_spaces=cleaning_spaces,
+        cleaning_breaks=cleaning_breaks,
+    )
     paragraph_assignments = None
 
     if job.auto_headings or job.requirement_headings:

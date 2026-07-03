@@ -45,6 +45,32 @@ def test_body_paragraph_heading_keeps_full_subtitle():
     assert blocks[1].text.startswith("Artificial intelligence")
 
 
+def test_build_formatted_preview_html_does_not_crash():
+    from formatter import FormatJob
+    from formatter.preview_html import build_formatted_preview_html
+
+    job = FormatJob(
+        font_family="Times New Roman",
+        font_size_pt=12,
+        line_spacing=1.5,
+        alignment="justify",
+        first_line_indent=False,
+        space_before_pt=0,
+        space_after_pt=12,
+        margin_preset="normal",
+        page_number_position="none",
+        auto_headings=True,
+        heading_all_caps=False,
+        auto_justify_refs=True,
+        format_style="harvard",
+    )
+    html = build_formatted_preview_html(
+        "The Impact of AI on Education.\n\nIntroduction\n\nBody text here.",
+        job,
+    )
+    assert "Introduction" in html
+
+
 def test_format_pipeline_title_and_markdown_cleanup():
     doc = Document()
     doc.add_paragraph("The Impact of Artificial Intelligence on Higher Education.")
