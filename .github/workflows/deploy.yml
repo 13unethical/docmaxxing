@@ -17,14 +17,16 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USER }}
           key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          command_timeout: 10m
 
           script: |
+            set -euo pipefail
             cd /root/docmaxxing
-
-            git pull origin main
-
+            git fetch origin main
+            git reset --hard origin/main
             source venv/bin/activate
-
             pip install -r requirements.txt
-
             systemctl restart docmaxxing
+            systemctl is-active --quiet docmaxxing
+            echo "Deployed $(git rev-parse --short HEAD)"

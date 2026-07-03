@@ -193,6 +193,31 @@ def references():
     return render_template("references.html", nav_active="references")
 
 
+def _git_revision() -> str:
+    import subprocess
+
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+@app.get("/api/version")
+def api_version():
+    """Lets you verify which code revision is running (local vs production)."""
+    return jsonify(
+        {
+            "revision": _git_revision(),
+            "engine": "reconstruction+style_engine",
+        }
+    )
+
+
 def _feedback_from_request():
     """
     Parse JSON {\"message\": \"...\"}, send to Telegram if configured.
