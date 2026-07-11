@@ -13,5 +13,6 @@ systemctl daemon-reload
 systemctl enable docmaxxing
 systemctl restart docmaxxing
 systemctl is-active --quiet docmaxxing
+bash scripts/patch_nginx_timeouts.sh || true
 echo "OK — running $(git rev-parse --short HEAD)"
 curl -sS http://127.0.0.1:8000/api/version || true

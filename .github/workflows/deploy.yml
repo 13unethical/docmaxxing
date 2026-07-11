@@ -41,6 +41,7 @@ jobs:
             systemctl enable docmaxxing
             systemctl restart docmaxxing
             systemctl is-active --quiet docmaxxing
+            bash scripts/patch_nginx_timeouts.sh || true
             echo "Deployed $(git rev-parse --short HEAD)"
             echo "Storage: $(grep PROJECT_STORAGE_DIR .env || true)"
             ls -la /root/docmaxxing/data/assignment-trace.log || true

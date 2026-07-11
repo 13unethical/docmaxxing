@@ -790,24 +790,67 @@ def api_writer_session_merge(session_id: str):
 
 @app.post("/api/assignment/projects/<project_id>/writer/start")
 def api_assignment_writer_start(project_id: str):
+    trace(
+        "api.writer.start.received",
+        **project_service.store.lookup_diagnostics(project_id),
+    )
     try:
         session = project_service.start_writer(project_id)
     except KeyError:
         return jsonify({"error": "Project not found"}), 404
     except ValueError as exc:
+        trace("api.writer.start.failed", project_id=project_id, error=str(exc))
         return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.writer.start.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Writer setup failed. Please try again."}), 502
+    trace(
+        "api.writer.start.completed",
+        project_id=project_id,
+        session_id=session.id,
+        sections=len(session.sections),
+        engine=session.engine_version,
+    )
     return jsonify(session.to_dict()), 201
 
 
 @app.post("/api/assignment/projects/<project_id>/writer/advance")
 def api_assignment_writer_advance(project_id: str):
+    trace(
+        "api.writer.advance.received",
+        **project_service.store.lookup_diagnostics(project_id),
+    )
     try:
         session = project_service.advance_writer(project_id)
     except KeyError:
         return jsonify({"error": "Writer session not found"}), 404
     except ValueError as exc:
         message = str(exc)
+        trace("api.writer.advance.failed", project_id=project_id, error=message)
         return jsonify({"error": user_friendly_llm_error(message)}), llm_error_http_status(message)
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.writer.advance.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Writing step failed. Please try again."}), 502
+    current = session.current_section()
+    trace(
+        "api.writer.advance.completed",
+        project_id=project_id,
+        session_id=session.id,
+        progress=session.progress,
+        status=session.status.value,
+        current_section=current.title if current else None,
+        completed_sections=len(session.completed_section_ids),
+    )
     return jsonify(session.to_dict())
 
 
@@ -825,12 +868,32 @@ def api_assignment_writer_revise(project_id: str):
 
 @app.post("/api/assignment/projects/<project_id>/writer/merge")
 def api_assignment_writer_merge(project_id: str):
+    trace(
+        "api.writer.merge.received",
+        **project_service.store.lookup_diagnostics(project_id),
+    )
     try:
         draft = project_service.merge_writer_draft(project_id)
     except KeyError:
         return jsonify({"error": "Writer session not found"}), 404
     except ValueError as exc:
+        trace("api.writer.merge.failed", project_id=project_id, error=str(exc))
         return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.writer.merge.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Draft merge failed. Please try again."}), 502
+    trace(
+        "api.writer.merge.completed",
+        project_id=project_id,
+        draft_id=draft.id,
+        total_words=draft.total_words,
+        model=draft.model,
+    )
     return jsonify(draft.to_dict()), 201
 
 

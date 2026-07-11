@@ -170,6 +170,16 @@
 
   var LLM_REQUEST_TIMEOUT_MS = 300000;
 
+  function isLongRunningStageUrl(url) {
+    return /\/research|\/blueprint|\/writer|\/humanizer|\/review|\/revision|\/ai-detection/.test(url || "");
+  }
+
+  function apiLlm(url, options) {
+    var opts = options || {};
+    opts.timeoutMs = LLM_REQUEST_TIMEOUT_MS;
+    return api(url, opts);
+  }
+
   async function api(url, options) {
     var opts = options || {};
     var timeoutMs = opts.timeoutMs;
@@ -186,6 +196,9 @@
     if (!res.ok) {
       if (responseMeansProjectMissing(res, payload)) {
         resetProjectState();
+      }
+      if (res.status === 504 || (res.status >= 500 && isLongRunningStageUrl(url))) {
+        throw new Error("This AI step can take a few minutes. Please wait and click Retry.");
       }
       if (res.status >= 500 && /\/research|\/blueprint/.test(url)) {
         throw new Error("AI planning is taking longer than expected. Please wait a moment and click Retry.");
@@ -657,7 +670,7 @@
 
   async function runResearch() {
     if (!state.research) {
-      var created = await api(projectUrl("/research"), { method: "POST", timeoutMs: LLM_REQUEST_TIMEOUT_MS });
+      var created = await apiLlm(projectUrl("/research"), { method: "POST" });
       state.research = created.research_plan || null;
     }
     if (!state.research) {
@@ -669,9 +682,8 @@
 
   async function runBlueprint() {
     if (!state.blueprint) {
-      var created = await api(projectUrl("/blueprint"), {
+      var created = await apiLlm(projectUrl("/blueprint"), {
         method: "POST",
-        timeoutMs: LLM_REQUEST_TIMEOUT_MS,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ research_plan: state.research || null }),
       });
@@ -689,7 +701,7 @@
     try {
       state.writerSession = await api(projectUrl("/writer"));
     } catch (err) {
-      state.writerSession = await api(projectUrl("/writer/start"), { method: "POST" });
+      state.writerSession = await apiLlm(projectUrl("/writer/start"), { method: "POST" });
     }
     return state.writerSession;
   }
@@ -697,19 +709,19 @@
   async function advanceWriter() {
     await ensureWriterSession();
     try {
-      state.writerSession = await api(projectUrl("/writer/advance"), { method: "POST" });
+      state.writerSession = await apiLlm(projectUrl("/writer/advance"), { method: "POST" });
     } catch (err) {
       if (String(err.message || "").toLowerCase().indexOf("not found") >= 0) {
         state.writerSession = null;
         await ensureWriterSession();
-        state.writerSession = await api(projectUrl("/writer/advance"), { method: "POST" });
+        state.writerSession = await apiLlm(projectUrl("/writer/advance"), { method: "POST" });
       } else {
         throw err;
       }
     }
     renderProgress();
     if (state.writerSession.status === "completed") {
-      state.draft = await api(projectUrl("/writer/merge"), { method: "POST" });
+      state.draft = await apiLlm(projectUrl("/writer/merge"), { method: "POST" });
     }
   }
 
@@ -719,7 +731,7 @@
   }
 
   async function ensureDetection() {
-    state.detectionSession = await api(projectUrl("/ai-detection/start"), { method: "POST" });
+    state.detectionSession = await apiLlm(projectUrl("/ai-detection/start"), { method: "POST" });
     var data = await api(projectUrl(""));
     if (data.project && data.project.artifacts && data.project.artifacts.detection_attempt_number) {
       state.detectionAttempt = data.project.artifacts.detection_attempt_number;
@@ -728,7 +740,7 @@
   }
 
   async function advanceDetection() {
-    state.detectionSession = await api(projectUrl("/ai-detection/advance"), { method: "POST" });
+    state.detectionSession = await apiLlm(projectUrl("/ai-detection/advance"), { method: "POST" });
     renderProgress();
   }
 
@@ -738,7 +750,7 @@
   }
 
   async function runReview() {
-    var payload = await api(projectUrl("/review"), { method: "POST" });
+    var payload = await apiLlm(projectUrl("/review"), { method: "POST" });
     state.review = payload.review_report || null;
     state.reviewMeta = {
       pass_number: payload.pass_number || state.reviewPass,
@@ -750,7 +762,7 @@
   }
 
   async function runRevision() {
-    var payload = await api(projectUrl("/revision"), { method: "POST" });
+    var payload = await apiLlm(projectUrl("/revision"), { method: "POST" });
     state.reviewMeta = state.reviewMeta || {};
     state.reviewMeta.issues_fixed = (payload.revision_result && payload.revision_result.issues_addressed)
       ? payload.revision_result.issues_addressed.length
@@ -762,22 +774,19 @@
 
   async function ensureHumanizer() {
     if (state.humanizerSession && state.humanizerSession.status !== "merged") return state.humanizerSession;
-    state.humanizerSession = await api(projectUrl("/humanizer/start"), { method: "POST" });
+    state.humanizerSession = await apiLlm(projectUrl("/humanizer/start"), { method: "POST" });
     return state.humanizerSession;
   }
 
   async function advanceHumanizer() {
     await ensureHumanizer();
-    state.humanizerSession = await api(projectUrl("/humanizer/advance"), {
-      method: "POST",
-      timeoutMs: 360000,
-    });
+    state.humanizerSession = await apiLlm(projectUrl("/humanizer/advance"), { method: "POST" });
     renderProgress();
   }
 
   async function mergeHumanizer() {
     if (state.humanizerSession && state.humanizerSession.status === "merged") return;
-    await api(projectUrl("/humanizer/merge"), { method: "POST" });
+    await apiLlm(projectUrl("/humanizer/merge"), { method: "POST" });
     var data = await api(projectUrl(""));
     state.humanizerSession = data.humanizer_session || state.humanizerSession;
   }
@@ -841,7 +850,7 @@
       await advanceDetection();
     }
     if (!state.detectionReport) {
-      var payload = await api(projectUrl("/ai-detection/finalize"), { method: "POST" });
+      var payload = await apiLlm(projectUrl("/ai-detection/finalize"), { method: "POST" });
       state.detectionReport = payload.detection_report || payload;
     }
     renderProgress();
