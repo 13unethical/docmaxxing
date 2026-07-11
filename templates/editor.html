@@ -1,0 +1,40 @@
+{% extends "tools_base.html" %}
+{% set tools_active = 'editor' %}
+{% block title %}Editor — DocMaxxing{% endblock %}
+{% block tools_content %}
+<header class="tool-page-head tool-page-head--compact">
+  <div class="editor-head-row">
+    <div>
+      <h1 class="tool-page-title" id="editor_doc_title">Untitled document</h1>
+      <p class="tool-page-lede" id="editor_save_status">All changes saved locally</p>
+    </div>
+    <span class="editor-stats" id="editor_stats">0 words</span>
+  </div>
+</header>
+
+<div class="editor-shell" data-editor-page>
+  <div class="editor-toolbar" role="toolbar" aria-label="Formatting">
+    <select class="editor-tool-select" disabled aria-label="Paragraph style">
+      <option>Paragraph</option>
+      <option>Heading 1</option>
+      <option>Heading 2</option>
+    </select>
+    <button type="button" class="editor-tool" disabled><strong>B</strong></button>
+    <button type="button" class="editor-tool" disabled><em>I</em></button>
+    <button type="button" class="editor-tool" disabled><u>U</u></button>
+    <span class="editor-toolbar-note">TipTap editor · Phase 2</span>
+    <button type="button" class="btn-secondary editor-export" disabled>Export .docx</button>
+  </div>
+  <div
+    class="editor-page"
+    id="editor_surface"
+    contenteditable="true"
+    role="textbox"
+    aria-multiline="true"
+    data-placeholder="Start writing or open a draft from Format…"
+  ></div>
+</div>
+{% endblock %}
+{% block tools_scripts %}
+<script src="{{ url_for('static', filename='editor-page.js') }}"></script>
+{% endblock %}

@@ -3,7 +3,7 @@ Extract formatting requirements from free-form text.
 
 Uses Gemini when GOOGLE_API_KEY is set; otherwise returns deterministic
 data derived from strict keyword heuristics.
-Optional: GEMINI_MODEL (default gemini-2.5-flash).
+Optional: GEMINI_MODEL (default gemini-3.1-flash-lite).
 """
 
 from __future__ import annotations

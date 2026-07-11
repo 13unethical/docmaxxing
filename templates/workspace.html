@@ -1,0 +1,61 @@
+{% extends "workspace_base.html" %}
+{% block title %}Assignment Workspace — DocMaxxing{% endblock %}
+{% block content %}
+<div class="ws-assignment" data-workspace>
+  <header class="ws-assignment-header">
+    <div>
+      <h1 class="ws-assignment-title">Assignment Workspace</h1>
+      <p class="ws-assignment-subtitle" data-ws-project-name>Project Monitor</p>
+    </div>
+    <div class="ws-assignment-controls">
+      <label class="ws-project-id-wrap" for="ws_project_id">Project ID</label>
+      <input id="ws_project_id" class="ws-project-id-input" type="text" placeholder="paste project id" data-ws-project-id-input />
+      <button type="button" class="ws-refresh-btn" data-ws-project-load>Load</button>
+    </div>
+  </header>
+
+  <div class="ws-assignment-main">
+    <aside class="ws-left-sidebar">
+      <h2>Project</h2>
+      <ul class="ws-stage-list" data-ws-stage-list></ul>
+    </aside>
+
+    <section class="ws-center-panel">
+      <h2>Current Stage</h2>
+      <p class="ws-current-stage" data-ws-current-stage>Waiting for project</p>
+      <div class="ws-progress-wrap">
+        <div class="ws-progress-bar">
+          <span data-ws-progress-fill></span>
+        </div>
+        <span data-ws-progress-label>0%</span>
+      </div>
+      <dl class="ws-center-meta">
+        <div><dt>Current task</dt><dd data-ws-current-task>-</dd></div>
+        <div><dt>Model</dt><dd data-ws-current-model>-</dd></div>
+        <div><dt>Estimated remaining time</dt><dd data-ws-est-remaining>-</dd></div>
+      </dl>
+    </section>
+
+    <aside class="ws-right-sidebar">
+      <h2>Project Summary</h2>
+      <dl class="ws-summary-list">
+        <div><dt>Assignment Type</dt><dd data-ws-assignment-type>-</dd></div>
+        <div><dt>Word Count</dt><dd data-ws-word-count>-</dd></div>
+        <div><dt>Citation Style</dt><dd data-ws-citation-style>-</dd></div>
+        <div><dt>Deadline</dt><dd data-ws-deadline>-</dd></div>
+        <div><dt>Current AI Model</dt><dd data-ws-current-ai-model>-</dd></div>
+        <div><dt>Credits Used</dt><dd data-ws-credits-used>0</dd></div>
+        <div><dt>Time Elapsed</dt><dd data-ws-time-elapsed>-</dd></div>
+      </dl>
+    </aside>
+  </div>
+
+  <section class="ws-bottom-feed">
+    <div class="ws-feed-header">
+      <h2>Activity Feed</h2>
+      <span data-ws-feed-updated>Not synced</span>
+    </div>
+    <ul class="ws-feed-list" data-ws-activity-feed></ul>
+  </section>
+</div>
+{% endblock %}

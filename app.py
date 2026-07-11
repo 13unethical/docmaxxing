@@ -16,11 +16,15 @@ except ImportError:
 import io
 import json
 import os
+import re
+import time
+import traceback
+import uuid
 from typing import Any
 
 import requests
 from docx import Document
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 
 from formatter import FormatJob, format_document_full
 from formatter.document_reconstruction import reconstruct_document_before_format
@@ -44,9 +48,84 @@ from services.document_structure_engine import infer_assignment_title, paragraph
 from services.intext_citations import generate_intext
 from services.requirements_ocr import extract_text_from_image_stream
 from services.requirements_parser import form_autofill_from_parsed, parse_requirements
+from services.assignment_pipeline import (
+    PIPELINE_STAGE_SPECS,
+    AssignmentPipelineService,
+    PipelineStage,
+)
+from services.assignment_pipeline.handlers import StageResult
+from services.assignment_pipeline.models import utc_now
+from services.assignment_project import ProjectService
+from services.research_engine import ResearchEngineService
+from services.research_engine.models import ParsedDocument
+from services.blueprint_engine import BlueprintEngineService
+from services.writer_engine import WriterEngineService
+from services.reviewer_engine import ReviewerEngineService
+from services.revision_engine import RevisionEngineService
+from services.humanizer_engine import HumanizerEngineService
+from services.humanizer_engine.constants import (
+    DEFAULT_HUMANIZER_MODE,
+    MAX_WORDS_PER_INPUT,
+    MIN_HUMANIZE_CHARS,
+)
+from services.humanizer_engine.mock_validator import ZeroGPTParagraphValidator
+from services.humanizer_engine.zerogpt_humanizer import ZeroGPTTextHumanizer, count_words
+from services.ai_detection_engine import AIDetectionEngineService
+from services.delivery_engine import DeliveryEngineService
+from services.llm_errors import llm_error_http_status, user_friendly_llm_error
+from services.zerogpt_business import (
+    ZeroGPTClient,
+    ZeroGPTDetectionProvider,
+    ZeroGPTError,
+    ZeroGPTHumanizerProvider,
+    ZeroGPTProviderError,
+    orchestrator_review,
+)
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB uploads
+
+assignment_pipeline = AssignmentPipelineService()
+research_engine = ResearchEngineService()
+blueprint_engine = BlueprintEngineService()
+writer_engine = WriterEngineService()
+reviewer_engine = ReviewerEngineService()
+revision_engine = RevisionEngineService(draft_store=writer_engine.drafts)
+ai_detection_engine = AIDetectionEngineService()
+delivery_engine = DeliveryEngineService()
+zerogpt_client = ZeroGPTClient()
+
+
+def _zerogpt_configured() -> bool:
+    api_key = (os.environ.get("ZEROGPT_API_KEY") or "").strip()
+    email = (os.environ.get("ZEROGPT_EMAIL") or "").strip()
+    password = (os.environ.get("ZEROGPT_PASSWORD") or "").strip()
+    return bool(api_key or (email and password))
+
+
+def _build_humanizer_engine() -> HumanizerEngineService:
+    if _zerogpt_configured():
+        return HumanizerEngineService(
+            humanizer=ZeroGPTTextHumanizer(client=zerogpt_client, mode=DEFAULT_HUMANIZER_MODE),
+            validator=ZeroGPTParagraphValidator(),
+        )
+    return HumanizerEngineService()
+
+
+humanizer_engine = _build_humanizer_engine()
+zerogpt_detection_provider = ZeroGPTDetectionProvider(client=zerogpt_client)
+zerogpt_humanizer_provider = ZeroGPTHumanizerProvider(client=zerogpt_client)
+project_service = ProjectService(
+    pipeline=assignment_pipeline,
+    research=research_engine,
+    blueprint=blueprint_engine,
+    writer=writer_engine,
+    reviewer=reviewer_engine,
+    revision=revision_engine,
+    humanizer=humanizer_engine,
+    ai_detection=ai_detection_engine,
+    delivery=delivery_engine,
+)
 
 ALLOWED_FONTS = frozenset(
     {
@@ -74,6 +153,57 @@ REQUIREMENTS_DOC_EXT = frozenset({".docx", ".pdf"}) | REQUIREMENTS_TEXT_EXT | RE
 # Telegram Bot API: TELEGRAM_TOKEN + CHAT_ID (also accepts TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID).
 TELEGRAM_SEND_MESSAGE_TIMEOUT_S = 12
 TELEGRAM_TEXT_MAX_LEN = 4096
+
+
+def _project_api_payload(bundle, *, include_pipeline: bool = True) -> dict[str, Any]:
+    payload = bundle.to_dict()
+    if include_pipeline:
+        try:
+            payload["pipeline"] = assignment_pipeline.get_project(bundle.project.id).to_dict()
+        except KeyError:
+            payload["pipeline"] = None
+    try:
+        payload["research_plan"] = project_service.get_research_plan(bundle.project.id).to_dict()
+    except KeyError:
+        payload["research_plan"] = None
+    try:
+        payload["blueprint"] = project_service.get_blueprint(bundle.project.id).to_dict()
+    except KeyError:
+        payload["blueprint"] = None
+    try:
+        payload["writer_session"] = project_service.get_writer_session(bundle.project.id).to_dict()
+    except KeyError:
+        payload["writer_session"] = None
+    try:
+        payload["draft"] = project_service.get_draft(bundle.project.id).to_dict()
+    except KeyError:
+        payload["draft"] = None
+    try:
+        payload["review_report"] = project_service.get_review_report(bundle.project.id).to_dict()
+    except KeyError:
+        payload["review_report"] = None
+    payload["revision_history"] = project_service.get_revision_history(bundle.project.id).to_dict()
+    try:
+        payload["humanizer_session"] = project_service.get_humanizer_session(bundle.project.id).to_dict()
+    except KeyError:
+        payload["humanizer_session"] = None
+    try:
+        payload["humanized_draft"] = project_service.get_humanized_draft(bundle.project.id).to_dict()
+    except KeyError:
+        payload["humanized_draft"] = None
+    try:
+        payload["detection_session"] = project_service.get_detection_session(bundle.project.id).to_dict()
+    except KeyError:
+        payload["detection_session"] = None
+    try:
+        payload["detection_report"] = project_service.get_detection_report(bundle.project.id).to_dict()
+    except KeyError:
+        payload["detection_report"] = None
+    try:
+        payload["delivery_package"] = project_service.get_delivery_package(bundle.project.id).to_dict()
+    except KeyError:
+        payload["delivery_package"] = None
+    return payload
 
 
 def _truthy(form: Any, key: str) -> bool:
@@ -185,12 +315,1436 @@ def check():
 
 @app.route("/templates")
 def templates():
-    return render_template("templates.html", nav_active="templates")
+    return redirect(url_for("index"), code=302)
 
 
 @app.route("/references")
 def references():
-    return render_template("references.html", nav_active="references")
+    return redirect(url_for("index"), code=302)
+
+
+@app.route("/workspace")
+def workspace():
+    """Full document workspace — editor, humanize, AI, cite, comments."""
+    return render_template("workspace.html")
+
+
+@app.route("/editor")
+def editor():
+    """Legacy URL → workspace."""
+    return redirect(url_for("workspace"), code=302)
+
+
+@app.route("/humanizer")
+def humanizer():
+    return render_template("humanizer.html", nav_active="humanizer")
+
+
+@app.route("/assignment")
+def assignment():
+    return render_template("assignment.html", nav_active="assignment")
+
+
+def _parse_pipeline_stage(value: str) -> PipelineStage | None:
+    try:
+        return PipelineStage(value.strip().lower())
+    except ValueError:
+        return None
+
+
+@app.get("/api/assignment/pipeline/stages")
+def api_assignment_pipeline_stages():
+    """Pipeline stage definitions and future provider integration slots."""
+    return jsonify({"stages": [spec.to_dict() for spec in PIPELINE_STAGE_SPECS]})
+
+
+@app.post("/api/assignment/projects")
+def api_assignment_project_create():
+    """Create an assignment project with files, requirement shell, and pipeline."""
+    payload = request.get_json(silent=True) or {}
+    upload_manifest = payload.get("upload_manifest")
+    if upload_manifest is not None and not isinstance(upload_manifest, dict):
+        return jsonify({"error": "upload_manifest must be an object"}), 400
+    files = payload.get("files")
+    if files is not None and not isinstance(files, list):
+        return jsonify({"error": "files must be an array"}), 400
+
+    try:
+        bundle = project_service.create_project(
+            user_id=payload.get("user_id"),
+            title=payload.get("title"),
+            university=payload.get("university"),
+            deadline=payload.get("deadline"),
+            note=payload.get("note"),
+            files=files,
+            upload_manifest=upload_manifest,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify(_project_api_payload(bundle)), 201
+
+
+@app.get("/api/assignment/projects/<project_id>")
+def api_assignment_project_get(project_id: str):
+    try:
+        bundle = project_service.get_project(project_id)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    return jsonify(_project_api_payload(bundle))
+
+
+@app.post("/api/assignment/projects/<project_id>/files")
+def api_assignment_project_add_file(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    original_filename = (payload.get("original_filename") or payload.get("name") or "").strip()
+    file_type = (payload.get("file_type") or payload.get("source") or "").strip()
+    if not original_filename or not file_type:
+        return jsonify({"error": "file_type and original_filename are required"}), 400
+    try:
+        file_record = project_service.add_file(
+            project_id,
+            file_type=file_type,
+            original_filename=original_filename,
+            storage_path=payload.get("storage_path"),
+            parsed=bool(payload.get("parsed", False)),
+        )
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(file_record.to_dict()), 201
+
+
+@app.post("/api/assignment/projects/upload")
+def api_assignment_project_upload():
+    """Create a project and persist uploaded assignment files."""
+    note = (request.form.get("note") or request.form.get("lecture_notes") or "").strip()
+    deadline = (request.form.get("deadline") or "").strip() or None
+    title = (request.form.get("title") or "").strip() or "Assignment Project"
+
+    has_upload = any(
+        upload and upload.filename
+        for field in ("assignment_brief", "rubric", "additional_files", "lecture_notes")
+        for upload in request.files.getlist(field)
+    )
+    if not has_upload:
+        return jsonify({"error": "Upload at least an assignment brief file."}), 400
+
+    try:
+        bundle = project_service.create_project(
+            title=title,
+            deadline=deadline,
+            note=note or None,
+        )
+        saved_files = _attach_multipart_uploads(bundle.project.id)
+        if note:
+            note_path = _write_debug_text_file(bundle.project.id, "project_note.txt", note)
+            project_service.add_file(
+                bundle.project.id,
+                file_type="professor_notes",
+                original_filename="project_note.txt",
+                storage_path=note_path,
+                parsed=True,
+            )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    payload = _project_api_payload(bundle)
+    payload["uploaded_files"] = saved_files
+    return jsonify(payload), 201
+
+
+@app.post("/api/assignment/projects/<project_id>/analyze-requirements")
+def api_assignment_project_analyze_requirements(project_id: str):
+    """Run requirement analysis via Gemini."""
+    try:
+        bundle = project_service.analyze_requirements(project_id)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify(_project_api_payload(bundle))
+
+
+@app.post("/api/assignment/projects/<project_id>/pricing")
+def api_assignment_project_pricing(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    priority = str(payload.get("priority") or "standard").strip().lower()
+    try:
+        bundle = project_service.calculate_pricing(project_id, priority=priority)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_project_api_payload(bundle))
+
+
+@app.post("/api/assignment/projects/<project_id>/confirm-payment")
+def api_assignment_project_confirm_payment(project_id: str):
+    try:
+        bundle = project_service.confirm_payment(project_id)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_project_api_payload(bundle))
+
+
+@app.post("/api/assignment/projects/<project_id>/research")
+def api_assignment_project_research(project_id: str):
+    """Build Research Plan from Requirement JSON and parsed documents only."""
+    payload = request.get_json(silent=True) or {}
+    parsed_documents = payload.get("parsed_documents")
+    if parsed_documents is not None and not isinstance(parsed_documents, list):
+        return jsonify({"error": "parsed_documents must be an array"}), 400
+    try:
+        plan = project_service.run_research(project_id, parsed_documents=parsed_documents)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"research_plan": plan.to_dict()})
+
+
+@app.get("/api/assignment/projects/<project_id>/research-plan")
+def api_assignment_project_research_plan(project_id: str):
+    try:
+        plan = project_service.get_research_plan(project_id)
+    except KeyError:
+        return jsonify({"error": "Research plan not found"}), 404
+    return jsonify(plan.to_dict())
+
+
+@app.patch("/api/assignment/projects/<project_id>/research-plan")
+def api_assignment_project_research_plan_update(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Invalid payload"}), 400
+    try:
+        plan = project_service.update_research_plan(project_id, payload)
+    except KeyError:
+        return jsonify({"error": "Research plan not found"}), 404
+    return jsonify(plan.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/blueprint")
+def api_assignment_project_blueprint(project_id: str):
+    """Build writing Blueprint from Requirement JSON + Research Plan only."""
+    try:
+        blueprint = project_service.run_blueprint(project_id)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"blueprint": blueprint.to_dict()})
+
+
+@app.get("/api/assignment/projects/<project_id>/blueprint")
+def api_assignment_project_blueprint_get(project_id: str):
+    try:
+        blueprint = project_service.get_blueprint(project_id)
+    except KeyError:
+        return jsonify({"error": "Blueprint not found"}), 404
+    return jsonify(blueprint.to_dict())
+
+
+@app.patch("/api/assignment/projects/<project_id>/blueprint")
+def api_assignment_project_blueprint_update(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Invalid payload"}), 400
+    try:
+        blueprint = project_service.update_blueprint(project_id, payload)
+    except KeyError:
+        return jsonify({"error": "Blueprint not found"}), 404
+    return jsonify(blueprint.to_dict())
+
+
+@app.get("/api/debug/blueprint/<project_id>")
+def api_debug_blueprint_get(project_id: str):
+    """Debug endpoint: return stored Blueprint JSON without transformations."""
+    try:
+        blueprint = project_service.get_blueprint(project_id)
+    except KeyError:
+        return jsonify({"error": "Blueprint not found"}), 404
+    return jsonify(blueprint.to_dict())
+
+
+@app.post("/api/blueprint/build")
+def api_blueprint_build():
+    """Standalone Blueprint Engine entrypoint."""
+    payload = request.get_json(silent=True) or {}
+    requirement_json = payload.get("requirement_json")
+    research_plan = payload.get("research_plan")
+    if not isinstance(requirement_json, dict):
+        return jsonify({"error": "requirement_json object is required"}), 400
+    if not isinstance(research_plan, dict):
+        return jsonify({"error": "research_plan object is required"}), 400
+    blueprint = blueprint_engine.build_blueprint(
+        requirement_json=requirement_json,
+        research_plan=research_plan,
+        project_id=payload.get("project_id"),
+    )
+    return jsonify(blueprint.to_dict()), 201
+
+
+@app.post("/api/writer/session")
+def api_writer_session_create():
+    payload = request.get_json(silent=True) or {}
+    for key in ("requirement_json", "research_plan", "blueprint"):
+        if not isinstance(payload.get(key), dict):
+            return jsonify({"error": f"{key} object is required"}), 400
+    session = writer_engine.create_session(
+        requirement_json=payload["requirement_json"],
+        research_plan=payload["research_plan"],
+        blueprint=payload["blueprint"],
+        project_id=payload.get("project_id"),
+    )
+    return jsonify(session.to_dict()), 201
+
+
+@app.get("/api/writer/session/<session_id>")
+def api_writer_session_get(session_id: str):
+    try:
+        session = writer_engine.get_session(session_id)
+    except KeyError:
+        return jsonify({"error": "Writer session not found"}), 404
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/writer/session/<session_id>/advance")
+def api_writer_session_advance(session_id: str):
+    try:
+        session = writer_engine.advance_section(session_id)
+    except KeyError:
+        return jsonify({"error": "Writer session not found"}), 404
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/writer/session/<session_id>/revise")
+def api_writer_session_revise(session_id: str):
+    payload = request.get_json(silent=True) or {}
+    try:
+        session = writer_engine.revise_section(session_id, payload.get("section_id"))
+    except KeyError:
+        return jsonify({"error": "Writer session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/writer/session/<session_id>/merge")
+def api_writer_session_merge(session_id: str):
+    payload = request.get_json(silent=True) or {}
+    try:
+        draft = writer_engine.merge_draft(session_id, title=payload.get("title"))
+    except KeyError:
+        return jsonify({"error": "Writer session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(draft.to_dict()), 201
+
+
+@app.post("/api/assignment/projects/<project_id>/writer/start")
+def api_assignment_writer_start(project_id: str):
+    try:
+        session = project_service.start_writer(project_id)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(session.to_dict()), 201
+
+
+@app.post("/api/assignment/projects/<project_id>/writer/advance")
+def api_assignment_writer_advance(project_id: str):
+    try:
+        session = project_service.advance_writer(project_id)
+    except KeyError:
+        return jsonify({"error": "Writer session not found"}), 404
+    except ValueError as exc:
+        message = str(exc)
+        return jsonify({"error": user_friendly_llm_error(message)}), llm_error_http_status(message)
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/writer/revise")
+def api_assignment_writer_revise(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    try:
+        session = project_service.revise_writer_section(project_id, payload.get("section_id"))
+    except KeyError:
+        return jsonify({"error": "Writer session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/writer/merge")
+def api_assignment_writer_merge(project_id: str):
+    try:
+        draft = project_service.merge_writer_draft(project_id)
+    except KeyError:
+        return jsonify({"error": "Writer session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(draft.to_dict()), 201
+
+
+@app.get("/api/assignment/projects/<project_id>/writer")
+def api_assignment_writer_get(project_id: str):
+    try:
+        session = project_service.get_writer_session(project_id)
+    except KeyError:
+        return jsonify({"error": "Writer session not found"}), 404
+    return jsonify(session.to_dict())
+
+
+@app.get("/api/assignment/projects/<project_id>/draft")
+def api_assignment_draft_get(project_id: str):
+    try:
+        draft = project_service.get_draft(project_id)
+    except KeyError:
+        return jsonify({"error": "Draft not found"}), 404
+    return jsonify(draft.to_dict())
+
+
+@app.get("/api/debug/draft/<project_id>")
+def api_debug_draft_get(project_id: str):
+    """Debug endpoint: return stored Draft JSON without transformations."""
+    try:
+        draft = project_service.get_draft(project_id)
+    except KeyError:
+        return jsonify({"error": "Draft not found"}), 404
+    return jsonify(draft.to_dict())
+
+
+@app.get("/api/debug/section-review/<project_id>")
+def api_debug_section_review_get(project_id: str):
+    """Return all section review results for project draft without transformations."""
+    try:
+        draft = project_service.get_draft(project_id).to_dict()
+    except KeyError:
+        return jsonify({"error": "Draft not found"}), 404
+    sections = list(draft.get("sections") or [])
+    review_results = [
+        {
+            "title": section.get("title"),
+            "review_result": section.get("review_result"),
+        }
+        for section in sections
+    ]
+    return jsonify(
+        {
+            "project_id": project_id,
+            "sections_review": review_results,
+        }
+    )
+
+
+def _debug_now_iso() -> str:
+    return utc_now().isoformat()
+
+
+def _extract_text_from_pptx_bytes(raw: bytes) -> tuple[str, int]:
+    from pptx import Presentation
+
+    prs = Presentation(io.BytesIO(raw))
+    parts: list[str] = []
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            text = getattr(shape, "text", None)
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+    return ("\n\n".join(parts).strip(), len(prs.slides))
+
+
+def _extract_uploaded_text(raw: bytes, filename: str, mimetype: str | None = None) -> tuple[str, int | None]:
+    ext = upload_extension(filename, mimetype).lower()
+    if ext in {".docx", ".pdf"}:
+        text = extract_text_from_document_bytes(raw, filename, mimetype)
+        pages: int | None = None
+        if ext == ".pdf":
+            try:
+                from pypdf import PdfReader
+
+                pages = len(PdfReader(io.BytesIO(raw)).pages)
+            except Exception:  # noqa: BLE001
+                pages = None
+        return text, pages
+    if ext == ".txt":
+        return raw.decode("utf-8", errors="replace").strip(), None
+    if ext == ".pptx":
+        text, slides = _extract_text_from_pptx_bytes(raw)
+        return text, slides
+    raise ValueError("Unsupported file type. Allowed: PDF, DOCX, TXT, PPTX")
+
+
+def _collect_debug_input_payload() -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    if request.mimetype == "application/json" or request.is_json:
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid JSON payload")
+        return payload, [], []
+
+    payload: dict[str, Any] = {
+        "assignment_brief": request.form.get("assignment_brief", ""),
+        "rubric": request.form.get("rubric", ""),
+        "lecture_notes": request.form.get("lecture_notes", ""),
+        "uploaded_files": [],
+    }
+    parsed_files: list[dict[str, Any]] = []
+    file_errors: list[dict[str, Any]] = []
+
+    field_to_type = {
+        "assignment_brief": "assignment_brief",
+        "rubric": "rubric",
+        "lecture_notes": "lecture_slides",
+        "professor_notes": "professor_notes",
+        "reading_materials": "reading_material",
+        "additional_files": "additional_file",
+    }
+    aggregate_fields = {"lecture_notes", "reading_materials"}
+
+    aggregated_by_field: dict[str, list[str]] = {field: [] for field in aggregate_fields}
+    aggregated_meta: dict[str, list[dict[str, Any]]] = {field: [] for field in aggregate_fields}
+
+    for field, file_type in field_to_type.items():
+        files = request.files.getlist(field)
+        for upload in files:
+            if not upload or not upload.filename:
+                continue
+            filename = upload.filename
+            try:
+                raw = upload.read()
+                if not raw:
+                    raise ValueError("Uploaded file is empty")
+                text, pages = _extract_uploaded_text(raw, filename, upload.mimetype)
+                characters = len(text)
+                words = len([w for w in text.split() if w.strip()])
+                preview = text[:500]
+                file_info = {
+                    "filename": filename,
+                    "file_type": file_type,
+                    "pages": pages,
+                    "characters": characters,
+                    "words": words,
+                    "extracted_text_preview": preview,
+                }
+                parsed_files.append(file_info)
+                if field in aggregate_fields:
+                    aggregated_by_field[field].append(text)
+                    aggregated_meta[field].append({"filename": filename, "text": text, "file_type": file_type})
+                elif field in {"assignment_brief", "rubric"}:
+                    existing = str(payload.get(field) or "").strip()
+                    payload[field] = f"{existing}\n\n{text}".strip() if existing else text
+                else:
+                    payload["uploaded_files"].append(
+                        {
+                            "filename": filename,
+                            "file_type": file_type,
+                            "text": text,
+                        }
+                    )
+            except Exception as exc:  # noqa: BLE001
+                file_errors.append(
+                    {
+                        "filename": filename,
+                        "file_type": file_type,
+                        "message": str(exc),
+                        "traceback": traceback.format_exc(),
+                    }
+                )
+
+    if aggregated_by_field["lecture_notes"]:
+        payload["lecture_notes"] = "\n\n".join(aggregated_by_field["lecture_notes"]).strip()
+    for entry in aggregated_meta["reading_materials"]:
+        payload["uploaded_files"].append(entry)
+
+    return payload, parsed_files, file_errors
+
+
+def _write_debug_text_file(project_id: str, filename: str, content: str) -> str:
+    base = Path("data") / "projects" / project_id / "files"
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / filename
+    path.write_text(content or "", encoding="utf-8")
+    return str(path)
+
+
+def _write_project_binary_file(project_id: str, filename: str, raw: bytes) -> str:
+    base = Path("data") / "projects" / project_id / "files"
+    base.mkdir(parents=True, exist_ok=True)
+    safe_name = Path(filename).name
+    path = base / f"{uuid.uuid4()}_{safe_name}"
+    path.write_bytes(raw)
+    return str(path)
+
+
+def _attach_multipart_uploads(project_id: str) -> list[dict[str, Any]]:
+    """Persist uploaded brief/rubric/materials for a project."""
+    field_to_type = {
+        "assignment_brief": "assignment_brief",
+        "rubric": "rubric",
+        "lecture_notes": "lecture_slides",
+        "professor_notes": "professor_notes",
+        "reading_materials": "reading_material",
+        "additional_files": "additional_file",
+    }
+    saved: list[dict[str, Any]] = []
+    for field, file_type in field_to_type.items():
+        for upload in request.files.getlist(field):
+            if not upload or not upload.filename:
+                continue
+            raw = upload.read()
+            if not raw:
+                raise ValueError(f"{upload.filename} is empty")
+            storage_path = _write_project_binary_file(project_id, upload.filename, raw)
+            record = project_service.add_file(
+                project_id,
+                file_type=file_type,
+                original_filename=upload.filename,
+                storage_path=storage_path,
+                parsed=False,
+            )
+            saved.append(record.to_dict())
+    return saved
+
+
+def _prepare_debug_project(payload: dict[str, Any]) -> str:
+    bundle = project_service.create_project(
+        title="Debug Full Pipeline Project",
+        files=[],
+    )
+    project_id = bundle.project.id
+
+    assignment_brief = str(payload.get("assignment_brief") or "").strip()
+    rubric = str(payload.get("rubric") or "").strip()
+    lecture_notes = str(payload.get("lecture_notes") or "").strip()
+    uploaded_files = payload.get("uploaded_files") or []
+
+    if assignment_brief:
+        project_service.add_file(
+            project_id,
+            file_type="assignment_brief",
+            original_filename="assignment_brief.txt",
+            storage_path=_write_debug_text_file(project_id, "assignment_brief.txt", assignment_brief),
+            parsed=True,
+        )
+    if rubric:
+        project_service.add_file(
+            project_id,
+            file_type="rubric",
+            original_filename="rubric.txt",
+            storage_path=_write_debug_text_file(project_id, "rubric.txt", rubric),
+            parsed=True,
+        )
+    if lecture_notes:
+        project_service.add_file(
+            project_id,
+            file_type="lecture_slides",
+            original_filename="lecture_notes.txt",
+            storage_path=_write_debug_text_file(project_id, "lecture_notes.txt", lecture_notes),
+            parsed=True,
+        )
+
+    if isinstance(uploaded_files, list):
+        for idx, entry in enumerate(uploaded_files, start=1):
+            if isinstance(entry, str):
+                text = entry.strip()
+                if not text:
+                    continue
+                file_type = "additional_file"
+                original_filename = f"uploaded_{idx}.txt"
+            elif isinstance(entry, dict):
+                text = str(entry.get("text") or "").strip()
+                if not text:
+                    continue
+                file_type = str(entry.get("file_type") or "additional_file")
+                original_filename = str(entry.get("filename") or f"uploaded_{idx}.txt")
+            else:
+                continue
+            project_service.add_file(
+                project_id,
+                file_type=file_type,
+                original_filename=original_filename,
+                storage_path=_write_debug_text_file(project_id, original_filename, text),
+                parsed=True,
+            )
+    return project_id
+
+
+def _debug_run_stage(stage: str, project_id: str) -> dict[str, Any]:
+    stage_start = _debug_now_iso()
+    started = time.perf_counter()
+    try:
+        if stage == "requirement":
+            output = project_service.analyze_requirements(project_id).requirement.to_dict()
+        elif stage == "research":
+            bundle = project_service.get_project(project_id)
+            if not bundle.project.artifacts.get("payment_confirmed"):
+                project_service.calculate_pricing(project_id, priority="standard")
+                project_service.confirm_payment(project_id)
+            output = project_service.run_research(project_id).to_dict()
+        elif stage == "blueprint":
+            output = project_service.run_blueprint(project_id).to_dict()
+        elif stage == "writer":
+            session = project_service.start_writer(project_id)
+            while session.status.value == "active":
+                session = project_service.advance_writer(project_id)
+            output = project_service.merge_writer_draft(project_id).to_dict()
+        else:
+            raise ValueError(f"Unsupported stage: {stage}")
+
+        ended = time.perf_counter()
+        return {
+            "success": True,
+            "start_time": stage_start,
+            "end_time": _debug_now_iso(),
+            "duration_ms": int((ended - started) * 1000),
+            "output": output,
+        }
+    except Exception as exc:  # noqa: BLE001
+        ended = time.perf_counter()
+        return {
+            "success": False,
+            "start_time": stage_start,
+            "end_time": _debug_now_iso(),
+            "duration_ms": int((ended - started) * 1000),
+            "output": None,
+            "error": {"message": str(exc), "traceback": traceback.format_exc()},
+        }
+
+
+@app.post("/api/debug/full-pipeline")
+def api_debug_full_pipeline():
+    try:
+        payload, parsed_files, file_errors = _collect_debug_input_payload()
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    total_start = _debug_now_iso()
+    started = time.perf_counter()
+    errors: list[dict[str, Any]] = list(file_errors)
+    stages: dict[str, Any] = {}
+
+    try:
+        project_id = _prepare_debug_project(payload)
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "project_id": None,
+                    "total_time_ms": int((time.perf_counter() - started) * 1000),
+                    "models_used": {},
+                    "stages": {},
+                    "parsed_files": parsed_files,
+                    "errors": [
+                        {
+                            "stage": "setup",
+                            "message": str(exc),
+                            "traceback": traceback.format_exc(),
+                        }
+                    ],
+                }
+            ),
+            500,
+        )
+
+    stage_order = ["requirement", "research", "blueprint", "writer"]
+    for stage in stage_order:
+        result = _debug_run_stage(stage, project_id)
+        stages[stage] = result
+        if not result["success"]:
+            errors.append(
+                {
+                    "stage": stage,
+                    "message": result["error"]["message"],
+                    "traceback": result["error"]["traceback"],
+                }
+            )
+            break
+
+    ended = time.perf_counter()
+
+    models_used = {
+        "requirement": (stages.get("requirement", {}).get("output") or {}).get("analyzer_version"),
+        "research": (stages.get("research", {}).get("output") or {}).get("engine_version"),
+        "blueprint": (stages.get("blueprint", {}).get("output") or {}).get("engine_version"),
+        "writer": (stages.get("writer", {}).get("output") or {}).get("model"),
+    }
+
+    return jsonify(
+        {
+            "success": not errors,
+            "project_id": project_id,
+            "start_time": total_start,
+            "end_time": _debug_now_iso(),
+            "total_time_ms": int((ended - started) * 1000),
+            "models_used": models_used,
+            "stages": stages,
+            "parsed_files": parsed_files,
+            "errors": errors,
+        }
+    )
+
+
+@app.post("/api/debug/run-stage")
+def api_debug_run_stage():
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Invalid JSON payload"}), 400
+    stage = str(payload.get("stage") or "").strip().lower()
+    if stage not in {"requirement", "research", "blueprint", "writer"}:
+        return jsonify({"error": "stage must be one of: requirement, research, blueprint, writer"}), 400
+
+    project_id = str(payload.get("project_id") or "").strip()
+    if not project_id:
+        if stage != "requirement":
+            return jsonify({"error": "project_id is required for stages other than requirement"}), 400
+        project_id = _prepare_debug_project(payload)
+
+    result = _debug_run_stage(stage, project_id)
+    errors = []
+    if not result["success"]:
+        errors.append(
+            {
+                "stage": stage,
+                "message": result["error"]["message"],
+                "traceback": result["error"]["traceback"],
+            }
+        )
+
+    return jsonify(
+        {
+            "success": result["success"],
+            "project_id": project_id,
+            "stage": stage,
+            "result": result,
+            "errors": errors,
+        }
+    )
+
+
+@app.get("/api/debug/project/<project_id>")
+def api_debug_project_get(project_id: str):
+    data: dict[str, Any] = {"project_id": project_id}
+    errors: list[dict[str, str]] = []
+
+    try:
+        data["requirement"] = project_service.get_project(project_id).requirement.to_dict()
+    except Exception as exc:  # noqa: BLE001
+        data["requirement"] = None
+        errors.append({"stage": "requirement", "message": str(exc)})
+    try:
+        data["research"] = project_service.get_research_plan(project_id).to_dict()
+    except Exception as exc:  # noqa: BLE001
+        data["research"] = None
+        errors.append({"stage": "research", "message": str(exc)})
+    try:
+        data["blueprint"] = project_service.get_blueprint(project_id).to_dict()
+    except Exception as exc:  # noqa: BLE001
+        data["blueprint"] = None
+        errors.append({"stage": "blueprint", "message": str(exc)})
+    try:
+        data["draft"] = project_service.get_draft(project_id).to_dict()
+    except Exception as exc:  # noqa: BLE001
+        data["draft"] = None
+        errors.append({"stage": "writer", "message": str(exc)})
+
+    data["errors"] = errors
+    return jsonify(data)
+
+
+@app.post("/api/reviewer/review")
+def api_reviewer_review():
+    payload = request.get_json(silent=True) or {}
+    for key in ("requirement_json", "research_plan", "blueprint", "draft"):
+        if not isinstance(payload.get(key), dict):
+            return jsonify({"error": f"{key} object is required"}), 400
+    report = reviewer_engine.review_draft(
+        requirement_json=payload["requirement_json"],
+        research_plan=payload["research_plan"],
+        blueprint=payload["blueprint"],
+        draft=payload["draft"],
+        project_id=payload.get("project_id"),
+    )
+    return jsonify(report.to_dict()), 201
+
+
+@app.post("/api/assignment/projects/<project_id>/review")
+def api_assignment_project_review(project_id: str):
+    try:
+        report = project_service.run_academic_review(project_id)
+        bundle = project_service.get_project(project_id)
+        project = bundle.project
+    except KeyError:
+        return jsonify({"error": "Project or draft not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({
+        "review_report": report.to_dict(),
+        "pass_number": int(project.artifacts.get("review_pass_number", 1)),
+        "issues_found": int(project.artifacts.get("last_review_issues_found", len(report.issues))),
+        "issues_fixed": int(project.artifacts.get("last_issues_fixed", 0)),
+    })
+
+
+@app.get("/api/assignment/projects/<project_id>/review-report")
+def api_assignment_project_review_report(project_id: str):
+    try:
+        report = project_service.get_review_report(project_id)
+    except KeyError:
+        return jsonify({"error": "Review report not found"}), 404
+    return jsonify(report.to_dict())
+
+
+@app.post("/api/revision/revise")
+def api_revision_revise():
+    payload = request.get_json(silent=True) or {}
+    for key in ("requirement_json", "research_plan", "blueprint", "draft", "review_report"):
+        if not isinstance(payload.get(key), dict):
+            return jsonify({"error": f"{key} object is required"}), 400
+    try:
+        result = revision_engine.revise_draft(
+            requirement_json=payload["requirement_json"],
+            research_plan=payload["research_plan"],
+            blueprint=payload["blueprint"],
+            draft=payload["draft"],
+            review_report=payload["review_report"],
+            project_id=payload.get("project_id"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(result.to_dict()), 201
+
+
+@app.post("/api/assignment/projects/<project_id>/revision")
+def api_assignment_project_revision(project_id: str):
+    try:
+        result = project_service.run_revision(project_id)
+    except KeyError:
+        return jsonify({"error": "Project, draft, or review report not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"revision_result": result.to_dict()})
+
+
+@app.get("/api/assignment/projects/<project_id>/revision-history")
+def api_assignment_project_revision_history(project_id: str):
+    history = project_service.get_revision_history(project_id)
+    return jsonify(history.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/draft/restore")
+def api_assignment_project_restore_draft(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    version = payload.get("version")
+    if not isinstance(version, int):
+        return jsonify({"error": "version integer is required"}), 400
+    try:
+        draft = project_service.restore_draft_version(project_id, version)
+    except KeyError:
+        return jsonify({"error": "Draft version not found"}), 404
+    return jsonify({"draft": draft.to_dict()})
+
+
+@app.post("/api/humanizer/run")
+def api_humanizer_run():
+    """Humanize standalone text via ZeroGPT AI Humanizer (max 5,000 words per request)."""
+    if not _zerogpt_configured():
+        return jsonify({"error": "ZeroGPT is not configured. Set ZEROGPT_API_KEY in .env"}), 503
+
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+
+    if len(text) < MIN_HUMANIZE_CHARS:
+        return jsonify(
+            {
+                "error": (
+                    f"Text must be at least {MIN_HUMANIZE_CHARS} characters "
+                    f"(received {len(text)})."
+                )
+            }
+        ), 400
+
+    words = count_words(text)
+    if words > MAX_WORDS_PER_INPUT:
+        return jsonify(
+            {
+                "error": (
+                    f"Maximum {MAX_WORDS_PER_INPUT:,} words per request "
+                    f"(received {words:,}). Shorten the text and try again."
+                )
+            }
+        ), 400
+
+    try:
+        humanizer = ZeroGPTTextHumanizer(client=zerogpt_client, mode=DEFAULT_HUMANIZER_MODE)
+        output = humanizer.humanize(text, academic_tone="Academic")
+    except (ZeroGPTError, ZeroGPTProviderError) as exc:
+        return jsonify({"error": str(exc)}), 502
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("humanizer/run failed")
+        return jsonify({"error": f"Humanizer failed: {exc}"}), 502
+
+    output = output.strip()
+    if not output:
+        return jsonify({"error": "Humanizer returned empty text"}), 502
+
+    return jsonify(
+        {
+            "text": output,
+            "provider": getattr(humanizer, "VERSION", "humanizer"),
+            "original_words": count_words(text),
+            "humanized_words": count_words(output),
+        }
+    )
+
+
+@app.post("/api/humanizer/session")
+def api_humanizer_session_create():
+    payload = request.get_json(silent=True) or {}
+    for key in ("draft", "requirement_json", "blueprint"):
+        if not isinstance(payload.get(key), dict):
+            return jsonify({"error": f"{key} object is required"}), 400
+    try:
+        session = humanizer_engine.create_session(
+            draft=payload["draft"],
+            requirement_json=payload["requirement_json"],
+            blueprint=payload["blueprint"],
+            project_id=payload.get("project_id"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(session.to_dict()), 201
+
+
+@app.get("/api/humanizer/session/<session_id>")
+def api_humanizer_session_get(session_id: str):
+    try:
+        session = humanizer_engine.get_session(session_id)
+    except KeyError:
+        return jsonify({"error": "Humanizer session not found"}), 404
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/humanizer/session/<session_id>/advance")
+def api_humanizer_session_advance(session_id: str):
+    try:
+        session = humanizer_engine.advance_paragraph(session_id)
+    except KeyError:
+        return jsonify({"error": "Humanizer session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/humanizer/session/<session_id>/merge")
+def api_humanizer_session_merge(session_id: str):
+    payload = request.get_json(silent=True) or {}
+    try:
+        draft = humanizer_engine.merge_humanized_draft(session_id, title=payload.get("title"))
+    except KeyError:
+        return jsonify({"error": "Humanizer session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(draft.to_dict()), 201
+
+
+@app.post("/api/assignment/projects/<project_id>/humanizer/start")
+def api_assignment_humanizer_start(project_id: str):
+    try:
+        session = project_service.start_humanizer(project_id)
+    except KeyError:
+        return jsonify({"error": "Project or draft not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(session.to_dict()), 201
+
+
+@app.post("/api/assignment/projects/<project_id>/humanizer/advance")
+def api_assignment_humanizer_advance(project_id: str):
+    try:
+        session = project_service.advance_humanizer(project_id)
+    except KeyError:
+        return jsonify({"error": "Humanizer session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/humanizer/merge")
+def api_assignment_humanizer_merge(project_id: str):
+    try:
+        draft = project_service.merge_humanized_draft(project_id)
+    except KeyError:
+        return jsonify({"error": "Humanizer session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(draft.to_dict()), 201
+
+
+@app.get("/api/assignment/projects/<project_id>/humanizer")
+def api_assignment_humanizer_get(project_id: str):
+    try:
+        session = project_service.get_humanizer_session(project_id)
+    except KeyError:
+        return jsonify({"error": "Humanizer session not found"}), 404
+    return jsonify(session.to_dict())
+
+
+@app.get("/api/assignment/projects/<project_id>/humanized-draft")
+def api_assignment_humanized_draft_get(project_id: str):
+    try:
+        draft = project_service.get_humanized_draft(project_id)
+    except KeyError:
+        return jsonify({"error": "Humanized draft not found"}), 404
+    return jsonify(draft.to_dict())
+
+
+@app.post("/api/ai-detection/session")
+def api_ai_detection_session_create():
+    payload = request.get_json(silent=True) or {}
+    for key in ("humanized_draft", "requirement_json"):
+        if not isinstance(payload.get(key), dict):
+            return jsonify({"error": f"{key} object is required"}), 400
+    try:
+        from services.ai_detection_engine.models import DetectionThresholds
+
+        thresholds = DetectionThresholds.from_dict(payload.get("thresholds"))
+        session = ai_detection_engine.create_session(
+            humanized_draft=payload["humanized_draft"],
+            requirement_json=payload["requirement_json"],
+            project_id=payload.get("project_id"),
+            thresholds=thresholds,
+            humanizer_paragraph_ids=payload.get("humanizer_paragraph_ids"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(session.to_dict()), 201
+
+
+@app.get("/api/ai-detection/session/<session_id>")
+def api_ai_detection_session_get(session_id: str):
+    try:
+        session = ai_detection_engine.get_session(session_id)
+    except KeyError:
+        return jsonify({"error": "Detection session not found"}), 404
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/ai-detection/session/<session_id>/advance")
+def api_ai_detection_session_advance(session_id: str):
+    try:
+        session = ai_detection_engine.advance_paragraph(session_id)
+    except KeyError:
+        return jsonify({"error": "Detection session not found"}), 404
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/ai-detection/session/<session_id>/finalize")
+def api_ai_detection_session_finalize(session_id: str):
+    try:
+        session = ai_detection_engine.finalize_session(session_id)
+    except KeyError:
+        return jsonify({"error": "Detection session not found"}), 404
+    report = ai_detection_engine.get_report(session.report_id)
+    return jsonify({"session": session.to_dict(), "detection_report": report.to_dict()})
+
+
+@app.post("/api/assignment/projects/<project_id>/ai-detection/start")
+def api_assignment_ai_detection_start(project_id: str):
+    try:
+        session = project_service.start_ai_detection(project_id)
+    except KeyError:
+        return jsonify({"error": "Project or humanized draft not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(session.to_dict()), 201
+
+
+@app.post("/api/assignment/projects/<project_id>/ai-detection/advance")
+def api_assignment_ai_detection_advance(project_id: str):
+    try:
+        session = project_service.advance_ai_detection(project_id)
+    except KeyError:
+        return jsonify({"error": "Detection session not found"}), 404
+    return jsonify(session.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/ai-detection/finalize")
+def api_assignment_ai_detection_finalize(project_id: str):
+    try:
+        report = project_service.finalize_ai_detection(project_id)
+    except KeyError:
+        return jsonify({"error": "Detection session not found"}), 404
+    return jsonify({"detection_report": report.to_dict()})
+
+
+@app.post("/api/assignment/projects/<project_id>/ai-detection/prepare-retry")
+def api_assignment_ai_detection_prepare_retry(project_id: str):
+    try:
+        project_service.prepare_detection_retry(project_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True})
+
+
+@app.get("/api/assignment/projects/<project_id>/ai-detection")
+def api_assignment_ai_detection_get(project_id: str):
+    try:
+        session = project_service.get_detection_session(project_id)
+    except KeyError:
+        return jsonify({"error": "Detection session not found"}), 404
+    return jsonify(session.to_dict())
+
+
+@app.get("/api/assignment/projects/<project_id>/detection-report")
+def api_assignment_detection_report_get(project_id: str):
+    try:
+        report = project_service.get_detection_report(project_id)
+    except KeyError:
+        return jsonify({"error": "Detection report not found"}), 404
+    return jsonify(report.to_dict())
+
+
+@app.post("/api/delivery/package")
+def api_delivery_package_prepare():
+    """Standalone Delivery Engine — packages prior pipeline outputs only."""
+    payload = request.get_json(silent=True) or {}
+    final_draft = payload.get("final_draft")
+    requirement_json = payload.get("requirement_json")
+    research_plan = payload.get("research_plan")
+    blueprint = payload.get("blueprint")
+    review_report = payload.get("review_report")
+    detection_report = payload.get("detection_report")
+    if not all(
+        isinstance(item, dict)
+        for item in (
+            final_draft,
+            requirement_json,
+            research_plan,
+            blueprint,
+            review_report,
+            detection_report,
+        )
+    ):
+        return jsonify({"error": "All pipeline artifacts are required as objects"}), 400
+    package = delivery_engine.prepare_package(
+        final_draft=final_draft,
+        requirement_json=requirement_json,
+        research_plan=research_plan,
+        blueprint=blueprint,
+        review_report=review_report,
+        detection_report=detection_report,
+        project_id=payload.get("project_id"),
+        revision_attempts=int(payload.get("revision_attempts", 0)),
+        humanization_attempts=int(payload.get("humanization_attempts", 0)),
+        completion_time=payload.get("completion_time"),
+    )
+    return jsonify(package.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/delivery")
+def api_assignment_delivery_prepare(project_id: str):
+    try:
+        package = project_service.run_delivery(project_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(package.to_dict())
+
+
+@app.get("/api/assignment/projects/<project_id>/delivery-package")
+def api_assignment_delivery_package_get(project_id: str):
+    try:
+        package = project_service.get_delivery_package(project_id)
+    except KeyError:
+        return jsonify({"error": "Delivery package not found"}), 404
+    return jsonify(package.to_dict())
+
+
+@app.get("/api/delivery/packages/<package_id>/download")
+def api_delivery_package_download(package_id: str):
+    try:
+        package = delivery_engine.get_package(package_id)
+    except KeyError:
+        return jsonify({"error": "Package not found"}), 404
+    project_dir = Path("data/projects") / str(package.project_id or "local") / "delivery"
+    expected = f"{_safe_download_name(package)}-delivery-package.zip"
+    zip_path = project_dir / expected
+    if not zip_path.exists():
+        matches = sorted(project_dir.glob("*-delivery-package.zip"))
+        if matches:
+            zip_path = matches[0]
+    if not zip_path.exists():
+        return jsonify({"error": "Package archive is not available"}), 404
+    return send_file(
+        zip_path,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=zip_path.name,
+    )
+
+
+@app.get("/api/delivery/files/<file_id>")
+def api_delivery_file_download(file_id: str):
+    try:
+        file_record = delivery_engine.get_file(file_id)
+    except KeyError:
+        return jsonify({"error": "File not found"}), 404
+    file_path = Path(file_record.storage_path)
+    if not file_path.exists():
+        return jsonify({"error": "Delivery file is not available"}), 404
+    return send_file(
+        file_path,
+        mimetype=file_record.mime_type or "application/octet-stream",
+        as_attachment=True,
+        download_name=file_record.filename,
+    )
+
+
+def _safe_download_name(package) -> str:
+    if package and getattr(package, "project_summary", None):
+        raw = str(getattr(package.project_summary, "project_name", "") or "")
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", raw.strip()).strip("-")
+        if cleaned:
+            return cleaned
+    return "Assignment"
+
+
+@app.post("/api/research/plan")
+def api_research_plan_build():
+    """Standalone Research Engine entrypoint — no raw files, only parsed inputs."""
+    payload = request.get_json(silent=True) or {}
+    requirement_json = payload.get("requirement_json")
+    if not isinstance(requirement_json, dict):
+        return jsonify({"error": "requirement_json object is required"}), 400
+    parsed_raw = payload.get("parsed_documents") or []
+    if not isinstance(parsed_raw, list):
+        return jsonify({"error": "parsed_documents must be an array"}), 400
+    documents = [ParsedDocument.from_dict(item) for item in parsed_raw]
+    plan = research_engine.build_plan(
+        requirement_json=requirement_json,
+        parsed_documents=documents,
+        project_id=payload.get("project_id"),
+    )
+    return jsonify(plan.to_dict()), 201
+
+
+@app.get("/api/assignment/projects/<project_id>/pipeline")
+def api_assignment_project_pipeline(project_id: str):
+    try:
+        pipeline_project = assignment_pipeline.get_project(project_id)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    return jsonify(pipeline_project.to_dict())
+
+
+@app.get("/api/project/<project_id>/timeline")
+def api_project_timeline(project_id: str):
+    try:
+        timeline = project_service.get_project_timeline(project_id)
+    except KeyError:
+        return jsonify({"error": "Project timeline not found"}), 404
+    return jsonify({"project_id": project_id, "timeline": timeline})
+
+
+@app.get("/api/project/<project_id>/status")
+def api_project_status(project_id: str):
+    try:
+        status = project_service.get_project_lifecycle_status(project_id)
+    except KeyError:
+        return jsonify({"error": "Project status not found"}), 404
+    return jsonify({"project_id": project_id, **status})
+
+
+@app.post("/api/assignment/projects/<project_id>/stages/<stage_name>/start")
+def api_assignment_stage_start(project_id: str, stage_name: str):
+    stage = _parse_pipeline_stage(stage_name)
+    if stage is None:
+        return jsonify({"error": f"Unknown stage: {stage_name}"}), 400
+    try:
+        project = assignment_pipeline.start_stage(project_id, stage)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    project_service.sync_pipeline_state(project_id)
+    return jsonify(project.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/stages/<stage_name>/complete")
+def api_assignment_stage_complete(project_id: str, stage_name: str):
+    stage = _parse_pipeline_stage(stage_name)
+    if stage is None:
+        return jsonify({"error": f"Unknown stage: {stage_name}"}), 400
+    payload = request.get_json(silent=True) or {}
+    result = StageResult(
+        output=payload.get("output") if isinstance(payload.get("output"), dict) else {},
+        artifacts=payload.get("artifacts") if isinstance(payload.get("artifacts"), dict) else {},
+        requirement_json=payload.get("requirement_json")
+        if isinstance(payload.get("requirement_json"), dict)
+        else None,
+        pricing=payload.get("pricing") if isinstance(payload.get("pricing"), dict) else None,
+    )
+    try:
+        project = assignment_pipeline.complete_stage(project_id, stage, result)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    project_service.sync_pipeline_state(project_id)
+    return jsonify(project.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/stages/<stage_name>/fail")
+def api_assignment_stage_fail(project_id: str, stage_name: str):
+    stage = _parse_pipeline_stage(stage_name)
+    if stage is None:
+        return jsonify({"error": f"Unknown stage: {stage_name}"}), 400
+    payload = request.get_json(silent=True) or {}
+    error = (payload.get("error") or "Stage failed").strip()
+    try:
+        project = assignment_pipeline.fail_stage(project_id, stage, error)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    project_service.sync_pipeline_state(project_id)
+    return jsonify(project.to_dict())
+
+
+@app.post("/api/assignment/projects/<project_id>/run")
+def api_assignment_stage_run(project_id: str):
+    """Run a registered stage handler when wired; otherwise marks stage as running."""
+    payload = request.get_json(silent=True) or {}
+    stage = None
+    if payload.get("stage"):
+        stage = _parse_pipeline_stage(str(payload["stage"]))
+        if stage is None:
+            return jsonify({"error": f"Unknown stage: {payload['stage']}"}), 400
+    try:
+        project = assignment_pipeline.run_stage(project_id, stage)
+    except KeyError:
+        return jsonify({"error": "Project not found"}), 404
+    project_service.sync_pipeline_state(project_id)
+    return jsonify(project.to_dict())
+
+
+@app.route("/turnitin")
+def turnitin():
+    return render_template("turnitin.html", nav_active="turnitin")
+
+
+@app.route("/pricing")
+def pricing():
+    """Coin packages — clear pricing without subscription pressure."""
+    return render_template("pricing.html", nav_active="pricing")
 
 
 def _git_revision() -> str:
@@ -911,6 +2465,96 @@ def format_document():
     except Exception as e:  # noqa: BLE001
         app.logger.exception("Format failed")
         return jsonify({"error": f"Could not format document: {str(e)}"}), 500
+
+
+@app.get("/api/test/zerogpt")
+def api_test_zerogpt():
+    """Connectivity test endpoint for raw ZeroGPT Detection API response."""
+    sample_text = "This essay discusses artificial intelligence in higher education."
+    try:
+        zerogpt_client.login()
+        raw = zerogpt_client.detect(sample_text)
+        return jsonify(raw), 200
+    except (ZeroGPTError, ZeroGPTProviderError) as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.post("/api/ai/orchestrator/review")
+def api_ai_orchestrator_review():
+    """Run AIOrchestrator-compatible review flow for Review Engine."""
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    return jsonify(orchestrator_review(text, client=zerogpt_client)), 200
+
+
+@app.get("/api/test/zerogpt-humanizer")
+def api_test_zerogpt_humanizer():
+    """Connectivity test endpoint for raw ZeroGPT Humanizer API response."""
+    sample_text = "Artificial intelligence improves productivity in academic writing."
+    try:
+        zerogpt_client.login()
+        raw = zerogpt_client.humanize(sample_text)
+        return jsonify(raw), 200
+    except (ZeroGPTError, ZeroGPTProviderError) as exc:
+        return jsonify({"error": str(exc)}), 502
+
+
+@app.get("/api/test/env")
+def api_test_env():
+    return jsonify(
+        {
+            "email_exists": os.getenv("ZEROGPT_EMAIL") is not None,
+            "password_exists": os.getenv("ZEROGPT_PASSWORD") is not None,
+            "api_key_exists": os.getenv("ZEROGPT_API_KEY") is not None,
+            "cwd": os.getcwd(),
+            "dotenv_found": os.path.exists(".env"),
+        }
+    ), 200
+
+
+@app.get("/api/test/gemini")
+def api_test_gemini():
+    """Temporary debug endpoint: raw Gemini API connectivity test."""
+    api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+    from services.gemini_client import _gemini_auth, gemini_model
+
+    model = gemini_model()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    body = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": "Reply with exactly OK",
+                    }
+                ]
+            }
+        ]
+    }
+
+    auth_params, auth_headers = _gemini_auth(api_key)
+    res = requests.post(
+        url,
+        params=auth_params,
+        headers=auth_headers,
+        json=body,
+        timeout=30,
+    )
+    content_type = (res.headers.get("Content-Type") or "").lower()
+    if "application/json" in content_type:
+        response_body = res.json()
+    else:
+        response_body = res.text
+
+    return jsonify(
+        {
+            "http_status": res.status_code,
+            "response_body": response_body,
+            "response_headers": dict(res.headers),
+        }
+    ), 200
 
 
 if __name__ == "__main__":

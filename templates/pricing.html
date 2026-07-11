@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Pricing — DocMaxxing{% endblock %}
+{% block page_header %}
+      <header class="top pricing-hero">
+        <p class="brand">Pricing</p>
+        <h1>Coins when you need them</h1>
+        <p class="lede">
+          Format on the home page stays simple. Workspace tools (Humanize, Cite, Academic Check) use coins —
+          pay only for what you run, with clear costs on every button.
+        </p>
+      </header>
+{% endblock %}
+{% block content %}
+      <section class="pricing-grid" aria-label="Coin packages">
+        <article class="card pricing-card">
+          <h2 class="pricing-name">Starter</h2>
+          <p class="pricing-price"><span>$5</span></p>
+          <p class="pricing-coins">100 coins</p>
+          <ul class="pricing-features">
+            <li>~10 Humanize runs</li>
+            <li>~10 AI Detect checks</li>
+            <li>Best for one short assignment</li>
+          </ul>
+          <button type="button" class="btn-secondary" disabled title="Checkout connects later">Get Starter</button>
+        </article>
+
+        <article class="card pricing-card pricing-card--featured">
+          <p class="pricing-badge">Most students</p>
+          <h2 class="pricing-name">Student</h2>
+          <p class="pricing-price"><span>$15</span></p>
+          <p class="pricing-coins">500 coins</p>
+          <ul class="pricing-features">
+            <li>~50 Humanize runs</li>
+            <li>Several Academic Checks</li>
+            <li>Cites + AI helpers through the term</li>
+          </ul>
+          <button type="button" class="cta" disabled title="Checkout connects later">Get Student</button>
+        </article>
+
+        <article class="card pricing-card">
+          <h2 class="pricing-name">Cram</h2>
+          <p class="pricing-price"><span>$29</span></p>
+          <p class="pricing-coins">1,200 coins</p>
+          <ul class="pricing-features">
+            <li>Heavy deadline week</li>
+            <li>Many Humanize + Check cycles</li>
+            <li>Best value per coin</li>
+          </ul>
+          <button type="button" class="btn-secondary" disabled title="Checkout connects later">Get Cram</button>
+        </article>
+      </section>
+
+      <section class="card pricing-explainer">
+        <h2 class="card-title">What coins pay for</h2>
+        <table class="pricing-table">
+          <thead>
+            <tr>
+              <th>Action</th>
+              <th>Typical cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Home Format (standard)</td>
+              <td>Free</td>
+            </tr>
+            <tr>
+              <td>Humanize marked selections</td>
+              <td>10 coins / call</td>
+            </tr>
+            <tr>
+              <td>AI detect in editor</td>
+              <td>10 coins</td>
+            </tr>
+            <tr>
+              <td>Soft AI rewrite (Improve / Paraphrase…)</td>
+              <td>0.1 coin / 500 words</td>
+            </tr>
+            <tr>
+              <td>Academic Check (plagiarism + AI)</td>
+              <td>20–30 coins</td>
+            </tr>
+            <tr>
+              <td>Failed paid action</td>
+              <td>Refunded</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="pricing-note">
+          New accounts get <strong>50 welcome coins</strong> to try Workspace before buying.
+          No hard sell on the Format page — Workspace is opt-in when you need deeper help.
+        </p>
+        <a class="cta" href="{{ url_for('workspace') }}">Open Workspace</a>
+      </section>
+{% endblock %}

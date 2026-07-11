@@ -1,0 +1,88 @@
+{% extends "tools_base.html" %}
+{% set tools_active = 'humanizer' %}
+{% block title %}Humanizer — DocMaxxing{% endblock %}
+{% block tools_content %}
+<header class="tool-page-head">
+  <h1 class="tool-page-title">Humanizer</h1>
+  <p class="tool-page-lede">Refine AI-generated writing into a natural academic draft with an editor-first workflow.</p>
+</header>
+
+<div class="humanizer-grid" data-humanizer-page>
+  <section class="humanizer-panel humanizer-panel--input">
+    <header class="humanizer-panel-head">
+      <h2 class="humanizer-panel-title">Original Text</h2>
+      <div class="humanizer-panel-actions">
+        <label class="humanizer-action-btn">
+          <input type="file" accept=".doc,.docx,.pdf,.txt,.rtf,.odt" hidden data-hz-file />
+          Upload Document
+        </label>
+        <button type="button" class="humanizer-action-btn" data-hz-paste-focus>Paste Text</button>
+      </div>
+    </header>
+
+    <div class="humanizer-toolbar" role="toolbar" aria-label="Text formatting">
+      <select class="humanizer-toolbar-select" data-hz-font>
+        <option>Inter</option>
+        <option>Arial</option>
+        <option>Times New Roman</option>
+        <option>Georgia</option>
+      </select>
+      <button type="button" class="humanizer-tool" data-hz-format="bold" aria-label="Bold"><strong>B</strong></button>
+      <button type="button" class="humanizer-tool" data-hz-format="italic" aria-label="Italic"><em>I</em></button>
+      <button type="button" class="humanizer-tool" data-hz-format="underline" aria-label="Underline"><u>U</u></button>
+      <button type="button" class="humanizer-tool" data-hz-format="insertUnorderedList" aria-label="Bullet list">• List</button>
+      <button type="button" class="humanizer-tool" data-hz-format="insertOrderedList" aria-label="Numbered list">1. List</button>
+      <button type="button" class="humanizer-tool" data-hz-format="removeFormat" aria-label="Clear formatting">Clear</button>
+    </div>
+
+    <div
+      class="humanizer-editor"
+      id="humanizer_input_editor"
+      data-hz-input
+      contenteditable="true"
+      role="textbox"
+      aria-multiline="true"
+      data-placeholder="Paste AI generated text here..."
+    ></div>
+
+    <footer class="humanizer-footer">
+      <div class="humanizer-footer-cell">
+        <span class="humanizer-word-count" data-hz-wordcount>Words: 0 / 5,000</span>
+      </div>
+      <div class="humanizer-footer-cell humanizer-footer-cell--right">
+        <button type="button" class="humanizer-primary-btn" data-hz-run>Humanize Text</button>
+      </div>
+    </footer>
+  </section>
+
+  <aside class="humanizer-panel humanizer-panel--output">
+    <header class="humanizer-panel-head">
+      <h2 class="humanizer-panel-title">Humanized Result</h2>
+      <span class="humanizer-file-name" data-hz-filename hidden></span>
+    </header>
+
+    <div
+      class="humanizer-editor humanizer-editor--output"
+      data-hz-output
+      role="region"
+      aria-label="Humanized output"
+      data-placeholder="Your humanized version will appear here..."
+    ></div>
+
+    <footer class="humanizer-footer humanizer-footer--output">
+      <div class="humanizer-footer-cell">
+        <span class="humanizer-footer-label">Result Words</span>
+        <strong class="humanizer-result-count" data-hz-out-words>0</strong>
+      </div>
+      <div class="humanizer-footer-cell humanizer-footer-cell--right humanizer-output-actions">
+        <button type="button" class="btn-secondary" data-hz-copy disabled>Copy Text</button>
+        <button type="button" class="btn-secondary" data-hz-dl-docx disabled>Download DOCX</button>
+        <button type="button" class="btn-secondary" data-hz-dl-txt disabled>Download TXT</button>
+      </div>
+    </footer>
+  </aside>
+</div>
+{% endblock %}
+{% block tools_scripts %}
+<script src="{{ url_for('static', filename='humanizer-page.js') }}"></script>
+{% endblock %}

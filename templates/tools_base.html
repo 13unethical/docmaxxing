@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block head_extra %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='tools.css') }}" />
+{% endblock %}
+{% block page_header %}{% endblock %}
+{% block content %}
+<div class="tools-layout">
+  <div class="tools-main">
+    {% block tools_content %}{% endblock %}
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+    {% block tools_scripts %}{% endblock %}
+{% endblock %}

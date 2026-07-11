@@ -65,6 +65,7 @@
       auto_justify_refs: $("auto_justify_refs") ? !!$("auto_justify_refs").checked : true,
       requirement_headings: $("requirement_headings") ? !!$("requirement_headings").checked : true,
       format_style: ($("format_style") && $("format_style").value) || "harvard",
+      document_type: ($("document_type") && $("document_type").value) || "",
       clean_extra_spaces: $("clean_extra_spaces") ? !!$("clean_extra_spaces").checked : true,
       clean_extra_linebreaks: $("clean_extra_linebreaks") ? !!$("clean_extra_linebreaks").checked : false,
       requirements_text: ($("requirements_text") && $("requirements_text").value.trim()) || "",
@@ -100,6 +101,7 @@
       space_before_pt: "space_before_pt",
       space_after_pt: "space_after_pt",
       heading_size_pt: "heading_size_pt",
+      format_style: "format_style",
     };
     Object.keys(map).forEach(function (k) {
       if (cfg[k] != null && $(map[k])) {
@@ -193,6 +195,8 @@
       "cover_module",
       "cover_lecturer",
       "cover_submission_date",
+      "format_style",
+      "document_type",
     ];
     ids.forEach(function (id) {
       var el = document.getElementById(id);
@@ -431,6 +435,9 @@
       fd.append("space_after_pt", cfg.space_after_pt);
       fd.append("heading_size_pt", cfg.heading_size_pt);
       fd.append("format_style", cfg.format_style || citationStyleForFormat());
+      if (cfg.document_type) {
+        fd.append("document_type", cfg.document_type);
+      }
       var reqText = document.getElementById("requirements_text");
       if (reqText && reqText.value.trim()) {
         fd.append("requirements_text", reqText.value.trim());

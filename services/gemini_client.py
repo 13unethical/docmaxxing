@@ -13,17 +13,21 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MODEL = "gemini-2.5-flash"
+_DEFAULT_MODEL = "gemini-3.1-flash-lite"
 _DEFAULT_TIMEOUT_S = 30
+_DEFAULT_PRO_TIMEOUT_S = 120
+_DEFAULT_FLASH_TIMEOUT_S = 60
 _DEFAULT_MAX_RETRIES = 3
 _INITIAL_BACKOFF_S = 1.0
 _MAX_BACKOFF_S = 32.0
 
-# Primary → lighter fallbacks when the primary model is overloaded or unavailable.
+# Primary → fallbacks when overloaded (503) or unavailable (404).
+# Gemini 2.x models return 404 on generateContent as of Jul 2026.
 DEFAULT_MODEL_FALLBACK_CHAIN = (
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-2.0-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-pro-latest",
 )
 
 _RETRYABLE_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
@@ -50,11 +54,29 @@ def gemini_model_chain() -> list[str]:
 
 
 def gemini_api_key() -> str:
-    return (os.environ.get("GOOGLE_API_KEY") or "").strip()
+    return (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
 
 
 def gemini_enabled() -> bool:
     return bool(gemini_api_key())
+
+
+def gemini_timeout_s(model: str | None = None) -> int:
+    """Resolve request timeout; Pro models need more time for large JSON responses."""
+    env_value = (os.environ.get("GEMINI_TIMEOUT_S") or "").strip()
+    if env_value.isdigit():
+        return max(10, int(env_value))
+    model_name = (model or gemini_model()).lower()
+    if "pro" in model_name:
+        return _DEFAULT_PRO_TIMEOUT_S
+    return _DEFAULT_FLASH_TIMEOUT_S
+
+
+def _gemini_auth(api_key: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Return (query_params, headers) for Gemini REST authentication."""
+    if api_key.startswith("AQ."):
+        return {}, {"x-goog-api-key": api_key}
+    return {"key": api_key}, {}
 
 
 def estimate_tokens(text: str) -> int:
@@ -140,8 +162,18 @@ def generate_json(
     prompt_text = f"{system_prompt}\n\n{user_prompt}"
     request_chars = len(prompt_text)
     token_est = estimate_tokens(prompt_text)
-    chain = [model] if model else (models or gemini_model_chain())
-    chain = [m.strip() for m in chain if m and m.strip()]
+    if models:
+        chain = [m.strip() for m in models if m and m.strip()]
+    elif model:
+        chain = []
+        for candidate in (model, *gemini_model_chain()):
+            candidate = candidate.strip()
+            if candidate and candidate not in chain:
+                chain.append(candidate)
+    else:
+        chain = gemini_model_chain()
+    if timeout_s == _DEFAULT_TIMEOUT_S:
+        timeout_s = gemini_timeout_s(chain[0] if chain else None)
 
     if not gemini_enabled():
         diag = _base_diagnostics(model=chain[0] if chain else _DEFAULT_MODEL, request_chars=request_chars, token_usage_estimate=token_est)
@@ -173,9 +205,11 @@ def generate_json(
         for attempt in range(max_retries + 1):
             started = time.monotonic()
             try:
+                _auth_params, _auth_headers = _gemini_auth(gemini_api_key())
                 res = requests.post(
                     url,
-                    params={"key": gemini_api_key()},
+                    params=_auth_params,
+                    headers=_auth_headers,
                     json=body,
                     timeout=timeout_s,
                 )

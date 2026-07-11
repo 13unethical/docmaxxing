@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{% block title %}Workspace — DocMaxxing{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}" />
+    {% block head_extra %}{% endblock %}
+  </head>
+  <body class="ws-body">
+    {% block content %}{% endblock %}
+    <script src="{{ url_for('static', filename='workspace/mock-services.js') }}"></script>
+    <script src="{{ url_for('static', filename='workspace/tour-steps.js') }}"></script>
+    <script src="{{ url_for('static', filename='workspace/workspace-app.js') }}"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

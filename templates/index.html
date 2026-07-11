@@ -62,6 +62,7 @@
 
         <section class="card settings-section text-settings-card" aria-labelledby="text-settings">
           <h2 class="card-title" id="text-settings">Text</h2>
+          <input type="hidden" id="format_style" value="harvard" />
           <div class="field text-preset-field" role="group" aria-label="Academic style preset">
             <span class="label">Academic preset</span>
             <div class="preset-row preset-row--text">
@@ -131,6 +132,27 @@
             <input type="checkbox" id="first_line_indent" />
             <span>First-line indent (0.5″) on body paragraphs</span>
           </label>
+        </section>
+
+        <section class="card settings-section home-doc-type-card" aria-labelledby="document-type-settings">
+          <h2 class="card-title" id="document-type-settings">Document Type</h2>
+          <label class="field">
+            <span class="label">Preset</span>
+            <select id="document_type">
+              <option value="">Choose document type…</option>
+              <option value="essay">Essay</option>
+              <option value="report">Report</option>
+              <option value="literature_review">Literature Review</option>
+              <option value="research_paper">Research Paper</option>
+              <option value="case_study">Case Study</option>
+              <option value="reflection">Reflection</option>
+              <option value="dissertation">Dissertation</option>
+              <option value="presentation">Presentation</option>
+            </select>
+          </label>
+          <p class="card-hint">
+            Choosing a document type applies recommended formatting presets. You can still edit any setting manually.
+          </p>
         </section>
         </div>
 
@@ -309,8 +331,49 @@
             </div>
           </details>
 
+          <details class="card settings-accordion home-references-card" open>
+            <summary class="settings-summary">
+              <span class="settings-summary-title">References</span>
+              <span class="settings-summary-hint">One unified citation generation flow</span>
+            </summary>
+            <div class="settings-body">
+              <fieldset class="field toggles">
+                <legend class="label">Reference source</legend>
+                <label class="check"><input type="radio" name="reference_source" value="none" checked /> <span>None</span></label>
+                <label class="check"><input type="radio" name="reference_source" value="auto_ai" /> <span>Generate Automatically (AI)</span></label>
+                <label class="check"><input type="radio" name="reference_source" value="doi" /> <span>Import from DOI</span></label>
+                <label class="check"><input type="radio" name="reference_source" value="url" /> <span>Import from URL</span></label>
+                <label class="check"><input type="radio" name="reference_source" value="scholar" /> <span>Import from Google Scholar</span></label>
+                <label class="check"><input type="radio" name="reference_source" value="paste" /> <span>Paste Existing Bibliography</span></label>
+              </fieldset>
+              <div class="field-row two">
+                <label class="field">
+                  <span class="label">Citation style</span>
+                  <select id="citation_style_format">
+                    <option value="APA">APA 7</option>
+                    <option value="Harvard">Harvard</option>
+                    <option value="MLA">MLA</option>
+                    <option value="Chicago">Chicago</option>
+                    <option value="IEEE">IEEE</option>
+                  </select>
+                </label>
+              </div>
+              <button type="button" class="btn-secondary" id="generate_citations_btn">Generate Citations</button>
+              <p id="references_status" class="format-status status" role="status" aria-live="polite"></p>
+              <ul id="references_preview_list" class="ref-list hidden" aria-label="Generated references"></ul>
+            </div>
+          </details>
+
           <button type="button" class="cta" id="format_btn">Format document</button>
           <p id="format_status" class="format-status status" role="status" aria-live="polite"></p>
+          <div id="home_workspace_cta" class="home-workspace-cta is-hidden" aria-live="polite">
+            <a class="btn-secondary" id="open_workspace_btn" href="{{ url_for('workspace') }}">
+              Open in Workspace
+            </a>
+            <p class="home-workspace-cta-note">
+              Optional: Humanize, Cite, and Academic Check use coins — costs shown before you pay.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -334,6 +397,7 @@
       </div>
 {% endblock %}
 {% block scripts %}
+    <script src="{{ url_for('static', filename='workspace.js') }}"></script>
     <script src="{{ url_for('static', filename='assignment-templates.js') }}"></script>
     <script src="{{ url_for('static', filename='preview.js') }}"></script>
     <script src="{{ url_for('static', filename='home.js') }}"></script>

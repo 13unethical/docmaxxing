@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}DocMaxxing{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    {% block head_extra %}{% endblock %}
   </head>
   <body>
     {% set _nav = nav_active|default('home') %}
@@ -59,16 +60,28 @@
               >Check</a
             >
             <a
-              href="{{ url_for('templates') }}"
-              class="nav-link{% if _nav == 'templates' %} is-active{% endif %}"
-              {% if _nav == 'templates' %}aria-current="page"{% endif %}
-              >Templates</a
+              href="{{ url_for('workspace') }}"
+              class="nav-link nav-link--workspace{% if _nav == 'workspace' %} is-active{% endif %}"
+              {% if _nav == 'workspace' %}aria-current="page"{% endif %}
+              >Workspace</a
             >
             <a
-              href="{{ url_for('references') }}"
-              class="nav-link{% if _nav == 'references' %} is-active{% endif %}"
-              {% if _nav == 'references' %}aria-current="page"{% endif %}
-              >References</a
+              href="{{ url_for('humanizer') }}"
+              class="nav-link{% if _nav == 'humanizer' %} is-active{% endif %}"
+              {% if _nav == 'humanizer' %}aria-current="page"{% endif %}
+              >Humanizer</a
+            >
+            <a
+              href="{{ url_for('assignment') }}"
+              class="nav-link{% if _nav == 'assignment' %} is-active{% endif %}"
+              {% if _nav == 'assignment' %}aria-current="page"{% endif %}
+              >Assignment</a
+            >
+            <a
+              href="{{ url_for('turnitin') }}"
+              class="nav-link{% if _nav == 'turnitin' %} is-active{% endif %}"
+              {% if _nav == 'turnitin' %}aria-current="page"{% endif %}
+              >Turnitin</a
             >
           </nav>
         </div>

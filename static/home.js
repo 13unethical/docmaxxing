@@ -65,6 +65,17 @@
     },
   };
   var REF_STYLE_KEY = "academic_formatter_citation_style";
+  var REF_STORAGE_KEY = "academic_formatter_saved_references";
+  var DOC_TYPE_TO_TEMPLATE = {
+    essay: "essay",
+    report: "report",
+    literature_review: "literature_review",
+    research_paper: "research_paper",
+    case_study: "case_study",
+    reflection: "reflection",
+    dissertation: "dissertation_chapter",
+    presentation: "presentation_notes",
+  };
 
   function applyPreset(name) {
     var cfg = PRESETS[name];
@@ -75,6 +86,9 @@
       return;
     }
     FC.applyFormatterConfig(cfg);
+    if ($("format_style")) {
+      $("format_style").value = cfg.format_style || "harvard";
+    }
   }
 
   function presetChipButtons() {
@@ -92,6 +106,9 @@
       return;
     }
     FC.applyFormatterConfig(form);
+    if (form && form.format_style && $("format_style")) {
+      $("format_style").value = String(form.format_style);
+    }
     FC.saveFormatterSettingsFromHome();
   }
 
@@ -123,6 +140,140 @@
       return;
     }
     FC.writeStorage(REF_STYLE_KEY, v);
+    if ($("citation_style_format")) {
+      $("citation_style_format").value = v;
+    }
+  }
+
+  function applyDocumentTypePreset(docType) {
+    var tplLib = window.AssignmentTemplates;
+    var templateId = DOC_TYPE_TO_TEMPLATE[docType];
+    if (!tplLib || !templateId || !tplLib.getById) {
+      return;
+    }
+    var tpl = tplLib.getById(templateId);
+    if (!tpl || !tpl.settings) {
+      return;
+    }
+    FC.applyFormatterConfig(tpl.settings);
+    if ($("format_style")) {
+      $("format_style").value = String(tpl.settings.format_style || "harvard");
+    }
+    if (tpl.citationStyle) {
+      FC.writeStorage(REF_STYLE_KEY, tpl.citationStyle);
+      if ($("citation_style_format")) {
+        $("citation_style_format").value = tpl.citationStyle;
+      }
+    }
+    setPresetChipActiveOnly("custom");
+    FC.saveFormatterSettingsFromHome();
+  }
+
+  function loadCitationStyleIntoFormat() {
+    var styleSelect = $("citation_style_format");
+    if (!styleSelect) {
+      return;
+    }
+    var stored = FC.readStorage(REF_STYLE_KEY);
+    if (stored && Array.prototype.some.call(styleSelect.options, function (o) { return o.value === stored; })) {
+      styleSelect.value = stored;
+    }
+    styleSelect.addEventListener("change", function () {
+      FC.writeStorage(REF_STYLE_KEY, styleSelect.value);
+    });
+  }
+
+  function setReferencesStatus(message, kind) {
+    var el = $("references_status");
+    if (!el) {
+      return;
+    }
+    el.textContent = message || "";
+    el.className = "format-status status" + (kind ? " " + kind : "");
+  }
+
+  function saveGeneratedReferences(list) {
+    FC.writeStorage(REF_STORAGE_KEY, JSON.stringify(list || []));
+  }
+
+  function renderGeneratedReferences(list) {
+    var el = $("references_preview_list");
+    if (!el) {
+      return;
+    }
+    var refs = Array.isArray(list) ? list : [];
+    el.innerHTML = "";
+    refs.forEach(function (ref) {
+      var li = document.createElement("li");
+      var span = document.createElement("span");
+      span.textContent = ref;
+      li.appendChild(span);
+      el.appendChild(li);
+    });
+    el.classList.toggle("hidden", refs.length === 0);
+  }
+
+  function selectedReferenceSource() {
+    var node = document.querySelector("input[name='reference_source']:checked");
+    return node ? node.value : "none";
+  }
+
+  function buildMockReferences(style, source, docType) {
+    var styleLabel = style || "APA";
+    var typeLabel = docType || "essay";
+    var sourceLabel = source || "auto_ai";
+    return [
+      "Smith, J. (2024). Renewable transition planning in modern grids. Journal of Energy Systems, 14(2), 44-61.",
+      "Lopez, M., & Kim, S. (2023). AI-assisted citation generation for academic writing workflows. Computing in Education, 9(4), 201-219.",
+      "Source mode: " + sourceLabel + " · Doc type: " + typeLabel + " · Style: " + styleLabel + ".",
+    ];
+  }
+
+  function runCitationWorkflow() {
+    var source = selectedReferenceSource();
+    var styleSelect = $("citation_style_format");
+    var style = (styleSelect && styleSelect.value) || "APA";
+    var docType = ($("document_type") && $("document_type").value) || "essay";
+    FC.writeStorage(REF_STYLE_KEY, style);
+
+    if (source === "none") {
+      saveGeneratedReferences([]);
+      renderGeneratedReferences([]);
+      setReferencesStatus("Reference source: None. No citations will be generated.", "warn");
+      return;
+    }
+
+    setReferencesStatus("Analyzing document…");
+    var btn = $("generate_citations_btn");
+    if (btn) {
+      btn.disabled = true;
+    }
+
+    var steps = [
+      "Identifying statements that need citations…",
+      "Searching relevant academic sources…",
+      "Building bibliography entries…",
+      "Inserting in-text citations and References section…",
+    ];
+    var i = 0;
+    var timer = setInterval(function () {
+      if (i < steps.length) {
+        setReferencesStatus(steps[i]);
+        i += 1;
+        return;
+      }
+      clearInterval(timer);
+      var refs = buildMockReferences(style, source, docType);
+      saveGeneratedReferences(refs);
+      renderGeneratedReferences(refs);
+      setReferencesStatus("Citations generated with one unified AI workflow.", "success");
+      if (btn) {
+        btn.disabled = false;
+      }
+      if (window.AppUI) {
+        window.AppUI.showToast("Citations generated", "success");
+      }
+    }, 500);
   }
 
   presetChipButtons().forEach(function (btn) {
@@ -145,9 +296,14 @@
   var stored = FC.loadStoredFormatterSettings();
   if (stored) {
     FC.applyFormatterConfig(stored);
+    if ($("format_style") && stored.format_style) {
+      $("format_style").value = String(stored.format_style);
+    }
   } else {
     applyPreset("harvard");
   }
+
+  loadCitationStyleIntoFormat();
 
   function refreshHomePreview() {
     var DP = window.DocPreview;
@@ -186,7 +342,7 @@
     refreshHomePreview();
   }
 
-  ["font_family", "font_size", "line_spacing", "alignment", "first_line_indent", "auto_headings", "requirement_headings", "heading_size_pt"].forEach(
+  ["font_family", "font_size", "line_spacing", "alignment", "first_line_indent", "auto_headings", "requirement_headings", "heading_size_pt", "document_type", "citation_style_format"].forEach(
     function (id) {
       var el = $(id);
       if (el && previewSection && !previewSection.classList.contains("hidden")) {
@@ -408,6 +564,7 @@
 
   var formatBtn = $("format_btn");
   var formatStatusEl = $("format_status");
+  var workspaceCta = $("home_workspace_cta");
 
   formatBtn.addEventListener("click", function () {
     FC.formatDocument({
@@ -415,6 +572,41 @@
       pastedInputId: "pasted_text",
       formatBtn: formatBtn,
       statusEl: formatStatusEl,
+      onSuccess: function () {
+        var pasted = ($("pasted_text") && $("pasted_text").value) || "";
+        if (window.WorkspaceDraft && pasted.trim()) {
+          window.WorkspaceDraft.saveFromText(pasted, "Formatted draft");
+        } else if (pasted.trim()) {
+          try {
+            var payload = JSON.stringify({
+              text: pasted,
+              title: "Formatted draft",
+              updatedAt: Date.now(),
+            });
+            sessionStorage.setItem("docmaxxing_workspace_draft", payload);
+            localStorage.setItem("docmaxxing_workspace_draft", payload);
+          } catch (e) {
+            /* ignore */
+          }
+        }
+        if (workspaceCta) {
+          workspaceCta.classList.remove("is-hidden");
+        }
+      },
     });
   });
+
+  var docTypeEl = $("document_type");
+  if (docTypeEl) {
+    docTypeEl.addEventListener("change", function () {
+      if (docTypeEl.value) {
+        applyDocumentTypePreset(docTypeEl.value);
+      }
+    });
+  }
+
+  var generateCitationsBtn = $("generate_citations_btn");
+  if (generateCitationsBtn) {
+    generateCitationsBtn.addEventListener("click", runCitationWorkflow);
+  }
 })();
