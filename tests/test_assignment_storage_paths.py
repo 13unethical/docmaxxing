@@ -9,7 +9,14 @@ from services.assignment_project.paths import assignment_storage_root, project_f
 from services.assignment_project.store import ProjectStore
 
 
-def test_assignment_storage_root_is_absolute(tmp_path, monkeypatch):
+def test_trace_accepts_lookup_diagnostics_spread(tmp_path):
+    from services.assignment_project.trace_log import trace
+
+    store = ProjectStore(root=tmp_path / "projects")
+    trace("test.event", **store.lookup_diagnostics("missing-id"))
+
+
+def test_assignment_storage_root_is_absolute(monkeypatch):
     monkeypatch.delenv("PROJECT_STORAGE_DIR", raising=False)
     root = assignment_storage_root()
     assert root.is_absolute()

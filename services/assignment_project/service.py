@@ -381,7 +381,6 @@ class ProjectService:
             else:
                 trace(
                     "service.confirm_payment.missing_price",
-                    project_id=project_id,
                     **self.store.lookup_diagnostics(project_id),
                 )
                 raise ValueError("Price must be calculated before payment confirmation")

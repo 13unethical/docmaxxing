@@ -145,7 +145,6 @@ def _assignment_not_found(endpoint: str, project_id: str, exc: KeyError) -> tupl
     trace(
         "api.project_not_found",
         endpoint=endpoint,
-        project_id=project_id,
         reason=reason,
         **diagnostics,
     )
@@ -507,7 +506,6 @@ def api_assignment_project_analyze_requirements(project_id: str):
     """Run requirement analysis via Gemini."""
     trace(
         "api.analyze.received",
-        project_id=project_id,
         **project_service.store.lookup_diagnostics(project_id),
     )
     try:
@@ -517,6 +515,9 @@ def api_assignment_project_analyze_requirements(project_id: str):
     except ValueError as exc:
         trace("api.analyze.failed", project_id=project_id, error=str(exc))
         return jsonify({"error": str(exc)}), 502
+    except Exception as exc:  # noqa: BLE001
+        trace("api.analyze.error", project_id=project_id, error=str(exc), error_type=type(exc).__name__)
+        raise
     trace(
         "api.analyze.completed",
         project_id=project_id,
@@ -532,7 +533,6 @@ def api_assignment_project_pricing(project_id: str):
     priority = str(payload.get("priority") or "standard").strip().lower()
     trace(
         "api.pricing.received",
-        project_id=project_id,
         priority=priority,
         **project_service.store.lookup_diagnostics(project_id),
     )
@@ -543,6 +543,9 @@ def api_assignment_project_pricing(project_id: str):
     except ValueError as exc:
         trace("api.pricing.failed", project_id=project_id, error=str(exc))
         return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        trace("api.pricing.error", project_id=project_id, error=str(exc), error_type=type(exc).__name__)
+        raise
     trace(
         "api.pricing.completed",
         project_id=project_id,
@@ -556,7 +559,6 @@ def api_assignment_project_pricing(project_id: str):
 def api_assignment_project_confirm_payment(project_id: str):
     trace(
         "api.confirm_payment.received",
-        project_id=project_id,
         **project_service.store.lookup_diagnostics(project_id),
     )
     try:
@@ -566,7 +568,6 @@ def api_assignment_project_confirm_payment(project_id: str):
     except ValueError as exc:
         trace(
             "api.confirm_payment.failed",
-            project_id=project_id,
             error=str(exc),
             **project_service.store.lookup_diagnostics(project_id),
         )

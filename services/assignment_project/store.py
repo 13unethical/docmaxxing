@@ -199,6 +199,6 @@ class ProjectStore:
         bundle = self.get_bundle(project_id)
         if bundle is None:
             reason = f"Project bundle not found: {project_id}"
-            trace("store.require_bundle.fail", project_id=project_id, reason=reason, **self.lookup_diagnostics(project_id))
+            trace("store.require_bundle.fail", reason=reason, **self.lookup_diagnostics(project_id))
             raise KeyError(reason)
         return bundle

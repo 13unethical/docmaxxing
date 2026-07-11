@@ -26,9 +26,13 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             mkdir -p /root/docmaxxing/data/projects
+            mkdir -p /root/docmaxxing/data/project_engine
             touch /root/docmaxxing/data/assignment-trace.log
             if ! grep -q '^PROJECT_STORAGE_DIR=' .env 2>/dev/null; then
               echo 'PROJECT_STORAGE_DIR=/root/docmaxxing/data/projects' >> .env
+            fi
+            if ! grep -q '^PROJECT_ENGINE_DIR=' .env 2>/dev/null; then
+              echo 'PROJECT_ENGINE_DIR=/root/docmaxxing/data/project_engine' >> .env
             fi
             source venv/bin/activate
             pip install -r requirements.txt

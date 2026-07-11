@@ -25,5 +25,12 @@ def assignment_trace_log_path() -> Path:
     return (_REPO_ROOT / "data" / "assignment-trace.log").resolve()
 
 
+def project_engine_root() -> Path:
+    override = (os.environ.get("PROJECT_ENGINE_DIR") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return (_REPO_ROOT / "data" / "project_engine").resolve()
+
+
 def project_files_dir(project_id: str) -> Path:
     return assignment_storage_root() / project_id / "files"

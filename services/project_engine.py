@@ -11,6 +11,7 @@ from threading import RLock
 from typing import Any
 
 from services.assignment_pipeline.models import utc_now
+from services.assignment_project.paths import project_engine_root
 
 
 class ProjectLifecycleStatus(StrEnum):
@@ -108,8 +109,8 @@ class ProjectEngineState:
 
 
 class ProjectEngine:
-    def __init__(self, root_dir: str | None = None) -> None:
-        self._root = Path(root_dir or "data/project_engine")
+    def __init__(self, root_dir: str | Path | None = None) -> None:
+        self._root = Path(root_dir or project_engine_root()).resolve()
         self._root.mkdir(parents=True, exist_ok=True)
         self._lock = RLock()
         self._cache: dict[str, ProjectEngineState] = {}
