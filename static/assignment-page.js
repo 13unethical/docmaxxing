@@ -161,6 +161,13 @@
     return "Previous session expired. Upload your brief and click Analyze & get price.";
   }
 
+  function responseMeansProjectMissing(res, payload) {
+    if (res.status !== 404 || !/\/api\/assignment\/projects\//.test(res.url || "")) {
+      return false;
+    }
+    return String((payload && payload.error) || "").trim().toLowerCase() === "project not found";
+  }
+
   var LLM_REQUEST_TIMEOUT_MS = 300000;
 
   async function api(url, options) {
@@ -177,7 +184,7 @@
     var res = await fetch(url, fetchOpts);
     var payload = await res.json().catch(function () { return {}; });
     if (!res.ok) {
-      if (res.status === 404 && /\/api\/assignment\/projects\//.test(url)) {
+      if (responseMeansProjectMissing(res, payload)) {
         resetProjectState();
       }
       if (res.status >= 500 && /\/research|\/blueprint/.test(url)) {
