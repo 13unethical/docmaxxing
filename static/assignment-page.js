@@ -133,6 +133,8 @@
     localStorage.removeItem(STORAGE_KEY);
   }
 
+  var LLM_REQUEST_TIMEOUT_MS = 300000;
+
   async function api(url, options) {
     var opts = options || {};
     var timeoutMs = opts.timeoutMs;
@@ -149,6 +151,9 @@
     if (!res.ok) {
       if (res.status === 404 && /\/api\/assignment\/projects\//.test(url)) {
         clearSavedProject();
+      }
+      if (res.status >= 500 && /\/research|\/blueprint/.test(url)) {
+        throw new Error("AI planning is taking longer than expected. Please wait a moment and click Retry.");
       }
       throw new Error(payload.error || ("HTTP " + res.status));
     }
@@ -314,7 +319,7 @@
       } else if (state.autoRunning) {
         note.textContent = "";
       } else if (state.paymentConfirmed) {
-        note.textContent = "Generation in progress.";
+        note.textContent = "Payment confirmed — click Continue to start generation.";
       } else if (state.price != null) {
         note.textContent = "Confirm to begin writing.";
       } else if (state.requirement) {
@@ -360,7 +365,7 @@
   function updateChrome() {
     var hasReq = !!state.requirement;
     var isComplete = !!state.deliveryPackage;
-    var inProduction = state.paymentConfirmed && !isComplete;
+    var inProduction = state.paymentConfirmed && !isComplete && state.autoRunning;
 
     if (isComplete) {
       showCompleteUI();
@@ -601,16 +606,31 @@
   }
 
   async function runResearch() {
-    if (!state.research) await api(projectUrl("/research"), { method: "POST" });
-    var data = await api(projectUrl(""));
-    state.research = data.research_plan || null;
+    if (!state.research) {
+      var created = await api(projectUrl("/research"), { method: "POST", timeoutMs: LLM_REQUEST_TIMEOUT_MS });
+      state.research = created.research_plan || null;
+    }
+    if (!state.research) {
+      var data = await api(projectUrl(""));
+      state.research = data.research_plan || null;
+    }
     renderProgress();
   }
 
   async function runBlueprint() {
-    if (!state.blueprint) await api(projectUrl("/blueprint"), { method: "POST" });
-    var data = await api(projectUrl(""));
-    state.blueprint = data.blueprint || null;
+    if (!state.blueprint) {
+      var created = await api(projectUrl("/blueprint"), {
+        method: "POST",
+        timeoutMs: LLM_REQUEST_TIMEOUT_MS,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ research_plan: state.research || null }),
+      });
+      state.blueprint = created.blueprint || null;
+    }
+    if (!state.blueprint) {
+      var data = await api(projectUrl(""));
+      state.blueprint = data.blueprint || null;
+    }
     renderProgress();
   }
 
@@ -842,6 +862,12 @@
     return { ok: true };
   }
 
+  async function beginProduction() {
+    setStage("research");
+    enterProductionLayout();
+    updateProductionProgress("research");
+  }
+
   async function continueAutoProduction() {
     if (state.autoRunning) return;
     state.autoRunning = true;
@@ -851,7 +877,7 @@
     updateSummaryPayButton();
     try {
       await ensurePaymentConfirmed();
-      enterProductionLayout();
+      beginProduction();
       var result = await runProductionCore();
       if (!(await handleProductionResult(result))) return;
     } catch (err) {
@@ -881,7 +907,7 @@
     updateSummaryPayButton();
     try {
       await ensurePaymentConfirmed();
-      enterProductionLayout();
+      beginProduction();
       state.humanizerPass = 1;
       state.reviewPass = 1;
       state.detectionAttempt = 1;
@@ -973,9 +999,11 @@
       if (!state.paymentConfirmed) {
         stage = "price";
       } else if (state.paymentConfirmed && !state.deliveryPackage) {
-        continueAutoProduction().catch(function (err) {
-          fail(err, continueAutoProduction);
-        });
+        stage = inferStageFromArtifacts();
+        if (stage === "price" || stage === "upload") stage = "research";
+        setStage(stage, { skipSave: true });
+        saveWizard();
+        updateChrome();
         return;
       }
       setStage(stage, { skipSave: true });

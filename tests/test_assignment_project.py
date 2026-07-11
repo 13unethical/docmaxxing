@@ -185,3 +185,117 @@ def test_calculate_pricing_restores_pipeline_from_disk(tmp_path):
     assert priced.project.price is not None
     pricing_state = pipeline_b.get_project(bundle.project.id).stage_state(PipelineStage.PRICING)
     assert pricing_state.status.value == "completed"
+
+
+class _StubResearchEngine:
+    VERSION = "stub-research"
+
+    def build_plan(self, payload):
+        from services.research_engine.models import ResearchPlan, ResearchSection
+
+        return ResearchPlan(
+            id="plan-disk-1",
+            project_id=payload.project_id,
+            assignment_topic="Disk persistence topic",
+            writing_objective="Test objective",
+            main_research_question="Test question?",
+            section_list=[
+                ResearchSection(
+                    title="Introduction",
+                    description="Intro",
+                    purpose="Open",
+                    estimated_words=200,
+                )
+            ],
+            engine_version=self.VERSION,
+        )
+
+
+class _StubResearchService:
+    def __init__(self) -> None:
+        from services.research_engine.service import ResearchEngineService
+
+        self.store = ResearchEngineService().store
+        self.engine = _StubResearchEngine()
+
+    def build_plan(self, *, requirement_json, parsed_documents, project_id=None):
+        from services.research_engine.models import ResearchEngineInput
+
+        plan = self.engine.build_plan(
+            ResearchEngineInput(
+                requirement_json=requirement_json,
+                parsed_documents=parsed_documents,
+                project_id=project_id,
+            )
+        )
+        return self.store.save(plan)
+
+
+def test_run_research_restores_plan_from_disk(tmp_path):
+    """Simulate a new gunicorn worker loading research plan from bundle artifacts."""
+    from services.research_engine.service import ResearchEngineService
+
+    store = ProjectStore(root=tmp_path / "projects")
+    pipeline_a = AssignmentPipelineService()
+    research_a = _StubResearchService()
+    service_a = ProjectService(
+        store=store,
+        pipeline=pipeline_a,
+        research=research_a,  # type: ignore[arg-type]
+        analyzer=_StubRequirementAnalyzer(),
+    )
+
+    bundle = service_a.create_project(
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service_a.analyze_requirements(project_id)
+    service_a.calculate_pricing(project_id)
+    service_a.confirm_payment(project_id)
+    plan = service_a.run_research(project_id)
+
+    research_b = ResearchEngineService()
+    pipeline_b = AssignmentPipelineService()
+    service_b = ProjectService(store=store, pipeline=pipeline_b, research=research_b)
+
+    loaded = service_b.get_research_plan(project_id)
+    assert loaded.id == plan.id
+    assert loaded.assignment_topic == plan.assignment_topic
+    assert store.require_bundle(project_id).project.artifacts.get("research_plan")
+
+
+def test_seed_research_plan_from_client_snapshot(tmp_path):
+    """Fresh worker can adopt research plan JSON sent from the browser."""
+    from services.research_engine.service import ResearchEngineService
+
+    store = ProjectStore(root=tmp_path / "projects")
+    pipeline_a = AssignmentPipelineService()
+    research_a = _StubResearchService()
+    service_a = ProjectService(
+        store=store,
+        pipeline=pipeline_a,
+        research=research_a,  # type: ignore[arg-type]
+        analyzer=_StubRequirementAnalyzer(),
+    )
+
+    bundle = service_a.create_project(
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service_a.analyze_requirements(project_id)
+    service_a.calculate_pricing(project_id)
+    service_a.confirm_payment(project_id)
+    plan = service_a.run_research(project_id)
+    plan_snapshot = plan.to_dict()
+
+    project = store.require_project(project_id)
+    project.artifacts.pop("research_plan", None)
+    store.save_project(project)
+
+    service_b = ProjectService(store=store, research=ResearchEngineService())
+    with pytest.raises(KeyError):
+        service_b._load_research_plan(project_id)
+
+    loaded = service_b._load_research_plan(project_id, seed=plan_snapshot)
+    assert loaded.id == plan.id
+    assert store.require_bundle(project_id).project.artifacts.get("research_plan")

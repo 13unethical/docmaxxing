@@ -414,7 +414,16 @@ def api_assignment_project_get(project_id: str):
         bundle = project_service.get_project(project_id)
     except KeyError:
         return jsonify({"error": "Project not found"}), 404
-    return jsonify(_project_api_payload(bundle))
+    try:
+        return jsonify(_project_api_payload(bundle))
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.project_get.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Failed to load project state"}), 500
 
 
 @app.post("/api/assignment/projects/<project_id>/files")
@@ -584,16 +593,35 @@ def api_assignment_project_confirm_payment(project_id: str):
 @app.post("/api/assignment/projects/<project_id>/research")
 def api_assignment_project_research(project_id: str):
     """Build Research Plan from Requirement JSON and parsed documents only."""
+    trace(
+        "api.research.received",
+        **project_service.store.lookup_diagnostics(project_id),
+    )
     payload = request.get_json(silent=True) or {}
     parsed_documents = payload.get("parsed_documents")
     if parsed_documents is not None and not isinstance(parsed_documents, list):
         return jsonify({"error": "parsed_documents must be an array"}), 400
     try:
         plan = project_service.run_research(project_id, parsed_documents=parsed_documents)
-    except KeyError:
-        return jsonify({"error": "Project not found"}), 404
+    except KeyError as exc:
+        return _assignment_not_found("research", project_id, exc)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        trace("api.research.failed", project_id=project_id, error=str(exc))
+        return jsonify({"error": str(exc)}), 502
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.research.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Research planning failed. Please try again."}), 502
+    trace(
+        "api.research.completed",
+        project_id=project_id,
+        plan_id=plan.id,
+        engine=plan.engine_version,
+    )
     return jsonify({"research_plan": plan.to_dict()})
 
 
@@ -621,12 +649,36 @@ def api_assignment_project_research_plan_update(project_id: str):
 @app.post("/api/assignment/projects/<project_id>/blueprint")
 def api_assignment_project_blueprint(project_id: str):
     """Build writing Blueprint from Requirement JSON + Research Plan only."""
+    payload = request.get_json(silent=True) or {}
+    research_plan = payload.get("research_plan")
+    if research_plan is not None and not isinstance(research_plan, dict):
+        return jsonify({"error": "research_plan must be an object"}), 400
+    trace(
+        "api.blueprint.received",
+        has_client_research_plan=isinstance(research_plan, dict),
+        **project_service.store.lookup_diagnostics(project_id),
+    )
     try:
-        blueprint = project_service.run_blueprint(project_id)
-    except KeyError:
-        return jsonify({"error": "Project not found"}), 404
+        blueprint = project_service.run_blueprint(project_id, research_plan=research_plan)
+    except KeyError as exc:
+        return _assignment_not_found("blueprint", project_id, exc)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        trace("api.blueprint.failed", project_id=project_id, error=str(exc))
+        return jsonify({"error": str(exc)}), 502
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.blueprint.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Blueprint generation failed. Please try again."}), 502
+    trace(
+        "api.blueprint.completed",
+        project_id=project_id,
+        blueprint_id=blueprint.id,
+        engine=blueprint.engine_version,
+    )
     return jsonify({"blueprint": blueprint.to_dict()})
 
 

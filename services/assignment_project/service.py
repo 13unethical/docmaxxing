@@ -28,8 +28,10 @@ from services.assignment_project.pricing import calculate_project_price
 from services.assignment_project.paths import project_files_dir
 from services.assignment_project.store import ProjectStore
 from services.assignment_project.trace_log import trace
+from services.research_engine.models import ResearchPlan
 from services.research_engine.parsed_documents import build_parsed_documents
 from services.research_engine.service import ResearchEngineService
+from services.blueprint_engine.models import Blueprint
 from services.blueprint_engine.service import BlueprintEngineService
 from services.writer_engine.service import WriterEngineService
 from services.reviewer_engine.service import ReviewerEngineService
@@ -155,6 +157,57 @@ class ProjectService:
         except KeyError:
             self.pipeline.create_project(project_id=project_id)
         self._restore_pipeline_from_bundle(project_id)
+
+    def _ensure_project_engine(self, project_id: str) -> None:
+        try:
+            self.project_engine.get_status(project_id)
+        except KeyError:
+            self.project_engine.init_project(project_id)
+
+    def _seed_research_plan(self, project_id: str, snapshot: dict[str, Any] | None) -> ResearchPlan | None:
+        if not isinstance(snapshot, dict) or not snapshot.get("id"):
+            return None
+        plan = ResearchPlan.from_dict(snapshot)
+        plan.project_id = project_id
+        saved = self.research.store.save(plan)
+        project = self.store.require_project(project_id)
+        project.artifacts["research_plan_id"] = saved.id
+        project.artifacts["research_plan"] = saved.to_dict()
+        self.store.save_project(project)
+        return saved
+
+    def _load_research_plan(
+        self,
+        project_id: str,
+        *,
+        seed: dict[str, Any] | None = None,
+    ) -> ResearchPlan:
+        if seed:
+            seeded = self._seed_research_plan(project_id, seed)
+            if seeded is not None:
+                return seeded
+        plan = self.research.store.get_by_project(project_id)
+        if plan is not None:
+            return plan
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("research_plan")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            plan = ResearchPlan.from_dict(snapshot)
+            plan.project_id = project_id
+            return self.research.store.save(plan)
+        raise KeyError(f"Research plan not found for project: {project_id}")
+
+    def _load_blueprint(self, project_id: str) -> Blueprint:
+        blueprint = self.blueprint.store.get_by_project(project_id)
+        if blueprint is not None:
+            return blueprint
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("blueprint")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            blueprint = Blueprint.from_dict(snapshot)
+            self.blueprint.store.save(blueprint)
+            return blueprint
+        raise KeyError(f"Blueprint not found for project: {project_id}")
 
     def _restore_pipeline_from_bundle(self, project_id: str) -> None:
         """Rebuild in-memory pipeline stages from persisted project artifacts."""
@@ -418,6 +471,7 @@ class ProjectService:
 
         self._ensure_pipeline_project(project_id)
         documents = build_parsed_documents(bundle.files, parsed_documents)
+        self._ensure_project_engine(project_id)
         self.project_engine.stage_start(project_id, ProjectLifecycleStatus.RESEARCH_READY)
         self.pipeline.start_stage(project_id, PipelineStage.RESEARCH)
 
@@ -430,6 +484,7 @@ class ProjectService:
 
             project = self.store.require_project(project_id)
             project.artifacts["research_plan_id"] = plan.id
+            project.artifacts["research_plan"] = plan.to_dict()
             self.store.save_project(project)
 
             self.pipeline.complete_stage(
@@ -458,32 +513,39 @@ class ProjectService:
             raise
 
     def get_research_plan(self, project_id: str):
-        return self.research.get_plan_by_project(project_id)
+        return self._load_research_plan(project_id)
 
     def update_research_plan(self, project_id: str, payload: dict):
-        plan = self.research.get_plan_by_project(project_id)
+        plan = self._load_research_plan(project_id)
         return self.research.update_plan_from_dict(plan.id, payload)
 
-    def run_blueprint(self, project_id: str):
+    def run_blueprint(
+        self,
+        project_id: str,
+        *,
+        research_plan: dict[str, Any] | None = None,
+    ):
         bundle = self.store.require_bundle(project_id)
         requirement = bundle.requirement.to_dict()
         try:
-            research_plan = self.research.get_plan_by_project(project_id).to_dict()
+            research_plan_dict = self._load_research_plan(project_id, seed=research_plan).to_dict()
         except KeyError as exc:
             raise ValueError("Research Plan must exist before building a Blueprint") from exc
 
         self._ensure_pipeline_project(project_id)
+        self._ensure_project_engine(project_id)
         self.project_engine.stage_start(project_id, ProjectLifecycleStatus.BLUEPRINT_READY)
         self.pipeline.start_stage(project_id, PipelineStage.BLUEPRINT)
         try:
             blueprint = self.blueprint.build_blueprint(
                 requirement_json=requirement,
-                research_plan=research_plan,
+                research_plan=research_plan_dict,
                 project_id=project_id,
             )
 
             project = self.store.require_project(project_id)
             project.artifacts["blueprint_id"] = blueprint.id
+            project.artifacts["blueprint"] = blueprint.to_dict()
             self.store.save_project(project)
 
             self.pipeline.complete_stage(
@@ -512,17 +574,17 @@ class ProjectService:
             raise
 
     def get_blueprint(self, project_id: str):
-        return self.blueprint.get_blueprint_by_project(project_id)
+        return self._load_blueprint(project_id)
 
     def update_blueprint(self, project_id: str, payload: dict):
-        blueprint = self.blueprint.get_blueprint_by_project(project_id)
+        blueprint = self._load_blueprint(project_id)
         return self.blueprint.update_blueprint_from_dict(blueprint.id, payload)
 
     def start_writer(self, project_id: str):
         bundle = self.store.require_bundle(project_id)
         requirement = bundle.requirement.to_dict()
-        research_plan = self.research.get_plan_by_project(project_id).to_dict()
-        blueprint = self.blueprint.get_blueprint_by_project(project_id).to_dict()
+        research_plan = self._load_research_plan(project_id).to_dict()
+        blueprint = self._load_blueprint(project_id).to_dict()
 
         self._ensure_pipeline_project(project_id)
         self.project_engine.stage_start(project_id, ProjectLifecycleStatus.WRITING)
@@ -605,7 +667,7 @@ class ProjectService:
             return
         session = self.humanizer.get_session_by_project(project_id)
         draft = self.writer.get_draft_by_project(project_id)
-        blueprint = self.blueprint.get_blueprint_by_project(project_id).to_dict()
+        blueprint = self._load_blueprint(project_id).to_dict()
         self.humanizer.refresh_revised_sections(
             session.id,
             draft_content=draft.content,
@@ -616,8 +678,8 @@ class ProjectService:
     def run_academic_review(self, project_id: str):
         bundle = self.store.require_bundle(project_id)
         requirement = bundle.requirement.to_dict()
-        research_plan = self.research.get_plan_by_project(project_id).to_dict()
-        blueprint = self.blueprint.get_blueprint_by_project(project_id).to_dict()
+        research_plan = self._load_research_plan(project_id).to_dict()
+        blueprint = self._load_blueprint(project_id).to_dict()
         draft = self._draft_for_review(project_id)
 
         self._ensure_pipeline_project(project_id)
@@ -672,8 +734,8 @@ class ProjectService:
     def run_revision(self, project_id: str):
         bundle = self.store.require_bundle(project_id)
         requirement = bundle.requirement.to_dict()
-        research_plan = self.research.get_plan_by_project(project_id).to_dict()
-        blueprint = self.blueprint.get_blueprint_by_project(project_id).to_dict()
+        research_plan = self._load_research_plan(project_id).to_dict()
+        blueprint = self._load_blueprint(project_id).to_dict()
         draft = self._draft_for_review(project_id)
         review_report = self.reviewer.get_report_by_project(project_id).to_dict()
 
@@ -739,7 +801,7 @@ class ProjectService:
     def start_humanizer(self, project_id: str):
         bundle = self.store.require_bundle(project_id)
         draft = self._draft_for_review(project_id)
-        blueprint = self.blueprint.get_blueprint_by_project(project_id).to_dict()
+        blueprint = self._load_blueprint(project_id).to_dict()
 
         self._ensure_pipeline_project(project_id)
         self._complete_placeholder_stages_before_humanization(project_id)
@@ -886,8 +948,8 @@ class ProjectService:
         except KeyError:
             final_draft = self.writer.get_draft_by_project(project_id).to_dict()
 
-        research_plan = self.research.get_plan_by_project(project_id).to_dict()
-        blueprint = self.blueprint.get_blueprint_by_project(project_id).to_dict()
+        research_plan = self._load_research_plan(project_id).to_dict()
+        blueprint = self._load_blueprint(project_id).to_dict()
         review_report = self.reviewer.get_report_by_project(project_id).to_dict()
         detection_report = self.ai_detection.get_report_by_project(project_id).to_dict()
 
