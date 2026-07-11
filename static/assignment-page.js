@@ -78,6 +78,11 @@
 
   function $(sel) { return root.querySelector(sel); }
 
+  function isStaleProjectError(err) {
+    var msg = String((err && err.message) || "").toLowerCase();
+    return msg.indexOf("project not found") >= 0 || msg.indexOf("http 404") >= 0;
+  }
+
   function show(el, on) {
     if (!el) return;
     el.hidden = !on;
@@ -262,16 +267,15 @@
 
   function fail(err, retryFn) {
     state.retryAction = retryFn || null;
-    var wasProduction = state.autoRunning;
     state.autoRunning = false;
     var message = "Something went wrong. Please try again.";
-    if (!wasProduction && err && err.message) {
+    if (err && err.message) {
       message = err.message;
     }
     root.classList.remove("asg-page--production");
     show($("[data-asg-production]"), false);
     show($("[data-asg-upload-card]"), true);
-    show($("[data-asg-summary-card]"), !!state.requirement);
+    show($("[data-asg-summary-card]"), true);
     show($("[data-asg-wizard]"), false);
     showError(message);
     var primary = $("[data-asg-wizard-primary]");
@@ -313,6 +317,8 @@
         note.textContent = "Generation in progress.";
       } else if (state.price != null) {
         note.textContent = "Confirm to begin writing.";
+      } else if (state.requirement) {
+        note.textContent = "Click Analyze & get price to calculate your quote.";
       } else {
         note.textContent = "Upload your brief to see the price.";
       }
@@ -365,7 +371,7 @@
       enterProductionLayout();
     } else {
       show($("[data-asg-upload-card]"), true);
-      show($("[data-asg-summary-card]"), hasReq);
+      show($("[data-asg-summary-card]"), true);
       show($("[data-asg-wizard]"), false);
       show($("[data-asg-production]"), false);
       show($("[data-asg-complete]"), false);
@@ -976,8 +982,11 @@
       saveWizard();
     } catch (err) {
       clearSavedProject();
-      localStorage.removeItem(STORAGE_KEY);
       setStage("upload");
+      if (isStaleProjectError(err)) {
+        clearError();
+        return;
+      }
       fail(err, resume);
     }
   }
@@ -1015,8 +1024,19 @@
         startResume().then(function () {
           return runPrePayment();
         }).catch(function (err) {
-          set("[data-asg-analysis-status]", err.message || "Failed");
-          fail(err, runPrePayment);
+          var status = isStaleProjectError(err)
+            ? "Previous session expired. Upload your brief and click Analyze & get price."
+            : (err.message || "Failed");
+          set("[data-asg-analysis-status]", status);
+          if (state.requirement) {
+            renderSummary();
+            updateChrome();
+          }
+          if (!isStaleProjectError(err)) {
+            fail(err, runPrePayment);
+          } else {
+            clearError();
+          }
         });
       });
     }

@@ -50,9 +50,11 @@ class ProjectStore:
         return True
 
     def _ensure_loaded_locked(self, project_id: str) -> bool:
-        if project_id in self._projects and project_id in self._requirements:
-            return True
-        return self._load_locked(project_id)
+        # Always prefer on-disk state when a bundle exists so multiple gunicorn
+        # workers see writes performed by other processes.
+        if self._bundle_path(project_id).is_file():
+            return self._load_locked(project_id)
+        return project_id in self._projects and project_id in self._requirements
 
     def save_project(self, project: Project) -> Project:
         with self._lock:

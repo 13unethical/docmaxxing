@@ -143,6 +143,103 @@ class ProjectService:
             self.pipeline.get_project(project_id)
         except KeyError:
             self.pipeline.create_project(project_id=project_id)
+        self._restore_pipeline_from_bundle(project_id)
+
+    def _restore_pipeline_from_bundle(self, project_id: str) -> None:
+        """Rebuild in-memory pipeline stages from persisted project artifacts."""
+        bundle = self.store.require_bundle(project_id)
+        project = bundle.project
+        artifacts = project.artifacts
+        requirement = bundle.requirement.to_dict()
+
+        def complete(stage: PipelineStage, result: StageResult | None = None) -> None:
+            pipeline_project = self.pipeline.get_project(project_id)
+            record = pipeline_project.stage_state(stage)
+            if record.status != StageStatus.COMPLETED:
+                self.pipeline.complete_stage(project_id, stage, result)
+
+        if requirement.get("analyzed_at") or requirement.get("assignment_type"):
+            complete(
+                PipelineStage.REQUIREMENT_ANALYSIS,
+                StageResult(requirement_json=requirement),
+            )
+
+        pricing = artifacts.get("pricing")
+        if project.price is not None and pricing:
+            complete(
+                PipelineStage.PRICING,
+                StageResult(
+                    pricing=pricing,
+                    output={
+                        "amount_usd": pricing.get("amount_usd", project.price),
+                        "priority": pricing.get("priority", "standard"),
+                    },
+                ),
+            )
+
+        if artifacts.get("payment_confirmed"):
+            complete(
+                PipelineStage.WAITING_FOR_PAYMENT,
+                StageResult(output={"payment_confirmed": True}),
+            )
+        elif project.price is not None:
+            self.pipeline.start_stage(project_id, PipelineStage.WAITING_FOR_PAYMENT)
+
+        if artifacts.get("research_plan_id"):
+            complete(
+                PipelineStage.RESEARCH,
+                StageResult(output={"research_plan_id": artifacts["research_plan_id"]}),
+            )
+
+        if artifacts.get("blueprint_id"):
+            complete(
+                PipelineStage.BLUEPRINT,
+                StageResult(output={"blueprint_id": artifacts["blueprint_id"]}),
+            )
+
+        if artifacts.get("writer_session_id"):
+            complete(
+                PipelineStage.WRITING,
+                StageResult(output={"writer_session_id": artifacts["writer_session_id"]}),
+            )
+
+        if artifacts.get("draft_id"):
+            complete(
+                PipelineStage.MERGE,
+                StageResult(output={"draft_id": artifacts["draft_id"]}),
+            )
+
+        if artifacts.get("review_report_id"):
+            complete(
+                PipelineStage.STYLE_REVIEW,
+                StageResult(output={"review_report_id": artifacts["review_report_id"]}),
+            )
+
+        if artifacts.get("last_revision_id"):
+            complete(
+                PipelineStage.REVISION,
+                StageResult(output={"last_revision_id": artifacts["last_revision_id"]}),
+            )
+
+        if artifacts.get("humanized_draft_id"):
+            complete(
+                PipelineStage.HUMANIZATION,
+                StageResult(output={"humanized_draft_id": artifacts["humanized_draft_id"]}),
+            )
+
+        if artifacts.get("detection_report_id"):
+            complete(
+                PipelineStage.AI_DETECTION,
+                StageResult(output={"detection_report_id": artifacts["detection_report_id"]}),
+            )
+
+        if artifacts.get("delivery_package_id"):
+            complete(
+                PipelineStage.DELIVERY,
+                StageResult(output={"delivery_package_id": artifacts["delivery_package_id"]}),
+            )
+
+        self._sync_pipeline_state(project_id)
 
     def get_project(self, project_id: str) -> ProjectBundle:
         self._ensure_pipeline_project(project_id)
@@ -219,6 +316,8 @@ class ProjectService:
         if not requirement.get("analyzed_at") and not requirement.get("assignment_type"):
             raise ValueError("Requirement analysis must complete before pricing")
 
+        self._ensure_pipeline_project(project_id)
+
         pricing = calculate_project_price(requirement, priority=priority)
         project = bundle.project
         project.price = float(pricing["amount_usd"])
@@ -241,7 +340,13 @@ class ProjectService:
         if bundle.project.artifacts.get("payment_confirmed"):
             return bundle
         if bundle.project.price is None:
-            raise ValueError("Price must be calculated before payment confirmation")
+            pricing = bundle.project.artifacts.get("pricing")
+            if pricing and pricing.get("amount_usd") is not None:
+                bundle.project.price = float(pricing["amount_usd"])
+                self.store.save_project(bundle.project)
+            else:
+                raise ValueError("Price must be calculated before payment confirmation")
+        self._ensure_pipeline_project(project_id)
         pipeline_project = self.pipeline.get_project(project_id)
         pricing_state = pipeline_project.stage_state(PipelineStage.PRICING)
         if pricing_state.status != StageStatus.COMPLETED:
@@ -273,6 +378,7 @@ class ProjectService:
         if not bundle.project.artifacts.get("payment_confirmed"):
             raise ValueError("Payment must be confirmed before research planning")
 
+        self._ensure_pipeline_project(project_id)
         documents = build_parsed_documents(bundle.files, parsed_documents)
         self.project_engine.stage_start(project_id, ProjectLifecycleStatus.RESEARCH_READY)
         self.pipeline.start_stage(project_id, PipelineStage.RESEARCH)
@@ -328,6 +434,7 @@ class ProjectService:
         except KeyError as exc:
             raise ValueError("Research Plan must exist before building a Blueprint") from exc
 
+        self._ensure_pipeline_project(project_id)
         self.project_engine.stage_start(project_id, ProjectLifecycleStatus.BLUEPRINT_READY)
         self.pipeline.start_stage(project_id, PipelineStage.BLUEPRINT)
         try:
@@ -379,6 +486,7 @@ class ProjectService:
         research_plan = self.research.get_plan_by_project(project_id).to_dict()
         blueprint = self.blueprint.get_blueprint_by_project(project_id).to_dict()
 
+        self._ensure_pipeline_project(project_id)
         self.project_engine.stage_start(project_id, ProjectLifecycleStatus.WRITING)
         self.pipeline.start_stage(project_id, PipelineStage.WRITING)
         session = self.writer.create_session(
@@ -413,6 +521,7 @@ class ProjectService:
         title = bundle.project.title or bundle.requirement.title or "Assignment Draft"
         draft = self.writer.merge_draft(session.id, title=title)
 
+        self._ensure_pipeline_project(project_id)
         self.pipeline.complete_stage(
             project_id,
             PipelineStage.WRITING,
@@ -473,6 +582,7 @@ class ProjectService:
         blueprint = self.blueprint.get_blueprint_by_project(project_id).to_dict()
         draft = self._draft_for_review(project_id)
 
+        self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.STYLE_REVIEW)
         report = self.reviewer.review_draft(
             requirement_json=requirement,
@@ -538,6 +648,7 @@ class ProjectService:
 
         self._complete_placeholder_stages_before_revision(project_id)
 
+        self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.REVISION)
         result = self.revision.revise_draft(
             requirement_json=requirement,
@@ -592,6 +703,7 @@ class ProjectService:
         draft = self._draft_for_review(project_id)
         blueprint = self.blueprint.get_blueprint_by_project(project_id).to_dict()
 
+        self._ensure_pipeline_project(project_id)
         self._complete_placeholder_stages_before_humanization(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.HUMANIZATION)
 
@@ -617,6 +729,7 @@ class ProjectService:
         title = bundle.project.title or bundle.requirement.title or "Humanized Assignment Draft"
         humanized = self.humanizer.merge_humanized_draft(session.id, title=title)
 
+        self._ensure_pipeline_project(project_id)
         project = self.store.require_project(project_id)
         project.artifacts["humanized_draft_id"] = humanized.id
         self.store.save_project(project)
@@ -653,6 +766,7 @@ class ProjectService:
         attempt_number = int(project.artifacts.get("detection_attempt_number", 0)) + 1
         project.artifacts["detection_attempt_number"] = attempt_number
 
+        self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.AI_DETECTION)
         session = self.ai_detection.create_session(
             humanized_draft=humanized,
@@ -680,6 +794,7 @@ class ProjectService:
             session = self.ai_detection.finalize_session(session.id)
         report = self.ai_detection.get_report(session.report_id)
 
+        self._ensure_pipeline_project(project_id)
         project = self.store.require_project(project_id)
         project.artifacts["detection_report_id"] = report.id
         if report.final_status.value == "needs_manual_review":
@@ -746,6 +861,7 @@ class ProjectService:
             or "—"
         )
 
+        self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.DELIVERY)
         package = self.delivery.prepare_package(
             final_draft=final_draft,
