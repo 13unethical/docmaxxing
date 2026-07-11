@@ -1,0 +1,15 @@
+[Unit]
+Description=DocMaxxing Flask application
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/docmaxxing
+EnvironmentFile=-/root/docmaxxing/.env
+ExecStart=/root/docmaxxing/venv/bin/gunicorn --config /root/docmaxxing/gunicorn.conf.py app:app
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -36,13 +36,9 @@ jobs:
             fi
             source venv/bin/activate
             pip install -r requirements.txt
-            UNIT=/etc/systemd/system/docmaxxing.service
-            if [ -f "$UNIT" ]; then
-              if grep -q 'gunicorn ' "$UNIT" && ! grep -q 'gunicorn.conf.py' "$UNIT"; then
-                sed -i 's|gunicorn |gunicorn --config /root/docmaxxing/gunicorn.conf.py |' "$UNIT"
-                systemctl daemon-reload
-              fi
-            fi
+            install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service
+            systemctl daemon-reload
+            systemctl enable docmaxxing
             systemctl restart docmaxxing
             systemctl is-active --quiet docmaxxing
             echo "Deployed $(git rev-parse --short HEAD)"
