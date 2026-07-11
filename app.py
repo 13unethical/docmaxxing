@@ -56,6 +56,9 @@ from services.assignment_pipeline import (
 from services.assignment_pipeline.handlers import StageResult
 from services.assignment_pipeline.models import utc_now
 from services.assignment_project import ProjectService
+from services.assignment_project.paths import assignment_storage_root, project_files_dir
+from services.assignment_project.store import ProjectStore
+from services.assignment_project.trace_log import trace
 from services.research_engine import ResearchEngineService
 from services.research_engine.models import ParsedDocument
 from services.blueprint_engine import BlueprintEngineService
@@ -115,7 +118,9 @@ def _build_humanizer_engine() -> HumanizerEngineService:
 humanizer_engine = _build_humanizer_engine()
 zerogpt_detection_provider = ZeroGPTDetectionProvider(client=zerogpt_client)
 zerogpt_humanizer_provider = ZeroGPTHumanizerProvider(client=zerogpt_client)
+PROJECT_STORAGE_ROOT = assignment_storage_root()
 project_service = ProjectService(
+    store=ProjectStore(root=PROJECT_STORAGE_ROOT),
     pipeline=assignment_pipeline,
     research=research_engine,
     blueprint=blueprint_engine,
@@ -126,6 +131,24 @@ project_service = ProjectService(
     ai_detection=ai_detection_engine,
     delivery=delivery_engine,
 )
+trace(
+    "app.project_service.init",
+    storage_root=str(PROJECT_STORAGE_ROOT),
+    store_root=str(project_service.store.storage_root),
+)
+
+
+def _assignment_not_found(endpoint: str, project_id: str, exc: KeyError) -> tuple[Any, int]:
+    reason = str(exc)
+    diagnostics = project_service.store.lookup_diagnostics(project_id)
+    trace(
+        "api.project_not_found",
+        endpoint=endpoint,
+        project_id=project_id,
+        reason=reason,
+        **diagnostics,
+    )
+    return jsonify({"error": "Project not found"}), 404
 
 ALLOWED_FONTS = frozenset(
     {
@@ -431,13 +454,27 @@ def api_assignment_project_upload():
     if not has_upload:
         return jsonify({"error": "Upload at least an assignment brief file."}), 400
 
+    trace(
+        "api.upload.received",
+        storage_root=str(PROJECT_STORAGE_ROOT),
+        store_root=str(project_service.store.storage_root),
+    )
     try:
         bundle = project_service.create_project(
             title=title,
             deadline=deadline,
             note=note or None,
         )
-        saved_files = _attach_multipart_uploads(bundle.project.id)
+        project_id = bundle.project.id
+        bundle_path = project_service.store._bundle_path(project_id)
+        trace(
+            "api.upload.created",
+            project_id=project_id,
+            bundle_path=str(bundle_path.resolve()),
+            bundle_exists=bundle_path.is_file(),
+            save_ok=bundle_path.is_file(),
+        )
+        saved_files = _attach_multipart_uploads(project_id)
         if note:
             note_path = _write_debug_text_file(bundle.project.id, "project_note.txt", note)
             project_service.add_file(
@@ -448,8 +485,17 @@ def api_assignment_project_upload():
                 parsed=True,
             )
     except ValueError as exc:
+        trace("api.upload.failed", error=str(exc))
         return jsonify({"error": str(exc)}), 400
 
+    bundle_path = project_service.store._bundle_path(bundle.project.id)
+    trace(
+        "api.upload.completed",
+        project_id=bundle.project.id,
+        bundle_path=str(bundle_path.resolve()),
+        bundle_exists=bundle_path.is_file(),
+        uploaded_files=len(saved_files),
+    )
     payload = _project_api_payload(bundle)
     payload["uploaded_files"] = saved_files
     return jsonify(payload), 201
@@ -458,12 +504,24 @@ def api_assignment_project_upload():
 @app.post("/api/assignment/projects/<project_id>/analyze-requirements")
 def api_assignment_project_analyze_requirements(project_id: str):
     """Run requirement analysis via Gemini."""
+    trace(
+        "api.analyze.received",
+        project_id=project_id,
+        **project_service.store.lookup_diagnostics(project_id),
+    )
     try:
         bundle = project_service.analyze_requirements(project_id)
-    except KeyError:
-        return jsonify({"error": "Project not found"}), 404
+    except KeyError as exc:
+        return _assignment_not_found("analyze-requirements", project_id, exc)
     except ValueError as exc:
+        trace("api.analyze.failed", project_id=project_id, error=str(exc))
         return jsonify({"error": str(exc)}), 502
+    trace(
+        "api.analyze.completed",
+        project_id=project_id,
+        price=bundle.project.price,
+        assignment_type=bundle.requirement.assignment_type,
+    )
     return jsonify(_project_api_payload(bundle))
 
 
@@ -471,12 +529,25 @@ def api_assignment_project_analyze_requirements(project_id: str):
 def api_assignment_project_pricing(project_id: str):
     payload = request.get_json(silent=True) or {}
     priority = str(payload.get("priority") or "standard").strip().lower()
+    trace(
+        "api.pricing.received",
+        project_id=project_id,
+        priority=priority,
+        **project_service.store.lookup_diagnostics(project_id),
+    )
     try:
         bundle = project_service.calculate_pricing(project_id, priority=priority)
-    except KeyError:
-        return jsonify({"error": "Project not found"}), 404
+    except KeyError as exc:
+        return _assignment_not_found("pricing", project_id, exc)
     except ValueError as exc:
+        trace("api.pricing.failed", project_id=project_id, error=str(exc))
         return jsonify({"error": str(exc)}), 400
+    trace(
+        "api.pricing.completed",
+        project_id=project_id,
+        price=bundle.project.price,
+        bundle_path=str(project_service.store._bundle_path(project_id).resolve()),
+    )
     return jsonify(_project_api_payload(bundle))
 
 
@@ -866,7 +937,7 @@ def _collect_debug_input_payload() -> tuple[dict[str, Any], list[dict[str, Any]]
 
 
 def _write_debug_text_file(project_id: str, filename: str, content: str) -> str:
-    base = Path("data") / "projects" / project_id / "files"
+    base = project_files_dir(project_id)
     base.mkdir(parents=True, exist_ok=True)
     path = base / filename
     path.write_text(content or "", encoding="utf-8")
@@ -874,7 +945,7 @@ def _write_debug_text_file(project_id: str, filename: str, content: str) -> str:
 
 
 def _write_project_binary_file(project_id: str, filename: str, raw: bytes) -> str:
-    base = Path("data") / "projects" / project_id / "files"
+    base = project_files_dir(project_id)
     base.mkdir(parents=True, exist_ok=True)
     safe_name = Path(filename).name
     path = base / f"{uuid.uuid4()}_{safe_name}"
@@ -1580,7 +1651,7 @@ def api_delivery_package_download(package_id: str):
         package = delivery_engine.get_package(package_id)
     except KeyError:
         return jsonify({"error": "Package not found"}), 404
-    project_dir = Path("data/projects") / str(package.project_id or "local") / "delivery"
+    project_dir = PROJECT_STORAGE_ROOT / str(package.project_id or "local") / "delivery"
     expected = f"{_safe_download_name(package)}-delivery-package.zip"
     zip_path = project_dir / expected
     if not zip_path.exists():

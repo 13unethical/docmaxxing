@@ -25,7 +25,9 @@ from services.assignment_project.requirement_analyzer import (
     normalize_file_type,
 )
 from services.assignment_project.pricing import calculate_project_price
+from services.assignment_project.paths import project_files_dir
 from services.assignment_project.store import ProjectStore
+from services.assignment_project.trace_log import trace
 from services.research_engine.parsed_documents import build_parsed_documents
 from services.research_engine.service import ResearchEngineService
 from services.blueprint_engine.service import BlueprintEngineService
@@ -50,7 +52,7 @@ def _parse_deadline(value: str | None) -> datetime | None:
 
 def _storage_path(project_id: str, file_id: str, original_filename: str) -> str:
     safe_name = Path(original_filename).name
-    return f"data/projects/{project_id}/files/{file_id}_{safe_name}"
+    return str(project_files_dir(project_id) / f"{file_id}_{safe_name}")
 
 
 class ProjectService:
@@ -125,6 +127,15 @@ class ProjectService:
         self.store.save_project(project)
         self.store.save_requirement(requirement)
         self.project_engine.init_project(project_id)
+
+        bundle_path = self.store._bundle_path(project_id)
+        trace(
+            "service.create_project.persisted",
+            project_id=project_id,
+            storage_root=str(self.store.storage_root),
+            bundle_path=str(bundle_path.resolve()),
+            bundle_exists=bundle_path.is_file(),
+        )
 
         manifest_files = list((upload_manifest or {}).get("files") or [])
         payload_files = list(files or [])
