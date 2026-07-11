@@ -123,6 +123,11 @@
     return "/api/assignment/projects/" + encodeURIComponent(pid()) + path;
   }
 
+  function clearSavedProject() {
+    state.projectId = null;
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
   async function api(url, options) {
     var opts = options || {};
     var timeoutMs = opts.timeoutMs;
@@ -136,7 +141,12 @@
     }
     var res = await fetch(url, fetchOpts);
     var payload = await res.json().catch(function () { return {}; });
-    if (!res.ok) throw new Error(payload.error || ("HTTP " + res.status));
+    if (!res.ok) {
+      if (res.status === 404 && /\/api\/assignment\/projects\//.test(url)) {
+        clearSavedProject();
+      }
+      throw new Error(payload.error || ("HTTP " + res.status));
+    }
     return payload;
   }
 
@@ -531,6 +541,9 @@
     form.append("priority", getPriority());
     var payload = await api("/api/assignment/projects/upload", { method: "POST", body: form });
     state.projectId = payload.project && payload.project.id;
+    if (!state.projectId) {
+      throw new Error("Upload did not return a project id. Please try again.");
+    }
     state.requirement = payload.requirement || null;
     saveWizard();
   }
@@ -552,6 +565,7 @@
   async function runPrePayment() {
     setBusy(true);
     clearError();
+    clearSavedProject();
     set("[data-asg-analysis-status]", "Uploading files…");
     await uploadProject();
     set("[data-asg-analysis-status]", "Analyzing your brief…");
@@ -961,10 +975,22 @@
       setStage(stage, { skipSave: true });
       saveWizard();
     } catch (err) {
+      clearSavedProject();
       localStorage.removeItem(STORAGE_KEY);
       setStage("upload");
       fail(err, resume);
     }
+  }
+
+  var resumePromise = null;
+
+  function startResume() {
+    if (!resumePromise) {
+      resumePromise = resume().finally(function () {
+        resumePromise = null;
+      });
+    }
+    return resumePromise;
   }
 
   function downloadDelivery() {
@@ -986,7 +1012,9 @@
     var analyze = $("[data-asg-analyze]");
     if (analyze) {
       analyze.addEventListener("click", function () {
-        runPrePayment().catch(function (err) {
+        startResume().then(function () {
+          return runPrePayment();
+        }).catch(function (err) {
           set("[data-asg-analysis-status]", err.message || "Failed");
           fail(err, runPrePayment);
         });
@@ -1014,7 +1042,7 @@
     var completeDownload = $("[data-asg-complete-download]");
     if (completeDownload) completeDownload.addEventListener("click", downloadDelivery);
 
-    resume();
+    startResume();
   }
 
   wire();

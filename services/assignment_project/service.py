@@ -138,7 +138,14 @@ class ProjectService:
 
         return self.store.require_bundle(project_id)
 
+    def _ensure_pipeline_project(self, project_id: str) -> None:
+        try:
+            self.pipeline.get_project(project_id)
+        except KeyError:
+            self.pipeline.create_project(project_id=project_id)
+
     def get_project(self, project_id: str) -> ProjectBundle:
+        self._ensure_pipeline_project(project_id)
         self._sync_pipeline_state(project_id)
         return self.store.require_bundle(project_id)
 
@@ -165,6 +172,7 @@ class ProjectService:
         return file_record
 
     def analyze_requirements(self, project_id: str) -> ProjectBundle:
+        self._ensure_pipeline_project(project_id)
         bundle = self.store.require_bundle(project_id)
         self.project_engine.stage_start(project_id, ProjectLifecycleStatus.REQUIREMENTS_READY)
         self.pipeline.start_stage(project_id, PipelineStage.REQUIREMENT_ANALYSIS)

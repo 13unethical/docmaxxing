@@ -172,6 +172,24 @@ class ProjectFile:
         }
 
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProjectFile:
+        uploaded_raw = data.get("uploaded_at")
+        uploaded_at = utc_now()
+        if uploaded_raw:
+            uploaded_at = datetime.fromisoformat(str(uploaded_raw).replace("Z", "+00:00"))
+        return cls(
+            id=str(data["id"]),
+            project_id=str(data["project_id"]),
+            file_type=ProjectFileType(str(data.get("file_type") or ProjectFileType.ADDITIONAL_FILE.value)),
+            filename=str(data.get("filename") or data.get("original_filename") or ""),
+            original_filename=str(data.get("original_filename") or ""),
+            storage_path=str(data.get("storage_path") or ""),
+            parsed=bool(data.get("parsed")),
+            uploaded_at=uploaded_at,
+        )
+
+
 @dataclass
 class Project:
     id: str
@@ -212,6 +230,35 @@ class Project:
             "note": self.note,
             "artifacts": dict(self.artifacts),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Project:
+        def _parse_dt(value: str | None) -> datetime | None:
+            if not value:
+                return None
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+        created = _parse_dt(data.get("created_at")) or utc_now()
+        updated = _parse_dt(data.get("updated_at")) or created
+        return cls(
+            id=str(data["id"]),
+            user_id=data.get("user_id"),
+            title=str(data.get("title") or "Untitled Assignment"),
+            assignment_type=data.get("assignment_type"),
+            university=data.get("university"),
+            status=ProjectStatus(str(data.get("status") or ProjectStatus.DRAFT.value)),
+            current_stage=PipelineStage(str(data.get("current_stage") or PipelineStage.UPLOAD.value)),
+            progress=int(data.get("progress") or 0),
+            price=data.get("price"),
+            credits=data.get("credits"),
+            estimated_word_count=data.get("estimated_word_count"),
+            citation_style=data.get("citation_style"),
+            deadline=_parse_dt(data.get("deadline")),
+            created_at=created,
+            updated_at=updated,
+            note=data.get("note"),
+            artifacts=dict(data.get("artifacts") or {}),
+        )
 
 
 @dataclass
