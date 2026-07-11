@@ -231,6 +231,60 @@ class _StubResearchService:
         return self.store.save(plan)
 
 
+class _StubBlueprintEngine:
+    VERSION = "stub-blueprint"
+
+    def build_blueprint(self, payload):
+        from services.blueprint_engine.models import Blueprint, BlueprintSection, WordDistributionEntry
+
+        section = BlueprintSection(
+            id="introduction",
+            title="Introduction",
+            objective="Introduce the topic.",
+            estimated_words=200,
+            key_points=["Background", "Thesis"],
+        )
+        return Blueprint(
+            id="blueprint-disk-1",
+            project_id=payload.project_id,
+            total_target_words=200,
+            total_target_sections=1,
+            writing_order=["introduction"],
+            transition_rules=[],
+            citation_strategy="APA 7",
+            academic_tone="Formal academic prose",
+            critical_analysis_locations=[],
+            comparison_locations=[],
+            counterargument_locations=[],
+            conclusion_goals=[],
+            sections=[section],
+            word_distribution=[WordDistributionEntry(title="Introduction", estimated_words=200)],
+            writing_queue=["Introduction"],
+            estimated_completion_time="1 hour",
+            engine_version=self.VERSION,
+        )
+
+
+class _StubBlueprintService:
+    def __init__(self) -> None:
+        from services.blueprint_engine.service import BlueprintEngineService
+
+        self.store = BlueprintEngineService().store
+        self.engine = _StubBlueprintEngine()
+
+    def build_blueprint(self, *, requirement_json, research_plan, project_id=None):
+        from services.blueprint_engine.models import BlueprintEngineInput
+
+        blueprint = self.engine.build_blueprint(
+            BlueprintEngineInput(
+                requirement_json=requirement_json,
+                research_plan=research_plan,
+                project_id=project_id,
+            )
+        )
+        return self.store.save(blueprint)
+
+
 def test_run_research_restores_plan_from_disk(tmp_path):
     """Simulate a new gunicorn worker loading research plan from bundle artifacts."""
     from services.research_engine.service import ResearchEngineService
@@ -299,3 +353,91 @@ def test_seed_research_plan_from_client_snapshot(tmp_path):
     loaded = service_b._load_research_plan(project_id, seed=plan_snapshot)
     assert loaded.id == plan.id
     assert store.require_bundle(project_id).project.artifacts.get("research_plan")
+
+
+def test_start_writer_restores_session_from_disk(tmp_path):
+    """Simulate a new gunicorn worker loading writer session from bundle artifacts."""
+    from services.research_engine.service import ResearchEngineService
+    from services.writer_engine import MockSectionWriter, WriterEngineService
+
+    store = ProjectStore(root=tmp_path / "projects")
+    pipeline_a = AssignmentPipelineService()
+    research_a = _StubResearchService()
+    blueprint_a = _StubBlueprintService()
+    writer_a = WriterEngineService(writer=MockSectionWriter())
+    service_a = ProjectService(
+        store=store,
+        pipeline=pipeline_a,
+        research=research_a,  # type: ignore[arg-type]
+        blueprint=blueprint_a,  # type: ignore[arg-type]
+        writer=writer_a,
+        analyzer=_StubRequirementAnalyzer(),
+    )
+
+    bundle = service_a.create_project(
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service_a.analyze_requirements(project_id)
+    service_a.calculate_pricing(project_id)
+    service_a.confirm_payment(project_id)
+    service_a.run_research(project_id)
+    service_a.run_blueprint(project_id)
+    session = service_a.start_writer(project_id)
+
+    service_b = ProjectService(
+        store=store,
+        pipeline=AssignmentPipelineService(),
+        research=ResearchEngineService(),
+        blueprint=_StubBlueprintService(),  # type: ignore[arg-type]
+        writer=WriterEngineService(writer=MockSectionWriter()),
+    )
+
+    loaded = service_b.get_writer_session(project_id)
+    assert loaded.id == session.id
+    assert loaded.sections[0].id == session.sections[0].id
+    assert store.require_bundle(project_id).project.artifacts.get("writer_session")
+
+
+def test_advance_writer_restores_session_from_disk(tmp_path):
+    """Fresh worker can advance a writer session persisted by another worker."""
+    from services.research_engine.service import ResearchEngineService
+    from services.writer_engine import MockSectionWriter, WriterEngineService
+
+    store = ProjectStore(root=tmp_path / "projects")
+    pipeline_a = AssignmentPipelineService()
+    research_a = _StubResearchService()
+    blueprint_a = _StubBlueprintService()
+    writer_a = WriterEngineService(writer=MockSectionWriter())
+    service_a = ProjectService(
+        store=store,
+        pipeline=pipeline_a,
+        research=research_a,  # type: ignore[arg-type]
+        blueprint=blueprint_a,  # type: ignore[arg-type]
+        writer=writer_a,
+        analyzer=_StubRequirementAnalyzer(),
+    )
+
+    bundle = service_a.create_project(
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service_a.analyze_requirements(project_id)
+    service_a.calculate_pricing(project_id)
+    service_a.confirm_payment(project_id)
+    service_a.run_research(project_id)
+    service_a.run_blueprint(project_id)
+    service_a.start_writer(project_id)
+
+    service_b = ProjectService(
+        store=store,
+        pipeline=AssignmentPipelineService(),
+        research=ResearchEngineService(),
+        blueprint=_StubBlueprintService(),  # type: ignore[arg-type]
+        writer=WriterEngineService(writer=MockSectionWriter()),
+    )
+
+    advanced = service_b.advance_writer(project_id)
+    assert advanced.progress > 0
+    assert store.require_bundle(project_id).project.artifacts.get("writer_session")
+    assert advanced.sections[0].generated_text

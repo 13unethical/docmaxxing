@@ -696,6 +696,13 @@
     renderProgress();
   }
 
+  function writerSessionBody() {
+    return {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ writer_session: state.writerSession || null }),
+    };
+  }
+
   async function ensureWriterSession() {
     if (state.writerSession && !writerDone()) return state.writerSession;
     try {
@@ -709,19 +716,28 @@
   async function advanceWriter() {
     await ensureWriterSession();
     try {
-      state.writerSession = await apiLlm(projectUrl("/writer/advance"), { method: "POST" });
+      state.writerSession = await apiLlm(projectUrl("/writer/advance"), {
+        method: "POST",
+        ...writerSessionBody(),
+      });
     } catch (err) {
       if (String(err.message || "").toLowerCase().indexOf("not found") >= 0) {
         state.writerSession = null;
         await ensureWriterSession();
-        state.writerSession = await apiLlm(projectUrl("/writer/advance"), { method: "POST" });
+        state.writerSession = await apiLlm(projectUrl("/writer/advance"), {
+          method: "POST",
+          ...writerSessionBody(),
+        });
       } else {
         throw err;
       }
     }
     renderProgress();
     if (state.writerSession.status === "completed") {
-      state.draft = await apiLlm(projectUrl("/writer/merge"), { method: "POST" });
+      state.draft = await apiLlm(projectUrl("/writer/merge"), {
+        method: "POST",
+        ...writerSessionBody(),
+      });
     }
   }
 

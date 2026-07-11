@@ -34,6 +34,7 @@ from services.research_engine.service import ResearchEngineService
 from services.blueprint_engine.models import Blueprint
 from services.blueprint_engine.service import BlueprintEngineService
 from services.writer_engine.service import WriterEngineService
+from services.writer_engine.models import Draft, WriterSession
 from services.reviewer_engine.service import ReviewerEngineService
 from services.revision_engine.service import RevisionEngineService
 from services.revision_engine.models import MAX_REVISION_ATTEMPTS
@@ -208,6 +209,61 @@ class ProjectService:
             self.blueprint.store.save(blueprint)
             return blueprint
         raise KeyError(f"Blueprint not found for project: {project_id}")
+
+    def _persist_writer_session(self, project_id: str, session: WriterSession) -> WriterSession:
+        session.project_id = project_id
+        saved = self.writer.sessions.save(session)
+        project = self.store.require_project(project_id)
+        project.artifacts["writer_session_id"] = saved.id
+        project.artifacts["writer_session"] = saved.to_dict()
+        self.store.save_project(project)
+        return saved
+
+    def _seed_writer_session(self, project_id: str, snapshot: dict[str, Any] | None) -> WriterSession | None:
+        if not isinstance(snapshot, dict) or not snapshot.get("id"):
+            return None
+        session = WriterSession.from_dict(snapshot)
+        return self._persist_writer_session(project_id, session)
+
+    def _load_writer_session(
+        self,
+        project_id: str,
+        *,
+        seed: dict[str, Any] | None = None,
+    ) -> WriterSession:
+        if seed:
+            seeded = self._seed_writer_session(project_id, seed)
+            if seeded is not None:
+                return seeded
+        session = self.writer.sessions.get_by_project(project_id)
+        if session is not None:
+            return session
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("writer_session")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            session = WriterSession.from_dict(snapshot)
+            return self.writer.sessions.save(session)
+        raise KeyError(f"Writer session not found for project: {project_id}")
+
+    def _persist_draft(self, project_id: str, draft: Draft) -> Draft:
+        draft.project_id = project_id
+        saved = self.writer.drafts.save(draft)
+        project = self.store.require_project(project_id)
+        project.artifacts["draft_id"] = saved.id
+        project.artifacts["draft"] = saved.to_dict()
+        self.store.save_project(project)
+        return saved
+
+    def _load_draft(self, project_id: str) -> Draft:
+        draft = self.writer.drafts.get_by_project(project_id)
+        if draft is not None:
+            return draft
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("draft")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            draft = Draft.from_dict(snapshot)
+            return self.writer.drafts.save(draft)
+        raise KeyError(f"Draft not found for project: {project_id}")
 
     def _restore_pipeline_from_bundle(self, project_id: str) -> None:
         """Rebuild in-memory pipeline stages from persisted project artifacts."""
@@ -581,6 +637,11 @@ class ProjectService:
         return self.blueprint.update_blueprint_from_dict(blueprint.id, payload)
 
     def start_writer(self, project_id: str):
+        try:
+            return self._load_writer_session(project_id)
+        except KeyError:
+            pass
+
         bundle = self.store.require_bundle(project_id)
         requirement = bundle.requirement.to_dict()
         research_plan = self._load_research_plan(project_id).to_dict()
@@ -596,27 +657,33 @@ class ProjectService:
             project_id=project_id,
         )
 
-        project = self.store.require_project(project_id)
-        project.artifacts["writer_session_id"] = session.id
-        self.store.save_project(project)
+        saved = self._persist_writer_session(project_id, session)
         self.project_engine.stage_finish(
             project_id,
             ProjectLifecycleStatus.WRITING,
             success=True,
-            model_used=session.engine_version,
+            model_used=saved.engine_version,
         )
-        return session
+        return saved
 
-    def advance_writer(self, project_id: str):
-        session = self.writer.get_session_by_project(project_id)
-        return self.writer.advance_section(session.id)
+    def advance_writer(self, project_id: str, *, writer_session: dict[str, Any] | None = None):
+        session = self._load_writer_session(project_id, seed=writer_session)
+        updated = self.writer.advance_section(session.id)
+        return self._persist_writer_session(project_id, updated)
 
-    def revise_writer_section(self, project_id: str, section_id: str | None = None):
-        session = self.writer.get_session_by_project(project_id)
-        return self.writer.revise_section(session.id, section_id)
+    def revise_writer_section(
+        self,
+        project_id: str,
+        section_id: str | None = None,
+        *,
+        writer_session: dict[str, Any] | None = None,
+    ):
+        session = self._load_writer_session(project_id, seed=writer_session)
+        updated = self.writer.revise_section(session.id, section_id)
+        return self._persist_writer_session(project_id, updated)
 
-    def merge_writer_draft(self, project_id: str):
-        session = self.writer.get_session_by_project(project_id)
+    def merge_writer_draft(self, project_id: str, *, writer_session: dict[str, Any] | None = None):
+        session = self._load_writer_session(project_id, seed=writer_session)
         bundle = self.store.require_bundle(project_id)
         title = bundle.project.title or bundle.requirement.title or "Assignment Draft"
         draft = self.writer.merge_draft(session.id, title=title)
@@ -636,37 +703,36 @@ class ProjectService:
             StageResult(output={"draft_id": draft.id}, artifacts={"draft": draft.to_dict()}),
         )
 
-        project = self.store.require_project(project_id)
-        project.artifacts["draft_id"] = draft.id
-        self.store.save_project(project)
-        self.revision.register_initial_draft(draft)
+        self._persist_writer_session(project_id, session)
+        saved_draft = self._persist_draft(project_id, draft)
+        self.revision.register_initial_draft(saved_draft)
         self.project_engine.stage_start(project_id, ProjectLifecycleStatus.WRITING_COMPLETED)
         self.project_engine.stage_finish(
             project_id,
             ProjectLifecycleStatus.WRITING_COMPLETED,
             success=True,
-            model_used=draft.model,
+            model_used=saved_draft.model,
         )
         self._sync_pipeline_state(project_id)
-        return draft
+        return saved_draft
 
     def get_writer_session(self, project_id: str):
-        return self.writer.get_session_by_project(project_id)
+        return self._load_writer_session(project_id)
 
     def get_draft(self, project_id: str):
-        return self.writer.get_draft_by_project(project_id)
+        return self._load_draft(project_id)
 
     def _draft_for_review(self, project_id: str) -> dict:
         try:
             return self.humanizer.get_humanized_draft_by_project(project_id).to_dict()
         except KeyError:
-            return self.writer.get_draft_by_project(project_id).to_dict()
+            return self._load_draft(project_id).to_dict()
 
     def _rehumanize_revised_sections(self, project_id: str, section_names: list[str]) -> None:
         if not section_names:
             return
         session = self.humanizer.get_session_by_project(project_id)
-        draft = self.writer.get_draft_by_project(project_id)
+        draft = self._load_draft(project_id)
         blueprint = self._load_blueprint(project_id).to_dict()
         self.humanizer.refresh_revised_sections(
             session.id,
@@ -699,7 +765,7 @@ class ProjectService:
         project.artifacts["last_review_issues_found"] = len(report.issues)
         self.store.save_project(project)
 
-        draft = self.writer.get_draft_by_project(project_id)
+        draft = self._load_draft(project_id)
         try:
             self.revision.update_review_score(
                 project_id,
@@ -946,7 +1012,7 @@ class ProjectService:
         try:
             final_draft = self.humanizer.get_humanized_draft_by_project(project_id).to_dict()
         except KeyError:
-            final_draft = self.writer.get_draft_by_project(project_id).to_dict()
+            final_draft = self._load_draft(project_id).to_dict()
 
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()

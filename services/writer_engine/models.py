@@ -205,6 +205,40 @@ class WriterSession:
                 return section
         raise KeyError(f"Section not found: {section_id}")
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WriterSession:
+        status_raw = str(data.get("status") or WriterSessionStatus.ACTIVE.value)
+        try:
+            status = WriterSessionStatus(status_raw)
+        except ValueError:
+            status = WriterSessionStatus.ACTIVE
+        created_at = None
+        updated_at = None
+        if data.get("created_at"):
+            created_at = datetime.fromisoformat(str(data["created_at"]).replace("Z", "+00:00"))
+        if data.get("updated_at"):
+            updated_at = datetime.fromisoformat(str(data["updated_at"]).replace("Z", "+00:00"))
+        sections = [WriterSection.from_dict(section) for section in (data.get("sections") or [])]
+        return cls(
+            id=str(data.get("id") or ""),
+            project_id=data.get("project_id"),
+            sections=sections,
+            current_section_id=data.get("current_section_id"),
+            completed_section_ids=list(data.get("completed_section_ids") or []),
+            remaining_section_ids=list(data.get("remaining_section_ids") or []),
+            progress=int(data.get("progress") or 0),
+            total_words_written=int(data.get("total_words_written") or 0),
+            estimated_remaining_time=str(data.get("estimated_remaining_time") or "0 minutes"),
+            status=status,
+            draft_id=data.get("draft_id"),
+            engine_version=str(data.get("engine_version") or "mock-1.0"),
+            requirement_json=dict(data.get("requirement_json") or {}),
+            research_plan=dict(data.get("research_plan") or {}),
+            blueprint=dict(data.get("blueprint") or {}),
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+
 
 @dataclass
 class Draft:

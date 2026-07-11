@@ -821,12 +821,17 @@ def api_assignment_writer_start(project_id: str):
 
 @app.post("/api/assignment/projects/<project_id>/writer/advance")
 def api_assignment_writer_advance(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    writer_session = payload.get("writer_session")
+    if writer_session is not None and not isinstance(writer_session, dict):
+        return jsonify({"error": "writer_session must be an object"}), 400
     trace(
         "api.writer.advance.received",
+        has_client_writer_session=isinstance(writer_session, dict),
         **project_service.store.lookup_diagnostics(project_id),
     )
     try:
-        session = project_service.advance_writer(project_id)
+        session = project_service.advance_writer(project_id, writer_session=writer_session)
     except KeyError:
         return jsonify({"error": "Writer session not found"}), 404
     except ValueError as exc:
@@ -857,8 +862,15 @@ def api_assignment_writer_advance(project_id: str):
 @app.post("/api/assignment/projects/<project_id>/writer/revise")
 def api_assignment_writer_revise(project_id: str):
     payload = request.get_json(silent=True) or {}
+    writer_session = payload.get("writer_session")
+    if writer_session is not None and not isinstance(writer_session, dict):
+        return jsonify({"error": "writer_session must be an object"}), 400
     try:
-        session = project_service.revise_writer_section(project_id, payload.get("section_id"))
+        session = project_service.revise_writer_section(
+            project_id,
+            payload.get("section_id"),
+            writer_session=writer_session,
+        )
     except KeyError:
         return jsonify({"error": "Writer session not found"}), 404
     except ValueError as exc:
@@ -868,12 +880,17 @@ def api_assignment_writer_revise(project_id: str):
 
 @app.post("/api/assignment/projects/<project_id>/writer/merge")
 def api_assignment_writer_merge(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    writer_session = payload.get("writer_session")
+    if writer_session is not None and not isinstance(writer_session, dict):
+        return jsonify({"error": "writer_session must be an object"}), 400
     trace(
         "api.writer.merge.received",
+        has_client_writer_session=isinstance(writer_session, dict),
         **project_service.store.lookup_diagnostics(project_id),
     )
     try:
-        draft = project_service.merge_writer_draft(project_id)
+        draft = project_service.merge_writer_draft(project_id, writer_session=writer_session)
     except KeyError:
         return jsonify({"error": "Writer session not found"}), 404
     except ValueError as exc:
