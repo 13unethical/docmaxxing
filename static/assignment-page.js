@@ -133,6 +133,34 @@
     localStorage.removeItem(STORAGE_KEY);
   }
 
+  function resetProjectState() {
+    clearSavedProject();
+    state.requirement = null;
+    state.price = null;
+    state.paymentConfirmed = false;
+    state.research = null;
+    state.blueprint = null;
+    state.writerSession = null;
+    state.draft = null;
+    state.review = null;
+    state.humanizerSession = null;
+    state.detectionSession = null;
+    state.detectionReport = null;
+    state.deliveryPackage = null;
+    state.humanizerPass = 1;
+    state.reviewPass = 1;
+    state.detectionAttempt = 1;
+    state.reviewMeta = null;
+    state.autoRunning = false;
+    state.retryAction = null;
+    state.forceContinue = false;
+    state.stage = "upload";
+  }
+
+  function staleSessionMessage() {
+    return "Previous session expired. Upload your brief and click Analyze & get price.";
+  }
+
   var LLM_REQUEST_TIMEOUT_MS = 300000;
 
   async function api(url, options) {
@@ -150,7 +178,7 @@
     var payload = await res.json().catch(function () { return {}; });
     if (!res.ok) {
       if (res.status === 404 && /\/api\/assignment\/projects\//.test(url)) {
-        clearSavedProject();
+        resetProjectState();
       }
       if (res.status >= 500 && /\/research|\/blueprint/.test(url)) {
         throw new Error("AI planning is taking longer than expected. Please wait a moment and click Retry.");
@@ -275,7 +303,17 @@
     state.autoRunning = false;
     var message = "Something went wrong. Please try again.";
     if (err && err.message) {
-      message = err.message;
+      message = isStaleProjectError(err) ? staleSessionMessage() : err.message;
+    }
+    if (isStaleProjectError(err)) {
+      resetProjectState();
+      setStage("upload");
+      showError("");
+      set("[data-asg-analysis-status]", message);
+      renderSummary();
+      updateChrome();
+      setBusy(false);
+      return;
     }
     root.classList.remove("asg-page--production");
     show($("[data-asg-production]"), false);
@@ -576,9 +614,14 @@
   async function runPrePayment() {
     setBusy(true);
     clearError();
-    clearSavedProject();
-    set("[data-asg-analysis-status]", "Uploading files…");
-    await uploadProject();
+    var files = collectUploadFiles();
+    if (files.length > 0) {
+      resetProjectState();
+      set("[data-asg-analysis-status]", "Uploading files…");
+      await uploadProject();
+    } else if (!pid()) {
+      throw new Error("Please upload at least an assignment brief.");
+    }
     set("[data-asg-analysis-status]", "Analyzing your brief…");
     await analyzeRequirements();
     set("[data-asg-analysis-status]", "Calculating price…");
@@ -1009,10 +1052,13 @@
       setStage(stage, { skipSave: true });
       saveWizard();
     } catch (err) {
-      clearSavedProject();
-      setStage("upload");
       if (isStaleProjectError(err)) {
+        resetProjectState();
+        setStage("upload");
         clearError();
+        set("[data-asg-analysis-status]", staleSessionMessage());
+        renderSummary();
+        updateChrome();
         return;
       }
       fail(err, resume);
@@ -1049,22 +1095,26 @@
     var analyze = $("[data-asg-analyze]");
     if (analyze) {
       analyze.addEventListener("click", function () {
-        startResume().then(function () {
-          return runPrePayment();
-        }).catch(function (err) {
+        runPrePayment().catch(function (err) {
           var status = isStaleProjectError(err)
-            ? "Previous session expired. Upload your brief and click Analyze & get price."
+            ? staleSessionMessage()
             : (err.message || "Failed");
           set("[data-asg-analysis-status]", status);
-          if (state.requirement) {
+          if (isStaleProjectError(err)) {
+            resetProjectState();
+            setStage("upload");
+            clearError();
+          } else if (state.requirement) {
             renderSummary();
             updateChrome();
-          }
-          if (!isStaleProjectError(err)) {
             fail(err, runPrePayment);
+            return;
           } else {
-            clearError();
+            fail(err, runPrePayment);
+            return;
           }
+          renderSummary();
+          updateChrome();
         });
       });
     }

@@ -412,8 +412,8 @@ def api_assignment_project_create():
 def api_assignment_project_get(project_id: str):
     try:
         bundle = project_service.get_project(project_id)
-    except KeyError:
-        return jsonify({"error": "Project not found"}), 404
+    except KeyError as exc:
+        return _assignment_not_found("get", project_id, exc)
     try:
         return jsonify(_project_api_payload(bundle))
     except Exception as exc:  # noqa: BLE001
