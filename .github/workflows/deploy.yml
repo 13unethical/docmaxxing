@@ -25,8 +25,15 @@ jobs:
             cd /root/docmaxxing
             git fetch origin main
             git reset --hard origin/main
+            mkdir -p /root/docmaxxing/data/projects
+            touch /root/docmaxxing/data/assignment-trace.log
+            if ! grep -q '^PROJECT_STORAGE_DIR=' .env 2>/dev/null; then
+              echo 'PROJECT_STORAGE_DIR=/root/docmaxxing/data/projects' >> .env
+            fi
             source venv/bin/activate
             pip install -r requirements.txt
             systemctl restart docmaxxing
             systemctl is-active --quiet docmaxxing
             echo "Deployed $(git rev-parse --short HEAD)"
+            echo "Storage: $(grep PROJECT_STORAGE_DIR .env || true)"
+            ls -la /root/docmaxxing/data/assignment-trace.log || true

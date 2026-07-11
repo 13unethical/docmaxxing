@@ -58,7 +58,7 @@ from services.assignment_pipeline.models import utc_now
 from services.assignment_project import ProjectService
 from services.assignment_project.paths import assignment_storage_root, project_files_dir
 from services.assignment_project.store import ProjectStore
-from services.assignment_project.trace_log import trace
+from services.assignment_project.trace_log import trace, trace_startup
 from services.research_engine import ResearchEngineService
 from services.research_engine.models import ParsedDocument
 from services.blueprint_engine import BlueprintEngineService
@@ -136,6 +136,7 @@ trace(
     storage_root=str(PROJECT_STORAGE_ROOT),
     store_root=str(project_service.store.storage_root),
 )
+trace_startup()
 
 
 def _assignment_not_found(endpoint: str, project_id: str, exc: KeyError) -> tuple[Any, int]:
@@ -553,12 +554,29 @@ def api_assignment_project_pricing(project_id: str):
 
 @app.post("/api/assignment/projects/<project_id>/confirm-payment")
 def api_assignment_project_confirm_payment(project_id: str):
+    trace(
+        "api.confirm_payment.received",
+        project_id=project_id,
+        **project_service.store.lookup_diagnostics(project_id),
+    )
     try:
         bundle = project_service.confirm_payment(project_id)
-    except KeyError:
-        return jsonify({"error": "Project not found"}), 404
+    except KeyError as exc:
+        return _assignment_not_found("confirm-payment", project_id, exc)
     except ValueError as exc:
+        trace(
+            "api.confirm_payment.failed",
+            project_id=project_id,
+            error=str(exc),
+            **project_service.store.lookup_diagnostics(project_id),
+        )
         return jsonify({"error": str(exc)}), 400
+    trace(
+        "api.confirm_payment.completed",
+        project_id=project_id,
+        price=bundle.project.price,
+        payment_confirmed=bool(bundle.project.artifacts.get("payment_confirmed")),
+    )
     return jsonify(_project_api_payload(bundle))
 
 

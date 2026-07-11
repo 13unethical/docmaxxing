@@ -322,12 +322,11 @@ class ProjectService:
             raise
 
     def calculate_pricing(self, project_id: str, *, priority: str = "standard") -> ProjectBundle:
+        self._ensure_pipeline_project(project_id)
         bundle = self.store.require_bundle(project_id)
         requirement = bundle.requirement.to_dict()
         if not requirement.get("analyzed_at") and not requirement.get("assignment_type"):
             raise ValueError("Requirement analysis must complete before pricing")
-
-        self._ensure_pipeline_project(project_id)
 
         pricing = calculate_project_price(requirement, priority=priority)
         project = bundle.project
@@ -344,10 +343,33 @@ class ProjectService:
         )
         self.pipeline.start_stage(project_id, PipelineStage.WAITING_FOR_PAYMENT)
         self._sync_pipeline_state(project_id)
-        return self.store.require_bundle(project_id)
+
+        saved = self.store.require_bundle(project_id)
+        if saved.project.price is None:
+            trace(
+                "service.calculate_pricing.persist_failed",
+                project_id=project_id,
+                bundle_path=str(self.store._bundle_path(project_id).resolve()),
+                pricing_artifact=saved.project.artifacts.get("pricing"),
+            )
+            raise ValueError("Price could not be persisted after pricing")
+        trace(
+            "service.calculate_pricing.persisted",
+            project_id=project_id,
+            price=saved.project.price,
+            bundle_path=str(self.store._bundle_path(project_id).resolve()),
+        )
+        return saved
 
     def confirm_payment(self, project_id: str) -> ProjectBundle:
         bundle = self.store.require_bundle(project_id)
+        trace(
+            "service.confirm_payment.loaded",
+            project_id=project_id,
+            price=bundle.project.price,
+            pricing_artifact=bundle.project.artifacts.get("pricing"),
+            bundle_path=str(self.store._bundle_path(project_id).resolve()),
+        )
         if bundle.project.artifacts.get("payment_confirmed"):
             return bundle
         if bundle.project.price is None:
@@ -355,7 +377,13 @@ class ProjectService:
             if pricing and pricing.get("amount_usd") is not None:
                 bundle.project.price = float(pricing["amount_usd"])
                 self.store.save_project(bundle.project)
+                bundle = self.store.require_bundle(project_id)
             else:
+                trace(
+                    "service.confirm_payment.missing_price",
+                    project_id=project_id,
+                    **self.store.lookup_diagnostics(project_id),
+                )
                 raise ValueError("Price must be calculated before payment confirmation")
         self._ensure_pipeline_project(project_id)
         pipeline_project = self.pipeline.get_project(project_id)
