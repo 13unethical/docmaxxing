@@ -1211,23 +1211,67 @@ class ProjectService:
 
     def advance_ai_detection(self, project_id: str, *, detection_session: dict[str, Any] | None = None):
         session = self._load_detection_session(project_id, seed=detection_session)
-        humanizer_session = self._load_humanizer_session(project_id)
+        humanizer_session = None
+        try:
+            humanizer_session = self._load_humanizer_session(project_id)
+        except KeyError:
+            trace("detection.advance.humanizer_missing", project_id=project_id)
 
-        def rehumanize(paragraph_id: str, _current_text: str) -> str:
+        def rehumanize(paragraph_id: str, current_text: str) -> str:
+            if humanizer_session is None:
+                return current_text
             text = self.humanizer.rehumanize_paragraph_for_detection(humanizer_session.id, paragraph_id)
             self._persist_humanizer_session(project_id, humanizer_session)
+            try:
+                self._persist_humanized_draft(project_id, self._load_humanized_draft(project_id))
+            except KeyError:
+                pass
             return text
 
         updated = self.ai_detection.advance_paragraph(session.id, rehumanize=rehumanize)
-        return self._persist_detection_session(project_id, updated)
+        saved = self._persist_detection_session(project_id, updated)
+        # advance_paragraph may auto-finalize into the worker's RAM — persist report to disk.
+        if saved.report_id:
+            try:
+                report = self.ai_detection.reports.get(saved.report_id)
+                if report is not None:
+                    self._persist_detection_report(project_id, report)
+            except Exception as exc:  # noqa: BLE001
+                trace(
+                    "detection.advance.report_persist_failed",
+                    project_id=project_id,
+                    error=str(exc),
+                )
+        return saved
 
     def finalize_ai_detection(self, project_id: str, *, detection_session: dict[str, Any] | None = None):
         session = self._load_detection_session(project_id, seed=detection_session)
-        if not session.report_id:
+
+        # Prefer report already on disk (other worker may have finalized during advance).
+        try:
+            existing = self._load_detection_report(project_id)
+            if existing.session_id == session.id or not session.report_id:
+                return self._finish_detection_pipeline(project_id, existing)
+        except KeyError:
+            pass
+
+        report = None
+        if session.report_id:
+            report = self.ai_detection.reports.get(session.report_id)
+
+        if report is None:
+            # Rebuild on this worker if report was never persisted / wrong worker RAM.
+            session.report_id = None
             session = self.ai_detection.finalize_session(session.id)
             self._persist_detection_session(project_id, session)
-        report = self.ai_detection.get_report(session.report_id)
+            report = self.ai_detection.reports.get(session.report_id)
+            if report is None:
+                raise KeyError(f"Detection report not found for session: {session.id}")
 
+        saved = self._persist_detection_report(project_id, report)
+        return self._finish_detection_pipeline(project_id, saved)
+
+    def _finish_detection_pipeline(self, project_id: str, report: DetectionReport):
         self._ensure_pipeline_project(project_id)
         saved = self._persist_detection_report(project_id, report)
         project = self.store.require_project(project_id)

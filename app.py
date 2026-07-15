@@ -1736,10 +1736,18 @@ def api_assignment_ai_detection_advance(project_id: str):
         return jsonify({"error": "detection_session must be an object"}), 400
     try:
         session = project_service.advance_ai_detection(project_id, detection_session=detection_session)
-    except KeyError:
-        return jsonify({"error": "Detection session not found"}), 404
+    except KeyError as exc:
+        return jsonify({"error": str(exc) or "Detection session not found"}), 404
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 502
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.detection.advance.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Detection step failed. Please try again."}), 502
     return jsonify(session.to_dict())
 
 
@@ -1751,10 +1759,18 @@ def api_assignment_ai_detection_finalize(project_id: str):
         return jsonify({"error": "detection_session must be an object"}), 400
     try:
         report = project_service.finalize_ai_detection(project_id, detection_session=detection_session)
-    except KeyError:
-        return jsonify({"error": "Detection session not found"}), 404
+    except KeyError as exc:
+        return jsonify({"error": str(exc) or "Detection session not found"}), 404
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.detection.finalize.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Detection finalize failed. Please try again."}), 502
     return jsonify({"detection_report": report.to_dict()})
 
 

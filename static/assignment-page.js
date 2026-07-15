@@ -803,26 +803,39 @@
   }
 
   async function ensureDetection() {
+    if (state.detectionSession &&
+      (state.detectionSession.status === "active" ||
+        state.detectionSession.status === "completed" ||
+        state.detectionSession.status === "needs_manual_review")) {
+      return state.detectionSession;
+    }
     try {
       state.detectionSession = await api(projectUrl("/ai-detection"));
     } catch (err) {
       state.detectionSession = await apiLlm(projectUrl("/ai-detection/start"), { method: "POST" });
     }
-    var data = await api(projectUrl(""));
-    if (data.project && data.project.artifacts && data.project.artifacts.detection_attempt_number) {
-      state.detectionAttempt = data.project.artifacts.detection_attempt_number;
+    try {
+      var data = await api(projectUrl(""));
+      if (data.project && data.project.artifacts && data.project.artifacts.detection_attempt_number) {
+        state.detectionAttempt = data.project.artifacts.detection_attempt_number;
+      }
+      if (data.detection_report) state.detectionReport = data.detection_report;
+    } catch (err) {
+      /* optional hydrate */
     }
     return state.detectionSession;
   }
 
   async function advanceDetection() {
+    await ensureDetection();
     try {
       state.detectionSession = await apiLlm(projectUrl("/ai-detection/advance"), {
         method: "POST",
         ...detectionSessionBody(),
       });
     } catch (err) {
-      if (String(err.message || "").toLowerCase().indexOf("not found") >= 0) {
+      var msg = String(err.message || "").toLowerCase();
+      if (msg.indexOf("not found") >= 0) {
         state.detectionSession = null;
         await ensureDetection();
         state.detectionSession = await apiLlm(projectUrl("/ai-detection/advance"), {
@@ -832,6 +845,40 @@
       } else {
         throw err;
       }
+    }
+    renderProgress();
+  }
+
+  async function resetDetection() {
+    state.detectionReport = null;
+    // Keep an existing in-progress session; only clear local pointer when starting fresh scan.
+    state.detectionSession = null;
+  }
+
+  async function runDetectionScan() {
+    setStage("detection");
+    await resetDetection();
+    await ensureDetection();
+    var guard = 0;
+    var maxSteps = Math.max(
+      20,
+      (((state.detectionSession && state.detectionSession.paragraphs) || []).length * 4) + 5
+    );
+    while (state.detectionSession &&
+      state.detectionSession.status !== "completed" &&
+      state.detectionSession.status !== "needs_manual_review") {
+      guard += 1;
+      if (guard > maxSteps) {
+        throw new Error("Detection took too long. Please refresh and try again.");
+      }
+      await advanceDetection();
+    }
+    if (!state.detectionReport) {
+      var payload = await apiLlm(projectUrl("/ai-detection/finalize"), {
+        method: "POST",
+        ...detectionSessionBody(),
+      });
+      state.detectionReport = payload.detection_report || payload;
     }
     renderProgress();
   }
@@ -952,30 +999,6 @@
     if (!report) return false;
     var threshold = (report.thresholds && report.thresholds.acceptable_max) || 15;
     return Number(report.overall_ai_score) <= threshold;
-  }
-
-  async function resetDetection() {
-    state.detectionSession = null;
-    state.detectionReport = null;
-  }
-
-  async function runDetectionScan() {
-    setStage("detection");
-    await resetDetection();
-    await ensureDetection();
-    while (state.detectionSession &&
-      state.detectionSession.status !== "completed" &&
-      state.detectionSession.status !== "needs_manual_review") {
-      await advanceDetection();
-    }
-    if (!state.detectionReport) {
-      var payload = await apiLlm(projectUrl("/ai-detection/finalize"), {
-        method: "POST",
-        ...detectionSessionBody(),
-      });
-      state.detectionReport = payload.detection_report || payload;
-    }
-    renderProgress();
   }
 
   async function runDetectionLoop() {

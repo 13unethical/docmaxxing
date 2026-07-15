@@ -123,6 +123,72 @@ def test_detection_rehumanize_callback_on_fail():
     assert calls or session.paragraphs_completed > 0
 
 
+def test_finalize_detection_rebuilds_report_missing_from_worker_memory(tmp_path):
+    """Worker B can finalize after worker A auto-finalized in RAM and only persisted the session."""
+    from services.ai_detection_engine import AIDetectionEngineService, MockAIDetector
+    from services.assignment_project.store import ProjectStore
+    from services.writer_engine import MockSectionWriter, WriterEngineService
+    from services.writer_engine.mock_reviewer import MockSectionReviewer
+    from tests.test_assignment_project import (
+        _StubBlueprintService,
+        _StubRequirementAnalyzer,
+        _StubResearchService,
+    )
+
+    store = ProjectStore(root=tmp_path / "projects")
+    writer = WriterEngineService(writer=MockSectionWriter(), reviewer=MockSectionReviewer())
+    humanizer = HumanizerEngineService()
+    detection_a = AIDetectionEngineService(detector=MockAIDetector())
+    service_a = ProjectService(
+        store=store,
+        pipeline=AssignmentPipelineService(),
+        research=_StubResearchService(),  # type: ignore[arg-type]
+        blueprint=_StubBlueprintService(),  # type: ignore[arg-type]
+        writer=writer,
+        humanizer=humanizer,
+        ai_detection=detection_a,
+        analyzer=_StubRequirementAnalyzer(),
+    )
+    bundle = service_a.create_project(
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service_a.analyze_requirements(project_id)
+    service_a.calculate_pricing(project_id)
+    service_a.confirm_payment(project_id)
+    service_a.run_research(project_id)
+    service_a.run_blueprint(project_id)
+    session = service_a.start_writer(project_id)
+    while session.status.value == "active":
+        session = service_a.advance_writer(project_id)
+    service_a.merge_writer_draft(project_id)
+    hz = service_a.start_humanizer(project_id)
+    while hz.status.value == "active":
+        hz = service_a.advance_humanizer(project_id)
+    service_a.merge_humanized_draft(project_id)
+
+    detection = service_a.start_ai_detection(project_id)
+    while detection.status.value == "active":
+        detection = service_a.advance_ai_detection(project_id)
+
+    # Simulate worker B with empty detection RAM but shared disk artifacts.
+    detection_b = AIDetectionEngineService(detector=MockAIDetector())
+    service_b = ProjectService(
+        store=store,
+        pipeline=AssignmentPipelineService(),
+        research=_StubResearchService(),  # type: ignore[arg-type]
+        blueprint=_StubBlueprintService(),  # type: ignore[arg-type]
+        writer=WriterEngineService(writer=MockSectionWriter(), reviewer=MockSectionReviewer()),
+        humanizer=HumanizerEngineService(),
+        ai_detection=detection_b,
+        analyzer=_StubRequirementAnalyzer(),
+    )
+    # Drop in-memory report on A path by using B which never saw it; disk may already have report.
+    report = service_b.finalize_ai_detection(project_id)
+    assert report.id
+    assert service_b.get_detection_report(project_id).id == report.id
+
+
 def test_project_ai_detection_pipeline():
     pipeline = AssignmentPipelineService()
     writer = WriterEngineService()
