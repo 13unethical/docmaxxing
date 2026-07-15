@@ -1986,19 +1986,10 @@ def _git_revision() -> str:
 @app.get("/api/version")
 def api_version():
     """Lets you verify which code revision is running (local vs production)."""
-    from services.assignment_llm import (
-        assignment_llm_configured,
-        assignment_llm_model,
-        assignment_llm_provider,
-    )
-
     return jsonify(
         {
             "revision": _git_revision(),
             "engine": "reconstruction+style_engine",
-            "assignment_llm": assignment_llm_provider(),
-            "assignment_llm_model": assignment_llm_model(),
-            "assignment_llm_configured": assignment_llm_configured(),
         }
     )
 

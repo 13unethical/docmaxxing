@@ -1,4 +1,4 @@
-"""LLM routing for the assignment pipeline (Gemini default when configured)."""
+"""LLM routing for the assignment pipeline (temporary Claude-first switch)."""
 
 from __future__ import annotations
 
@@ -14,8 +14,7 @@ def assignment_llm_provider() -> str:
     explicit = (os.environ.get("ASSIGNMENT_LLM") or "").strip().lower()
     if explicit in {"claude", "gemini"}:
         return explicit
-    if gemini_enabled():
-        return "gemini"
+    # Temporary default while Gemini billing is unavailable for assignment work.
     if claude_enabled():
         return "claude"
     return "gemini"
@@ -23,10 +22,6 @@ def assignment_llm_provider() -> str:
 
 def assignment_uses_claude() -> bool:
     return assignment_llm_provider() == "claude"
-
-
-def assignment_uses_gemini() -> bool:
-    return assignment_llm_provider() == "gemini"
 
 
 def assignment_llm_model() -> str:

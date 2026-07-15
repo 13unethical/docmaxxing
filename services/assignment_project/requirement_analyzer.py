@@ -35,7 +35,7 @@ class RequirementAnalyzer(Protocol):
 
 
 class GeminiRequirementAnalyzer:
-    """Requirement analyzer — uses assignment LLM router (Gemini by default)."""
+    """Requirement analyzer — uses Claude for assignment when configured."""
 
     VERSION = assignment_llm_model()
     _INVALID_JSON_RETRIES = 2

@@ -1,4 +1,4 @@
-"""Section review engine — Gemini or Claude per ASSIGNMENT_LLM."""
+"""Section review engine — Claude primary, Gemini fallback."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any, Protocol
 import requests
 
 from services.assignment_pipeline.models import utc_now
-from services.assignment_llm import assignment_llm_model, assignment_uses_gemini
+from services.assignment_llm import assignment_llm_model, assignment_uses_claude
 from services.gemini_client import generate_json, gemini_enabled, gemini_model
 from services.writer_engine.llm_writer import _claude_api_key
 from services.writer_engine.models import SectionReview, WriterEngineInput, WriterSection
@@ -25,7 +25,7 @@ class SectionReviewer(Protocol):
 
 
 class GeminiSectionReviewer:
-    """Section reviewer — follows assignment LLM router (Gemini by default)."""
+    """Prefer Claude for assignment; Gemini only when assignment LLM is set to gemini."""
 
     VERSION = assignment_llm_model()
     _INVALID_JSON_RETRIES = 2
@@ -36,37 +36,17 @@ class GeminiSectionReviewer:
 
         review_input = _review_input(section=section, payload=payload)
         claude_key = _claude_api_key()
-        errors: list[str] = []
-
-        def try_gemini() -> SectionReview | None:
-            if not gemini_enabled():
-                return None
-            try:
-                return _review_with_gemini(review_input=review_input)
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"Gemini: {exc}")
-                return None
-
-        def try_claude() -> SectionReview | None:
-            if not claude_key:
-                return None
+        if claude_key:
             try:
                 return _review_with_claude(review_input=review_input, claude_key=claude_key)
             except Exception as exc:  # noqa: BLE001
-                errors.append(f"Claude: {exc}")
-                return None
+                if not gemini_enabled() or assignment_uses_claude():
+                    return _failed_section_review(f"Claude review failed: {exc}")
 
-        if assignment_uses_gemini():
-            result = try_gemini() or try_claude()
-        else:
-            result = try_claude() or try_gemini()
+        if gemini_enabled() and not assignment_uses_claude():
+            return _review_with_gemini(review_input=review_input)
 
-        if result is not None:
-            return result
-
-        if errors:
-            return _failed_section_review("; ".join(errors))
-        return _failed_section_review("No review provider configured (GOOGLE_API_KEY or ANTHROPIC_API_KEY).")
+        return _failed_section_review("No review provider configured (ANTHROPIC_API_KEY or GOOGLE_API_KEY).")
 
 
 def _empty_section_review() -> SectionReview:
