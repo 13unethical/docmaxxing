@@ -26,6 +26,7 @@ from services.assignment_project.requirement_analyzer import (
 )
 from services.assignment_project.pricing import calculate_project_price
 from services.assignment_project.paths import project_files_dir
+from services.assignment_project.session_sync import pick_freshest
 from services.assignment_project.store import ProjectStore
 from services.assignment_project.trace_log import trace
 from services.research_engine.models import ResearchPlan
@@ -34,7 +35,7 @@ from services.research_engine.service import ResearchEngineService
 from services.blueprint_engine.models import Blueprint
 from services.blueprint_engine.service import BlueprintEngineService
 from services.writer_engine.service import WriterEngineService
-from services.writer_engine.models import Draft, WriterSession
+from services.writer_engine.models import Draft, WriterSectionStatus, WriterSession, WriterSessionStatus
 from services.reviewer_engine.service import ReviewerEngineService
 from services.reviewer_engine.models import ReviewReport
 from services.revision_engine.service import RevisionEngineService
@@ -234,20 +235,27 @@ class ProjectService:
         *,
         seed: dict[str, Any] | None = None,
     ) -> WriterSession:
-        # Prefer in-memory / disk over client seed so a stale browser snapshot
-        # cannot rewind progress and look like a stalled writer loop.
-        session = self.writer.sessions.get_by_project(project_id)
-        if session is not None:
-            return session
-        bundle = self.store.require_bundle(project_id)
-        snapshot = bundle.project.artifacts.get("writer_session")
-        if isinstance(snapshot, dict) and snapshot.get("id"):
-            session = WriterSession.from_dict(snapshot)
-            return self.writer.sessions.save(session)
-        seeded = self._seed_writer_session(project_id, seed)
-        if seeded is not None:
-            return seeded
-        raise KeyError(f"Writer session not found for project: {project_id}")
+        # Multi-worker safe: pick freshest among disk / memory / client seed.
+        # Never trust a single worker's RAM over a newer disk snapshot.
+        mem = self.writer.sessions.get_by_project(project_id)
+        disk = None
+        try:
+            bundle = self.store.require_bundle(project_id)
+            snapshot = bundle.project.artifacts.get("writer_session")
+            if isinstance(snapshot, dict) and snapshot.get("id"):
+                disk = WriterSession.from_dict(snapshot)
+        except KeyError:
+            disk = None
+        seeded = None
+        if isinstance(seed, dict) and seed.get("id"):
+            try:
+                seeded = WriterSession.from_dict(seed)
+            except Exception:  # noqa: BLE001
+                seeded = None
+        best = pick_freshest([disk, mem, seeded])
+        if best is None:
+            raise KeyError(f"Writer session not found for project: {project_id}")
+        return self._persist_writer_session(project_id, best)
 
     def _persist_draft(self, project_id: str, draft: Draft) -> Draft:
         draft.project_id = project_id
@@ -259,14 +267,19 @@ class ProjectService:
         return saved
 
     def _load_draft(self, project_id: str) -> Draft:
+        # Disk is source of truth across gunicorn workers.
+        try:
+            bundle = self.store.require_bundle(project_id)
+            snapshot = bundle.project.artifacts.get("draft")
+            if isinstance(snapshot, dict) and snapshot.get("id"):
+                draft = Draft.from_dict(snapshot)
+                draft.project_id = project_id
+                return self.writer.drafts.save(draft)
+        except KeyError:
+            pass
         draft = self.writer.drafts.get_by_project(project_id)
         if draft is not None:
             return draft
-        bundle = self.store.require_bundle(project_id)
-        snapshot = bundle.project.artifacts.get("draft")
-        if isinstance(snapshot, dict) and snapshot.get("id"):
-            draft = Draft.from_dict(snapshot)
-            return self.writer.drafts.save(draft)
         raise KeyError(f"Draft not found for project: {project_id}")
 
     def _persist_humanizer_session(self, project_id: str, session: HumanizerSession) -> HumanizerSession:
@@ -294,19 +307,25 @@ class ProjectService:
         *,
         seed: dict[str, Any] | None = None,
     ) -> HumanizerSession:
-        if seed:
-            seeded = self._seed_humanizer_session(project_id, seed)
-            if seeded is not None:
-                return seeded
-        session = self.humanizer.sessions.get_by_project(project_id)
-        if session is not None:
-            return session
-        bundle = self.store.require_bundle(project_id)
-        snapshot = bundle.project.artifacts.get("humanizer_session")
-        if isinstance(snapshot, dict) and snapshot.get("id"):
-            session = HumanizerSession.from_dict(snapshot)
-            return self.humanizer.sessions.save(session)
-        raise KeyError(f"Humanizer session not found for project: {project_id}")
+        mem = self.humanizer.sessions.get_by_project(project_id)
+        disk = None
+        try:
+            bundle = self.store.require_bundle(project_id)
+            snapshot = bundle.project.artifacts.get("humanizer_session")
+            if isinstance(snapshot, dict) and snapshot.get("id"):
+                disk = HumanizerSession.from_dict(snapshot)
+        except KeyError:
+            disk = None
+        seeded = None
+        if isinstance(seed, dict) and seed.get("id"):
+            try:
+                seeded = HumanizerSession.from_dict(seed)
+            except Exception:  # noqa: BLE001
+                seeded = None
+        best = pick_freshest([disk, mem, seeded])
+        if best is None:
+            raise KeyError(f"Humanizer session not found for project: {project_id}")
+        return self._persist_humanizer_session(project_id, best)
 
     def _persist_humanized_draft(self, project_id: str, draft: HumanizedDraft) -> HumanizedDraft:
         draft.project_id = project_id
@@ -318,14 +337,18 @@ class ProjectService:
         return saved
 
     def _load_humanized_draft(self, project_id: str) -> HumanizedDraft:
+        try:
+            bundle = self.store.require_bundle(project_id)
+            snapshot = bundle.project.artifacts.get("humanized_draft")
+            if isinstance(snapshot, dict) and snapshot.get("id"):
+                draft = HumanizedDraft.from_dict(snapshot)
+                draft.project_id = project_id
+                return self.humanizer.drafts.save(draft)
+        except KeyError:
+            pass
         draft = self.humanizer.drafts.get_by_project(project_id)
         if draft is not None:
             return draft
-        bundle = self.store.require_bundle(project_id)
-        snapshot = bundle.project.artifacts.get("humanized_draft")
-        if isinstance(snapshot, dict) and snapshot.get("id"):
-            draft = HumanizedDraft.from_dict(snapshot)
-            return self.humanizer.drafts.save(draft)
         raise KeyError(f"Humanized draft not found for project: {project_id}")
 
     def _persist_detection_session(self, project_id: str, session: DetectionSession) -> DetectionSession:
@@ -353,19 +376,25 @@ class ProjectService:
         *,
         seed: dict[str, Any] | None = None,
     ) -> DetectionSession:
-        if seed:
-            seeded = self._seed_detection_session(project_id, seed)
-            if seeded is not None:
-                return seeded
-        session = self.ai_detection.sessions.get_by_project(project_id)
-        if session is not None:
-            return session
-        bundle = self.store.require_bundle(project_id)
-        snapshot = bundle.project.artifacts.get("detection_session")
-        if isinstance(snapshot, dict) and snapshot.get("id"):
-            session = DetectionSession.from_dict(snapshot)
-            return self.ai_detection.sessions.save(session)
-        raise KeyError(f"Detection session not found for project: {project_id}")
+        mem = self.ai_detection.sessions.get_by_project(project_id)
+        disk = None
+        try:
+            bundle = self.store.require_bundle(project_id)
+            snapshot = bundle.project.artifacts.get("detection_session")
+            if isinstance(snapshot, dict) and snapshot.get("id"):
+                disk = DetectionSession.from_dict(snapshot)
+        except KeyError:
+            disk = None
+        seeded = None
+        if isinstance(seed, dict) and seed.get("id"):
+            try:
+                seeded = DetectionSession.from_dict(seed)
+            except Exception:  # noqa: BLE001
+                seeded = None
+        best = pick_freshest([disk, mem, seeded])
+        if best is None:
+            raise KeyError(f"Detection session not found for project: {project_id}")
+        return self._persist_detection_session(project_id, best)
 
     def _persist_detection_report(self, project_id: str, report: DetectionReport) -> DetectionReport:
         report.project_id = project_id
@@ -377,14 +406,18 @@ class ProjectService:
         return saved
 
     def _load_detection_report(self, project_id: str) -> DetectionReport:
+        try:
+            bundle = self.store.require_bundle(project_id)
+            snapshot = bundle.project.artifacts.get("detection_report")
+            if isinstance(snapshot, dict) and snapshot.get("id"):
+                report = DetectionReport.from_dict(snapshot)
+                report.project_id = project_id
+                return self.ai_detection.reports.save(report)
+        except KeyError:
+            pass
         report = self.ai_detection.reports.get_by_project(project_id)
         if report is not None:
             return report
-        bundle = self.store.require_bundle(project_id)
-        snapshot = bundle.project.artifacts.get("detection_report")
-        if isinstance(snapshot, dict) and snapshot.get("id"):
-            report = DetectionReport.from_dict(snapshot)
-            return self.ai_detection.reports.save(report)
         raise KeyError(f"Detection report not found for project: {project_id}")
 
     def _persist_review_report(self, project_id: str, report: ReviewReport) -> ReviewReport:
@@ -845,6 +878,29 @@ class ProjectService:
 
     def merge_writer_draft(self, project_id: str, *, writer_session: dict[str, Any] | None = None):
         session = self._load_writer_session(project_id, seed=writer_session)
+        # Finish remaining sections instead of failing the whole production run.
+        max_steps = max(20, len(session.sections) * 4 + 5)
+        for _ in range(max_steps):
+            incomplete = [s for s in session.sections if s.status != WriterSectionStatus.COMPLETED]
+            if not incomplete:
+                if session.status == WriterSessionStatus.ACTIVE:
+                    session.status = WriterSessionStatus.COMPLETED
+                    session.progress = 100
+                    session.current_section_id = None
+                    session = self._persist_writer_session(project_id, session)
+                break
+            if session.status != WriterSessionStatus.ACTIVE:
+                session.status = WriterSessionStatus.ACTIVE
+                session = self._persist_writer_session(project_id, session)
+            session = self.advance_writer(project_id, writer_session=session.to_dict())
+
+        incomplete = [s for s in session.sections if s.status != WriterSectionStatus.COMPLETED]
+        if incomplete:
+            raise ValueError(
+                "Writing could not finish all sections before merge "
+                f"({len(incomplete)} remaining). Please retry."
+            )
+
         bundle = self.store.require_bundle(project_id)
         title = bundle.project.title or bundle.requirement.title or "Assignment Draft"
         draft = self.writer.merge_draft(session.id, title=title)

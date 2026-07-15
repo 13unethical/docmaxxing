@@ -256,9 +256,29 @@ def _complete_section_in_session(session: WriterSession, section: WriterSection)
 
 
 def _refresh_session_metrics(session: WriterSession) -> None:
+    completed_by_status = [
+        section for section in session.sections if section.status == WriterSectionStatus.COMPLETED
+    ]
+    # Keep completed_section_ids aligned with real section statuses.
+    session.completed_section_ids = [section.id for section in completed_by_status]
+    session.remaining_section_ids = [
+        section.id for section in session.sections if section.status != WriterSectionStatus.COMPLETED
+    ]
     completed = len(session.completed_section_ids)
     total = len(session.sections)
     session.progress = int(round(100 * completed / total)) if total else 0
+    if completed and session.progress == 0:
+        session.progress = 1
+    if completed == total and total > 0:
+        session.progress = 100
+        if session.status == WriterSessionStatus.ACTIVE:
+            session.status = WriterSessionStatus.COMPLETED
+            session.current_section_id = None
+    elif session.status == WriterSessionStatus.COMPLETED and completed < total:
+        # Repair inconsistent snapshots that claim completed too early.
+        session.status = WriterSessionStatus.ACTIVE
+        if session.current_section_id is None and session.remaining_section_ids:
+            session.current_section_id = session.remaining_section_ids[0]
     session.total_words_written = sum(count_words(section.generated_text) for section in session.sections)
     remaining = [section for section in session.sections if section.status != WriterSectionStatus.COMPLETED]
     session.estimated_remaining_time = _estimate_remaining(remaining)

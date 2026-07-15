@@ -230,9 +230,20 @@
     return 0;
   }
 
+  function writerSectionsComplete(session) {
+    var sections = (session && session.sections) || [];
+    if (!sections.length) return false;
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i].status !== "completed") return false;
+    }
+    return true;
+  }
+
   function writerDone() {
     var s = state.writerSession;
-    return s && (s.status === "completed" || s.status === "merged");
+    if (!s) return false;
+    if (s.status === "merged") return true;
+    return s.status === "completed" && writerSectionsComplete(s);
   }
 
   function productionPercent(stage) {
@@ -754,11 +765,14 @@
       }
     }
     renderProgress();
-    if (state.writerSession.status === "completed") {
+    if (state.writerSession.status === "completed" && writerSectionsComplete(state.writerSession)) {
       state.draft = await apiLlm(projectUrl("/writer/merge"), {
         method: "POST",
         ...writerSessionBody(),
       });
+    } else if (state.writerSession.status === "completed" && !writerSectionsComplete(state.writerSession)) {
+      // Inconsistent snapshot — keep advancing instead of merging early.
+      state.writerSession.status = "active";
     }
   }
 

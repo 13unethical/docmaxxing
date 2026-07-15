@@ -399,6 +399,51 @@ def test_start_writer_restores_session_from_disk(tmp_path):
     assert store.require_bundle(project_id).project.artifacts.get("writer_session")
 
 
+def test_advance_writer_prefers_disk_over_stale_worker_memory(tmp_path):
+    """A worker with stale RAM must not rewind progress persisted by another worker."""
+    from services.writer_engine import MockSectionWriter, WriterEngineService
+    from services.writer_engine.mock_reviewer import MockSectionReviewer
+    from services.writer_engine.models import WriterSession
+
+    store = ProjectStore(root=tmp_path / "projects")
+    writer_a = WriterEngineService(writer=MockSectionWriter(), reviewer=MockSectionReviewer())
+    service_a = ProjectService(
+        store=store,
+        pipeline=AssignmentPipelineService(),
+        research=_StubResearchService(),  # type: ignore[arg-type]
+        blueprint=_StubBlueprintService(),  # type: ignore[arg-type]
+        writer=writer_a,
+        analyzer=_StubRequirementAnalyzer(),
+    )
+    bundle = service_a.create_project(
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service_a.analyze_requirements(project_id)
+    service_a.calculate_pricing(project_id)
+    service_a.confirm_payment(project_id)
+    service_a.run_research(project_id)
+    service_a.run_blueprint(project_id)
+    started = service_a.start_writer(project_id)
+    latest = service_a.advance_writer(project_id)
+    assert len(latest.completed_section_ids) >= 1
+
+    # Simulate worker B that still has the older in-memory session (pre-advance).
+    writer_b = WriterEngineService(writer=MockSectionWriter(), reviewer=MockSectionReviewer())
+    writer_b.sessions.save(WriterSession.from_dict(started.to_dict()))
+    service_b = ProjectService(
+        store=store,
+        pipeline=AssignmentPipelineService(),
+        research=_StubResearchService(),  # type: ignore[arg-type]
+        blueprint=_StubBlueprintService(),  # type: ignore[arg-type]
+        writer=writer_b,
+        analyzer=_StubRequirementAnalyzer(),
+    )
+    loaded = service_b.get_writer_session(project_id)
+    assert len(loaded.completed_section_ids) == len(latest.completed_section_ids)
+    assert loaded.progress == latest.progress
+
+
 def test_advance_writer_restores_session_from_disk(tmp_path):
     """Fresh worker can advance a writer session persisted by another worker."""
     from services.research_engine.service import ResearchEngineService
