@@ -26,7 +26,7 @@ from services.assignment_project.requirement_analyzer import (
 )
 from services.assignment_project.pricing import calculate_project_price
 from services.assignment_project.paths import project_files_dir
-from services.assignment_project.session_sync import pick_freshest
+from services.assignment_project.session_sync import pick_freshest, rank_of
 from services.assignment_project.store import ProjectStore
 from services.assignment_project.trace_log import trace
 from services.research_engine.models import ResearchPlan
@@ -263,7 +263,11 @@ class ProjectService:
         best = pick_freshest([disk, mem, seeded])
         if best is None:
             raise KeyError(f"Writer session not found for project: {project_id}")
-        return self._persist_writer_session(project_id, best)
+        self.writer.sessions.save(best)
+        # Avoid rewriting huge artifacts on every GET; only persist when ahead of disk.
+        if disk is None or rank_of(best) > rank_of(disk):
+            return self._persist_writer_session(project_id, best)
+        return best
 
     def _persist_draft(self, project_id: str, draft: Draft) -> Draft:
         draft.project_id = project_id
@@ -342,7 +346,10 @@ class ProjectService:
         best = pick_freshest([disk, mem, seeded])
         if best is None:
             raise KeyError(f"Humanizer session not found for project: {project_id}")
-        return self._persist_humanizer_session(project_id, best)
+        self.humanizer.sessions.save(best)
+        if disk is None or rank_of(best) > rank_of(disk):
+            return self._persist_humanizer_session(project_id, best)
+        return best
 
     def _persist_humanized_draft(self, project_id: str, draft: HumanizedDraft) -> HumanizedDraft:
         draft.project_id = project_id
@@ -420,7 +427,10 @@ class ProjectService:
         best = pick_freshest([disk, mem, seeded])
         if best is None:
             raise KeyError(f"Detection session not found for project: {project_id}")
-        return self._persist_detection_session(project_id, best)
+        self.ai_detection.sessions.save(best)
+        if disk is None or rank_of(best) > rank_of(disk):
+            return self._persist_detection_session(project_id, best)
+        return best
 
     def _persist_detection_report(self, project_id: str, report: DetectionReport) -> DetectionReport:
         report.project_id = project_id
@@ -1330,11 +1340,26 @@ class ProjectService:
 
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
-        review_report = self._load_review_report(project_id).to_dict()
-        detection_report = self._load_detection_report(project_id).to_dict()
+        try:
+            review_report = self._load_review_report(project_id).to_dict()
+        except KeyError as exc:
+            raise KeyError(
+                "Review report not found — finish academic review before delivery"
+            ) from exc
+        try:
+            detection_report = self._load_detection_report(project_id).to_dict()
+        except KeyError as exc:
+            raise KeyError(
+                "Detection report not found — finish AI detection before delivery"
+            ) from exc
 
         revision_history = self.revision.get_history_or_empty(project_id)
-        humanizer_session = self._load_humanizer_session(project_id)
+        humanization_attempts = 0
+        try:
+            humanizer_session = self._load_humanizer_session(project_id)
+            humanization_attempts = sum(p.attempts for p in humanizer_session.paragraphs)
+        except KeyError:
+            humanization_attempts = 0
         completion_time = (
             str(research_plan.get("estimated_completion_time") or "")
             or str(blueprint.get("estimated_completion_time") or "")
@@ -1352,12 +1377,13 @@ class ProjectService:
             detection_report=detection_report,
             project_id=project_id,
             revision_attempts=revision_history.revision_attempts,
-            humanization_attempts=sum(p.attempts for p in humanizer_session.paragraphs),
+            humanization_attempts=humanization_attempts,
             completion_time=completion_time,
         )
 
         project = self.store.require_project(project_id)
         project.artifacts["delivery_package_id"] = package.id
+        project.artifacts["delivery_package"] = package.to_dict()
         project.status = ProjectStatus.COMPLETED
         self.store.save_project(project)
 
@@ -1377,7 +1403,42 @@ class ProjectService:
         return package
 
     def get_delivery_package(self, project_id: str):
-        return self.delivery.get_package_by_project(project_id)
+        try:
+            return self.delivery.get_package_by_project(project_id)
+        except KeyError:
+            pass
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("delivery_package")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            from services.delivery_engine.models import DeliveryPackage
+
+            package = DeliveryPackage.from_dict(snapshot)
+            return self.delivery.store.save(package)
+        raise KeyError(f"Delivery package not found for project: {project_id}")
+
+    def find_delivery_package(self, package_id: str):
+        """Restore a delivery package from disk when another worker created it."""
+        try:
+            return self.delivery.get_package(package_id)
+        except KeyError:
+            pass
+        from services.delivery_engine.models import DeliveryPackage
+
+        root = self.store.storage_root
+        if not root.exists():
+            raise KeyError(f"Delivery package not found: {package_id}")
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            try:
+                bundle = self.store.require_bundle(child.name)
+            except KeyError:
+                continue
+            snapshot = bundle.project.artifacts.get("delivery_package")
+            if isinstance(snapshot, dict) and str(snapshot.get("id") or "") == package_id:
+                package = DeliveryPackage.from_dict(snapshot)
+                return self.delivery.store.save(package)
+        raise KeyError(f"Delivery package not found: {package_id}")
 
     def _complete_placeholder_stages_before_humanization(self, project_id: str) -> None:
         for stage in (

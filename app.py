@@ -183,49 +183,29 @@ def _project_api_payload(bundle, *, include_pipeline: bool = True) -> dict[str, 
     if include_pipeline:
         try:
             payload["pipeline"] = assignment_pipeline.get_project(bundle.project.id).to_dict()
-        except KeyError:
+        except Exception:  # noqa: BLE001
             payload["pipeline"] = None
+
+    def _safe(key: str, loader):
+        try:
+            payload[key] = loader().to_dict()
+        except Exception:  # noqa: BLE001
+            payload[key] = None
+
+    _safe("research_plan", lambda: project_service.get_research_plan(bundle.project.id))
+    _safe("blueprint", lambda: project_service.get_blueprint(bundle.project.id))
+    _safe("writer_session", lambda: project_service.get_writer_session(bundle.project.id))
+    _safe("draft", lambda: project_service.get_draft(bundle.project.id))
+    _safe("review_report", lambda: project_service.get_review_report(bundle.project.id))
     try:
-        payload["research_plan"] = project_service.get_research_plan(bundle.project.id).to_dict()
-    except KeyError:
-        payload["research_plan"] = None
-    try:
-        payload["blueprint"] = project_service.get_blueprint(bundle.project.id).to_dict()
-    except KeyError:
-        payload["blueprint"] = None
-    try:
-        payload["writer_session"] = project_service.get_writer_session(bundle.project.id).to_dict()
-    except KeyError:
-        payload["writer_session"] = None
-    try:
-        payload["draft"] = project_service.get_draft(bundle.project.id).to_dict()
-    except KeyError:
-        payload["draft"] = None
-    try:
-        payload["review_report"] = project_service.get_review_report(bundle.project.id).to_dict()
-    except KeyError:
-        payload["review_report"] = None
-    payload["revision_history"] = project_service.get_revision_history(bundle.project.id).to_dict()
-    try:
-        payload["humanizer_session"] = project_service.get_humanizer_session(bundle.project.id).to_dict()
-    except KeyError:
-        payload["humanizer_session"] = None
-    try:
-        payload["humanized_draft"] = project_service.get_humanized_draft(bundle.project.id).to_dict()
-    except KeyError:
-        payload["humanized_draft"] = None
-    try:
-        payload["detection_session"] = project_service.get_detection_session(bundle.project.id).to_dict()
-    except KeyError:
-        payload["detection_session"] = None
-    try:
-        payload["detection_report"] = project_service.get_detection_report(bundle.project.id).to_dict()
-    except KeyError:
-        payload["detection_report"] = None
-    try:
-        payload["delivery_package"] = project_service.get_delivery_package(bundle.project.id).to_dict()
-    except KeyError:
-        payload["delivery_package"] = None
+        payload["revision_history"] = project_service.get_revision_history(bundle.project.id).to_dict()
+    except Exception:  # noqa: BLE001
+        payload["revision_history"] = None
+    _safe("humanizer_session", lambda: project_service.get_humanizer_session(bundle.project.id))
+    _safe("humanized_draft", lambda: project_service.get_humanized_draft(bundle.project.id))
+    _safe("detection_session", lambda: project_service.get_detection_session(bundle.project.id))
+    _safe("detection_report", lambda: project_service.get_detection_report(bundle.project.id))
+    _safe("delivery_package", lambda: project_service.get_delivery_package(bundle.project.id))
     return payload
 
 
@@ -1848,6 +1828,14 @@ def api_assignment_delivery_prepare(project_id: str):
         return jsonify({"error": str(exc)}), 404
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.delivery.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": f"Delivery packaging failed: {exc}"}), 500
     return jsonify(package.to_dict())
 
 
@@ -1863,7 +1851,7 @@ def api_assignment_delivery_package_get(project_id: str):
 @app.get("/api/delivery/packages/<package_id>/download")
 def api_delivery_package_download(package_id: str):
     try:
-        package = delivery_engine.get_package(package_id)
+        package = project_service.find_delivery_package(package_id)
     except KeyError:
         return jsonify({"error": "Package not found"}), 404
     project_dir = PROJECT_STORAGE_ROOT / str(package.project_id or "local") / "delivery"

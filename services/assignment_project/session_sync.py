@@ -20,25 +20,31 @@ def artifact_rank(
     return (status_rank, int(completed_count or 0), int(progress or 0), ts)
 
 
+def rank_of(item: Any | None) -> tuple[int, int, int, float]:
+    if item is None:
+        return (-1, -1, -1, -1.0)
+    status = getattr(item, "status", None)
+    status_val = status.value if hasattr(status, "value") else str(status or "")
+    completed = (
+        getattr(item, "completed_section_ids", None)
+        or getattr(item, "completed_paragraph_ids", None)
+        or []
+    )
+    return artifact_rank(
+        status=status_val,
+        completed_count=len(completed),
+        progress=int(getattr(item, "progress", 0) or 0),
+        updated_at=getattr(item, "updated_at", None),
+    )
+
+
 def pick_freshest(candidates: list[Any]) -> Any | None:
     best = None
     best_rank: tuple[int, int, int, float] | None = None
     for item in candidates:
         if item is None:
             continue
-        status = getattr(item, "status", None)
-        status_val = status.value if hasattr(status, "value") else str(status or "")
-        completed = (
-            getattr(item, "completed_section_ids", None)
-            or getattr(item, "completed_paragraph_ids", None)
-            or []
-        )
-        rank = artifact_rank(
-            status=status_val,
-            completed_count=len(completed),
-            progress=int(getattr(item, "progress", 0) or 0),
-            updated_at=getattr(item, "updated_at", None),
-        )
+        rank = rank_of(item)
         if best is None or best_rank is None or rank > best_rank:
             best = item
             best_rank = rank

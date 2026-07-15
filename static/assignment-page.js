@@ -171,7 +171,7 @@
   var LLM_REQUEST_TIMEOUT_MS = 600000;
 
   function isLongRunningStageUrl(url) {
-    return /\/research|\/blueprint|\/writer|\/humanizer|\/review|\/revision|\/ai-detection/.test(url || "");
+    return /\/(research|blueprint|writer|humanizer|review|revision|ai-detection|delivery)\b/.test(url || "");
   }
 
   function apiLlm(url, options) {
@@ -214,7 +214,7 @@
           msg ||
           (isLongRunningStageUrl(url)
             ? "This AI step failed on the server. Please click Retry."
-            : "Server error. Please click Retry.")
+            : ("Server error (" + res.status + "). Please click Retry."))
         );
       }
       throw new Error(msg || ("HTTP " + res.status));

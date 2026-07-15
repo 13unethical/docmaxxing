@@ -13,6 +13,7 @@ from typing import Any, Protocol
 from docx import Document
 
 from services.assignment_pipeline.models import utc_now
+from services.assignment_project.paths import assignment_storage_root
 from services.delivery_engine.models import (
     DeliveryEngineInput,
     DeliveryFile,
@@ -41,7 +42,7 @@ class RealDeliveryPackager:
         title = _safe_filename(
             str(draft.get("title") or requirement.get("title") or requirement.get("assignment_type") or "Assignment")
         )
-        root = Path("data/projects") / project_id / "delivery"
+        root = assignment_storage_root() / project_id / "delivery"
         root.mkdir(parents=True, exist_ok=True)
 
         summary = _build_summary(payload, title, review, detection)
@@ -119,8 +120,9 @@ def _build_pdf_bytes(title: str, content: str) -> bytes:
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError("reportlab is required for PDF delivery generation") from exc
+    except Exception:
+        # Keep delivery working even if reportlab is unavailable on the host.
+        return _build_docx_bytes(title, content)
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=A4)

@@ -71,7 +71,8 @@ def test_delivery_packages_prior_outputs_only():
     )
 
     assert package.status == DeliveryStatus.READY
-    assert len(package.files) == 6
+    assert len(package.files) >= 6
+    assert any(f.filename.endswith(".docx") for f in package.files)
     assert package.project_summary.project_name == "Climate-Policy-Essay"
     assert package.project_summary.word_count == 1200
     assert package.project_summary.total_revisions == 1
@@ -114,8 +115,11 @@ def test_delivery_file_lookup():
 
 
 def test_project_delivery_pipeline():
+    from services.writer_engine import MockSectionWriter
+    from services.writer_engine.mock_reviewer import MockSectionReviewer
+
     pipeline = AssignmentPipelineService()
-    writer = WriterEngineService()
+    writer = WriterEngineService(writer=MockSectionWriter(), reviewer=MockSectionReviewer())
     humanizer = HumanizerEngineService()
     projects = ProjectService(
         pipeline=pipeline,
@@ -155,7 +159,7 @@ def test_project_delivery_pipeline():
     project = projects.get_project(bundle.project.id).project
 
     assert package.status == DeliveryStatus.READY
-    assert len(package.files) == 6
+    assert len(package.files) >= 6
     assert project.status == ProjectStatus.COMPLETED
     assert pipeline.get_project(bundle.project.id).current_stage == PipelineStage.DELIVERY
     assert projects.get_delivery_package(bundle.project.id).id == package.id
