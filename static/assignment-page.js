@@ -168,7 +168,7 @@
     return String((payload && payload.error) || "").trim().toLowerCase() === "project not found";
   }
 
-  var LLM_REQUEST_TIMEOUT_MS = 300000;
+  var LLM_REQUEST_TIMEOUT_MS = 600000;
 
   function isLongRunningStageUrl(url) {
     return /\/research|\/blueprint|\/writer|\/humanizer|\/review|\/revision|\/ai-detection/.test(url || "");
@@ -197,8 +197,11 @@
       if (responseMeansProjectMissing(res, payload)) {
         resetProjectState();
       }
-      if (res.status === 504 || (res.status >= 500 && isLongRunningStageUrl(url))) {
+      if (res.status === 504) {
         throw new Error("This AI step can take a few minutes. Please wait and click Retry.");
+      }
+      if (res.status >= 500 && isLongRunningStageUrl(url)) {
+        throw new Error(payload.error || "This AI step can take a few minutes. Please wait and click Retry.");
       }
       if (res.status >= 500 && /\/research|\/blueprint/.test(url)) {
         throw new Error("AI planning is taking longer than expected. Please wait a moment and click Retry.");

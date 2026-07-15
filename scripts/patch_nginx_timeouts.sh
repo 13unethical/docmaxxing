@@ -2,7 +2,19 @@
 # Patch nginx site config(s) that proxy to gunicorn so LLM stages do not 504 at 60s.
 set -euo pipefail
 
-TIMEOUT_BLOCK=$'        proxy_connect_timeout 300s;\n        proxy_send_timeout 300s;\n        proxy_read_timeout 300s;'
+TIMEOUT_BLOCK=$'        proxy_connect_timeout 600s;\n        proxy_send_timeout 600s;\n        proxy_read_timeout 600s;'
+
+upgrade_existing_timeouts() {
+  local f="$1"
+  if grep -q 'proxy_read_timeout' "$f"; then
+    sed -i -E 's/proxy_connect_timeout [0-9]+s;/proxy_connect_timeout 600s;/g' "$f"
+    sed -i -E 's/proxy_send_timeout [0-9]+s;/proxy_send_timeout 600s;/g' "$f"
+    sed -i -E 's/proxy_read_timeout [0-9]+s;/proxy_read_timeout 600s;/g' "$f"
+    echo "Upgraded nginx timeouts to 600s in $f"
+    return 0
+  fi
+  return 1
+}
 
 config_targets_gunicorn() {
   local f="$1"
@@ -14,7 +26,7 @@ config_targets_gunicorn() {
 patch_file() {
   local f="$1"
   if grep -q 'proxy_read_timeout' "$f"; then
-    echo "nginx already has proxy_read_timeout in $f"
+    upgrade_existing_timeouts "$f"
     return 0
   fi
   if grep -q 'proxy_pass' "$f"; then
@@ -48,4 +60,4 @@ fi
 
 nginx -t
 systemctl reload nginx
-echo "nginx reloaded with 300s proxy timeouts"
+echo "nginx reloaded with 600s proxy timeouts"

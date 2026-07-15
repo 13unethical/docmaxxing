@@ -8,8 +8,8 @@ import multiprocessing
 bind = "127.0.0.1:8000"
 workers = max(2, min(4, multiprocessing.cpu_count()))
 worker_class = "sync"
-timeout = 300
-graceful_timeout = 60
+timeout = 600
+graceful_timeout = 120
 keepalive = 5
 accesslog = "-"
 errorlog = "-"
