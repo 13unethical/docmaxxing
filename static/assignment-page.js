@@ -819,7 +819,11 @@
   }
 
   async function runRevision() {
-    var payload = await apiLlm(projectUrl("/revision"), { method: "POST" });
+    var payload = await apiLlm(projectUrl("/revision"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ review_report: state.review || null }),
+    });
     state.reviewMeta = state.reviewMeta || {};
     state.reviewMeta.issues_fixed = (payload.revision_result && payload.revision_result.issues_addressed)
       ? payload.revision_result.issues_addressed.length

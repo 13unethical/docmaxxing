@@ -1445,10 +1445,14 @@ def api_revision_revise():
 
 @app.post("/api/assignment/projects/<project_id>/revision")
 def api_assignment_project_revision(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    review_report = payload.get("review_report")
+    if review_report is not None and not isinstance(review_report, dict):
+        return jsonify({"error": "review_report must be an object"}), 400
     try:
-        result = project_service.run_revision(project_id)
-    except KeyError:
-        return jsonify({"error": "Project, draft, or review report not found"}), 404
+        result = project_service.run_revision(project_id, review_report=review_report)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"revision_result": result.to_dict()})

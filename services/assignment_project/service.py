@@ -36,6 +36,7 @@ from services.blueprint_engine.service import BlueprintEngineService
 from services.writer_engine.service import WriterEngineService
 from services.writer_engine.models import Draft, WriterSession
 from services.reviewer_engine.service import ReviewerEngineService
+from services.reviewer_engine.models import ReviewReport
 from services.revision_engine.service import RevisionEngineService
 from services.revision_engine.models import MAX_REVISION_ATTEMPTS
 from services.humanizer_engine.service import HumanizerEngineService
@@ -384,6 +385,45 @@ class ProjectService:
             report = DetectionReport.from_dict(snapshot)
             return self.ai_detection.reports.save(report)
         raise KeyError(f"Detection report not found for project: {project_id}")
+
+    def _persist_review_report(self, project_id: str, report: ReviewReport) -> ReviewReport:
+        report.project_id = project_id
+        saved = self.reviewer.store.save(report)
+        project = self.store.require_project(project_id)
+        project.artifacts["review_report_id"] = saved.id
+        project.artifacts["review_report"] = saved.to_dict()
+        self.store.save_project(project)
+        return saved
+
+    def _seed_review_report(
+        self,
+        project_id: str,
+        snapshot: dict[str, Any] | None,
+    ) -> ReviewReport | None:
+        if not isinstance(snapshot, dict) or not snapshot.get("id"):
+            return None
+        report = ReviewReport.from_dict(snapshot)
+        return self._persist_review_report(project_id, report)
+
+    def _load_review_report(
+        self,
+        project_id: str,
+        *,
+        seed: dict[str, Any] | None = None,
+    ) -> ReviewReport:
+        if seed:
+            seeded = self._seed_review_report(project_id, seed)
+            if seeded is not None:
+                return seeded
+        report = self.reviewer.store.get_by_project(project_id)
+        if report is not None:
+            return report
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("review_report")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            report = ReviewReport.from_dict(snapshot)
+            return self.reviewer.store.save(report)
+        raise KeyError(f"Review report not found for project: {project_id}")
 
     def _restore_pipeline_from_bundle(self, project_id: str) -> None:
         """Rebuild in-memory pipeline stages from persisted project artifacts."""
@@ -880,22 +920,22 @@ class ProjectService:
 
         project = self.store.require_project(project_id)
         pass_number = int(project.artifacts.get("review_pass_number", 0)) + 1
-        project.artifacts["review_report_id"] = report.id
         project.artifacts["review_pass_number"] = pass_number
         project.artifacts["last_review_issues_found"] = len(report.issues)
         self.store.save_project(project)
+        saved = self._persist_review_report(project_id, report)
 
         draft = self._load_draft(project_id)
         try:
             self.revision.update_review_score(
                 project_id,
                 version=draft.version,
-                review_score=report.overall_score,
+                review_score=saved.overall_score,
             )
         except KeyError:
             self.revision.register_initial_draft(draft)
 
-        if not report.passed:
+        if not saved.passed:
             history = self.revision.get_history_or_empty(project_id)
             if history.revision_attempts >= MAX_REVISION_ATTEMPTS:
                 self.revision.mark_needs_manual_review(project_id)
@@ -907,25 +947,29 @@ class ProjectService:
             project_id,
             PipelineStage.STYLE_REVIEW,
             StageResult(
-                output={"review_report_id": report.id, "passed": report.passed, "overall_score": report.overall_score},
-                artifacts={"review_report": report.to_dict()},
+                output={
+                    "review_report_id": saved.id,
+                    "passed": saved.passed,
+                    "overall_score": saved.overall_score,
+                },
+                artifacts={"review_report": saved.to_dict()},
             ),
         )
         self._sync_pipeline_state(project_id)
-        return report
+        return saved
 
     def get_review_report(self, project_id: str):
-        return self.reviewer.get_report_by_project(project_id)
+        return self._load_review_report(project_id)
 
-    def run_revision(self, project_id: str):
+    def run_revision(self, project_id: str, *, review_report: dict[str, Any] | None = None):
         bundle = self.store.require_bundle(project_id)
         requirement = bundle.requirement.to_dict()
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
         draft = self._draft_for_review(project_id)
-        review_report = self.reviewer.get_report_by_project(project_id).to_dict()
+        review = self._load_review_report(project_id, seed=review_report).to_dict()
 
-        if review_report.get("passed"):
+        if review.get("passed"):
             raise ValueError("Review report passed — revision is not required")
 
         history = self.revision.get_history_or_empty(project_id)
@@ -941,7 +985,7 @@ class ProjectService:
             research_plan=research_plan,
             blueprint=blueprint,
             draft=draft,
-            review_report=review_report,
+            review_report=review,
             project_id=project_id,
         )
 
@@ -1124,6 +1168,7 @@ class ProjectService:
             self._rehumanize_revised_sections(project_id, high_sections)
         project = self.store.require_project(project_id)
         project.artifacts.pop("review_report_id", None)
+        project.artifacts.pop("review_report", None)
         project.artifacts.pop("detection_report_id", None)
         project.artifacts.pop("detection_report", None)
         project.artifacts.pop("detection_session_id", None)
@@ -1145,7 +1190,7 @@ class ProjectService:
 
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
-        review_report = self.reviewer.get_report_by_project(project_id).to_dict()
+        review_report = self._load_review_report(project_id).to_dict()
         detection_report = self._load_detection_report(project_id).to_dict()
 
         revision_history = self.revision.get_history_or_empty(project_id)
