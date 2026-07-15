@@ -34,6 +34,9 @@ jobs:
             if ! grep -q '^PROJECT_ENGINE_DIR=' .env 2>/dev/null; then
               echo 'PROJECT_ENGINE_DIR=/root/docmaxxing/data/project_engine' >> .env
             fi
+            if ! grep -q '^ASSIGNMENT_LLM=' .env 2>/dev/null; then
+              echo 'ASSIGNMENT_LLM=gemini' >> .env
+            fi
             source venv/bin/activate
             pip install -r requirements.txt
             install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service

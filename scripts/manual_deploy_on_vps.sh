@@ -8,6 +8,9 @@ source venv/bin/activate
 pip install -r requirements.txt
 mkdir -p /root/docmaxxing/data/projects /root/docmaxxing/data/project_engine
 touch /root/docmaxxing/data/assignment-trace.log
+if ! grep -q '^ASSIGNMENT_LLM=' .env 2>/dev/null; then
+  echo 'ASSIGNMENT_LLM=gemini' >> .env
+fi
 install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service
 systemctl daemon-reload
 systemctl enable docmaxxing

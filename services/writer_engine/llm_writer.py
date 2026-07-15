@@ -1,4 +1,4 @@
-"""Section-by-section writer using Claude Sonnet 4 with Gemini fallback."""
+"""Section-by-section writer — Gemini or Claude per ASSIGNMENT_LLM."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 import requests
 
-from services.assignment_llm import assignment_uses_claude
+from services.assignment_llm import assignment_llm_model, assignment_uses_gemini
 from services.gemini_client import generate_json, gemini_enabled, gemini_model
 from services.writer_engine.mock_writer import SectionWriter
 from services.writer_engine.models import WriterEngineInput, WriterSection
@@ -48,23 +48,38 @@ class LLMSectionWriter(SectionWriter):
 
         claude_key = _claude_api_key()
         errors: list[str] = []
-        if claude_key:
-            try:
-                return _generate_with_claude(prompt=prompt, claude_key=claude_key)
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"Claude: {exc}")
 
-        if gemini_enabled() and not assignment_uses_claude():
+        def try_gemini() -> dict[str, Any] | None:
+            if not gemini_enabled():
+                return None
             try:
                 return _generate_with_gemini(prompt=prompt)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"Gemini: {exc}")
+                return None
+
+        def try_claude() -> dict[str, Any] | None:
+            if not claude_key:
+                return None
+            try:
+                return _generate_with_claude(prompt=prompt, claude_key=claude_key)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"Claude: {exc}")
+                return None
+
+        if assignment_uses_gemini():
+            result = try_gemini() or try_claude()
+        else:
+            result = try_claude() or try_gemini()
+
+        if result is not None:
+            return result
 
         if errors:
             raise ValueError("; ".join(errors))
         raise ValueError(
-            "Writer generation unavailable: missing Claude API key and Gemini GOOGLE_API_KEY. "
-            "Set ANTHROPIC_API_KEY (or Claude_API_Key) or GOOGLE_API_KEY."
+            "Writer generation unavailable: set GOOGLE_API_KEY for Gemini or "
+            "ANTHROPIC_API_KEY for Claude."
         )
 
 
