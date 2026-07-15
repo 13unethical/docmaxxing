@@ -41,6 +41,7 @@ from services.revision_engine.models import MAX_REVISION_ATTEMPTS
 from services.humanizer_engine.service import HumanizerEngineService
 from services.humanizer_engine.models import HumanizedDraft, HumanizerSession
 from services.ai_detection_engine.service import AIDetectionEngineService
+from services.ai_detection_engine.models import DetectionReport, DetectionSession
 from services.delivery_engine.service import DeliveryEngineService
 from services.project_engine import ProjectEngine, ProjectLifecycleStatus
 
@@ -324,6 +325,65 @@ class ProjectService:
             draft = HumanizedDraft.from_dict(snapshot)
             return self.humanizer.drafts.save(draft)
         raise KeyError(f"Humanized draft not found for project: {project_id}")
+
+    def _persist_detection_session(self, project_id: str, session: DetectionSession) -> DetectionSession:
+        session.project_id = project_id
+        saved = self.ai_detection.sessions.save(session)
+        project = self.store.require_project(project_id)
+        project.artifacts["detection_session_id"] = saved.id
+        project.artifacts["detection_session"] = saved.to_dict()
+        self.store.save_project(project)
+        return saved
+
+    def _seed_detection_session(
+        self,
+        project_id: str,
+        snapshot: dict[str, Any] | None,
+    ) -> DetectionSession | None:
+        if not isinstance(snapshot, dict) or not snapshot.get("id"):
+            return None
+        session = DetectionSession.from_dict(snapshot)
+        return self._persist_detection_session(project_id, session)
+
+    def _load_detection_session(
+        self,
+        project_id: str,
+        *,
+        seed: dict[str, Any] | None = None,
+    ) -> DetectionSession:
+        if seed:
+            seeded = self._seed_detection_session(project_id, seed)
+            if seeded is not None:
+                return seeded
+        session = self.ai_detection.sessions.get_by_project(project_id)
+        if session is not None:
+            return session
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("detection_session")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            session = DetectionSession.from_dict(snapshot)
+            return self.ai_detection.sessions.save(session)
+        raise KeyError(f"Detection session not found for project: {project_id}")
+
+    def _persist_detection_report(self, project_id: str, report: DetectionReport) -> DetectionReport:
+        report.project_id = project_id
+        saved = self.ai_detection.reports.save(report)
+        project = self.store.require_project(project_id)
+        project.artifacts["detection_report_id"] = saved.id
+        project.artifacts["detection_report"] = saved.to_dict()
+        self.store.save_project(project)
+        return saved
+
+    def _load_detection_report(self, project_id: str) -> DetectionReport:
+        report = self.ai_detection.reports.get_by_project(project_id)
+        if report is not None:
+            return report
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("detection_report")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            report = DetectionReport.from_dict(snapshot)
+            return self.ai_detection.reports.save(report)
+        raise KeyError(f"Detection report not found for project: {project_id}")
 
     def _restore_pipeline_from_bundle(self, project_id: str) -> None:
         """Rebuild in-memory pipeline stages from persisted project artifacts."""
@@ -984,6 +1044,11 @@ class ProjectService:
         return self._load_humanized_draft(project_id)
 
     def start_ai_detection(self, project_id: str):
+        try:
+            return self._load_detection_session(project_id)
+        except KeyError:
+            pass
+
         bundle = self.store.require_bundle(project_id)
         humanized = self._load_humanized_draft(project_id).to_dict()
         humanizer_session = self._load_humanizer_session(project_id)
@@ -992,6 +1057,7 @@ class ProjectService:
         project = self.store.require_project(project_id)
         attempt_number = int(project.artifacts.get("detection_attempt_number", 0)) + 1
         project.artifacts["detection_attempt_number"] = attempt_number
+        self.store.save_project(project)
 
         self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.AI_DETECTION)
@@ -1001,13 +1067,10 @@ class ProjectService:
             project_id=project_id,
             humanizer_paragraph_ids=humanizer_ids,
         )
+        return self._persist_detection_session(project_id, session)
 
-        project.artifacts["detection_session_id"] = session.id
-        self.store.save_project(project)
-        return session
-
-    def advance_ai_detection(self, project_id: str):
-        session = self.ai_detection.get_session_by_project(project_id)
+    def advance_ai_detection(self, project_id: str, *, detection_session: dict[str, Any] | None = None):
+        session = self._load_detection_session(project_id, seed=detection_session)
         humanizer_session = self._load_humanizer_session(project_id)
 
         def rehumanize(paragraph_id: str, _current_text: str) -> str:
@@ -1015,42 +1078,43 @@ class ProjectService:
             self._persist_humanizer_session(project_id, humanizer_session)
             return text
 
-        return self.ai_detection.advance_paragraph(session.id, rehumanize=rehumanize)
+        updated = self.ai_detection.advance_paragraph(session.id, rehumanize=rehumanize)
+        return self._persist_detection_session(project_id, updated)
 
-    def finalize_ai_detection(self, project_id: str):
-        session = self.ai_detection.get_session_by_project(project_id)
+    def finalize_ai_detection(self, project_id: str, *, detection_session: dict[str, Any] | None = None):
+        session = self._load_detection_session(project_id, seed=detection_session)
         if not session.report_id:
             session = self.ai_detection.finalize_session(session.id)
+            self._persist_detection_session(project_id, session)
         report = self.ai_detection.get_report(session.report_id)
 
         self._ensure_pipeline_project(project_id)
+        saved = self._persist_detection_report(project_id, report)
         project = self.store.require_project(project_id)
-        project.artifacts["detection_report_id"] = report.id
-        if report.final_status.value == "needs_manual_review":
+        if saved.final_status.value == "needs_manual_review":
             project.status = ProjectStatus.NEEDS_MANUAL_REVIEW
-        self.store.save_project(project)
+            self.store.save_project(project)
 
         self.pipeline.complete_stage(
             project_id,
             PipelineStage.AI_DETECTION,
             StageResult(
                 output={
-                    "detection_report_id": report.id,
-                    "overall_ai_score": report.overall_ai_score,
-                    "final_status": report.final_status.value,
+                    "detection_report_id": saved.id,
+                    "overall_ai_score": saved.overall_ai_score,
+                    "final_status": saved.final_status.value,
                 },
-                artifacts={"detection_report": report.to_dict()},
+                artifacts={"detection_report": saved.to_dict()},
             ),
         )
         self._sync_pipeline_state(project_id)
-        return report
+        return saved
 
     def prepare_detection_retry(self, project_id: str) -> None:
         """Re-humanize paragraphs that exceeded the AI score threshold, then require a new review."""
-        from services.ai_detection_engine.thresholds import DEFAULT_THRESHOLDS, score_passes
+        from services.ai_detection_engine.thresholds import score_passes
 
         report = self.get_detection_report(project_id)
-        threshold = report.thresholds.acceptable_max if report.thresholds else DEFAULT_THRESHOLDS.acceptable_max
         high_sections = [
             str(item.get("section") or "")
             for item in (report.paragraph_scores or [])
@@ -1061,14 +1125,16 @@ class ProjectService:
         project = self.store.require_project(project_id)
         project.artifacts.pop("review_report_id", None)
         project.artifacts.pop("detection_report_id", None)
+        project.artifacts.pop("detection_report", None)
         project.artifacts.pop("detection_session_id", None)
+        project.artifacts.pop("detection_session", None)
         self.store.save_project(project)
 
     def get_detection_session(self, project_id: str):
-        return self.ai_detection.get_session_by_project(project_id)
+        return self._load_detection_session(project_id)
 
     def get_detection_report(self, project_id: str):
-        return self.ai_detection.get_report_by_project(project_id)
+        return self._load_detection_report(project_id)
 
     def run_delivery(self, project_id: str):
         bundle = self.store.require_bundle(project_id)
@@ -1080,7 +1146,7 @@ class ProjectService:
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
         review_report = self.reviewer.get_report_by_project(project_id).to_dict()
-        detection_report = self.ai_detection.get_report_by_project(project_id).to_dict()
+        detection_report = self._load_detection_report(project_id).to_dict()
 
         revision_history = self.revision.get_history_or_empty(project_id)
         humanizer_session = self._load_humanizer_session(project_id)

@@ -1702,19 +1702,31 @@ def api_assignment_ai_detection_start(project_id: str):
 
 @app.post("/api/assignment/projects/<project_id>/ai-detection/advance")
 def api_assignment_ai_detection_advance(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    detection_session = payload.get("detection_session")
+    if detection_session is not None and not isinstance(detection_session, dict):
+        return jsonify({"error": "detection_session must be an object"}), 400
     try:
-        session = project_service.advance_ai_detection(project_id)
+        session = project_service.advance_ai_detection(project_id, detection_session=detection_session)
     except KeyError:
         return jsonify({"error": "Detection session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 502
     return jsonify(session.to_dict())
 
 
 @app.post("/api/assignment/projects/<project_id>/ai-detection/finalize")
 def api_assignment_ai_detection_finalize(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    detection_session = payload.get("detection_session")
+    if detection_session is not None and not isinstance(detection_session, dict):
+        return jsonify({"error": "detection_session must be an object"}), 400
     try:
-        report = project_service.finalize_ai_detection(project_id)
+        report = project_service.finalize_ai_detection(project_id, detection_session=detection_session)
     except KeyError:
         return jsonify({"error": "Detection session not found"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     return jsonify({"detection_report": report.to_dict()})
 
 

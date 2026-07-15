@@ -717,6 +717,13 @@
     };
   }
 
+  function detectionSessionBody() {
+    return {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ detection_session: state.detectionSession || null }),
+    };
+  }
+
   async function ensureWriterSession() {
     if (state.writerSession && !writerDone()) return state.writerSession;
     try {
@@ -761,7 +768,11 @@
   }
 
   async function ensureDetection() {
-    state.detectionSession = await apiLlm(projectUrl("/ai-detection/start"), { method: "POST" });
+    try {
+      state.detectionSession = await api(projectUrl("/ai-detection"));
+    } catch (err) {
+      state.detectionSession = await apiLlm(projectUrl("/ai-detection/start"), { method: "POST" });
+    }
     var data = await api(projectUrl(""));
     if (data.project && data.project.artifacts && data.project.artifacts.detection_attempt_number) {
       state.detectionAttempt = data.project.artifacts.detection_attempt_number;
@@ -770,7 +781,23 @@
   }
 
   async function advanceDetection() {
-    state.detectionSession = await apiLlm(projectUrl("/ai-detection/advance"), { method: "POST" });
+    try {
+      state.detectionSession = await apiLlm(projectUrl("/ai-detection/advance"), {
+        method: "POST",
+        ...detectionSessionBody(),
+      });
+    } catch (err) {
+      if (String(err.message || "").toLowerCase().indexOf("not found") >= 0) {
+        state.detectionSession = null;
+        await ensureDetection();
+        state.detectionSession = await apiLlm(projectUrl("/ai-detection/advance"), {
+          method: "POST",
+          ...detectionSessionBody(),
+        });
+      } else {
+        throw err;
+      }
+    }
     renderProgress();
   }
 
@@ -903,7 +930,10 @@
       await advanceDetection();
     }
     if (!state.detectionReport) {
-      var payload = await apiLlm(projectUrl("/ai-detection/finalize"), { method: "POST" });
+      var payload = await apiLlm(projectUrl("/ai-detection/finalize"), {
+        method: "POST",
+        ...detectionSessionBody(),
+      });
       state.detectionReport = payload.detection_report || payload;
     }
     renderProgress();

@@ -167,6 +167,44 @@ class DetectionSession:
                 return paragraph
         raise KeyError(f"Paragraph not found: {paragraph_id}")
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DetectionSession:
+        status_raw = str(data.get("status") or DetectionSessionStatus.ACTIVE.value)
+        try:
+            status = DetectionSessionStatus(status_raw)
+        except ValueError:
+            status = DetectionSessionStatus.ACTIVE
+        created_at = None
+        updated_at = None
+        if data.get("created_at"):
+            created_at = datetime.fromisoformat(str(data["created_at"]).replace("Z", "+00:00"))
+        if data.get("updated_at"):
+            updated_at = datetime.fromisoformat(str(data["updated_at"]).replace("Z", "+00:00"))
+        paragraphs = [
+            ParagraphDetection.from_dict(item)
+            for item in (data.get("paragraphs") or [])
+            if isinstance(item, dict)
+        ]
+        return cls(
+            id=str(data.get("id") or ""),
+            project_id=data.get("project_id"),
+            humanized_draft_id=str(data.get("humanized_draft_id") or ""),
+            paragraphs=paragraphs,
+            current_paragraph_id=data.get("current_paragraph_id"),
+            completed_paragraph_ids=list(data.get("completed_paragraph_ids") or []),
+            remaining_paragraph_ids=list(data.get("remaining_paragraph_ids") or []),
+            progress=int(data.get("progress") or 0),
+            paragraphs_completed=int(data.get("paragraphs_completed") or 0),
+            average_ai_score=float(data.get("average_ai_score") or 0),
+            thresholds=DetectionThresholds.from_dict(data.get("thresholds")),
+            status=status,
+            report_id=data.get("report_id"),
+            engine_version=str(data.get("engine_version") or "mock-1.0"),
+            requirement_json=dict(data.get("requirement_json") or {}),
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+
 
 @dataclass
 class DetectionReport:
@@ -200,6 +238,32 @@ class DetectionReport:
             "engine_version": self.engine_version,
             "generated_at": self.generated_at.isoformat() if self.generated_at else None,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DetectionReport:
+        generated_at = None
+        if data.get("generated_at"):
+            generated_at = datetime.fromisoformat(str(data["generated_at"]).replace("Z", "+00:00"))
+        status_raw = str(data.get("final_status") or FinalDetectionStatus.PASSED.value)
+        try:
+            final_status = FinalDetectionStatus(status_raw)
+        except ValueError:
+            final_status = FinalDetectionStatus.PASSED
+        return cls(
+            id=str(data.get("id") or ""),
+            project_id=data.get("project_id"),
+            session_id=str(data.get("session_id") or ""),
+            overall_ai_score=float(data.get("overall_ai_score") or 0),
+            paragraph_scores=list(data.get("paragraph_scores") or []),
+            average_score=float(data.get("average_score") or 0),
+            highest_score=float(data.get("highest_score") or 0),
+            lowest_score=float(data.get("lowest_score") or 0),
+            paragraphs_reprocessed=int(data.get("paragraphs_reprocessed") or 0),
+            final_status=final_status,
+            thresholds=DetectionThresholds.from_dict(data.get("thresholds")),
+            engine_version=str(data.get("engine_version") or "mock-1.0"),
+            generated_at=generated_at,
+        )
 
 
 @dataclass
