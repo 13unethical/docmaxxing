@@ -236,14 +236,22 @@ class ProjectService:
         seed: dict[str, Any] | None = None,
     ) -> WriterSession:
         # Multi-worker safe: pick freshest among disk / memory / client seed.
-        # Never trust a single worker's RAM over a newer disk snapshot.
         mem = self.writer.sessions.get_by_project(project_id)
         disk = None
         try:
             bundle = self.store.require_bundle(project_id)
             snapshot = bundle.project.artifacts.get("writer_session")
             if isinstance(snapshot, dict) and snapshot.get("id"):
-                disk = WriterSession.from_dict(snapshot)
+                try:
+                    disk = WriterSession.from_dict(snapshot)
+                except Exception as exc:  # noqa: BLE001
+                    trace(
+                        "writer.session.disk_corrupt",
+                        project_id=project_id,
+                        error=str(exc),
+                        error_type=type(exc).__name__,
+                    )
+                    disk = None
         except KeyError:
             disk = None
         seeded = None
@@ -313,7 +321,16 @@ class ProjectService:
             bundle = self.store.require_bundle(project_id)
             snapshot = bundle.project.artifacts.get("humanizer_session")
             if isinstance(snapshot, dict) and snapshot.get("id"):
-                disk = HumanizerSession.from_dict(snapshot)
+                try:
+                    disk = HumanizerSession.from_dict(snapshot)
+                except Exception as exc:  # noqa: BLE001
+                    trace(
+                        "humanizer.session.disk_corrupt",
+                        project_id=project_id,
+                        error=str(exc),
+                        error_type=type(exc).__name__,
+                    )
+                    disk = None
         except KeyError:
             disk = None
         seeded = None
@@ -382,7 +399,16 @@ class ProjectService:
             bundle = self.store.require_bundle(project_id)
             snapshot = bundle.project.artifacts.get("detection_session")
             if isinstance(snapshot, dict) and snapshot.get("id"):
-                disk = DetectionSession.from_dict(snapshot)
+                try:
+                    disk = DetectionSession.from_dict(snapshot)
+                except Exception as exc:  # noqa: BLE001
+                    trace(
+                        "detection.session.disk_corrupt",
+                        project_id=project_id,
+                        error=str(exc),
+                        error_type=type(exc).__name__,
+                    )
+                    disk = None
         except KeyError:
             disk = None
         seeded = None
@@ -878,28 +904,41 @@ class ProjectService:
 
     def merge_writer_draft(self, project_id: str, *, writer_session: dict[str, Any] | None = None):
         session = self._load_writer_session(project_id, seed=writer_session)
-        # Finish remaining sections instead of failing the whole production run.
-        max_steps = max(20, len(session.sections) * 4 + 5)
-        for _ in range(max_steps):
-            incomplete = [s for s in session.sections if s.status != WriterSectionStatus.COMPLETED]
-            if not incomplete:
-                if session.status == WriterSessionStatus.ACTIVE:
-                    session.status = WriterSessionStatus.COMPLETED
-                    session.progress = 100
-                    session.current_section_id = None
-                    session = self._persist_writer_session(project_id, session)
-                break
-            if session.status != WriterSessionStatus.ACTIVE:
-                session.status = WriterSessionStatus.ACTIVE
-                session = self._persist_writer_session(project_id, session)
-            session = self.advance_writer(project_id, writer_session=session.to_dict())
+
+        # Repair inconsistent "completed" flags without starting new LLM calls here.
+        # Long Claude writes must stay on /writer/advance — merge must be fast.
+        changed = False
+        for section in session.sections:
+            if (
+                section.status != WriterSectionStatus.COMPLETED
+                and str(section.generated_text or "").strip()
+            ):
+                section.status = WriterSectionStatus.COMPLETED
+                section.completed_at = section.completed_at or utc_now()
+                if section.id not in session.completed_section_ids:
+                    session.completed_section_ids.append(section.id)
+                if section.id in session.remaining_section_ids:
+                    session.remaining_section_ids.remove(section.id)
+                changed = True
 
         incomplete = [s for s in session.sections if s.status != WriterSectionStatus.COMPLETED]
         if incomplete:
+            if session.status != WriterSessionStatus.ACTIVE:
+                session.status = WriterSessionStatus.ACTIVE
+                changed = True
+            if changed:
+                self._persist_writer_session(project_id, session)
+            titles = ", ".join(s.title for s in incomplete[:5])
             raise ValueError(
-                "Writing could not finish all sections before merge "
-                f"({len(incomplete)} remaining). Please retry."
+                "Writing is still in progress "
+                f"({len(incomplete)} sections remaining: {titles}). "
+                "Continue writing before merge."
             )
+
+        session.status = WriterSessionStatus.COMPLETED
+        session.progress = 100
+        session.current_section_id = None
+        session = self._persist_writer_session(project_id, session)
 
         bundle = self.store.require_bundle(project_id)
         title = bundle.project.title or bundle.requirement.title or "Assignment Draft"

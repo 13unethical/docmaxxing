@@ -191,22 +191,33 @@
       fetchOpts.signal = controller.signal;
       setTimeout(function () { controller.abort(); }, timeoutMs);
     }
-    var res = await fetch(url, fetchOpts);
+    var res;
+    try {
+      res = await fetch(url, fetchOpts);
+    } catch (err) {
+      if (err && err.name === "AbortError") {
+        throw new Error("This AI step timed out. Please click Retry.");
+      }
+      throw new Error("Network error. Please check your connection and retry.");
+    }
     var payload = await res.json().catch(function () { return {}; });
     if (!res.ok) {
       if (responseMeansProjectMissing(res, payload)) {
         resetProjectState();
       }
+      var msg = payload.error || "";
       if (res.status === 504) {
-        throw new Error("This AI step can take a few minutes. Please wait and click Retry.");
+        throw new Error(msg || "This AI step can take a few minutes. Please wait and click Retry.");
       }
-      if (res.status >= 500 && isLongRunningStageUrl(url)) {
-        throw new Error(payload.error || "This AI step can take a few minutes. Please wait and click Retry.");
+      if (res.status >= 500) {
+        throw new Error(
+          msg ||
+          (isLongRunningStageUrl(url)
+            ? "This AI step failed on the server. Please click Retry."
+            : "Server error. Please click Retry.")
+        );
       }
-      if (res.status >= 500 && /\/research|\/blueprint/.test(url)) {
-        throw new Error("AI planning is taking longer than expected. Please wait a moment and click Retry.");
-      }
-      throw new Error(payload.error || ("HTTP " + res.status));
+      throw new Error(msg || ("HTTP " + res.status));
     }
     return payload;
   }
@@ -765,12 +776,22 @@
       }
     }
     renderProgress();
-    if (state.writerSession.status === "completed" && writerSectionsComplete(state.writerSession)) {
-      state.draft = await apiLlm(projectUrl("/writer/merge"), {
-        method: "POST",
-        ...writerSessionBody(),
-      });
-    } else if (state.writerSession.status === "completed" && !writerSectionsComplete(state.writerSession)) {
+    if (writerSectionsComplete(state.writerSession)) {
+      try {
+        state.draft = await apiLlm(projectUrl("/writer/merge"), {
+          method: "POST",
+          ...writerSessionBody(),
+        });
+        state.writerSession.status = "merged";
+      } catch (err) {
+        var mergeMsg = String(err && err.message || "");
+        if (/still in progress|sections remaining|before merge/i.test(mergeMsg)) {
+          if (state.writerSession) state.writerSession.status = "active";
+          return;
+        }
+        throw err;
+      }
+    } else if (state.writerSession.status === "completed") {
       // Inconsistent snapshot — keep advancing instead of merging early.
       state.writerSession.status = "active";
     }

@@ -875,6 +875,14 @@ def api_assignment_writer_revise(project_id: str):
         return jsonify({"error": "Writer session not found"}), 404
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.writer.revise.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Writing revision failed. Please try again."}), 502
     return jsonify(session.to_dict())
 
 
@@ -920,6 +928,14 @@ def api_assignment_writer_get(project_id: str):
         session = project_service.get_writer_session(project_id)
     except KeyError:
         return jsonify({"error": "Writer session not found"}), 404
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.writer.get.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Failed to load writer session. Please retry."}), 500
     return jsonify(session.to_dict())
 
 
@@ -1631,6 +1647,14 @@ def api_assignment_humanizer_get(project_id: str):
         session = project_service.get_humanizer_session(project_id)
     except KeyError:
         return jsonify({"error": "Humanizer session not found"}), 404
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.humanizer.get.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": "Failed to load humanizer session. Please retry."}), 500
     return jsonify(session.to_dict())
 
 
