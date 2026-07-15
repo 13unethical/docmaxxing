@@ -33,38 +33,41 @@ class BlueprintAnalyzer:
         normalized = self._generate_blueprint_json(req=req, plan=plan)
 
         citation_style = str(req.get("citation_style") or req.get("citationStyle") or "APA 7")
+        # Prefer the brief's word_count; never invent a fixed essay length.
         total_words = int(
             req.get("word_count")
             or req.get("estimatedWordCount")
             or _sum_section_words(plan)
-            or 2500
+            or 0
         )
+        if total_words <= 0:
+            total_words = max(400, _sum_section_words(plan) or 800)
         tone = str(normalized.get("academic_tone") or plan.get("writing_tone") or plan.get("writingTone") or "Formal academic prose")
         theories = list(plan.get("required_theories") or plan.get("requiredTheories") or [])
-        section_specs = [
-            {"title": title, "purpose": normalized["section_purposes"].get(title, _default_objective(title))}
-            for title in normalized["document_structure"]
-        ]
+        section_specs = list(plan.get("section_list") or plan.get("sectionList") or [])
         if not section_specs:
-            section_specs = list(plan.get("section_list") or plan.get("sectionList") or [])
+            section_specs = [
+                {"title": title, "purpose": normalized["section_purposes"].get(title, _default_objective(title))}
+                for title in normalized["document_structure"]
+            ]
 
         sections = [_build_section(spec, idx, theories, citation_style, total_words) for idx, spec in enumerate(section_specs)]
         if not sections:
             sections = _default_sections(total_words, theories, citation_style)
-        else:
-            for i, section in enumerate(sections):
-                section.transition_from_previous = _transition_from(
-                    sections[i - 1].title if i > 0 else None, section.title
-                )
-                section.transition_to_next = _transition_to(
-                    section.title, sections[i + 1].title if i + 1 < len(sections) else None
-                )
+        sections = _apply_total_word_budget(sections, total_words)
+        for i, section in enumerate(sections):
+            section.transition_from_previous = _transition_from(
+                sections[i - 1].title if i > 0 else None, section.title
+            )
+            section.transition_to_next = _transition_to(
+                section.title, sections[i + 1].title if i + 1 < len(sections) else None
+            )
 
         word_distribution = [
             WordDistributionEntry(title=section.title, estimated_words=section.estimated_words) for section in sections
         ]
-        writing_queue = [section.title for section in sections if section.title.lower() != "references"]
-        writing_order = [section.id for section in sections if section.title.lower() != "references"]
+        writing_queue = [section.title for section in sections if "reference" not in section.title.lower()]
+        writing_order = [section.id for section in sections if "reference" not in section.title.lower()]
 
         critical_locations = [s.title for s in sections if _is_critical_section(s.title)]
         comparison_locations = [s.title for s in sections if _is_comparison_section(s.title)]
@@ -168,7 +171,7 @@ def _build_section(
 ) -> BlueprintSection:
     title = str(spec.get("title") or f"Section {index + 1}")
     objective = str(spec.get("purpose") or spec.get("objective") or _default_objective(title))
-    words = int(spec.get("estimated_words") or spec.get("estimatedWords") or max(120, total_words // 5))
+    words = int(spec.get("estimated_words") or spec.get("estimatedWords") or max(50, total_words // 5))
     key_points = _key_points_for(title)
 
     return BlueprintSection(
@@ -221,6 +224,31 @@ def _default_sections(total_words: int, theories: list[str], citation_style: str
         section.transition_to_next = _transition_to(
             section.title, sections[i + 1].title if i + 1 < len(sections) else None
         )
+    return sections
+
+
+def _apply_total_word_budget(sections: list[BlueprintSection], total_words: int) -> list[BlueprintSection]:
+    writable = [section for section in sections if "reference" not in section.title.lower()]
+    if not writable or total_words <= 0:
+        return sections
+    current = sum(max(section.estimated_words, 0) for section in writable)
+    if current <= 0:
+        base = total_words // len(writable)
+        for section in writable:
+            section.estimated_words = base
+    else:
+        allocated = 0
+        for section in writable[:-1]:
+            words = max(40, int(total_words * (section.estimated_words / current)))
+            section.estimated_words = words
+            allocated += words
+        writable[-1].estimated_words = max(40, total_words - allocated)
+    for section in sections:
+        if "reference" in section.title.lower():
+            section.estimated_words = 0
+            section.citation_target = 0
+        else:
+            section.citation_target = _citation_target(section.title, section.estimated_words)
     return sections
 
 
@@ -473,7 +501,7 @@ def _normalize_blueprint_json(raw: dict[str, Any], *, req: dict[str, Any], plan:
     if not target_distribution and structure:
         per_section = max(
             80,
-            int(req.get("word_count") or req.get("estimatedWordCount") or _sum_section_words(plan) or 2500)
+            int(req.get("word_count") or req.get("estimatedWordCount") or _sum_section_words(plan) or 800)
             // max(len(structure), 1),
         )
         target_distribution = [

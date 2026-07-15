@@ -108,6 +108,7 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "requirement_json": payload.requirement_json,
         "revision": revision,
     }
+    global_word_count = payload.requirement_json.get("word_count") or payload.blueprint.get("total_target_words")
     return (
         "You are an academic section writer.\n"
         "STRICT RULES:\n"
@@ -117,9 +118,12 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "4) Return ONE strict JSON object only. No markdown. No code fences. No commentary.\n"
         "5) Required keys: title, purpose, target_words, draft, citations_used, warnings, generation_time, model_used.\n"
         "6) The draft field must be a single JSON string with escaped quotes (\\\") and \\n for line breaks.\n"
-        "7) citations_used must be a list of citation placeholders like [Author, Year] used in the draft.\n"
-        "8) warnings should flag any requirement conflict or missing input.\n"
-        "9) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n\n"
+        f"7) Hard word budget: this section must be about {section.estimated_words} words, "
+        f"and the full assignment target is {global_word_count or 'the provided blueprint total'} words. "
+        "Do not exceed the section target.\n"
+        "8) citations_used must be a list of citation placeholders like [Author, Year] used in the draft.\n"
+        "9) warnings should flag any requirement conflict or missing input.\n"
+        "10) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n\n"
         f"INPUT:\n{json.dumps(blueprint_guard, ensure_ascii=False)}"
     )
 
@@ -247,18 +251,36 @@ def _normalize_section_result(data: dict[str, Any]) -> dict[str, Any]:
         target_words = int(data.get("target_words") or 0)
     except (TypeError, ValueError):
         target_words = 0
-    citations = data.get("citations_used")
     warnings = data.get("warnings")
+    draft, trim_warning = _limit_draft_words(draft, target_words)
+    citations = data.get("citations_used")
+    normalized_warnings = [str(x) for x in warnings] if isinstance(warnings, list) else []
+    if trim_warning:
+        normalized_warnings.append(trim_warning)
     normalized = {
         "title": title,
         "purpose": purpose,
         "target_words": target_words,
         "draft": draft,
         "citations_used": [str(x) for x in citations] if isinstance(citations, list) else [],
-        "warnings": [str(x) for x in warnings] if isinstance(warnings, list) else [],
+        "warnings": normalized_warnings,
         "generation_time": float(data.get("generation_time") or 0.0),
         "model_used": str(data.get("model_used") or ""),
     }
     if not normalized["title"] or not normalized["draft"]:
         raise ValueError("Section JSON missing required fields: title/draft")
     return normalized
+
+
+def _limit_draft_words(draft: str, target_words: int) -> tuple[str, str | None]:
+    if target_words <= 0:
+        return draft, None
+    words = draft.split()
+    max_words = max(target_words, int(target_words * 1.1) + 5)
+    if len(words) <= max_words:
+        return draft, None
+    trimmed_words = words[:max_words]
+    trimmed = " ".join(trimmed_words).rstrip(" ,;:")
+    if trimmed and trimmed[-1] not in ".!?":
+        trimmed += "."
+    return trimmed, f"Trimmed section from {len(words)} to {len(trimmed_words)} words to respect assignment limit"

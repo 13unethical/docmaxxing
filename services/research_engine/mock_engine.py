@@ -33,10 +33,15 @@ class ResearchAnalyzer:
 
         assignment_type = str(req.get("assignment_type") or req.get("assignmentType") or "Essay")
         title = str(req.get("title") or _topic_from_documents(docs) or "Academic Assignment")
-        word_count = int(req.get("word_count") or req.get("estimatedWordCount") or 2500)
+        word_count = int(req.get("word_count") or req.get("estimatedWordCount") or 1200)
         difficulty = str(req.get("difficulty") or req.get("estimatedDifficulty") or "★★★★☆")
         min_sources = int(req.get("minimum_sources") or req.get("minimumReferences") or 12)
-        section_list = _build_sections(normalized["suggested_sections"], assignment_type, word_count)
+        required_sections = [
+            str(section)
+            for section in (req.get("required_sections") or req.get("requiredSections") or [])
+            if str(section).strip()
+        ]
+        section_list = _build_sections(required_sections or normalized["suggested_sections"], assignment_type, word_count)
         return ResearchPlan(
             id=str(uuid.uuid4()),
             project_id=payload.project_id,
@@ -85,6 +90,8 @@ class ResearchAnalyzer:
             "search_queries,recommended_journals,recommended_statistics,suggested_sections,terminology,"
             "writing_risks,research_depth. "
             "Every listed field except research_question and research_depth must be a non-empty array of strings. "
+            "Use the assignment's required_sections and word_count exactly when present. "
+            "Do not invent an essay topic or academic structure that is not in the brief. "
             "Do not return objects for terminology or plain text for recommended_statistics; use string arrays."
         )
         docs_text = "\n\n".join(
@@ -94,6 +101,9 @@ class ResearchAnalyzer:
         user_prompt = (
             f"Requirement JSON:\n{json.dumps(req, ensure_ascii=False)}\n\n"
             f"Parsed documents:\n{docs_text}\n\n"
+            "Plan research for THIS assignment only. "
+            "If word_count is set, treat it as the hard total length (do not plan a longer essay). "
+            "If required_sections is set, use those titles for suggested_sections — do not invent others. "
             "Return only valid JSON."
         )
         last_error = "LLM returned invalid research JSON"
@@ -218,23 +228,32 @@ def _weights_for_required(
     required_sections: list[str],
     word_count: int,
 ) -> list[tuple[str, str, str, int]]:
-    body_sections = [s for s in required_sections if s.lower() != "references"]
-    ref_words = 0 if "references" not in [s.lower() for s in required_sections] else max(0, int(word_count * 0.05))
+    cleaned = [_section_title(section) for section in required_sections if _section_title(section)]
+    body_sections = [s for s in cleaned if "reference" not in s.lower()]
+    ref_words = 0
     allocatable = max(word_count - ref_words, 0)
     per_section = int(allocatable / max(len(body_sections), 1))
     rows: list[tuple[str, str, str, int]] = []
-    for section in required_sections:
-        if section.lower() == "references":
-            rows.append((section, "Reference list.", "Demonstrate scholarly grounding.", ref_words or 120))
-        elif section.lower() == "introduction":
-            rows.append((section, "Opening section.", "Introduce the topic and research question.", min(220, per_section)))
-        elif "conclusion" in section.lower():
-            rows.append((section, "Closing section.", "Answer the research question.", min(220, per_section)))
-        elif "analysis" in section.lower() or "review" in section.lower():
-            rows.append((section, "Core analytical section.", "Compare theories and evaluate evidence.", per_section + 120))
+    for section in cleaned:
+        lower = section.lower()
+        if "reference" in lower:
+            rows.append((section, "Reference list.", "Demonstrate scholarly grounding.", ref_words))
+        elif lower == "introduction" or lower.startswith("introduction"):
+            rows.append((section, "Opening section.", "Introduce the topic and thesis.", per_section))
+        elif "conclusion" in lower or "concluding" in lower:
+            rows.append((section, "Closing section.", "Restate thesis and main idea.", per_section))
+        elif "body" in lower or "analysis" in lower or "review" in lower:
+            rows.append((section, "Core paragraph.", "Summarise or evaluate according to the brief.", per_section))
         else:
             rows.append((section, "Supporting section.", "Develop a key part of the argument.", per_section))
     return rows
+
+
+def _section_title(section: str) -> str:
+    text = str(section).strip()
+    if ":" in text:
+        return text.split(":", 1)[0].strip()
+    return text
 
 
 def _structure_summary(sections: list[ResearchSection]) -> str:

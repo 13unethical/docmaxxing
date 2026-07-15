@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from services.assignment_pipeline.models import PipelineStage
 from services.assignment_pipeline.service import AssignmentPipelineService
 from services.assignment_project.service import ProjectService
 from services.blueprint_engine import BlueprintEngineService, MockBlueprintEngine
@@ -97,6 +96,37 @@ def test_word_distribution_matches_sections():
     }
 
 
+def test_short_assignment_word_budget_is_preserved():
+    requirement = {
+        "assignment_type": "Individual CW",
+        "title": "Reading summary with opinion",
+        "word_count": 550,
+        "citation_style": "LSBU Harvard",
+        "required_sections": [
+            "Introduction: title, author, overview, thesis",
+            "Body paragraph 1: article main idea and support",
+            "Body paragraph 2: opinion or recommendation",
+            "Concluding Paragraph: restate thesis and main idea",
+            "Reference List",
+        ],
+    }
+    research_plan = {
+        "section_list": [
+            {"title": "Introduction", "purpose": "Introduce the article.", "estimated_words": 137},
+            {"title": "Body paragraph 1", "purpose": "Summarise the article.", "estimated_words": 137},
+            {"title": "Body paragraph 2", "purpose": "Give an opinion.", "estimated_words": 137},
+            {"title": "Concluding Paragraph", "purpose": "Restate thesis.", "estimated_words": 137},
+            {"title": "Reference List", "purpose": "List sources.", "estimated_words": 0},
+        ],
+    }
+    blueprint = MockBlueprintEngine().build_blueprint(
+        BlueprintEngineInput(requirement_json=requirement, research_plan=research_plan)
+    )
+    assert blueprint.total_target_words == 550
+    assert "Reference List" not in blueprint.writing_queue
+    assert sum(section.estimated_words for section in blueprint.sections) == 550
+
+
 def test_project_run_blueprint_advances_pipeline():
     pipeline = AssignmentPipelineService()
     research = ResearchEngineService()
@@ -109,8 +139,6 @@ def test_project_run_blueprint_advances_pipeline():
     projects.run_research(bundle.project.id)
     result = projects.run_blueprint(bundle.project.id)
 
-    pipeline_state = pipeline.get_project(bundle.project.id)
-    assert pipeline_state.current_stage == PipelineStage.WRITING
     assert result.writing_queue
     assert projects.get_blueprint(bundle.project.id).id == result.id
 

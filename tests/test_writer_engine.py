@@ -175,3 +175,16 @@ def test_parse_section_json_recovers_unescaped_draft_quotes():
     assert 'hello' in parsed["draft"]
     assert parsed["citations_used"] == ["[Smith, 2021]"]
     assert any("Recovered malformed" in w for w in parsed["warnings"])
+
+
+def test_parse_section_json_trims_overlong_draft_to_target_words():
+    from services.writer_engine.llm_writer import _parse_section_json
+
+    draft = " ".join(f"word{i}" for i in range(200))
+    parsed = _parse_section_json(
+        '{"title":"Body","purpose":"P","target_words":80,'
+        f'"draft":"{draft}","citations_used":[],"warnings":[],'
+        '"generation_time":0,"model_used":"x"}'
+    )
+    assert len(parsed["draft"].split()) <= 93
+    assert any("Trimmed section" in warning for warning in parsed["warnings"])
