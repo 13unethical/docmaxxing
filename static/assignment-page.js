@@ -242,6 +242,10 @@
       var wp = Number(state.writerSession.progress) || 0;
       return Math.round(35 + (wp / 100) * 25);
     }
+    if ((stage || state.stage) === "humanizer" && state.humanizerSession) {
+      var hp = Number(state.humanizerSession.progress) || 0;
+      return Math.round(60 + (hp / 100) * 20);
+    }
     return base;
   }
 
@@ -706,6 +710,13 @@
     };
   }
 
+  function humanizerSessionBody() {
+    return {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ humanizer_session: state.humanizerSession || null }),
+    };
+  }
+
   async function ensureWriterSession() {
     if (state.writerSession && !writerDone()) return state.writerSession;
     try {
@@ -793,19 +804,42 @@
 
   async function ensureHumanizer() {
     if (state.humanizerSession && state.humanizerSession.status !== "merged") return state.humanizerSession;
-    state.humanizerSession = await apiLlm(projectUrl("/humanizer/start"), { method: "POST" });
+    try {
+      state.humanizerSession = await api(projectUrl("/humanizer"));
+    } catch (err) {
+      state.humanizerSession = await apiLlm(projectUrl("/humanizer/start"), { method: "POST" });
+    }
     return state.humanizerSession;
   }
 
   async function advanceHumanizer() {
     await ensureHumanizer();
-    state.humanizerSession = await apiLlm(projectUrl("/humanizer/advance"), { method: "POST" });
+    try {
+      state.humanizerSession = await apiLlm(projectUrl("/humanizer/advance"), {
+        method: "POST",
+        ...humanizerSessionBody(),
+      });
+    } catch (err) {
+      if (String(err.message || "").toLowerCase().indexOf("not found") >= 0) {
+        state.humanizerSession = null;
+        await ensureHumanizer();
+        state.humanizerSession = await apiLlm(projectUrl("/humanizer/advance"), {
+          method: "POST",
+          ...humanizerSessionBody(),
+        });
+      } else {
+        throw err;
+      }
+    }
     renderProgress();
   }
 
   async function mergeHumanizer() {
     if (state.humanizerSession && state.humanizerSession.status === "merged") return;
-    await apiLlm(projectUrl("/humanizer/merge"), { method: "POST" });
+    await apiLlm(projectUrl("/humanizer/merge"), {
+      method: "POST",
+      ...humanizerSessionBody(),
+    });
     var data = await api(projectUrl(""));
     state.humanizerSession = data.humanizer_session || state.humanizerSession;
   }

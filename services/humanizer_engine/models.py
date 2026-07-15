@@ -167,6 +167,44 @@ class HumanizerSession:
                 return paragraph
         raise KeyError(f"Paragraph not found: {paragraph_id}")
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> HumanizerSession:
+        status_raw = str(data.get("status") or HumanizerSessionStatus.ACTIVE.value)
+        try:
+            status = HumanizerSessionStatus(status_raw)
+        except ValueError:
+            status = HumanizerSessionStatus.ACTIVE
+        created_at = None
+        updated_at = None
+        if data.get("created_at"):
+            created_at = datetime.fromisoformat(str(data["created_at"]).replace("Z", "+00:00"))
+        if data.get("updated_at"):
+            updated_at = datetime.fromisoformat(str(data["updated_at"]).replace("Z", "+00:00"))
+        paragraphs = [
+            HumanizerParagraph.from_dict(item) for item in (data.get("paragraphs") or []) if isinstance(item, dict)
+        ]
+        return cls(
+            id=str(data.get("id") or ""),
+            project_id=data.get("project_id"),
+            source_draft_id=str(data.get("source_draft_id") or ""),
+            source_draft_version=int(data.get("source_draft_version") or 0),
+            paragraphs=paragraphs,
+            current_paragraph_id=data.get("current_paragraph_id"),
+            completed_paragraph_ids=list(data.get("completed_paragraph_ids") or []),
+            remaining_paragraph_ids=list(data.get("remaining_paragraph_ids") or []),
+            progress=int(data.get("progress") or 0),
+            paragraphs_processed=int(data.get("paragraphs_processed") or 0),
+            average_ai_reduction=float(data.get("average_ai_reduction") or 0),
+            estimated_remaining_time=str(data.get("estimated_remaining_time") or "0 minutes"),
+            status=status,
+            humanized_draft_id=data.get("humanized_draft_id"),
+            engine_version=str(data.get("engine_version") or "mock-1.0"),
+            requirement_json=dict(data.get("requirement_json") or {}),
+            blueprint=dict(data.get("blueprint") or {}),
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+
 
 @dataclass
 class HumanizedDraft:

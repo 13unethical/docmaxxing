@@ -1593,8 +1593,12 @@ def api_assignment_humanizer_start(project_id: str):
 
 @app.post("/api/assignment/projects/<project_id>/humanizer/advance")
 def api_assignment_humanizer_advance(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    humanizer_session = payload.get("humanizer_session")
+    if humanizer_session is not None and not isinstance(humanizer_session, dict):
+        return jsonify({"error": "humanizer_session must be an object"}), 400
     try:
-        session = project_service.advance_humanizer(project_id)
+        session = project_service.advance_humanizer(project_id, humanizer_session=humanizer_session)
     except KeyError:
         return jsonify({"error": "Humanizer session not found"}), 404
     except ValueError as exc:
@@ -1604,8 +1608,12 @@ def api_assignment_humanizer_advance(project_id: str):
 
 @app.post("/api/assignment/projects/<project_id>/humanizer/merge")
 def api_assignment_humanizer_merge(project_id: str):
+    payload = request.get_json(silent=True) or {}
+    humanizer_session = payload.get("humanizer_session")
+    if humanizer_session is not None and not isinstance(humanizer_session, dict):
+        return jsonify({"error": "humanizer_session must be an object"}), 400
     try:
-        draft = project_service.merge_humanized_draft(project_id)
+        draft = project_service.merge_humanized_draft(project_id, humanizer_session=humanizer_session)
     except KeyError:
         return jsonify({"error": "Humanizer session not found"}), 404
     except ValueError as exc:

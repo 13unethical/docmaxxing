@@ -39,6 +39,7 @@ from services.reviewer_engine.service import ReviewerEngineService
 from services.revision_engine.service import RevisionEngineService
 from services.revision_engine.models import MAX_REVISION_ATTEMPTS
 from services.humanizer_engine.service import HumanizerEngineService
+from services.humanizer_engine.models import HumanizedDraft, HumanizerSession
 from services.ai_detection_engine.service import AIDetectionEngineService
 from services.delivery_engine.service import DeliveryEngineService
 from services.project_engine import ProjectEngine, ProjectLifecycleStatus
@@ -264,6 +265,65 @@ class ProjectService:
             draft = Draft.from_dict(snapshot)
             return self.writer.drafts.save(draft)
         raise KeyError(f"Draft not found for project: {project_id}")
+
+    def _persist_humanizer_session(self, project_id: str, session: HumanizerSession) -> HumanizerSession:
+        session.project_id = project_id
+        saved = self.humanizer.sessions.save(session)
+        project = self.store.require_project(project_id)
+        project.artifacts["humanizer_session_id"] = saved.id
+        project.artifacts["humanizer_session"] = saved.to_dict()
+        self.store.save_project(project)
+        return saved
+
+    def _seed_humanizer_session(
+        self,
+        project_id: str,
+        snapshot: dict[str, Any] | None,
+    ) -> HumanizerSession | None:
+        if not isinstance(snapshot, dict) or not snapshot.get("id"):
+            return None
+        session = HumanizerSession.from_dict(snapshot)
+        return self._persist_humanizer_session(project_id, session)
+
+    def _load_humanizer_session(
+        self,
+        project_id: str,
+        *,
+        seed: dict[str, Any] | None = None,
+    ) -> HumanizerSession:
+        if seed:
+            seeded = self._seed_humanizer_session(project_id, seed)
+            if seeded is not None:
+                return seeded
+        session = self.humanizer.sessions.get_by_project(project_id)
+        if session is not None:
+            return session
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("humanizer_session")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            session = HumanizerSession.from_dict(snapshot)
+            return self.humanizer.sessions.save(session)
+        raise KeyError(f"Humanizer session not found for project: {project_id}")
+
+    def _persist_humanized_draft(self, project_id: str, draft: HumanizedDraft) -> HumanizedDraft:
+        draft.project_id = project_id
+        saved = self.humanizer.drafts.save(draft)
+        project = self.store.require_project(project_id)
+        project.artifacts["humanized_draft_id"] = saved.id
+        project.artifacts["humanized_draft"] = saved.to_dict()
+        self.store.save_project(project)
+        return saved
+
+    def _load_humanized_draft(self, project_id: str) -> HumanizedDraft:
+        draft = self.humanizer.drafts.get_by_project(project_id)
+        if draft is not None:
+            return draft
+        bundle = self.store.require_bundle(project_id)
+        snapshot = bundle.project.artifacts.get("humanized_draft")
+        if isinstance(snapshot, dict) and snapshot.get("id"):
+            draft = HumanizedDraft.from_dict(snapshot)
+            return self.humanizer.drafts.save(draft)
+        raise KeyError(f"Humanized draft not found for project: {project_id}")
 
     def _restore_pipeline_from_bundle(self, project_id: str) -> None:
         """Rebuild in-memory pipeline stages from persisted project artifacts."""
@@ -724,14 +784,14 @@ class ProjectService:
 
     def _draft_for_review(self, project_id: str) -> dict:
         try:
-            return self.humanizer.get_humanized_draft_by_project(project_id).to_dict()
+            return self._load_humanized_draft(project_id).to_dict()
         except KeyError:
             return self._load_draft(project_id).to_dict()
 
     def _rehumanize_revised_sections(self, project_id: str, section_names: list[str]) -> None:
         if not section_names:
             return
-        session = self.humanizer.get_session_by_project(project_id)
+        session = self._load_humanizer_session(project_id)
         draft = self._load_draft(project_id)
         blueprint = self._load_blueprint(project_id).to_dict()
         self.humanizer.refresh_revised_sections(
@@ -865,6 +925,11 @@ class ProjectService:
         return draft
 
     def start_humanizer(self, project_id: str):
+        try:
+            return self._load_humanizer_session(project_id)
+        except KeyError:
+            pass
+
         bundle = self.store.require_bundle(project_id)
         draft = self._draft_for_review(project_id)
         blueprint = self._load_blueprint(project_id).to_dict()
@@ -879,53 +944,49 @@ class ProjectService:
             blueprint=blueprint,
             project_id=project_id,
         )
+        return self._persist_humanizer_session(project_id, session)
 
-        project = self.store.require_project(project_id)
-        project.artifacts["humanizer_session_id"] = session.id
-        self.store.save_project(project)
-        return session
+    def advance_humanizer(self, project_id: str, *, humanizer_session: dict[str, Any] | None = None):
+        session = self._load_humanizer_session(project_id, seed=humanizer_session)
+        updated = self.humanizer.advance_paragraph(session.id)
+        return self._persist_humanizer_session(project_id, updated)
 
-    def advance_humanizer(self, project_id: str):
-        session = self.humanizer.get_session_by_project(project_id)
-        return self.humanizer.advance_paragraph(session.id)
-
-    def merge_humanized_draft(self, project_id: str):
-        session = self.humanizer.get_session_by_project(project_id)
+    def merge_humanized_draft(self, project_id: str, *, humanizer_session: dict[str, Any] | None = None):
+        session = self._load_humanizer_session(project_id, seed=humanizer_session)
         bundle = self.store.require_bundle(project_id)
         title = bundle.project.title or bundle.requirement.title or "Humanized Assignment Draft"
         humanized = self.humanizer.merge_humanized_draft(session.id, title=title)
 
         self._ensure_pipeline_project(project_id)
-        project = self.store.require_project(project_id)
-        project.artifacts["humanized_draft_id"] = humanized.id
-        self.store.save_project(project)
+        self._persist_humanizer_session(project_id, session)
+        saved = self._persist_humanized_draft(project_id, humanized)
 
         self.pipeline.complete_stage(
             project_id,
             PipelineStage.HUMANIZATION,
             StageResult(
                 output={
-                    "humanized_draft_id": humanized.id,
-                    "version": humanized.version,
-                    "paragraphs_processed": humanized.paragraphs_processed,
-                    "average_ai_reduction": humanized.average_ai_reduction,
+                    "humanized_draft_id": saved.id,
+                    "version": saved.version,
+                    "paragraphs_processed": saved.paragraphs_processed,
+                    "average_ai_reduction": saved.average_ai_reduction,
                 },
-                artifacts={"humanized_draft": humanized.to_dict()},
+                artifacts={"humanized_draft": saved.to_dict()},
             ),
         )
         self._sync_pipeline_state(project_id)
-        return humanized
+        return saved
 
     def get_humanizer_session(self, project_id: str):
-        return self.humanizer.get_session_by_project(project_id)
+        return self._load_humanizer_session(project_id)
 
     def get_humanized_draft(self, project_id: str):
-        return self.humanizer.get_humanized_draft_by_project(project_id)
+        return self._load_humanized_draft(project_id)
 
     def start_ai_detection(self, project_id: str):
         bundle = self.store.require_bundle(project_id)
-        humanized = self.humanizer.get_humanized_draft_by_project(project_id).to_dict()
-        humanizer_session = self.humanizer.get_session_by_project(project_id)
+        humanized = self._load_humanized_draft(project_id).to_dict()
+        humanizer_session = self._load_humanizer_session(project_id)
         humanizer_ids = [p.paragraph_id for p in humanizer_session.paragraphs]
 
         project = self.store.require_project(project_id)
@@ -947,10 +1008,12 @@ class ProjectService:
 
     def advance_ai_detection(self, project_id: str):
         session = self.ai_detection.get_session_by_project(project_id)
-        humanizer_session = self.humanizer.get_session_by_project(project_id)
+        humanizer_session = self._load_humanizer_session(project_id)
 
         def rehumanize(paragraph_id: str, _current_text: str) -> str:
-            return self.humanizer.rehumanize_paragraph_for_detection(humanizer_session.id, paragraph_id)
+            text = self.humanizer.rehumanize_paragraph_for_detection(humanizer_session.id, paragraph_id)
+            self._persist_humanizer_session(project_id, humanizer_session)
+            return text
 
         return self.ai_detection.advance_paragraph(session.id, rehumanize=rehumanize)
 
@@ -1010,7 +1073,7 @@ class ProjectService:
     def run_delivery(self, project_id: str):
         bundle = self.store.require_bundle(project_id)
         try:
-            final_draft = self.humanizer.get_humanized_draft_by_project(project_id).to_dict()
+            final_draft = self._load_humanized_draft(project_id).to_dict()
         except KeyError:
             final_draft = self._load_draft(project_id).to_dict()
 
@@ -1020,7 +1083,7 @@ class ProjectService:
         detection_report = self.ai_detection.get_report_by_project(project_id).to_dict()
 
         revision_history = self.revision.get_history_or_empty(project_id)
-        humanizer_session = self.humanizer.get_session_by_project(project_id)
+        humanizer_session = self._load_humanizer_session(project_id)
         completion_time = (
             str(research_plan.get("estimated_completion_time") or "")
             or str(blueprint.get("estimated_completion_time") or "")

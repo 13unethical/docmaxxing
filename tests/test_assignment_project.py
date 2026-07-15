@@ -441,3 +441,61 @@ def test_advance_writer_restores_session_from_disk(tmp_path):
     assert advanced.progress > 0
     assert store.require_bundle(project_id).project.artifacts.get("writer_session")
     assert advanced.sections[0].generated_text
+
+
+def test_start_humanizer_restores_session_from_disk(tmp_path):
+    """Fresh gunicorn worker can load humanizer session from bundle artifacts."""
+    from services.research_engine.service import ResearchEngineService
+    from services.writer_engine import MockSectionWriter, WriterEngineService
+    from services.writer_engine.models import WriterSectionStatus
+    from services.humanizer_engine import HumanizerEngineService
+
+    store = ProjectStore(root=tmp_path / "projects")
+    research_a = _StubResearchService()
+    blueprint_a = _StubBlueprintService()
+    writer_a = WriterEngineService(writer=MockSectionWriter())
+    service_a = ProjectService(
+        store=store,
+        pipeline=AssignmentPipelineService(),
+        research=research_a,  # type: ignore[arg-type]
+        blueprint=blueprint_a,  # type: ignore[arg-type]
+        writer=writer_a,
+        humanizer=HumanizerEngineService(),
+        analyzer=_StubRequirementAnalyzer(),
+    )
+
+    bundle = service_a.create_project(
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service_a.analyze_requirements(project_id)
+    service_a.calculate_pricing(project_id)
+    service_a.confirm_payment(project_id)
+    service_a.run_research(project_id)
+    service_a.run_blueprint(project_id)
+    session = service_a.start_writer(project_id)
+    while session.status.value == "active":
+        current = session.current_section()
+        if current and current.status == WriterSectionStatus.REVISION:
+            session = service_a.revise_writer_section(project_id, session.current_section_id)
+        else:
+            session = service_a.advance_writer(project_id)
+    service_a.merge_writer_draft(project_id)
+    humanizer_session = service_a.start_humanizer(project_id)
+
+    service_b = ProjectService(
+        store=store,
+        pipeline=AssignmentPipelineService(),
+        research=ResearchEngineService(),
+        blueprint=_StubBlueprintService(),  # type: ignore[arg-type]
+        writer=WriterEngineService(writer=MockSectionWriter()),
+        humanizer=HumanizerEngineService(),
+    )
+
+    loaded = service_b.get_humanizer_session(project_id)
+    assert loaded.id == humanizer_session.id
+    assert store.require_bundle(project_id).project.artifacts.get("humanizer_session")
+
+    advanced = service_b.advance_humanizer(project_id)
+    assert advanced.paragraphs_processed >= 0
+    assert store.require_bundle(project_id).project.artifacts.get("humanizer_session")
