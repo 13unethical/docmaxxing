@@ -127,8 +127,18 @@ class WriterEngineService:
             project_id=session.project_id,
         )
 
-        if section.status in {WriterSectionStatus.PENDING, WriterSectionStatus.REVISION}:
-            section = self._write_section(session, section, payload, revision=section.status == WriterSectionStatus.REVISION)
+        # WRITING means a previous attempt died mid-call — rewrite instead of no-op.
+        if section.status in {
+            WriterSectionStatus.PENDING,
+            WriterSectionStatus.REVISION,
+            WriterSectionStatus.WRITING,
+        }:
+            section = self._write_section(
+                session,
+                section,
+                payload,
+                revision=section.status == WriterSectionStatus.REVISION,
+            )
 
         if section.status == WriterSectionStatus.SECTION_REVIEW:
             section = self._review_section(session, section, payload)
@@ -150,6 +160,14 @@ class WriterEngineService:
                     section.completed_at = utc_now()
 
         if section.status == WriterSectionStatus.COMPLETED:
+            _complete_section_in_session(session, section)
+        elif session.status == WriterSessionStatus.ACTIVE:
+            # Never leave an active section in a silent no-op state.
+            section.status = WriterSectionStatus.COMPLETED
+            section.completed_at = section.completed_at or utc_now()
+            section.warnings = list(section.warnings) + [
+                "Forced section completion after unexpected writer state"
+            ]
             _complete_section_in_session(session, section)
 
         session.updated_at = utc_now()

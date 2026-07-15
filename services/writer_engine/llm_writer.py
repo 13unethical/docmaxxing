@@ -1,22 +1,22 @@
-"""Section-by-section writer using Claude Sonnet 4 with Gemini fallback."""
+"""Section-by-section writer using Claude Sonnet 4 only."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any
 
 import requests
 
-from services.assignment_llm import STAGE_WRITER, assignment_uses_claude
-from services.gemini_client import generate_json, gemini_enabled, gemini_model
 from services.writer_engine.mock_writer import SectionWriter
 from services.writer_engine.models import WriterEngineInput, WriterSection
 
 _CLAUDE_MODEL = "claude-sonnet-4-6"
 _CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 _CLAUDE_TIMEOUT_S = 120
+_CLAUDE_MAX_TOKENS = 4096
 
 
 class LLMSectionWriter(SectionWriter):
@@ -44,28 +44,14 @@ class LLMSectionWriter(SectionWriter):
         payload: WriterEngineInput,
         revision: bool = False,
     ) -> dict[str, Any]:
-        prompt = _build_section_prompt(section=section, payload=payload, revision=revision)
-
         claude_key = _claude_api_key()
-        errors: list[str] = []
-        if claude_key:
-            try:
-                return _generate_with_claude(prompt=prompt, claude_key=claude_key)
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"Claude: {exc}")
-
-        if gemini_enabled() and not assignment_uses_claude(STAGE_WRITER):
-            try:
-                return _generate_with_gemini(prompt=prompt)
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"Gemini: {exc}")
-
-        if errors:
-            raise ValueError("; ".join(errors))
-        raise ValueError(
-            "Writer generation unavailable: missing Claude API key and Gemini GOOGLE_API_KEY. "
-            "Set ANTHROPIC_API_KEY (or Claude_API_Key) or GOOGLE_API_KEY."
-        )
+        if not claude_key:
+            raise ValueError(
+                "Writer generation unavailable: missing Claude API key. "
+                "Set ANTHROPIC_API_KEY (or Claude_API_Key)."
+            )
+        prompt = _build_section_prompt(section=section, payload=payload, revision=revision)
+        return _generate_with_claude(prompt=prompt, claude_key=claude_key)
 
 
 def _claude_api_key() -> str:
@@ -80,7 +66,7 @@ def _generate_with_claude(*, prompt: str, claude_key: str) -> dict[str, Any]:
     started = time.monotonic()
     body = {
         "model": _CLAUDE_MODEL,
-        "max_tokens": 2200,
+        "max_tokens": _CLAUDE_MAX_TOKENS,
         "temperature": 0.3,
         "messages": [{"role": "user", "content": prompt}],
     }
@@ -110,29 +96,6 @@ def _generate_with_claude(*, prompt: str, claude_key: str) -> dict[str, Any]:
     return parsed
 
 
-def _generate_with_gemini(*, prompt: str) -> dict[str, Any]:
-    started = time.monotonic()
-    data, diagnostics = generate_json(
-        system_prompt=(
-            "Return strict JSON only for section writing. "
-            "No markdown, no code fences."
-        ),
-        user_prompt=prompt,
-        model=gemini_model(),
-        temperature=0.3,
-        max_retries=2,
-    )
-    elapsed = time.monotonic() - started
-    if not isinstance(data, dict):
-        raise ValueError(
-            f"Gemini writer error: {diagnostics.get('error_message') or diagnostics.get('failure_reason')}"
-        )
-    parsed = _normalize_section_result(data)
-    parsed["generation_time"] = round(float(elapsed), 3)
-    parsed["model_used"] = str(diagnostics.get("model") or gemini_model())
-    return parsed
-
-
 def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput, revision: bool) -> str:
     blueprint_section = _blueprint_section(payload.blueprint, section.id)
     blueprint_guard = {
@@ -151,10 +114,12 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "1) Use ONLY the provided blueprint section structure and purpose.\n"
         "2) Do not invent new document structure.\n"
         "3) Write only this one section draft.\n"
-        "4) Return strict JSON with keys: title,purpose,target_words,draft,citations_used,warnings,generation_time,model_used.\n"
-        "5) citations_used must be a list of citation placeholders like [Author, Year] used in the draft.\n"
-        "6) warnings should flag any requirement conflict or missing input.\n"
-        "7) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n\n"
+        "4) Return ONE strict JSON object only. No markdown. No code fences. No commentary.\n"
+        "5) Required keys: title, purpose, target_words, draft, citations_used, warnings, generation_time, model_used.\n"
+        "6) The draft field must be a single JSON string with escaped quotes (\\\") and \\n for line breaks.\n"
+        "7) citations_used must be a list of citation placeholders like [Author, Year] used in the draft.\n"
+        "8) warnings should flag any requirement conflict or missing input.\n"
+        "9) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n\n"
         f"INPUT:\n{json.dumps(blueprint_guard, ensure_ascii=False)}"
     )
 
@@ -166,19 +131,112 @@ def _blueprint_section(blueprint: dict[str, Any], section_id: str) -> dict[str, 
     return {}
 
 
+def _strip_code_fences(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw.startswith("```"):
+        return raw
+    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\s*```$", "", raw)
+    return raw.strip()
+
+
+def _extract_json_object(text: str) -> str | None:
+    start = text.find("{")
+    end = text.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    return text[start : end + 1]
+
+
 def _parse_section_json(raw_text: str) -> dict[str, Any]:
+    cleaned = _strip_code_fences(raw_text)
+    candidates = [cleaned]
+    extracted = _extract_json_object(cleaned)
+    if extracted and extracted not in candidates:
+        candidates.append(extracted)
+
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+        if isinstance(data, dict):
+            return _normalize_section_result(data)
+
+    repaired = _repair_section_json(cleaned)
+    if repaired is not None:
+        return repaired
+
+    if last_error is not None:
+        raise ValueError(str(last_error)) from last_error
+    raise ValueError("Model response is not valid JSON")
+
+
+def _repair_section_json(raw_text: str) -> dict[str, Any] | None:
+    """Best-effort recovery when Claude leaves unescaped quotes/newlines in draft."""
+    draft_match = re.search(
+        r'"draft"\s*:\s*"(?P<draft>.*)"\s*,\s*"citations_used"',
+        raw_text,
+        flags=re.DOTALL,
+    )
+    title_match = re.search(r'"title"\s*:\s*"(?P<title>(?:\\.|[^"\\])*)"', raw_text)
+    purpose_match = re.search(r'"purpose"\s*:\s*"(?P<purpose>(?:\\.|[^"\\])*)"', raw_text)
+    if not draft_match or not title_match:
+        return None
+
+    draft_raw = draft_match.group("draft")
+    draft = (
+        draft_raw.replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace('\\"', '"')
+        .replace("\r", " ")
+    )
+    draft = re.sub(r"\n{3,}", "\n\n", draft).strip()
+    if not draft:
+        return None
+
+    citations: list[str] = []
+    cits_start = raw_text.find('"citations_used"')
+    warn_start = raw_text.find('"warnings"', cits_start if cits_start >= 0 else 0)
+    if cits_start >= 0 and warn_start > cits_start:
+        quotations = re.findall(r'"((?:\\.|[^"\\])*)"', raw_text[cits_start:warn_start])
+        citations = [_decode_json_string(q) for q in quotations[1:]]
+
+    warnings: list[str] = []
+    warn_key = raw_text.find('"warnings"')
+    gen_start = raw_text.find('"generation_time"', warn_key if warn_key >= 0 else 0)
+    if warn_key >= 0 and gen_start > warn_key:
+        quotations = re.findall(r'"((?:\\.|[^"\\])*)"', raw_text[warn_key:gen_start])
+        warnings = [_decode_json_string(q) for q in quotations[1:]]
+
+    target_words = 0
+    target_match = re.search(r'"target_words"\s*:\s*(\d+)', raw_text)
+    if target_match:
+        target_words = int(target_match.group(1))
+
+    purpose = _decode_json_string(purpose_match.group("purpose")) if purpose_match else ""
+    title = _decode_json_string(title_match.group("title"))
+    return _normalize_section_result(
+        {
+            "title": title,
+            "purpose": purpose,
+            "target_words": target_words,
+            "draft": draft,
+            "citations_used": citations,
+            "warnings": warnings + ["Recovered malformed Claude JSON for draft field"],
+            "generation_time": 0.0,
+            "model_used": "",
+        }
+    )
+
+
+def _decode_json_string(value: str) -> str:
     try:
-        data = json.loads(raw_text)
+        return json.loads(f'"{value}"')
     except json.JSONDecodeError:
-        start = raw_text.find("{")
-        end = raw_text.rfind("}")
-        if start >= 0 and end > start:
-            data = json.loads(raw_text[start : end + 1])
-        else:
-            raise ValueError("Model response is not valid JSON")
-    if not isinstance(data, dict):
-        raise ValueError("Section response JSON is not an object")
-    return _normalize_section_result(data)
+        return value.replace('\\"', '"').replace("\\n", "\n").replace("\\t", "\t")
 
 
 def _normalize_section_result(data: dict[str, Any]) -> dict[str, Any]:

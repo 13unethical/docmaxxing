@@ -18,38 +18,47 @@ class MockSectionReviewer:
 
     def review_section(self, *, section: WriterSection, payload: WriterEngineInput) -> SectionReview:
         text = section.generated_text.strip()
-        issues: list[str] = []
-        recommendations: list[str] = []
 
         if not text:
             return SectionReview(
                 passed=False,
                 score=0,
-                issues=["Section text is empty"],
-                recommendations=["Regenerate this section only"],
+                missing_points=["Section text is empty"],
+                warnings=["Regenerate this section only"],
+                needs_revision=True,
+                review_message="Section text is empty.",
                 reviewed_at=utc_now(),
             )
 
         score = 88
         passed = True
+        missing_points: list[str] = []
+        warnings: list[str] = []
 
         if section.revision_count == 0 and "analysis" in section.title.lower():
             score = 64
             passed = False
-            issues.append("Critical analysis needs stronger comparative evaluation")
-            recommendations.append("Increase theory comparison and evidence weighting")
+            missing_points.append("Critical analysis needs stronger comparative evaluation")
+            warnings.append("Increase theory comparison and evidence weighting")
         elif section.revision_count > 0:
             score = 91
             passed = True
-            recommendations.append("Section meets blueprint objective after revision")
+            warnings.append("Section meets blueprint objective after revision")
 
         if len(text.split()) < max(20, section.estimated_words // 20):
-            recommendations.append("Expand section toward target word allocation in production writer")
+            warnings.append("Expand section toward target word allocation in production writer")
 
         return SectionReview(
             passed=passed,
             score=score,
-            issues=issues,
-            recommendations=recommendations,
+            requirement_coverage=score,
+            argument_quality=score,
+            academic_style=score,
+            citation_quality=score,
+            critical_thinking=score,
+            missing_points=missing_points,
+            warnings=warnings,
+            needs_revision=not passed,
+            review_message="Mock section review",
             reviewed_at=utc_now(),
         )

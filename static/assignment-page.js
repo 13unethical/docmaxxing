@@ -954,7 +954,7 @@
     await ensureWriterSession();
     var guard = 0;
     var maxSteps = Math.max(20, ((state.writerSession && state.writerSession.sections) || []).length * 4 + 5);
-    var lastProgress = -1;
+    var lastCompleted = -1;
     var staleSteps = 0;
     while (state.writerSession && !writerDone()) {
       guard += 1;
@@ -962,15 +962,15 @@
         throw new Error("Writing took too long. Please refresh and try again.");
       }
       await advanceWriter();
-      var progress = Number(state.writerSession.progress) || 0;
-      if (progress === lastProgress) {
+      var completed = (state.writerSession.completed_section_ids || []).length;
+      if (completed === lastCompleted) {
         staleSteps += 1;
         if (staleSteps >= 3) {
           throw new Error("Writing stalled. Please refresh and try again.");
         }
       } else {
         staleSteps = 0;
-        lastProgress = progress;
+        lastCompleted = completed;
       }
     }
   }

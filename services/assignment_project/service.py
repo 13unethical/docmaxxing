@@ -234,10 +234,8 @@ class ProjectService:
         *,
         seed: dict[str, Any] | None = None,
     ) -> WriterSession:
-        if seed:
-            seeded = self._seed_writer_session(project_id, seed)
-            if seeded is not None:
-                return seeded
+        # Prefer in-memory / disk over client seed so a stale browser snapshot
+        # cannot rewind progress and look like a stalled writer loop.
         session = self.writer.sessions.get_by_project(project_id)
         if session is not None:
             return session
@@ -246,6 +244,9 @@ class ProjectService:
         if isinstance(snapshot, dict) and snapshot.get("id"):
             session = WriterSession.from_dict(snapshot)
             return self.writer.sessions.save(session)
+        seeded = self._seed_writer_session(project_id, seed)
+        if seeded is not None:
+            return seeded
         raise KeyError(f"Writer session not found for project: {project_id}")
 
     def _persist_draft(self, project_id: str, draft: Draft) -> Draft:
