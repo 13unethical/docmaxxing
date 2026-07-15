@@ -7,7 +7,7 @@ import uuid
 from typing import Any, Protocol
 
 from services.assignment_pipeline.models import utc_now
-from services.assignment_llm import assignment_generate_json, assignment_llm_model
+from services.assignment_llm import STAGE_RESEARCH, assignment_generate_json, assignment_llm_model
 from services.research_engine.models import (
     ResearchEngineInput,
     ResearchPlan,
@@ -23,7 +23,7 @@ class ResearchEngine(Protocol):
 
 
 class ResearchAnalyzer:
-    VERSION = assignment_llm_model()
+    VERSION = assignment_llm_model(STAGE_RESEARCH)
     _INVALID_JSON_RETRIES = 2
 
     def build_plan(self, payload: ResearchEngineInput) -> ResearchPlan:
@@ -102,6 +102,7 @@ class ResearchAnalyzer:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=0.1,
+                stage=STAGE_RESEARCH,
             )
             if raw is None:
                 last_error = str(diagnostics.get("error_message") or diagnostics.get("failure_reason") or last_error)

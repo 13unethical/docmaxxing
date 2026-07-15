@@ -9,7 +9,7 @@ from typing import Any
 
 import requests
 
-from services.assignment_llm import assignment_uses_claude
+from services.assignment_llm import STAGE_WRITER, assignment_uses_claude
 from services.gemini_client import generate_json, gemini_enabled, gemini_model
 from services.writer_engine.mock_writer import SectionWriter
 from services.writer_engine.models import WriterEngineInput, WriterSection
@@ -54,7 +54,7 @@ class LLMSectionWriter(SectionWriter):
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"Claude: {exc}")
 
-        if gemini_enabled() and not assignment_uses_claude():
+        if gemini_enabled() and not assignment_uses_claude(STAGE_WRITER):
             try:
                 return _generate_with_gemini(prompt=prompt)
             except Exception as exc:  # noqa: BLE001

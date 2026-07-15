@@ -8,7 +8,7 @@ import uuid
 from typing import Any, Protocol
 
 from services.assignment_pipeline.models import utc_now
-from services.assignment_llm import assignment_generate_json, assignment_llm_model
+from services.assignment_llm import STAGE_BLUEPRINT, assignment_generate_json, assignment_llm_model
 from services.blueprint_engine.models import (
     Blueprint,
     BlueprintEngineInput,
@@ -24,7 +24,7 @@ class BlueprintEngine(Protocol):
 
 
 class BlueprintAnalyzer:
-    VERSION = assignment_llm_model()
+    VERSION = assignment_llm_model(STAGE_BLUEPRINT)
     _INVALID_JSON_RETRIES = 2
 
     def build_blueprint(self, payload: BlueprintEngineInput) -> Blueprint:
@@ -130,6 +130,7 @@ class BlueprintAnalyzer:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=0.1,
+                stage=STAGE_BLUEPRINT,
             )
             if raw is None:
                 last_error = str(diagnostics.get("error_message") or diagnostics.get("failure_reason") or last_error)
