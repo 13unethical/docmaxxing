@@ -92,6 +92,8 @@ class RequirementJSON:
     word_count: int | None = None
     citation_style: str | None = None
     required_sections: list[str] = field(default_factory=list)
+    # Explicit per-section limits from the brief, e.g. {"Introduction": 100, "Reflection": 300}.
+    section_word_budgets: dict[str, int] = field(default_factory=dict)
     rubric: list[RubricCriterion] = field(default_factory=list)
     learning_outcomes: list[str] = field(default_factory=list)
     minimum_sources: int | None = None
@@ -111,6 +113,7 @@ class RequirementJSON:
             "word_count": self.word_count,
             "citation_style": self.citation_style,
             "required_sections": list(self.required_sections),
+            "section_word_budgets": dict(self.section_word_budgets),
             "rubric": [item.to_dict() for item in self.rubric],
             "learning_outcomes": list(self.learning_outcomes),
             "minimum_sources": self.minimum_sources,
@@ -136,6 +139,11 @@ class RequirementJSON:
             word_count=data.get("word_count"),
             citation_style=data.get("citation_style"),
             required_sections=list(data.get("required_sections") or []),
+            section_word_budgets={
+                str(k): int(v)
+                for k, v in dict(data.get("section_word_budgets") or {}).items()
+                if str(k).strip() and int(v) >= 0
+            },
             rubric=[RubricCriterion.from_dict(item) for item in (data.get("rubric") or [])],
             learning_outcomes=list(data.get("learning_outcomes") or []),
             minimum_sources=data.get("minimum_sources"),

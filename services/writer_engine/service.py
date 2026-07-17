@@ -54,7 +54,9 @@ class WriterEngineService:
             queue_ids = [
                 str(item.get("id"))
                 for item in (blueprint.get("sections") or [])
-                if str(item.get("title", "")).lower() != "references"
+                if int(item.get("estimated_words") or 0) > 0
+                and "reference" not in str(item.get("title", "")).lower()
+                and "cover" not in str(item.get("title", "")).lower()
             ]
 
         sections: list[WriterSection] = []

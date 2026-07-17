@@ -66,8 +66,16 @@ class BlueprintAnalyzer:
         word_distribution = [
             WordDistributionEntry(title=section.title, estimated_words=section.estimated_words) for section in sections
         ]
-        writing_queue = [section.title for section in sections if "reference" not in section.title.lower()]
-        writing_order = [section.id for section in sections if "reference" not in section.title.lower()]
+        writing_queue = [
+            section.title
+            for section in sections
+            if not _is_structural_section(section.title) and section.estimated_words > 0
+        ]
+        writing_order = [
+            section.id
+            for section in sections
+            if not _is_structural_section(section.title) and section.estimated_words > 0
+        ]
 
         critical_locations = [s.title for s in sections if _is_critical_section(s.title)]
         comparison_locations = [s.title for s in sections if _is_comparison_section(s.title)]
@@ -227,9 +235,35 @@ def _default_sections(total_words: int, theories: list[str], citation_style: str
     return sections
 
 
+def _is_structural_section(title: str) -> bool:
+    lower = title.lower().strip()
+    needles = (
+        "reference",
+        "bibliograph",
+        "cover page",
+        "title page",
+        "table of contents",
+        "acknowledgement",
+        "acknowledgment",
+        "appendix",
+        "appendices",
+    )
+    if any(n in lower for n in needles):
+        return True
+    return lower in {"cover", "contents", "toc"}
+
+
 def _apply_total_word_budget(sections: list[BlueprintSection], total_words: int) -> list[BlueprintSection]:
-    writable = [section for section in sections if "reference" not in section.title.lower()]
+    writable = [
+        section
+        for section in sections
+        if not _is_structural_section(section.title)
+    ]
     if not writable or total_words <= 0:
+        for section in sections:
+            if _is_structural_section(section.title):
+                section.estimated_words = 0
+                section.citation_target = 0
         return sections
     current = sum(max(section.estimated_words, 0) for section in writable)
     if current <= 0:
@@ -244,7 +278,7 @@ def _apply_total_word_budget(sections: list[BlueprintSection], total_words: int)
             allocated += words
         writable[-1].estimated_words = max(40, total_words - allocated)
     for section in sections:
-        if "reference" in section.title.lower():
+        if _is_structural_section(section.title):
             section.estimated_words = 0
             section.citation_target = 0
         else:

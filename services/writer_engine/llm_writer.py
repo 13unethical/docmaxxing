@@ -51,7 +51,30 @@ class LLMSectionWriter(SectionWriter):
                 "Set ANTHROPIC_API_KEY (or Claude_API_Key)."
             )
         prompt = _build_section_prompt(section=section, payload=payload, revision=revision)
-        return _generate_with_claude(prompt=prompt, claude_key=claude_key)
+        result = _generate_with_claude(prompt=prompt, claude_key=claude_key)
+        target = int(section.estimated_words or result.get("target_words") or 0)
+        if _needs_expansion(str(result.get("draft") or ""), target):
+            expand_prompt = _build_expansion_prompt(
+                section=section,
+                payload=payload,
+                short_draft=str(result.get("draft") or ""),
+            )
+            expanded = _generate_with_claude(prompt=expand_prompt, claude_key=claude_key)
+            warnings = list(expanded.get("warnings") or [])
+            warnings.append(
+                f"Expanded short draft from {_draft_word_count(str(result.get('draft') or ''))} "
+                f"toward {target} words"
+            )
+            expanded["warnings"] = warnings
+            if _draft_word_count(str(expanded.get("draft") or "")) >= _draft_word_count(
+                str(result.get("draft") or "")
+            ):
+                result = expanded
+            else:
+                result["warnings"] = list(result.get("warnings") or []) + [
+                    "Expansion pass did not increase length; kept original draft"
+                ]
+        return result
 
 
 def _claude_api_key() -> str:
@@ -59,6 +82,33 @@ def _claude_api_key() -> str:
     return (
         (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
         or (os.environ.get("Claude_API_Key") or "").strip()
+    )
+
+
+def _draft_word_count(draft: str) -> int:
+    return len(str(draft or "").split())
+
+
+def _needs_expansion(draft: str, target_words: int) -> bool:
+    if target_words < 60:
+        return False
+    return _draft_word_count(draft) < int(target_words * 0.85)
+
+
+def _build_expansion_prompt(*, section: WriterSection, payload: WriterEngineInput, short_draft: str) -> str:
+    current = _draft_word_count(short_draft)
+    target = int(section.estimated_words or 0)
+    return (
+        "You previously wrote a section that is TOO SHORT for the assignment word budget.\n"
+        f"Current draft word count: {current}. Required target: about {target} words "
+        f"(minimum {int(target * 0.9)}).\n"
+        "Expand the draft with more analysis, evidence, and explanation. "
+        "Keep the same section title/purpose and academic tone. "
+        "Do not add new document sections. Do not invent a different structure.\n"
+        "Return ONE strict JSON object only with keys: "
+        "title, purpose, target_words, draft, citations_used, warnings, generation_time, model_used.\n"
+        f"PREVIOUS_DRAFT:\n{short_draft}\n\n"
+        f"SECTION_CONTEXT:\n{json.dumps({'title': section.title, 'purpose': section.objective, 'target_words': target, 'requirement_json': payload.requirement_json}, ensure_ascii=False)}"
     )
 
 
@@ -118,9 +168,11 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "4) Return ONE strict JSON object only. No markdown. No code fences. No commentary.\n"
         "5) Required keys: title, purpose, target_words, draft, citations_used, warnings, generation_time, model_used.\n"
         "6) The draft field must be a single JSON string with escaped quotes (\\\") and \\n for line breaks.\n"
-        f"7) Hard word budget: this section must be about {section.estimated_words} words, "
+        f"7) Hard word budget: this section must be about {section.estimated_words} words "
+        f"(stay between {max(40, int(section.estimated_words * 0.9))} and "
+        f"{int(section.estimated_words * 1.1) + 5} words), "
         f"and the full assignment target is {global_word_count or 'the provided blueprint total'} words. "
-        "Do not exceed the section target.\n"
+        "Do not write a short stub — meet the minimum.\n"
         "8) citations_used must be a list of citation placeholders like [Author, Year] used in the draft.\n"
         "9) warnings should flag any requirement conflict or missing input.\n"
         "10) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n\n"

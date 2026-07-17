@@ -127,6 +127,56 @@ def test_short_assignment_word_budget_is_preserved():
     assert sum(section.estimated_words for section in blueprint.sections) == 550
 
 
+def test_learning_journal_section_budgets_and_cover_excluded():
+    requirement = {
+        "assignment_type": "Learning Journal",
+        "title": "Learning Journal",
+        "word_count": 1200,
+        "required_sections": [
+            "Cover page",
+            "Introduction",
+            "Journal Entry 1",
+            "Journal Entry 2",
+            "Journal Entry 3",
+            "Journal Entry 4",
+            "Reflection",
+            "References",
+        ],
+        "section_word_budgets": {
+            "Introduction": 100,
+            "Journal Entry 1": 200,
+            "Journal Entry 2": 200,
+            "Journal Entry 3": 200,
+            "Journal Entry 4": 200,
+            "Reflection": 300,
+        },
+    }
+    research_plan = {
+        "section_list": [
+            {"title": "Cover page", "purpose": "Cover", "estimated_words": 0},
+            {"title": "Introduction", "purpose": "Intro", "estimated_words": 100},
+            {"title": "Journal Entry 1", "purpose": "JE1", "estimated_words": 200},
+            {"title": "Journal Entry 2", "purpose": "JE2", "estimated_words": 200},
+            {"title": "Journal Entry 3", "purpose": "JE3", "estimated_words": 200},
+            {"title": "Journal Entry 4", "purpose": "JE4", "estimated_words": 200},
+            {"title": "Reflection", "purpose": "Reflect", "estimated_words": 300},
+            {"title": "References", "purpose": "Refs", "estimated_words": 0},
+        ],
+    }
+    blueprint = MockBlueprintEngine().build_blueprint(
+        BlueprintEngineInput(requirement_json=requirement, research_plan=research_plan)
+    )
+    by_title = {section.title: section.estimated_words for section in blueprint.sections}
+    assert by_title["Cover page"] == 0
+    assert by_title["References"] == 0
+    assert by_title["Introduction"] == 100
+    assert by_title["Reflection"] == 300
+    assert blueprint.total_target_words == 1200
+    assert "Cover page" not in blueprint.writing_queue
+    assert "References" not in blueprint.writing_queue
+    assert "Reflection" in blueprint.writing_queue
+
+
 def test_project_run_blueprint_advances_pipeline():
     pipeline = AssignmentPipelineService()
     research = ResearchEngineService()

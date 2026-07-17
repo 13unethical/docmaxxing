@@ -81,6 +81,18 @@ class GeminiRequirementAnalyzer:
                         for item in normalized.get("missing_information", [])
                         if "word count" not in item.lower()
                     ]
+            # Fill missing per-section budgets from brief text (e.g. "Introduction – 100 words").
+            local_budgets = _extract_section_word_budgets_from_sources(sections)
+            merged_budgets = dict(normalized.get("section_word_budgets") or {})
+            for title, words in local_budgets.items():
+                if title not in merged_budgets:
+                    merged_budgets[title] = words
+            # Also parse budgets embedded in required_sections strings.
+            for section in normalized.get("required_sections") or []:
+                title, words = _parse_section_word_budget(str(section))
+                if words is not None and title:
+                    merged_budgets.setdefault(title, words)
+            normalized["section_word_budgets"] = merged_budgets
             return RequirementJSON(
                 id=base.id,
                 project_id=base.project_id,
@@ -89,6 +101,7 @@ class GeminiRequirementAnalyzer:
                 word_count=normalized.get("word_count"),
                 citation_style=normalized.get("citation_style"),
                 required_sections=normalized.get("required_sections", []),
+                section_word_budgets=normalized.get("section_word_budgets") or {},
                 rubric=[RubricCriterion.from_dict(item) for item in normalized.get("rubric", [])],
                 learning_outcomes=normalized.get("learning_outcomes", []),
                 minimum_sources=normalized.get("minimum_sources"),
@@ -131,8 +144,8 @@ def _requirement_system_prompt() -> str:
         "Do not write essays or content drafts. "
         "Return one strict JSON object only, no markdown, no code fences, no commentary. "
         "Required top-level keys: assignment_type, title, word_count, citation_style, "
-        "required_sections, rubric, learning_outcomes, minimum_sources, formatting, deadline, "
-        "difficulty, missing_information. "
+        "required_sections, section_word_budgets, rubric, learning_outcomes, minimum_sources, "
+        "formatting, deadline, difficulty, missing_information. "
         "word_count and minimum_sources must be integers or null; never use descriptive text for them. "
         "WORD COUNT RULES (critical): "
         "1) Search the entire brief, tables, notes, and rubric for any word/page length limit. "
@@ -142,8 +155,15 @@ def _requirement_system_prompt() -> str:
         "4) Only set word_count to null if no numeric length limit appears anywhere; "
         "then list 'word count' in missing_information. "
         "Do not invent a default length. Do not use essay-length defaults. "
+        "SECTION WORD BUDGETS (critical): "
+        "If the brief assigns per-section limits like 'Introduction – 100 words', "
+        "'Journal Entry 1 – 200 words', 'Reflection – 300 words', put them in "
+        "section_word_budgets as an object mapping short section title → integer "
+        '(example: {"Introduction": 100, "Journal Entry 1": 200, "Reflection": 300}). '
+        "Cover page, title page, and References usually have no body word budget — omit them "
+        "or set 0. Do not invent section budgets. "
         "REQUIRED SECTIONS: use only section titles stated in the brief "
-        "(e.g. Introduction, Body paragraph 1, Conclusion, Reference List). "
+        "(e.g. Introduction, Journal Entry 1, Reflection, Reference List). "
         "Do not invent generic essay sections when the brief lists specific ones. "
         "The formatting field must be an object with keys: font_family, font_size, "
         "line_spacing, margins, alignment. "
@@ -168,7 +188,9 @@ def _requirement_user_prompt(project: Project, sections: dict[str, str]) -> str:
         "Extract only explicit requirements. Prefer assignment brief and rubric over lecture notes. "
         "Find the stated word/length limit carefully (including wording inside tables). "
         "For a range, put the upper bound in word_count as an integer. "
-        "If a field is not stated, set it to null or [] and list it in missing_information. "
+        "Also extract per-section word limits into section_word_budgets when stated "
+        "(Introduction 100, journal entries 200, reflection 300, etc.). "
+        "If a field is not stated, set it to null or []/{} and list it in missing_information. "
         "Keep required_sections as ordered section titles exactly as the brief lists them. "
         "Return only valid JSON with the required structure."
     )
@@ -234,6 +256,72 @@ def _extract_word_count_from_sources(sections: dict[str, str]) -> int | None:
     return None
 
 
+_SECTION_BUDGET_LINE = re.compile(
+    r"(?P<title>Introduction|Journal Entry\s*\d+|Reflection|Conclusion|"
+    r"Body(?:\s+paragraph)?\s*\d*|Literature Review|Discussion|Methodology|"
+    r"Findings|Critical Analysis|Abstract|Analysis)"
+    r"(?:\s*\([^)]*\))?"
+    r".{0,160}?"
+    r"[–\-]\s*(?P<words>\d{2,4})\s*words?\b",
+    re.I,
+)
+
+_SECTION_BUDGET_INLINE = re.compile(
+    r"(?P<title>.+?)\s*(?:[–\-]\s*|\()\s*(?P<words>\d{2,4})\s*words?\s*\)?\s*$",
+    re.I,
+)
+
+
+def _parse_section_word_budget(text: str) -> tuple[str, int | None]:
+    """Return (short title, budget) from a required-section string."""
+    raw = str(text or "").strip()
+    if not raw:
+        return "", None
+    title = raw.split(":", 1)[0].strip() if ":" in raw else raw
+    # Prefer trailing "– N words" / "(N words)" on the full string.
+    match = _SECTION_BUDGET_INLINE.search(raw)
+    words = int(match.group("words")) if match else None
+    if words is not None and match:
+        # Title may include the budget suffix — strip it.
+        title = re.sub(
+            r"\s*(?:[–\-]\s*|\()\s*\d{2,4}\s*words?\s*\)?\s*$",
+            "",
+            title,
+            flags=re.I,
+        ).strip() or title
+    if ":" in title:
+        title = title.split(":", 1)[0].strip()
+    return title, words
+
+
+def _extract_section_word_budgets_from_sources(sections: dict[str, str]) -> dict[str, int]:
+    text = "\n".join(sections.values())
+    budgets: dict[str, int] = {}
+    for match in _SECTION_BUDGET_LINE.finditer(text):
+        title = re.sub(r"\s+", " ", match.group("title")).strip()
+        words = int(match.group("words"))
+        if title and words > 0:
+            budgets[title] = words
+    return budgets
+
+
+def _coerce_section_word_budgets(raw: Any) -> dict[str, int]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, int] = {}
+    for key, value in raw.items():
+        title = str(key).strip()
+        if not title:
+            continue
+        try:
+            words = int(value)
+        except (TypeError, ValueError):
+            continue
+        if words >= 0:
+            out[title] = words
+    return out
+
+
 def _coerce_word_count_value(word_count: Any) -> int | None:
     """Turn Gemini word_count (int, '2000', '500-550', 'about 1500 words') into an int."""
     if word_count is None or isinstance(word_count, bool):
@@ -281,6 +369,7 @@ def _normalize_requirement_json(raw: dict[str, Any]) -> dict[str, Any]:
     word_count = pick("word_count", "wordCount")
     citation_style = pick("citation_style", "citationStyle")
     required_sections = pick("required_sections", "requiredSections")
+    section_word_budgets = pick("section_word_budgets", "sectionWordBudgets")
     rubric = pick("rubric")
     learning_outcomes = pick("learning_outcomes", "learningOutcomes")
     minimum_sources = pick("minimum_sources", "minimumSources")
@@ -333,12 +422,18 @@ def _normalize_requirement_json(raw: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    normalized_sections, budgets_from_sections = _normalize_required_sections_with_budgets(required_sections)
+    budgets = _coerce_section_word_budgets(section_word_budgets)
+    for title, words in budgets_from_sections.items():
+        budgets.setdefault(title, words)
+
     return {
         "assignment_type": str(assignment_type) if assignment_type is not None else None,
         "title": str(title) if title is not None else None,
         "word_count": wc_int,
         "citation_style": str(citation_style) if citation_style is not None else None,
-        "required_sections": _normalize_required_sections(required_sections),
+        "required_sections": normalized_sections,
+        "section_word_budgets": budgets,
         "rubric": normalized_rubric,
         "learning_outcomes": [str(v) for v in learning_outcomes if str(v).strip()],
         "minimum_sources": min_sources_int,
@@ -355,8 +450,9 @@ def _normalize_requirement_json(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _normalize_required_sections(raw_sections: list[Any]) -> list[str]:
+def _normalize_required_sections_with_budgets(raw_sections: list[Any]) -> tuple[list[str], dict[str, int]]:
     sections: list[str] = []
+    budgets: dict[str, int] = {}
     for item in raw_sections:
         value = item
         if isinstance(item, str) and item.strip().startswith("{"):
@@ -376,8 +472,23 @@ def _normalize_required_sections(raw_sections: list[Any]) -> list[str]:
             ).strip()
             detail = str(value.get("content") or value.get("description") or "").strip()
             text = f"{title}: {detail}" if title and detail else title
+            budget_raw = value.get("word_count") or value.get("estimated_words") or value.get("words")
+            if budget_raw is not None and title:
+                try:
+                    budgets[title.split(":", 1)[0].strip()] = int(budget_raw)
+                except (TypeError, ValueError):
+                    pass
         else:
             text = str(value).strip()
-        if text:
-            sections.append(text)
+        if not text:
+            continue
+        short_title, parsed_budget = _parse_section_word_budget(text)
+        if parsed_budget is not None and short_title:
+            budgets.setdefault(short_title, parsed_budget)
+        sections.append(text)
+    return sections, budgets
+
+
+def _normalize_required_sections(raw_sections: list[Any]) -> list[str]:
+    sections, _budgets = _normalize_required_sections_with_budgets(raw_sections)
     return sections

@@ -53,11 +53,51 @@ def test_research_engine_only_accepts_requirement_and_parsed_documents():
     assert plan.assignment_topic
     assert plan.main_research_question
     assert plan.section_list
-    assert all(section.estimated_words > 0 for section in plan.section_list)
+    assert all(
+        section.estimated_words > 0
+        for section in plan.section_list
+        if "reference" not in section.title.lower()
+    )
     assert plan.estimated_academic_sources == 12
     assert plan.potential_risks
     assert plan.notes_for_writer
     assert "paragraph" not in " ".join(plan.notes_for_writer).lower()
+
+
+def test_learning_journal_uses_explicit_section_budgets():
+    requirement = {
+        "assignment_type": "Learning Journal",
+        "title": "Learning Journal",
+        "word_count": 1200,
+        "required_sections": [
+            "Cover page",
+            "Introduction",
+            "Journal Entry 1",
+            "Journal Entry 2",
+            "Journal Entry 3",
+            "Journal Entry 4",
+            "Reflection",
+            "References",
+        ],
+        "section_word_budgets": {
+            "Introduction": 100,
+            "Journal Entry 1": 200,
+            "Journal Entry 2": 200,
+            "Journal Entry 3": 200,
+            "Journal Entry 4": 200,
+            "Reflection": 300,
+        },
+    }
+    plan = MockResearchEngine().build_plan(
+        ResearchEngineInput(requirement_json=requirement, parsed_documents=_parsed_docs())
+    )
+    by_title = {section.title: section.estimated_words for section in plan.section_list}
+    assert by_title["Cover page"] == 0
+    assert by_title["References"] == 0
+    assert by_title["Introduction"] == 100
+    assert by_title["Journal Entry 1"] == 200
+    assert by_title["Reflection"] == 300
+    assert sum(by_title.values()) == 1200
 
 
 def test_section_structure_has_title_purpose_and_words():
@@ -87,8 +127,10 @@ def test_project_run_research_advances_pipeline():
     prepare_project_for_research(projects, bundle.project.id)
     plan = projects.run_research(bundle.project.id)
 
+    from services.assignment_pipeline.models import StageStatus
+
     pipeline_state = pipeline.get_project(bundle.project.id)
-    assert pipeline_state.current_stage == PipelineStage.BLUEPRINT
+    assert pipeline_state.stage_state(PipelineStage.RESEARCH).status == StageStatus.COMPLETED
     assert plan.assignment_topic
     assert projects.get_research_plan(bundle.project.id).id == plan.id
 

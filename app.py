@@ -693,6 +693,494 @@ def api_debug_blueprint_get(project_id: str):
     return jsonify(blueprint.to_dict())
 
 
+@app.get("/api/browser/runtime-test")
+def api_browser_runtime_test():
+    """Temporary diagnostics: verify BrowserService can serve a page via CDP."""
+    from services.browser.browser_service import BrowserService
+
+    def _work():
+        service = BrowserService.instance()
+        service.ensure_running()
+        page = service.new_page()
+        started = time.monotonic()
+        page.goto("https://example.com", wait_until="networkidle")
+        load_time_ms = int((time.monotonic() - started) * 1000)
+        browser = page.context.browser
+        version = browser.version if browser is not None else "unknown"
+        title = page.title()
+        url = page.url
+        health = service.health()
+        try:
+            page.close()
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            "success": True,
+            "browser": {"engine": "chromium", "version": version, "mode": "cdp", "headless": False},
+            "page": {"title": title, "url": url, "load_time_ms": load_time_ms},
+            "runtime": {
+                "pages_open": health.get("pages", 0),
+                "cdp_url": service.cdp_url,
+                "connected": bool(health.get("connected")),
+            },
+        }
+
+    try:
+        return jsonify(_browser_submit(_work, timeout=90))
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
+
+
+@app.get("/api/browser/health")
+def api_browser_health():
+    """Aggregate Browser Service + provider diagnostics (Task 10 health)."""
+    from services.browser.browser_service import BrowserService
+
+    ensure_engine_started()
+    try:
+        data = _browser_submit(lambda: BrowserService.instance().health(), timeout=15)
+    except Exception:  # noqa: BLE001  (worker busy or error → degraded, no Playwright)
+        from services.browser.chrome_launcher import ChromeLauncher
+
+        launcher = ChromeLauncher()
+        data = {
+            "browser_running": launcher.is_cdp_available(),
+            "connected": None,
+            "chrome_pid": launcher.pid,
+            "memory_usage": launcher.memory_usage(),
+            "cdp_url": launcher.cdp_url,
+            "note": "degraded snapshot (worker busy)",
+        }
+    data["active_jobs"] = job_manager.active_count() if job_manager is not None else 0
+    if health_monitor is not None:
+        data["last_monitor_check"] = health_monitor.last
+    return jsonify(data)
+
+
+@app.get("/api/browser/connect")
+def api_browser_connect():
+    """Start/reuse the long-lived Browser Service (auto-launches Chrome + CDP)."""
+    from services.browser.browser_service import BrowserService
+
+    try:
+        ensure_engine_started()
+        _browser_submit(lambda: BrowserService.instance().start(), timeout=90)
+        health = _browser_submit(lambda: BrowserService.instance().health(), timeout=15)
+        return jsonify(
+            {
+                "success": True,
+                "connected": bool(health.get("connected")),
+                "contexts": int(health.get("contexts") or 0),
+                "pages": int(health.get("pages") or 0),
+                "browser": "Google Chrome",
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "connected": False,
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
+
+
+@app.get("/api/browser/providers/stealthwriter/health")
+def api_browser_stealthwriter_health():
+    """Temporary diagnostics: load StealthWriter public homepage (no login)."""
+    from services.browser.providers.stealthwriter import StealthWriterProvider
+
+    def _work():
+        provider = StealthWriterProvider()
+        provider.initialize()
+        return provider.health_check()
+
+    try:
+        health = _browser_submit(_work, timeout=90)
+        details = health.details or {}
+        return jsonify(
+            {
+                "success": bool(health.healthy),
+                "provider": "stealthwriter",
+                "title": details.get("title"),
+                "url": details.get("url"),
+                "logged_in": bool(details.get("logged_in")),
+                "turnstile": bool(details.get("turnstile")),
+                "cookies": int(details.get("cookies") or 0),
+                "page_load_ms": details.get("page_load_ms"),
+                "screenshot": details.get("screenshot"),
+                "http_status": details.get("http_status"),
+                "login_button": details.get("login_button"),
+                "dashboard": details.get("dashboard"),
+                "humanizer": details.get("humanizer"),
+                "localStorage_keys": details.get("localStorage_keys"),
+                "sessionStorage_keys": details.get("sessionStorage_keys"),
+                "message": health.message,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "provider": "stealthwriter",
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
+
+
+@app.get("/api/browser/providers/stealthwriter/session")
+def api_browser_stealthwriter_session():
+    """Temporary diagnostics: check CDP StealthWriter session (verbose failure reporting)."""
+    from services.browser.browser_service import BrowserService
+
+    diag: dict[str, Any] = {
+        "cdp_url": None,
+        "runtime_initialized": False,
+        "cdp_connected": False,
+        "context_created": False,
+        "page_created": False,
+        "current_url": None,
+    }
+
+    def _work():
+        service = BrowserService.instance()
+        diag["cdp_url"] = service.cdp_url
+        service.start()
+        health = service.health()
+        diag["runtime_initialized"] = True
+        diag["cdp_connected"] = bool(health.get("connected"))
+        diag["context_created"] = int(health.get("contexts") or 0) > 0
+
+        page = service.get_or_create_page("stealthwriter")
+        diag["page_created"] = True
+        page.goto("https://stealthwriter.ai/dashboard", wait_until="networkidle")
+        diag["current_url"] = page.url
+
+        current_url = page.url
+        title = page.title()
+        redirected = "/sign-in" in current_url.lower() or "/signin" in current_url.lower()
+        logged_in = (not redirected) and ("/dashboard" in current_url.lower())
+        return {
+            "success": True,
+            "logged_in": logged_in,
+            "cdp_url": diag["cdp_url"],
+            "dashboard_loaded": logged_in,
+            "current_url": current_url,
+            "title": title,
+            "redirected": redirected,
+            "diagnostics": diag,
+        }
+
+    try:
+        return jsonify(_browser_submit(_work, timeout=90))
+    except Exception as exc:  # noqa: BLE001
+        tb = traceback.format_exc()
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "exception": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": tb,
+                    "diagnostics": diag,
+                }
+            ),
+            500,
+        )
+
+
+@app.get("/api/browser/providers/stealthwriter/login")
+def api_browser_stealthwriter_login():
+    """Navigate attached Chrome to sign-in for interactive manual login."""
+    from services.browser.providers.stealthwriter import start_interactive_login
+
+    try:
+        result = _browser_submit(start_interactive_login, timeout=60)
+        return jsonify(
+            {
+                "success": True,
+                "message": result.get("message") or "Attached to Chrome. Please login manually.",
+                "profile": result.get("profile"),
+                "cdp_url": result.get("cdp_url"),
+                "already_open": result.get("already_open", False),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
+
+
+@app.get("/api/browser/providers/stealthwriter/check-login")
+def api_browser_stealthwriter_check_login():
+    """Verify interactive login; shut down runtime only after success."""
+    from services.browser.providers.stealthwriter import check_interactive_login
+
+    try:
+        result = _browser_submit(check_interactive_login, timeout=60)
+        return jsonify(
+            {
+                "success": True,
+                "logged_in": bool(result.get("logged_in")),
+                "dashboard_loaded": bool(result.get("dashboard_loaded")),
+                "current_url": result.get("current_url"),
+                "title": result.get("title"),
+                "redirected": result.get("redirected"),
+                "profile": result.get("profile"),
+                "runtime_shutdown": result.get("runtime_shutdown"),
+                "message": result.get("message"),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "logged_in": False,
+                    "exception": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
+
+
+@app.post("/api/browser/providers/stealthwriter/humanize")
+def api_browser_stealthwriter_humanize():
+    """Humanize via the production job engine (retries, timeout, recovery, logs).
+
+    Backward compatible: still returns humanized_text synchronously, plus job_id.
+    """
+    from services.browser.jobs.retry import MAX_RETRIES
+
+    payload = request.get_json(silent=True) or {}
+    text = payload.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify({"success": False, "error": "text is required"}), 400
+
+    try:
+        ensure_engine_started()
+        job = job_manager.create(
+            "stealthwriter", "humanize", {"text": text}, max_retries=MAX_RETRIES
+        )
+        max_wait = (browser_worker.job_timeout + 30) * (job.max_retries + 1) + 30
+        job_manager.wait(job.id, timeout=max_wait)
+        job = job_manager.get(job.id)
+        if job is None:
+            return jsonify({"success": False, "error": "job not found"}), 500
+
+        status = job.status.value
+        if status == "COMPLETED":
+            res = job.result or {}
+            return jsonify(
+                {
+                    "success": True,
+                    "humanized_text": res.get("humanized_text"),
+                    "elapsed_seconds": res.get("elapsed_seconds"),
+                    "job_id": job.id,
+                }
+            )
+        if status == "CANCELLED":
+            return jsonify({"success": False, "error": "cancelled", "job_id": job.id}), 409
+
+        code = job.error_code
+        if code == "LOGIN_REQUIRED":
+            return jsonify({"success": False, "error": "LOGIN_REQUIRED", "job_id": job.id}), 401
+        if code == "TIMEOUT":
+            return jsonify({"success": False, "error": "timeout", "job_id": job.id}), 504
+        if code == "AUTOMATION_ERROR" and job.error_details:
+            body = {
+                "success": False,
+                "error": job.error,
+                "job_id": job.id,
+                "diagnostics": job.error_details,
+            }
+            for key in (
+                "current_url",
+                "page_title",
+                "visible_buttons",
+                "textarea_count",
+                "dom_snippet",
+                "step",
+            ):
+                if key in job.error_details:
+                    body[key] = job.error_details[key]
+            return jsonify(body), 422
+        if not job.is_terminal:
+            return (
+                jsonify(
+                    {"success": False, "error": "still running", "status": status, "job_id": job.id}
+                ),
+                202,
+            )
+        return jsonify({"success": False, "error": job.error or "failed", "job_id": job.id}), 500
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
+
+
+@app.get("/api/browser/providers/stealthwriter/status")
+def api_browser_stealthwriter_status():
+    """Return StealthWriter session status from the dashboard sidebar."""
+    from services.browser.providers.stealthwriter import get_session_status
+
+    try:
+        status = _browser_submit(get_session_status, timeout=60)
+        return jsonify(
+            {
+                "logged_in": bool(status.get("logged_in")),
+                "current_url": status.get("current_url"),
+                "plan": status.get("plan"),
+                "username": status.get("username"),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "logged_in": False,
+                    "current_url": None,
+                    "plan": None,
+                    "username": None,
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
+
+
+@app.get("/api/browser/providers/stealthwriter/open")
+def api_browser_stealthwriter_open():
+    """Navigate attached Chrome to sign-in for one-time manual login (no automation)."""
+    from services.browser.providers.stealthwriter import open_manual_login_browser
+
+    try:
+        result = _browser_submit(open_manual_login_browser, timeout=60)
+        return jsonify(
+            {
+                "success": True,
+                "message": result["message"],
+                "profile": result.get("profile"),
+                "already_open": result.get("already_open", False),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
+
+
+@app.get("/api/jobs")
+def api_jobs_list():
+    """List all jobs (most recent last)."""
+    ensure_engine_started()
+    return jsonify({"jobs": [job.to_dict() for job in job_manager.list()]})
+
+
+@app.get("/api/jobs/<job_id>")
+def api_jobs_get(job_id: str):
+    """Return a single job by id."""
+    ensure_engine_started()
+    job = job_manager.get(job_id)
+    if job is None:
+        return jsonify({"error": "job not found"}), 404
+    return jsonify(job.to_dict())
+
+
+@app.delete("/api/jobs/<job_id>")
+def api_jobs_cancel(job_id: str):
+    """Cancel a job (immediate if still queued; cooperative otherwise)."""
+    ensure_engine_started()
+    if job_manager.get(job_id) is None:
+        return jsonify({"error": "job not found"}), 404
+    cancelled = job_manager.cancel(job_id)
+    return jsonify({"success": bool(cancelled), "job_id": job_id})
+
+
+@app.post("/api/browser/restart")
+def api_browser_restart():
+    """Force a full Browser Service restart (Chrome relaunch + reconnect + restore)."""
+    from services.browser.browser_service import BrowserService
+
+    try:
+        ensure_engine_started()
+        result = _browser_submit(lambda: BrowserService.instance().restart(), timeout=120)
+        if browser_metrics is not None:
+            browser_metrics.record_browser_restart()
+        return jsonify({"success": True, "restart": result})
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
+
+
+@app.get("/api/browser/metrics")
+def api_browser_metrics():
+    """Engine metrics: uptime, job counts, avg exec time, restarts, retries."""
+    ensure_engine_started()
+    data = browser_metrics.snapshot() if browser_metrics is not None else {}
+    data["active_jobs"] = job_manager.active_count() if job_manager is not None else 0
+    data["total_jobs"] = len(job_manager.list()) if job_manager is not None else 0
+    data["worker_ready"] = bool(browser_worker.is_ready()) if browser_worker is not None else False
+    return jsonify(data)
+
+
 @app.post("/api/blueprint/build")
 def api_blueprint_build():
     """Standalone Blueprint Engine entrypoint."""
@@ -2831,5 +3319,73 @@ def api_test_gemini():
     ), 200
 
 
+# ---------------------------------------------------------------------------
+# Browser production execution engine (JobManager + BrowserWorker + Monitor)
+# ---------------------------------------------------------------------------
+import threading as _threading  # noqa: E402
+
+browser_metrics = None
+job_manager = None
+browser_worker = None
+health_monitor = None
+_engine_started = False
+_engine_lock = _threading.Lock()
+
+
+def _register_browser_providers() -> None:
+    """Register providers with BrowserService (cheap; no Chrome launch)."""
+    try:
+        from services.browser.browser_service import BrowserService
+        from services.browser.providers.stealthwriter import StealthWriterProvider
+
+        service = BrowserService.instance()
+        service.register_provider(StealthWriterProvider())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[browser] provider registration skipped: {exc}", flush=True)
+
+
+def ensure_engine_started() -> None:
+    """Idempotently start the browser worker + health monitor.
+
+    The worker thread owns Playwright and auto-starts Chrome inside its own
+    thread on first run, satisfying the "zero manual actions" requirement.
+    """
+    global browser_metrics, job_manager, browser_worker, health_monitor, _engine_started
+    if _engine_started:
+        return
+    with _engine_lock:
+        if _engine_started:
+            return
+        from services.browser.browser_service import BrowserService
+        from services.browser.health_monitor import HealthMonitor
+        from services.browser.jobs.job_manager import JobManager
+        from services.browser.jobs.metrics import Metrics
+        from services.browser.jobs.worker import BrowserWorker
+
+        service = BrowserService.instance()
+        browser_metrics = Metrics()
+        browser_worker = BrowserWorker(service, None, browser_metrics)
+        job_manager = JobManager(enqueue=browser_worker.enqueue_job, metrics=browser_metrics)
+        browser_worker.attach_job_manager(job_manager)
+        browser_worker.start()
+
+        health_monitor = HealthMonitor(service, job_manager, browser_metrics, browser_worker)
+        health_monitor.start()
+
+        _engine_started = True
+        print("[browser] production engine started (worker + health monitor)", flush=True)
+
+
+def _browser_submit(fn, timeout=None):
+    """Run a browser-touching callable on the worker thread (Playwright owner)."""
+    ensure_engine_started()
+    return browser_worker.submit(fn, timeout)
+
+
+# Providers are known as soon as the app module loads, even before Chrome starts.
+_register_browser_providers()
+
+
 if __name__ == "__main__":
+    ensure_engine_started()
     app.run(debug=True, port=5001, use_reloader=False)

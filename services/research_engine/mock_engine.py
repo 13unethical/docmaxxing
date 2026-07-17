@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, Protocol
 
@@ -41,7 +42,17 @@ class ResearchAnalyzer:
             for section in (req.get("required_sections") or req.get("requiredSections") or [])
             if str(section).strip()
         ]
-        section_list = _build_sections(required_sections or normalized["suggested_sections"], assignment_type, word_count)
+        section_budgets = {
+            str(k): int(v)
+            for k, v in dict(req.get("section_word_budgets") or req.get("sectionWordBudgets") or {}).items()
+            if str(k).strip()
+        }
+        section_list = _build_sections(
+            required_sections or normalized["suggested_sections"],
+            assignment_type,
+            word_count,
+            section_budgets=section_budgets,
+        )
         return ResearchPlan(
             id=str(uuid.uuid4()),
             project_id=payload.project_id,
@@ -197,10 +208,11 @@ def _build_sections(
     required_sections: list[str],
     assignment_type: str,
     word_count: int,
+    section_budgets: dict[str, int] | None = None,
 ) -> list[ResearchSection]:
     blueprints = _section_blueprints(assignment_type)
     if required_sections:
-        weights = _weights_for_required(required_sections, word_count)
+        weights = _weights_for_required(required_sections, word_count, section_budgets or {})
         return [
             ResearchSection(
                 title=title,
@@ -224,28 +236,93 @@ def _build_sections(
     return sections
 
 
+def _is_structural_section(title: str) -> bool:
+    lower = title.lower().strip()
+    needles = (
+        "reference",
+        "bibliograph",
+        "cover page",
+        "title page",
+        "table of contents",
+        "acknowledgement",
+        "acknowledgment",
+        "appendix",
+        "appendices",
+    )
+    if any(n in lower for n in needles):
+        return True
+    return lower in {"cover", "contents", "toc"}
+
+
+def _lookup_budget(title: str, budgets: dict[str, int]) -> int | None:
+    if title in budgets:
+        return int(budgets[title])
+    lower = title.lower()
+    for key, value in budgets.items():
+        if key.lower() == lower or lower.startswith(key.lower()) or key.lower().startswith(lower):
+            return int(value)
+    return None
+
+
 def _weights_for_required(
     required_sections: list[str],
     word_count: int,
+    section_budgets: dict[str, int] | None = None,
 ) -> list[tuple[str, str, str, int]]:
-    cleaned = [_section_title(section) for section in required_sections if _section_title(section)]
-    body_sections = [s for s in cleaned if "reference" not in s.lower()]
-    ref_words = 0
-    allocatable = max(word_count - ref_words, 0)
-    per_section = int(allocatable / max(len(body_sections), 1))
+    budgets = dict(section_budgets or {})
+    parsed: list[tuple[str, int | None]] = []
+    for raw in required_sections:
+        title = _section_title(raw)
+        if not title:
+            continue
+        budget = _lookup_budget(title, budgets)
+        if budget is None:
+            # Parse "Introduction – 100 words" / "(200 words)" from the section string itself.
+            match = re.search(r"(?:[–\-]\s*|\()\s*(\d{2,4})\s*words?\b", str(raw), re.I)
+            if match:
+                budget = int(match.group(1))
+        parsed.append((title, budget))
+
+    content_rows = [(t, b) for t, b in parsed if not _is_structural_section(t)]
+    explicit_sum = sum(b for _, b in content_rows if b is not None)
+    unset = [t for t, b in content_rows if b is None]
+    remaining = max(word_count - explicit_sum, 0)
+    default_each = int(remaining / max(len(unset), 1)) if unset else 0
+
     rows: list[tuple[str, str, str, int]] = []
-    for section in cleaned:
-        lower = section.lower()
-        if "reference" in lower:
-            rows.append((section, "Reference list.", "Demonstrate scholarly grounding.", ref_words))
-        elif lower == "introduction" or lower.startswith("introduction"):
-            rows.append((section, "Opening section.", "Introduce the topic and thesis.", per_section))
-        elif "conclusion" in lower or "concluding" in lower:
-            rows.append((section, "Closing section.", "Restate thesis and main idea.", per_section))
-        elif "body" in lower or "analysis" in lower or "review" in lower:
-            rows.append((section, "Core paragraph.", "Summarise or evaluate according to the brief.", per_section))
+    for title, budget in parsed:
+        if _is_structural_section(title):
+            words = 0
+            purpose = (
+                "Structural front/back matter — do not count toward body word limit."
+                if "cover" in title.lower() or "title" in title.lower()
+                else "Reference list."
+            )
+            rows.append((title, "Structural section.", purpose, words))
+            continue
+        if budget is not None:
+            words = max(0, int(budget))
         else:
-            rows.append((section, "Supporting section.", "Develop a key part of the argument.", per_section))
+            words = max(40, default_each) if word_count > 0 else 80
+        lower = title.lower()
+        if lower == "introduction" or lower.startswith("introduction"):
+            rows.append((title, "Opening section.", "Introduce the topic and thesis.", words))
+        elif "conclusion" in lower or "concluding" in lower or "reflection" in lower:
+            rows.append((title, "Closing section.", "Synthesise and reflect as required by the brief.", words))
+        elif "journal" in lower or "body" in lower or "analysis" in lower or "review" in lower:
+            rows.append((title, "Core paragraph.", "Develop the entry according to the brief.", words))
+        else:
+            rows.append((title, "Supporting section.", "Develop a key part of the argument.", words))
+
+    # If explicit budgets undershoot the total and every content section was fixed,
+    # top up the largest body/reflection section so the plan still hits word_count.
+    content_indices = [i for i, (t, _, _, _) in enumerate(rows) if not _is_structural_section(t)]
+    planned = sum(rows[i][3] for i in content_indices)
+    if content_indices and word_count > 0 and planned < word_count and not unset:
+        deficit = word_count - planned
+        idx = content_indices[-1]
+        title, desc, purpose, words = rows[idx]
+        rows[idx] = (title, desc, purpose, words + deficit)
     return rows
 
 

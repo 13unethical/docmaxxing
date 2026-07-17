@@ -188,3 +188,12 @@ def test_parse_section_json_trims_overlong_draft_to_target_words():
     )
     assert len(parsed["draft"].split()) <= 93
     assert any("Trimmed section" in warning for warning in parsed["warnings"])
+
+
+def test_needs_expansion_when_draft_under_85_percent():
+    from services.writer_engine.llm_writer import _needs_expansion
+
+    short = " ".join(f"word{i}" for i in range(100))
+    assert _needs_expansion(short, 200) is True
+    long_enough = " ".join(f"word{i}" for i in range(180))
+    assert _needs_expansion(long_enough, 200) is False
