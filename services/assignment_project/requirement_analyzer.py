@@ -108,6 +108,7 @@ class GeminiRequirementAnalyzer:
                 formatting=RequirementFormatting.from_dict(normalized.get("formatting")),
                 deadline=normalized.get("deadline"),
                 difficulty=normalized.get("difficulty"),
+                academic_level=normalized.get("academic_level"),
                 missing_information=normalized.get("missing_information", []),
                 analyzer_version=self.VERSION,
                 analyzed_at=utc_now(),
@@ -145,8 +146,19 @@ def _requirement_system_prompt() -> str:
         "Return one strict JSON object only, no markdown, no code fences, no commentary. "
         "Required top-level keys: assignment_type, title, word_count, citation_style, "
         "required_sections, section_word_budgets, rubric, learning_outcomes, minimum_sources, "
-        "formatting, deadline, difficulty, missing_information. "
+        "formatting, deadline, difficulty, academic_level, missing_information. "
         "word_count and minimum_sources must be integers or null; never use descriptive text for them. "
+        "academic_level must be exactly one of: 'high_school', 'undergraduate', "
+        "'postgraduate', 'phd' (infer from wording like module code, 'Level 7', "
+        "'Master's', 'dissertation', 'undergraduate'); use null only if there is no signal. "
+        "difficulty must be an integer 1-10 grading the OVERALL difficulty of the whole "
+        "assignment, weighing ALL requirements together: academic level, assignment type, "
+        "required word count/length, number and quality of required sources, citation style, "
+        "rubric depth and criteria, technical/analytical demand, and originality expected. "
+        "Scale: 1-2 = trivial short reflection; 3-4 = simple undergraduate essay; "
+        "5-6 = standard analytical essay with several sources; 7-8 = advanced, technical, "
+        "or postgraduate work; 9-10 = original research / dissertation-level synthesis. "
+        "Return one integer 1-10, never text. "
         "WORD COUNT RULES (critical): "
         "1) Search the entire brief, tables, notes, and rubric for any word/page length limit. "
         "2) Exact limit like '2000 words' or 'approx. 1500 words' → word_count = that integer. "
@@ -376,6 +388,7 @@ def _normalize_requirement_json(raw: dict[str, Any]) -> dict[str, Any]:
     formatting = pick("formatting")
     deadline = pick("deadline")
     difficulty = pick("difficulty")
+    academic_level = pick("academic_level", "academicLevel", "level")
     missing_information = pick("missing_information", "missingInformation")
 
     if not isinstance(required_sections, list):
@@ -446,8 +459,25 @@ def _normalize_requirement_json(raw: dict[str, Any]) -> dict[str, Any]:
         },
         "deadline": str(deadline) if deadline not in (None, "") else None,
         "difficulty": str(difficulty) if difficulty not in (None, "") else None,
+        "academic_level": _normalize_academic_level(academic_level),
         "missing_information": [str(v) for v in missing_information if str(v).strip()],
     }
+
+
+def _normalize_academic_level(raw: Any) -> str | None:
+    """Map free-text level signals onto the pricing vocabulary."""
+    if raw in (None, ""):
+        return None
+    text = str(raw).lower()
+    if any(k in text for k in ("phd", "ph.d", "doctor", "doctoral")):
+        return "phd"
+    if any(k in text for k in ("master", "msc", "m.sc", "postgrad", "post-grad", "mba", "graduate", "level 7")):
+        return "postgraduate"
+    if any(k in text for k in ("undergrad", "bachelor", "bsc", "b.sc", "college", "level 4", "level 5", "level 6")):
+        return "undergraduate"
+    if any(k in text for k in ("high school", "highschool", "secondary", "gcse", "a-level", "a level", "school")):
+        return "high_school"
+    return None
 
 
 def _normalize_required_sections_with_budgets(raw_sections: list[Any]) -> tuple[list[str], dict[str, int]]:

@@ -7,15 +7,16 @@
     <div class="tt-page-header-text">
       <h1 class="tt-page-title">Turnitin Similarity Check</h1>
       <p class="tt-page-desc">
-        Upload your academic document and receive an official Turnitin Similarity Report.
-        The backend will later be connected to the Turnitin API.
+        Upload your academic document for similarity and AI detection.
+        Files are checked through our PlagDetect integration — results and reports
+        appear here when processing completes (usually 1–3 minutes).
       </p>
     </div>
     <div class="tt-credits-panel">
-      <span class="tt-credits-label">Current Credits</span>
-      <strong class="tt-credits-value" data-tt-credits>120</strong>
-      <span class="tt-credits-unit">Credits</span>
-      <a href="{{ url_for('pricing') }}" class="tt-btn tt-btn--secondary">Buy Credits</a>
+      <span class="tt-credits-label">Your Coins</span>
+      <strong class="tt-credits-value" data-tt-credits data-coin-balance>{{ coin_balance }}</strong>
+      <span class="tt-credits-unit">Coins</span>
+      <a href="{{ url_for('pricing') }}" class="tt-btn tt-btn--secondary">Buy Coins</a>
     </div>
   </header>
 
@@ -51,6 +52,7 @@
             class="tt-file-input"
             accept=".docx,.pdf,.doc,.txt"
             data-tt-file
+            multiple
             hidden
           />
           <span class="tt-selected-file" data-tt-filename hidden></span>
@@ -60,7 +62,7 @@
               <path d="M5 20h14" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
               <path d="M8 17h8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
             </svg>
-            Submit File
+            Submit Files
           </button>
         </div>
       </div>
@@ -99,6 +101,7 @@
             <th scope="col">Filename</th>
             <th scope="col">Similarity</th>
             <th scope="col">AI Score</th>
+            <th scope="col">AI Highlights</th>
             <th scope="col">Status</th>
             <th scope="col">Created</th>
             <th scope="col"><span class="tt-sr-only">Actions</span></th>
@@ -109,35 +112,6 @@
       <p class="tt-table-empty" data-tt-empty hidden>No reports match your search.</p>
     </div>
   </section>
-
-  <div class="tt-drawer-backdrop" data-tt-drawer-backdrop hidden></div>
-  <aside
-    class="tt-drawer"
-    data-tt-drawer
-    hidden
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="tt-drawer-title"
-  >
-    <div class="tt-drawer-header">
-      <h2 class="tt-drawer-title" id="tt-drawer-title">Report Details</h2>
-      <button type="button" class="tt-drawer-close" data-tt-drawer-close aria-label="Close report details">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
-        </svg>
-      </button>
-    </div>
-    <div class="tt-drawer-body" data-tt-drawer-body></div>
-    <div class="tt-drawer-footer">
-      <button type="button" class="tt-btn tt-btn--secondary tt-btn--full" data-tt-drawer-dl-pdf disabled>
-        Download PDF
-      </button>
-      <button type="button" class="tt-btn tt-btn--primary tt-btn--full" data-tt-drawer-open disabled>
-        Open Report
-      </button>
-      <a href="{{ url_for('humanizer') }}" class="tt-btn tt-btn--ghost tt-btn--full">Humanize Text</a>
-    </div>
-  </aside>
 </div>
 {% endblock %}
 {% block tools_scripts %}

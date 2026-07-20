@@ -100,6 +100,7 @@ class RequirementJSON:
     formatting: RequirementFormatting = field(default_factory=RequirementFormatting)
     deadline: str | None = None
     difficulty: str | None = None
+    academic_level: str | None = None
     missing_information: list[str] = field(default_factory=list)
     analyzer_version: str = "mock-1.0"
     analyzed_at: datetime | None = None
@@ -120,6 +121,7 @@ class RequirementJSON:
             "formatting": self.formatting.to_dict(),
             "deadline": self.deadline,
             "difficulty": self.difficulty,
+            "academic_level": self.academic_level,
             "missing_information": list(self.missing_information),
             "analyzer_version": self.analyzer_version,
             "analyzed_at": self.analyzed_at.isoformat() if self.analyzed_at else None,
@@ -150,6 +152,7 @@ class RequirementJSON:
             formatting=RequirementFormatting.from_dict(data.get("formatting")),
             deadline=data.get("deadline"),
             difficulty=data.get("difficulty"),
+            academic_level=data.get("academic_level"),
             missing_information=list(data.get("missing_information") or []),
             analyzer_version=str(data.get("analyzer_version") or "mock-1.0"),
             analyzed_at=analyzed_at,

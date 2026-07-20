@@ -10,6 +10,7 @@ from typing import Any
 
 from playwright.sync_api import Browser, BrowserContext, Playwright, sync_playwright
 
+from services.browser.cdp_compat import connect_over_cdp_compat
 from services.browser.page_manager import PageManager
 
 
@@ -40,8 +41,11 @@ class BrowserConnection:
 
         self._pw = sync_playwright().start()
         try:
-            self._browser = self._pw.chromium.connect_over_cdp(
-                self._cdp_url, timeout=self._timeout_ms
+            # `no_defaults=True` avoids the browser-wide Browser.setDownloadBehavior
+            # command that newer Chrome rejects with "Browser context management is
+            # not supported"; we reuse the existing context (never new_context()).
+            self._browser = connect_over_cdp_compat(
+                self._pw.chromium, self._cdp_url, timeout_ms=self._timeout_ms
             )
         except Exception as exc:  # noqa: BLE001
             self._teardown_playwright()

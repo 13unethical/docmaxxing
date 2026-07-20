@@ -1,0 +1,37 @@
+<div class="dm-auth-layer" data-auth-layer hidden aria-hidden="true">
+  <div class="dm-auth-backdrop" data-auth-close tabindex="-1" aria-hidden="true"></div>
+  <div class="dm-auth-modal" role="dialog" aria-modal="true" aria-labelledby="dm_auth_title">
+    <button type="button" class="dm-auth-x" data-auth-close aria-label="Close">&times;</button>
+    <div class="dm-auth-brand">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M7 3.75h7l4.25 4.25V20.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5V5.25A1.5 1.5 0 0 1 7 3.75Z" stroke="#2563eb" stroke-width="1.6" stroke-linejoin="round" />
+        <path d="M14 3.75V8h4.25" stroke="#2563eb" stroke-width="1.6" stroke-linejoin="round" />
+      </svg>
+      <span>DocMaxxing</span>
+    </div>
+    <h2 class="dm-auth-title" id="dm_auth_title" data-auth-title>Create your free account</h2>
+    <p class="dm-auth-reason" data-auth-reason>Register to continue.</p>
+
+    <div class="dm-auth-tabs" role="tablist">
+      <button type="button" class="dm-auth-tab is-active" data-auth-tab="register" role="tab">Sign up</button>
+      <button type="button" class="dm-auth-tab" data-auth-tab="login" role="tab">Sign in</button>
+    </div>
+
+    <p class="dm-auth-error" data-auth-error hidden role="alert"></p>
+
+    <form class="dm-auth-form" data-auth-form="register" novalidate>
+      <input class="dm-auth-input" type="text" name="name" placeholder="Name (optional)" autocomplete="name" />
+      <input class="dm-auth-input" type="email" name="email" placeholder="Email" autocomplete="email" required />
+      <input class="dm-auth-input" type="password" name="password" placeholder="Password (min 6 characters)" autocomplete="new-password" minlength="6" required />
+      <button type="submit" class="dm-auth-submit">Create account &amp; continue</button>
+    </form>
+
+    <form class="dm-auth-form" data-auth-form="login" novalidate hidden>
+      <input class="dm-auth-input" type="email" name="email" placeholder="Email" autocomplete="email" required />
+      <input class="dm-auth-input" type="password" name="password" placeholder="Password" autocomplete="current-password" required />
+      <button type="submit" class="dm-auth-submit">Sign in &amp; continue</button>
+    </form>
+
+    <p class="dm-auth-welcome">New accounts get <strong>{{ welcome_bonus }} welcome coins</strong>. Format and Academic Check stay free.</p>
+  </div>
+</div>

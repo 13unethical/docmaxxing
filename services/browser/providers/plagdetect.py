@@ -1,0 +1,1292 @@
+"""PlagDetect provider — upload, poll, and download Turnitin-style reports.
+
+Browser lifecycle is owned by BrowserService. This module drives the third-party
+PlagDetect dashboard (not official Turnitin): submit a file, wait for processing,
+read similarity / AI scores from the submissions table, and download both reports.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from services.browser.browser_service import BrowserService
+from services.browser.providers.base import Provider
+
+PROVIDER_NAME = "plagdetect"
+
+_PLACEHOLDER_HOSTS = frozenset(
+    {
+        "your-plagdetect-site.com",
+        "example.com",
+        "localhost",
+    }
+)
+_LOGIN_HINTS = ("/login", "/sign-in", "/signin", "/auth")
+_POLL_INTERVAL_S = 2.0
+_RELOAD_EVERY_N_POLLS = 2
+_DOWNLOAD_TIMEOUT_MS = 25_000
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _check_timeout_s() -> int:
+    return _env_int("PLAGDETECT_CHECK_TIMEOUT", 540)
+
+
+def _base_url() -> str:
+    return (os.environ.get("PLAGDETECT_BASE_URL") or "").strip().rstrip("/")
+
+
+def _dashboard_url() -> str:
+    explicit = (os.environ.get("PLAGDETECT_DASHBOARD_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    base = _base_url()
+    if base:
+        return f"{base}/dashboard"
+    return ""
+
+
+def _host_from_url(url: str) -> str:
+    match = re.match(r"https?://([^/]+)", url or "")
+    return (match.group(1) if match else "").lower()
+
+
+def plagdetect_config() -> dict[str, str]:
+    """Return the active PlagDetect URLs (read fresh from the environment)."""
+    return {
+        "base_url": _base_url(),
+        "dashboard_url": _dashboard_url(),
+    }
+
+
+def _validate_urls() -> None:
+    base = _base_url()
+    dash = _dashboard_url()
+    if not base or not dash:
+        raise PlagDetectAutomationError(
+            "PLAGDETECT_BASE_URL is not configured. "
+            "Open your PlagDetect dashboard in Chrome, copy the address bar URL "
+            "(e.g. https://app.example.com/dashboard), and set PLAGDETECT_BASE_URL "
+            "and PLAGDETECT_DASHBOARD_URL in .env, then restart python3 app.py.",
+            {"configured": plagdetect_config()},
+        )
+    host = _host_from_url(base)
+    if host in _PLACEHOLDER_HOSTS or "your-plagdetect" in host:
+        raise PlagDetectAutomationError(
+            f"PLAGDETECT_BASE_URL still uses a placeholder host ({host}). "
+            "Set the real dashboard URL from your browser address bar in .env.",
+            {"configured": plagdetect_config()},
+        )
+    if not base.startswith("http"):
+        raise PlagDetectAutomationError(
+            "PLAGDETECT_BASE_URL must start with http:// or https://",
+            {"configured": plagdetect_config()},
+        )
+
+
+class PlagDetectAutomationError(Exception):
+    def __init__(self, message: str, diagnostics: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
+
+
+def _page() -> Any:
+    return BrowserService.instance().get_or_create_page(PROVIDER_NAME)
+
+
+def _profile_path() -> str:
+    return str(BrowserService.instance().user_data_dir.resolve())
+
+
+def _is_login_url(url: str) -> bool:
+    lowered = (url or "").lower()
+    return any(h in lowered for h in _LOGIN_HINTS)
+
+
+def _collect_diagnostics(page: Any, *, step: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    diag: dict[str, Any] = {"step": step}
+    try:
+        diag["current_url"] = page.url
+        diag["page_title"] = page.title()
+        diag["visible_buttons"] = page.evaluate(
+            """() => Array.from(document.querySelectorAll('button, [role="button"], a'))
+                .map(el => (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' '))
+                .filter(Boolean)
+                .slice(0, 40)"""
+        )
+    except Exception as exc:  # noqa: BLE001
+        diag["diagnostics_error"] = str(exc)
+    if extra:
+        diag.update(extra)
+    return diag
+
+
+def start_interactive_login() -> dict[str, Any]:
+    _validate_urls()
+    page = _page()
+    page.goto(_dashboard_url(), wait_until="domcontentloaded")
+    return {
+        "success": True,
+        "cdp_url": BrowserService.instance().cdp_url,
+        "profile": _profile_path(),
+        "current_url": page.url,
+        "configured_dashboard_url": _dashboard_url(),
+        "message": "Chrome opened your PlagDetect dashboard. Sign in manually if needed.",
+    }
+
+
+def check_interactive_login() -> dict[str, Any]:
+    _validate_urls()
+    page = _page()
+    page.goto(_dashboard_url(), wait_until="domcontentloaded")
+    page.wait_for_timeout(1500)
+    logged_in = not _is_login_url(page.url)
+    return {
+        "success": True,
+        "logged_in": logged_in,
+        "current_url": page.url,
+        "title": page.title(),
+        "profile": _profile_path(),
+        "configured_dashboard_url": _dashboard_url(),
+        "message": "Logged in." if logged_in else "Not logged in yet — finish login in Chrome.",
+    }
+
+
+def get_session_status() -> dict[str, Any]:
+    _validate_urls()
+    page = _page()
+    page.goto(_dashboard_url(), wait_until="domcontentloaded")
+    page.wait_for_timeout(1200)
+    logged_in = not _is_login_url(page.url)
+    identity = page.evaluate(
+        """() => {
+            const emailRe = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i;
+            const body = document.body ? document.body.innerText : '';
+            const email = (body.match(emailRe) || [])[0] || null;
+            return { email };
+        }"""
+    )
+    return {
+        "logged_in": logged_in,
+        "current_url": page.url,
+        "configured_dashboard_url": _dashboard_url(),
+        "username": (identity or {}).get("email"),
+        "plan": None,
+    }
+
+
+def _set_toggle(page: Any, label_fragment: str, enabled: bool) -> bool:
+    """Set Exclude bibliography / Exclude quotes to the desired state.
+
+    Returns True when the switch was found and matches ``enabled``.
+    """
+    ok = bool(
+        page.evaluate(
+            """([label, on]) => {
+                const norm = (s) => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+                const target = norm(label);
+                const isChecked = (el) => {
+                    if (!el) return false;
+                    if (typeof el.checked === 'boolean') return el.checked;
+                    const aria = el.getAttribute('aria-checked');
+                    if (aria === 'true') return true;
+                    if (aria === 'false') return false;
+                    const cls = (el.className || '').toString().toLowerCase();
+                    return cls.includes('checked') || cls.includes('is-on') || cls.includes('active');
+                };
+                const clickEl = (el) => {
+                    if (!el) return;
+                    try { el.click(); } catch (_) {}
+                };
+                const candidates = Array.from(
+                    document.querySelectorAll('label, button, [role="switch"], span, div, p')
+                );
+                for (const node of candidates) {
+                    const text = norm(node.innerText || node.textContent || '');
+                    // Prefer short label nodes so we don't match huge containers.
+                    if (!text.includes(target) || text.length > 80) continue;
+
+                    let root = node.closest('label, [class*="toggle"], [class*="switch"], .flex, form, div') || node.parentElement;
+                    if (!root) continue;
+
+                    // Walk up a bit if the checkbox/switch is a sibling of the label.
+                    let input =
+                        root.querySelector('input[type="checkbox"], input[role="switch"], [role="switch"]') ||
+                        null;
+                    if (!input && node.parentElement) {
+                        root = node.parentElement.parentElement || node.parentElement;
+                        input = root.querySelector('input[type="checkbox"], input[role="switch"], [role="switch"]');
+                    }
+                    if (!input) {
+                        // Some UIs put the switch next to the label as a button.
+                        const sib = node.parentElement
+                            ? Array.from(node.parentElement.children).find(
+                                  (c) => c !== node && (
+                                      c.matches?.('button, [role="switch"], input') ||
+                                      /switch|toggle/i.test(c.className || '')
+                                  )
+                              )
+                            : null;
+                        input = sib || null;
+                    }
+                    if (!input) continue;
+
+                    let checked = isChecked(input);
+                    if (checked === !!on) return true;
+                    clickEl(input);
+                    // Also try the visual track if nested.
+                    const track = (input.closest('label, div') || root).querySelector(
+                        '[class*="switch"], [class*="toggle"], [role="switch"]'
+                    );
+                    if (track && track !== input && isChecked(input) !== !!on) clickEl(track);
+                    checked = isChecked(input);
+                    return checked === !!on;
+                }
+                return false;
+            }""",
+            [label_fragment, bool(enabled)],
+        )
+    )
+    page.wait_for_timeout(350)
+    return ok
+
+
+def _apply_exclude_toggles(
+    page: Any,
+    *,
+    exclude_bibliography: bool,
+    exclude_quotes: bool,
+) -> dict[str, bool]:
+    """Apply both exclude switches before upload; retry once if needed."""
+    bib_ok = _set_toggle(page, "bibliography", exclude_bibliography)
+    quotes_ok = _set_toggle(page, "quotes", exclude_quotes)
+    if not bib_ok or not quotes_ok:
+        page.wait_for_timeout(500)
+        if not bib_ok:
+            bib_ok = _set_toggle(page, "exclude bibliography", exclude_bibliography)
+        if not quotes_ok:
+            quotes_ok = _set_toggle(page, "exclude quotes", exclude_quotes)
+    return {"bibliography": bib_ok, "quotes": quotes_ok}
+
+
+def _parse_percent(text: str | None) -> float | None:
+    if not text:
+        return None
+    match = re.search(r"(\d+(?:\.\d+)?)\s*%", str(text))
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def _highlights_timeout_s() -> int:
+    return _env_int("PLAGDETECT_HIGHLIGHTS_TIMEOUT", 180)
+
+
+def _column_index(column: str) -> int:
+    return {"ai": 2, "similarity": 3, "highlights": 5}[column]
+
+
+def _parse_score_text(text: str | None) -> dict[str, Any]:
+    """Parse a PlagDetect score cell (supports numeric %, *%, and dashes)."""
+    raw = re.sub(r"\s+", " ", (text or "").strip())
+    if not raw or raw in {"-", "—"}:
+        return {"numeric": None, "display": None}
+    if "*" in raw:
+        return {"numeric": None, "display": "*%"}
+    numeric = _parse_percent(raw)
+    if numeric is not None:
+        display = f"{int(numeric) if numeric == int(numeric) else numeric:g}%"
+        return {"numeric": numeric, "display": display}
+    token = raw.split()[0] if raw else None
+    return {"numeric": None, "display": token}
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_CHECKPOINT_ROOT = _REPO_ROOT / "data" / "turnitin" / "checkpoints"
+
+
+def _checkpoint_path(submission_id: str) -> Path:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "", submission_id)
+    return _CHECKPOINT_ROOT / f"{safe}.json"
+
+
+def _load_checkpoint(submission_id: str | None) -> dict[str, Any] | None:
+    if not submission_id:
+        return None
+    path = _checkpoint_path(submission_id)
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_checkpoint(submission_id: str, data: dict[str, Any]) -> None:
+    path = _checkpoint_path(submission_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _clear_checkpoint(submission_id: str | None) -> None:
+    if not submission_id:
+        return
+    path = _checkpoint_path(submission_id)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _reload_dashboard(page: Any) -> None:
+    try:
+        page.goto(_dashboard_url(), wait_until="domcontentloaded", timeout=20_000)
+        page.wait_for_timeout(600)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _refresh_submissions_view(page: Any, *, force_reload: bool = False) -> None:
+    """Refresh the submissions table."""
+    if force_reload:
+        _reload_dashboard(page)
+        return
+    try:
+        page.evaluate(
+            """() => {
+                const refresh = Array.from(document.querySelectorAll('button, [role="button"], a'))
+                    .find(el => /refresh|reload/i.test(el.innerText || el.textContent || ''));
+                if (refresh) { refresh.click(); return true; }
+                return false;
+            }"""
+        )
+        page.wait_for_timeout(300)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _wait_for_file_attached_in_modal(page: Any, filename: str) -> None:
+    """Wait until the modal shows the selected filename."""
+    stem = Path(filename).name.lower()
+    try:
+        page.wait_for_function(
+            """(name) => {
+                const text = (document.body.innerText || '').toLowerCase();
+                return text.includes(name) || text.includes('.docx') || text.includes('.pdf');
+            }""",
+            stem,
+            timeout=12_000,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _read_submissions_table(page: Any) -> list[dict[str, Any]]:
+    return page.evaluate(
+        """() => {
+            const rows = [];
+            const tables = Array.from(document.querySelectorAll('table'));
+            for (const table of tables) {
+                const trs = Array.from(table.querySelectorAll('tbody tr'));
+                for (const tr of trs) {
+                    const cells = Array.from(tr.querySelectorAll('td')).map(td =>
+                        (td.innerText || td.textContent || '').trim().replace(/\\s+/g, ' ')
+                    );
+                    if (!cells.length) continue;
+                    const idMatch = (cells[0] || '').match(/#?([a-zA-Z0-9]+)/);
+                    rows.push({
+                        id: idMatch ? idMatch[1] : null,
+                        filename: cells[1] || cells[0] || '',
+                        ai_text: cells[2] || '',
+                        similarity_text: cells[3] || '',
+                        status_text: cells[4] || cells[3] || '',
+                        highlights_text: cells[5] || '',
+                        row_text: cells.join(' | '),
+                    });
+                }
+            }
+            return rows;
+        }"""
+    )
+
+
+def _normalize_filename(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
+def _wait_for_upload_row(
+    page: Any,
+    filename: str,
+    *,
+    exclude_external_id: str | None = None,
+    timeout_s: float = 45.0,
+) -> dict[str, Any] | None:
+    """Wait for the PlagDetect row created by our upload."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        rows = _read_submissions_table(page)
+        for row in rows:
+            if exclude_external_id and row.get("id") == exclude_external_id:
+                continue
+            if _row_status(row) in {"running", "queued"}:
+                return row
+        row = _find_row(rows, filename, exclude_external_id=exclude_external_id)
+        if row and row.get("id"):
+            return row
+        page.wait_for_timeout(int(_POLL_INTERVAL_S * 1000))
+        _refresh_submissions_view(page)
+    return None
+
+
+def _find_row(
+    rows: list[dict[str, Any]],
+    filename: str,
+    external_id: str | None = None,
+    *,
+    prefer_processing: bool = False,
+    exclude_external_id: str | None = None,
+) -> dict[str, Any] | None:
+    target = filename.lower()
+    target_norm = _normalize_filename(filename)
+    stem_norm = _normalize_filename(Path(filename).stem)
+
+    if external_id:
+        for row in rows:
+            if row.get("id") == external_id:
+                return row
+
+    candidates: list[dict[str, Any]] = []
+    for row in rows:
+        if exclude_external_id and row.get("id") == exclude_external_id:
+            continue
+        fn = (row.get("filename") or "").lower()
+        fn_norm = _normalize_filename(fn)
+        if fn == target or target in fn or fn in target:
+            candidates.append(row)
+            continue
+        if target_norm and fn_norm and (target_norm in fn_norm or fn_norm in target_norm):
+            candidates.append(row)
+            continue
+        if stem_norm and fn_norm and (stem_norm in fn_norm or fn_norm in stem_norm):
+            candidates.append(row)
+
+    if not candidates:
+        if prefer_processing:
+            for row in rows:
+                if exclude_external_id and row.get("id") == exclude_external_id:
+                    continue
+                status = _row_status(row)
+                if status in {"running", "queued"}:
+                    return row
+        return None
+
+    if prefer_processing:
+        for row in candidates:
+            if _row_status(row) in {"running", "queued"}:
+                return row
+    return candidates[0]
+
+
+def _row_status(row: dict[str, Any]) -> str:
+    text = (row.get("status_text") or row.get("row_text") or "").upper()
+    if "COMPLET" in text or "DONE" in text or "SUCCESS" in text:
+        return "completed"
+    if "FAIL" in text or "ERROR" in text:
+        return "failed"
+    if "RUN" in text or "PROCESS" in text or "PENDING" in text:
+        return "running"
+    if "QUEUE" in text:
+        return "queued"
+    ai = _parse_percent(row.get("ai_text"))
+    sim = _parse_percent(row.get("similarity_text"))
+    if ai is not None or sim is not None:
+        return "completed"
+    return "running"
+
+
+def _ensure_logged_in(page: Any) -> bool:
+    if _is_login_url(page.url):
+        return False
+    try:
+        return bool(
+            page.evaluate(
+                """() => {
+                    const text = (document.body.innerText || '').toLowerCase();
+                    return text.includes('welcome back')
+                        || text.includes('my submissions')
+                        || text.includes('available slots');
+                }"""
+            )
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _close_visible_modals(page: Any) -> None:
+    page.evaluate(
+        """() => {
+            const isVisible = el => {
+                if (!el) return false;
+                const st = getComputedStyle(el);
+                if (st.display === 'none' || st.visibility === 'hidden') return false;
+                return el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
+            };
+            document.querySelectorAll('.modal-close').forEach(btn => {
+                const modal = btn.closest('.modal, [role="dialog"]');
+                if (modal && isVisible(modal)) btn.click();
+            });
+            document.querySelectorAll('.modal button, [role="dialog"] button').forEach(btn => {
+                const modal = btn.closest('.modal, [role="dialog"]');
+                if (!modal || !isVisible(modal)) return;
+                const t = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+                if (t === '×' || t === 'x' || t.includes('cancel') || t === 'close') btn.click();
+            });
+        }"""
+    )
+    page.wait_for_timeout(300)
+
+
+def _submit_modal_visible(page: Any) -> bool:
+    try:
+        return bool(
+            page.evaluate(
+                """() => {
+                    const isVisible = el => {
+                        if (!el) return false;
+                        const st = getComputedStyle(el);
+                        if (st.display === 'none' || st.visibility === 'hidden') return false;
+                        return el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
+                    };
+                    for (const modal of document.querySelectorAll('.modal, [role="dialog"]')) {
+                        if (!isVisible(modal)) continue;
+                        const t = (modal.innerText || modal.textContent || '').toLowerCase();
+                        if (t.includes('submit new file') || t.includes('click to upload')) return true;
+                    }
+                    return false;
+                }"""
+            )
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _click_dashboard_submit_file(page: Any) -> None:
+    """Open the 'Submit New File' modal from the dashboard."""
+    clicked = page.evaluate(
+        """() => {
+            const inModal = el => !!el.closest('.modal, [role="dialog"], [class*="modal" i]');
+            const buttons = Array.from(document.querySelectorAll('button, [role="button"], a'));
+            for (const el of buttons) {
+                if (inModal(el)) continue;
+                const t = (el.innerText || el.textContent || '').trim().toLowerCase();
+                if (t === 'submit file' || t.includes('submit file')) {
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+        }"""
+    )
+    if not clicked:
+        raise PlagDetectAutomationError(
+            "Could not find the dashboard Submit File button.",
+            _collect_diagnostics(page, step="open_submit_modal"),
+        )
+
+
+def _wait_for_submit_modal(page: Any) -> None:
+    if _submit_modal_visible(page):
+        page.wait_for_timeout(400)
+        return
+    try:
+        page.wait_for_function(
+            """() => {
+                const isVisible = el => {
+                    if (!el) return false;
+                    const st = getComputedStyle(el);
+                    if (st.display === 'none' || st.visibility === 'hidden') return false;
+                    return el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0;
+                };
+                for (const modal of document.querySelectorAll('.modal, [role="dialog"]')) {
+                    if (!isVisible(modal)) continue;
+                    const t = (modal.innerText || modal.textContent || '').toLowerCase();
+                    if (t.includes('submit new file') || t.includes('click to upload')) return true;
+                }
+                return false;
+            }""",
+            timeout=12_000,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise PlagDetectAutomationError(
+            "Submit New File modal did not appear. "
+            "Make sure you are logged in to plagdetect.org in the automation Chrome window.",
+            _collect_diagnostics(page, step="wait_submit_modal"),
+        ) from exc
+    page.wait_for_timeout(400)
+
+
+def _open_submit_modal(page: Any) -> None:
+    _close_visible_modals(page)
+    if _submit_modal_visible(page):
+        return
+    last_error: Exception | None = None
+    for _attempt in range(3):
+        try:
+            _click_dashboard_submit_file(page)
+            _wait_for_submit_modal(page)
+            return
+        except PlagDetectAutomationError as exc:
+            last_error = exc
+            _close_visible_modals(page)
+            page.wait_for_timeout(500)
+    if last_error:
+        raise last_error
+    raise PlagDetectAutomationError(
+        "Could not open Submit New File modal.",
+        _collect_diagnostics(page, step="open_submit_modal"),
+    )
+
+
+def _upload_file_in_modal(page: Any, file_path: str) -> None:
+    """Attach the document inside the open modal."""
+    resolved = str(Path(file_path).resolve())
+
+    modal_input = page.locator('.modal input[type="file"], [role="dialog"] input[type="file"], #file')
+    if modal_input.count() > 0:
+        try:
+            modal_input.first.set_input_files(resolved)
+            page.wait_for_timeout(900)
+            return
+        except Exception:  # noqa: BLE001
+            pass
+
+    file_inputs = page.locator('input[type="file"]')
+    for idx in range(file_inputs.count() - 1, -1, -1):
+        try:
+            file_inputs.nth(idx).set_input_files(resolved)
+            page.wait_for_timeout(900)
+            return
+        except Exception:  # noqa: BLE001
+            continue
+
+    # Fallback: click the drop zone and use the native file chooser.
+    try:
+        with page.expect_file_chooser(timeout=15_000) as fc_info:
+            zone_clicked = page.evaluate(
+                """() => {
+                    const nodes = Array.from(document.querySelectorAll('div, label, button, p, span'));
+                    for (const node of nodes) {
+                        const t = (node.innerText || node.textContent || '').toLowerCase();
+                        if (t.includes('click to upload') || t.includes('drag and drop')) {
+                            node.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }"""
+            )
+            if not zone_clicked:
+                raise PlagDetectAutomationError(
+                    "Could not find upload zone in modal.",
+                    _collect_diagnostics(page, step="modal_upload_zone"),
+                )
+        fc_info.value.set_files(resolved)
+        page.wait_for_timeout(900)
+    except PlagDetectAutomationError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise PlagDetectAutomationError(
+            f"Could not attach file in modal: {exc}",
+            _collect_diagnostics(page, step="modal_upload_file"),
+        ) from exc
+
+
+def _confirm_modal_submit(page: Any) -> None:
+    """Click the modal's Submit File button (same label as the dashboard opener)."""
+    label = page.evaluate(
+        """() => {
+            const modal = document.querySelector('.modal:not([style*="display: none"])')
+                || document.querySelector('.modal.show')
+                || document.querySelector('[role="dialog"]')
+                || Array.from(document.querySelectorAll('.modal'))
+                    .find(m => (m.innerText || '').toLowerCase().includes('submit new file'));
+            if (!modal) return null;
+            const buttons = Array.from(modal.querySelectorAll('button, [role="button"]'));
+            for (const btn of buttons) {
+                const t = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+                if (t === 'submit file') {
+                    btn.click();
+                    return t;
+                }
+            }
+            for (const word of ['submit', 'upload', 'proceed', 'analyze', 'check']) {
+                for (const btn of buttons) {
+                    const t = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+                    if (!t || t.includes('cancel') || t.includes('close')) continue;
+                    if (t === word || t.includes(word)) {
+                        btn.click();
+                        return t;
+                    }
+                }
+            }
+            return null;
+        }"""
+    )
+    if not label:
+        raise PlagDetectAutomationError(
+            "Could not find the confirm button inside Submit New File modal.",
+            _collect_diagnostics(page, step="modal_confirm"),
+        )
+    page.wait_for_timeout(1200)
+    try:
+        page.wait_for_function(
+            """() => {
+                const text = (document.body.innerText || '').toLowerCase();
+                return !text.includes('submit new file');
+            }""",
+            timeout=20_000,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _submit_file_via_modal(page: Any, file_path: str) -> None:
+    _open_submit_modal(page)
+    _upload_file_in_modal(page, file_path)
+    _wait_for_file_attached_in_modal(page, Path(file_path).name)
+    _confirm_modal_submit(page)
+
+
+def _find_row_by_external_id(rows: list[dict[str, Any]], external_id: str) -> dict[str, Any] | None:
+    for row in rows:
+        if row.get("id") == external_id:
+            return row
+    return None
+
+
+def _highlights_needs_generation(text: str | None) -> bool:
+    lowered = (text or "").lower()
+    return "get highlights" in lowered or "unlock highlights" in lowered
+
+
+def _highlights_processing(text: str | None) -> bool:
+    lowered = (text or "").upper()
+    return "PROCESS" in lowered or "PENDING" in lowered
+
+
+def _click_get_highlights(page: Any, external_id: str) -> bool:
+    col_idx = _column_index("highlights")
+    return bool(
+        page.evaluate(
+            """([externalId, colIdx]) => {
+                const trs = Array.from(document.querySelectorAll('table tbody tr'));
+                for (const tr of trs) {
+                    const cells = Array.from(tr.querySelectorAll('td'));
+                    if (!cells.length) continue;
+                    const idText = (cells[0].innerText || cells[0].textContent || '').trim();
+                    if (!idText.includes(externalId)) continue;
+                    const cell = cells[colIdx];
+                    if (!cell) return false;
+                    const btn = cell.querySelector('button, a');
+                    if (!btn) return false;
+                    const label = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+                    if (label.includes('get highlights')) {
+                        btn.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""",
+            [external_id, col_idx],
+        )
+    )
+
+
+def _confirm_highlights_modal(page: Any) -> None:
+    page.evaluate(
+        """() => {
+            const modal = Array.from(document.querySelectorAll('.modal, [role="dialog"]'))
+                .find(m => (m.innerText || m.textContent || '').toLowerCase().includes('highlights'));
+            if (!modal) return false;
+            const buttons = Array.from(modal.querySelectorAll('button, [role="button"]'));
+            for (const word of ['generate highlights', 'generate', 'proceed', 'confirm']) {
+                for (const btn of buttons) {
+                    const t = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+                    if (t.includes(word)) { btn.click(); return true; }
+                }
+            }
+            return false;
+        }"""
+    )
+    page.wait_for_timeout(900)
+
+
+def _fetch_ai_highlights(
+    page: Any,
+    external_id: str,
+    dest: Path,
+) -> tuple[dict[str, Any], bool]:
+    """Request AI Highlights when AI score is *% and download the report."""
+    parsed: dict[str, Any] = {"numeric": None, "display": None}
+    _reload_dashboard(page)
+    deadline = time.monotonic() + _highlights_timeout_s()
+    triggered = False
+    poll_count = 0
+
+    while time.monotonic() < deadline:
+        rows = _read_submissions_table(page)
+        row = _find_row_by_external_id(rows, external_id)
+        if row is None:
+            page.wait_for_timeout(int(_POLL_INTERVAL_S * 1000))
+            poll_count += 1
+            if poll_count % _RELOAD_EVERY_N_POLLS == 0:
+                _reload_dashboard(page)
+            continue
+
+        hl_text = row.get("highlights_text") or ""
+        if _highlights_needs_generation(hl_text) and not triggered:
+            if _click_get_highlights(page, external_id):
+                _confirm_highlights_modal(page)
+                triggered = True
+            page.wait_for_timeout(int(_POLL_INTERVAL_S * 1000))
+            continue
+
+        candidate = _parse_score_text(hl_text)
+        if candidate.get("numeric") is not None:
+            parsed = candidate
+            break
+        if _highlights_processing(hl_text):
+            page.wait_for_timeout(int(_POLL_INTERVAL_S * 1000))
+            poll_count += 1
+            if poll_count % _RELOAD_EVERY_N_POLLS == 0:
+                _reload_dashboard(page)
+            continue
+        if hl_text.strip() in {"-", "—", ""} and not triggered:
+            if _click_get_highlights(page, external_id):
+                _confirm_highlights_modal(page)
+                triggered = True
+            page.wait_for_timeout(int(_POLL_INTERVAL_S * 1000))
+            continue
+        break
+
+    if parsed.get("numeric") is None:
+        rows = _read_submissions_table(page)
+        row = _find_row_by_external_id(rows, external_id)
+        if row:
+            parsed = _parse_score_text(row.get("highlights_text"))
+
+    ok = False
+    if parsed.get("numeric") is not None:
+        _reload_dashboard(page)
+        ok = _download_report(page, external_id, "highlights", dest)
+    return parsed, ok
+
+
+def _click_download_in_row(page: Any, external_id: str, column: str) -> Any:
+    """Click Download in the PlagDetect row (AI=2, similarity=3, highlights=5)."""
+    col_idx = _column_index(column)
+    return page.evaluate(
+        """([externalId, colIdx]) => {
+            const trs = Array.from(document.querySelectorAll('table tbody tr'));
+            for (const tr of trs) {
+                const cells = Array.from(tr.querySelectorAll('td'));
+                if (!cells.length) continue;
+                const idText = (cells[0].innerText || cells[0].textContent || '').trim();
+                if (!idText.includes(externalId)) continue;
+                const cell = cells[colIdx];
+                if (!cell) return false;
+                const btn = cell.querySelector('a, button');
+                if (!btn) return false;
+                const label = (btn.innerText || btn.textContent || '').trim().toLowerCase();
+                if (!label.includes('download')) return false;
+                btn.click();
+                return true;
+            }
+            return false;
+        }""",
+        [external_id, col_idx],
+    )
+
+
+def _download_report(page: Any, external_id: str, column: str, dest: Path) -> bool:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with page.expect_download(timeout=_DOWNLOAD_TIMEOUT_MS) as dl_info:
+            clicked = _click_download_in_row(page, external_id, column)
+            if not clicked:
+                return False
+        download = dl_info.value
+        download.save_as(str(dest))
+        return dest.is_file() and dest.stat().st_size > 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _download_both_reports(
+    page: Any,
+    external_id: str,
+    ai_dest: Path,
+    sim_dest: Path,
+) -> tuple[bool, bool]:
+    """Best-effort PDF download — never blocks job success."""
+    _reload_dashboard(page)
+    ai_ok = _download_report(page, external_id, "ai", ai_dest)
+    sim_ok = _download_report(page, external_id, "similarity", sim_dest)
+    if ai_ok and sim_ok:
+        return ai_ok, sim_ok
+    _reload_dashboard(page)
+    if not ai_ok:
+        ai_ok = _download_report(page, external_id, "ai", ai_dest)
+    if not sim_ok:
+        sim_ok = _download_report(page, external_id, "similarity", sim_dest)
+    return ai_ok, sim_ok
+
+
+def submit_check(
+    file_path: str,
+    *,
+    exclude_bibliography: bool = False,
+    exclude_quotes: bool = False,
+    report_dir: str | None = None,
+    submission_id: str | None = None,
+) -> dict[str, Any]:
+    """Upload a document to PlagDetect, wait for scores, download both reports."""
+    _validate_urls()
+    path = Path(file_path)
+    if not path.is_file():
+        return {"success": False, "error": "file not found"}
+
+    page = _page()
+    started = time.monotonic()
+    filename = path.name
+    checkpoint = _load_checkpoint(submission_id)
+    external_id: str | None = (checkpoint or {}).get("external_id")
+    plagdetect_filename: str | None = (checkpoint or {}).get("plagdetect_filename")
+    uploaded = bool((checkpoint or {}).get("uploaded"))
+
+    page.goto(_dashboard_url(), wait_until="domcontentloaded")
+    try:
+        page.wait_for_load_state("networkidle", timeout=20_000)
+    except Exception:  # noqa: BLE001
+        pass
+    page.wait_for_timeout(800)
+
+    if _is_login_url(page.url) or not _ensure_logged_in(page):
+        return {"success": False, "error": "LOGIN_REQUIRED"}
+
+    if not uploaded:
+        _reload_dashboard(page)
+        if not _ensure_logged_in(page):
+            return {"success": False, "error": "LOGIN_REQUIRED"}
+        _apply_exclude_toggles(
+            page,
+            exclude_bibliography=exclude_bibliography,
+            exclude_quotes=exclude_quotes,
+        )
+        _submit_file_via_modal(page, str(path.resolve()))
+        page.wait_for_timeout(2500)
+        upload_row = _wait_for_upload_row(
+            page,
+            filename,
+            exclude_external_id=external_id,
+        )
+        if upload_row is None:
+            raise PlagDetectAutomationError(
+                "Upload started but the submission row did not appear.",
+                _collect_diagnostics(page, step="wait_upload_row", extra={"filename": filename}),
+            )
+        external_id = upload_row.get("id") or external_id
+        plagdetect_filename = upload_row.get("filename") or plagdetect_filename
+        if submission_id and external_id:
+            _save_checkpoint(
+                submission_id,
+                {
+                    "uploaded": True,
+                    "external_id": external_id,
+                    "plagdetect_filename": plagdetect_filename,
+                    "source_filename": filename,
+                },
+            )
+            uploaded = True
+
+    if not external_id:
+        raise PlagDetectAutomationError(
+            "Missing PlagDetect submission id after upload.",
+            _collect_diagnostics(page, step="missing_external_id"),
+        )
+
+    deadline = time.monotonic() + _check_timeout_s()
+    row: dict[str, Any] | None = None
+    status = "queued"
+    poll_count = 0
+
+    while time.monotonic() < deadline:
+        if _is_login_url(page.url):
+            return {"success": False, "error": "LOGIN_REQUIRED", "external_id": external_id}
+
+        page.wait_for_timeout(int(_POLL_INTERVAL_S * 1000))
+        poll_count += 1
+        _refresh_submissions_view(page, force_reload=(poll_count % _RELOAD_EVERY_N_POLLS == 0))
+
+        rows = _read_submissions_table(page)
+        row = _find_row(rows, filename, external_id)
+        if row is None:
+            continue
+        external_id = row.get("id") or external_id
+        plagdetect_filename = row.get("filename") or plagdetect_filename
+        status = _row_status(row)
+        if status == "failed":
+            _clear_checkpoint(submission_id)
+            return {
+                "success": False,
+                "error": row.get("status_text") or "External check failed",
+                "external_id": external_id,
+            }
+        if status == "completed":
+            break
+
+    if row is None or status != "completed":
+        raise PlagDetectAutomationError(
+            "Timed out waiting for PlagDetect results.",
+            _collect_diagnostics(
+                page,
+                step="poll_results",
+                extra={"filename": filename, "external_id": external_id},
+            ),
+        )
+
+    ai_parsed = _parse_score_text(row.get("ai_text"))
+    sim_parsed = _parse_score_text(row.get("similarity_text"))
+
+    out_dir = Path(report_dir) if report_dir else path.parent / "reports"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ai_report = out_dir / f"{path.stem}_ai_report.pdf"
+    sim_report = out_dir / f"{path.stem}_similarity_report.pdf"
+
+    ai_ok = False
+    sim_ok = False
+    if external_id:
+        try:
+            ai_ok, sim_ok = _download_both_reports(page, external_id, ai_report, sim_report)
+        except Exception:  # noqa: BLE001
+            pass
+
+    _clear_checkpoint(submission_id)
+    elapsed = round(time.monotonic() - started, 3)
+    return {
+        "success": True,
+        "external_id": external_id,
+        "filename": filename,
+        "plagdetect_filename": plagdetect_filename,
+        "similarity": sim_parsed["numeric"],
+        "similarity_display": sim_parsed["display"],
+        "ai_score": ai_parsed["numeric"],
+        "ai_score_display": ai_parsed["display"],
+        "ai_report_path": str(ai_report.resolve()) if ai_ok else None,
+        "similarity_report_path": str(sim_report.resolve()) if sim_ok else None,
+        "elapsed_seconds": elapsed,
+        "current_url": page.url,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def fetch_reports(
+    *,
+    external_id: str,
+    report_dir: str | Path,
+    submission_id: str | None = None,
+    fetch_similarity: bool = True,
+    fetch_ai: bool = True,
+    fetch_highlights: bool = False,
+) -> dict[str, Any]:
+    """Re-download report PDFs from PlagDetect for an existing submission."""
+    _validate_urls()
+    ext = (external_id or "").strip()
+    if not ext:
+        raise PlagDetectAutomationError(
+            "PlagDetect submission id is required.",
+            _collect_diagnostics(None, step="fetch_reports"),
+        )
+
+    page = _page()
+    page.goto(_dashboard_url(), wait_until="domcontentloaded")
+    try:
+        page.wait_for_load_state("networkidle", timeout=20_000)
+    except Exception:  # noqa: BLE001
+        pass
+    page.wait_for_timeout(800)
+
+    if _is_login_url(page.url) or not _ensure_logged_in(page):
+        return {"success": False, "error": "LOGIN_REQUIRED"}
+
+    out_dir = Path(report_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = submission_id or ext
+    started = time.monotonic()
+
+    ai_report = out_dir / f"{stem}_ai_report.pdf"
+    sim_report = out_dir / f"{stem}_similarity_report.pdf"
+    hl_report = out_dir / f"{stem}_highlights_report.pdf"
+
+    ai_ok = False
+    sim_ok = False
+    hl_ok = False
+    hl_parsed: dict[str, Any] = {"numeric": None, "display": None}
+
+    _reload_dashboard(page)
+    if fetch_ai:
+        ai_ok = _download_report(page, ext, "ai", ai_report)
+    if fetch_similarity:
+        sim_ok = _download_report(page, ext, "similarity", sim_report)
+    if (fetch_ai and not ai_ok) or (fetch_similarity and not sim_ok):
+        _reload_dashboard(page)
+        if fetch_ai and not ai_ok:
+            ai_ok = _download_report(page, ext, "ai", ai_report)
+        if fetch_similarity and not sim_ok:
+            sim_ok = _download_report(page, ext, "similarity", sim_report)
+
+    if fetch_highlights:
+        rows = _read_submissions_table(page)
+        row = _find_row_by_external_id(rows, ext)
+        if row:
+            hl_parsed = _parse_score_text(row.get("highlights_text"))
+        if hl_parsed.get("numeric") is not None or hl_parsed.get("display"):
+            hl_ok = _download_report(page, ext, "highlights", hl_report)
+        else:
+            # Score not ready yet — try Get Highlights flow.
+            try:
+                hl_parsed, hl_ok = _fetch_ai_highlights(page, ext, hl_report)
+            except Exception:  # noqa: BLE001
+                pass
+
+    return {
+        "success": True,
+        "external_id": ext,
+        "ai_report_path": str(ai_report.resolve()) if ai_ok else None,
+        "similarity_report_path": str(sim_report.resolve()) if sim_ok else None,
+        "ai_highlights": hl_parsed.get("numeric"),
+        "ai_highlights_display": hl_parsed.get("display"),
+        "ai_highlights_report_path": str(hl_report.resolve()) if hl_ok else None,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "current_url": page.url,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def submit_highlights(
+    *,
+    external_id: str,
+    report_dir: str | Path,
+    submission_id: str | None = None,
+) -> dict[str, Any]:
+    """Request AI Highlights on PlagDetect (user-initiated) and download the PDF."""
+    _validate_urls()
+    ext = (external_id or "").strip()
+    if not ext:
+        raise PlagDetectAutomationError(
+            "PlagDetect submission id is required for AI Highlights.",
+            _collect_diagnostics(None, step="highlights"),
+        )
+
+    page = _page()
+    page.goto(_dashboard_url(), wait_until="domcontentloaded")
+    try:
+        page.wait_for_load_state("networkidle", timeout=20_000)
+    except Exception:  # noqa: BLE001
+        pass
+    page.wait_for_timeout(800)
+
+    if _is_login_url(page.url) or not _ensure_logged_in(page):
+        return {"success": False, "error": "LOGIN_REQUIRED"}
+
+    out_dir = Path(report_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = submission_id or ext
+    highlights_report = out_dir / f"{stem}_highlights_report.pdf"
+
+    started = time.monotonic()
+    highlights_parsed, highlights_ok = _fetch_ai_highlights(page, ext, highlights_report)
+
+    if highlights_parsed.get("numeric") is None and not highlights_parsed.get("display"):
+        raise PlagDetectAutomationError(
+            "AI Highlights did not finish in time.",
+            _collect_diagnostics(
+                page,
+                step="highlights",
+                extra={"external_id": ext},
+            ),
+        )
+
+    return {
+        "success": True,
+        "external_id": ext,
+        "ai_highlights": highlights_parsed.get("numeric"),
+        "ai_highlights_display": highlights_parsed.get("display"),
+        "ai_highlights_report_path": str(highlights_report.resolve()) if highlights_ok else None,
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "current_url": page.url,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+class PlagDetectProvider(Provider):
+    name = PROVIDER_NAME
+
+    def initialize(self) -> None:
+        self.page()
+
+    def login(self, *, credentials: dict[str, Any] | None = None) -> Any:
+        return start_interactive_login()
+
+    def is_logged_in(self) -> bool:
+        try:
+            return bool(get_session_status().get("logged_in"))
+        except Exception:  # noqa: BLE001
+            return False
+
+    def health(self) -> dict[str, Any]:
+        return {"provider": self.name, "logged_in": self.is_logged_in()}
+
+    def execute(self, task: Any) -> Any:
+        if isinstance(task, dict) and task.get("operation") == "check":
+            payload = task.get("payload") or {}
+            return submit_check(
+                str(payload.get("file_path") or ""),
+                exclude_bibliography=bool(payload.get("exclude_bibliography")),
+                exclude_quotes=bool(payload.get("exclude_quotes")),
+                report_dir=payload.get("report_dir"),
+                submission_id=payload.get("submission_id"),
+            )
+        if isinstance(task, dict) and task.get("operation") == "highlights":
+            payload = task.get("payload") or {}
+            return submit_highlights(
+                external_id=str(payload.get("external_id") or ""),
+                report_dir=str(payload.get("report_dir") or ""),
+                submission_id=payload.get("submission_id"),
+            )
+        if isinstance(task, dict) and task.get("operation") == "fetch_reports":
+            payload = task.get("payload") or {}
+            return fetch_reports(
+                external_id=str(payload.get("external_id") or ""),
+                report_dir=str(payload.get("report_dir") or ""),
+                submission_id=payload.get("submission_id"),
+                fetch_similarity=bool(payload.get("fetch_similarity", True)),
+                fetch_ai=bool(payload.get("fetch_ai", True)),
+                fetch_highlights=bool(payload.get("fetch_highlights", False)),
+            )
+        raise NotImplementedError(f"Unsupported PlagDetect task: {task!r}")

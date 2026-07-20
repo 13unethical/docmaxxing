@@ -8,6 +8,8 @@ from typing import Any, ClassVar
 
 from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
 
+from services.browser.cdp_compat import connect_over_cdp_compat
+
 _DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 
 
@@ -276,7 +278,11 @@ class BrowserRuntime:
         print(f"CDP endpoint: {self._cdp_url}", flush=True)
         self._playwright = sync_playwright().start()
         try:
-            self._browser = self._playwright.chromium.connect_over_cdp(self._cdp_url)
+            # `no_defaults=True` skips the unsupported browser-wide
+            # Browser.setDownloadBehavior call; reuse the existing context below.
+            self._browser = connect_over_cdp_compat(
+                self._playwright.chromium, self._cdp_url, timeout_ms=self._timeout_ms
+            )
         except Exception as exc:  # noqa: BLE001
             try:
                 self._playwright.stop()

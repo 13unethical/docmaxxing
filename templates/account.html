@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}Account — DocMaxxing{% endblock %}
+{% block content %}
+<section class="acct-page">
+  <header class="acct-header">
+    <h1 class="acct-title">Account</h1>
+    <p class="acct-desc">Your profile details and password.</p>
+  </header>
+
+  {% if profile_message %}
+  <p class="acct-flash acct-flash--ok" role="status">{{ profile_message }}</p>
+  {% endif %}
+  {% if profile_error %}
+  <p class="acct-flash acct-flash--err" role="alert">{{ profile_error }}</p>
+  {% endif %}
+  {% if password_message %}
+  <p class="acct-flash acct-flash--ok" role="status">{{ password_message }}</p>
+  {% endif %}
+  {% if password_error %}
+  <p class="acct-flash acct-flash--err" role="alert">{{ password_error }}</p>
+  {% endif %}
+
+  <div class="acct-grid">
+    <section class="acct-card">
+      <h2 class="acct-card-title">Profile</h2>
+      <dl class="acct-meta">
+        <div>
+          <dt>ID</dt>
+          <dd>#{{ current_user.id }}</dd>
+        </div>
+        <div>
+          <dt>Email</dt>
+          <dd>{{ current_user.email }}</dd>
+        </div>
+      </dl>
+
+      <form method="post" action="{{ url_for('account') }}" class="acct-form">
+        <input type="hidden" name="action" value="profile" />
+        <label class="acct-field">
+          <span class="acct-label">Displayed name</span>
+          <input
+            type="text"
+            name="name"
+            value="{{ current_user.name or '' }}"
+            maxlength="80"
+            placeholder="Your name"
+            autocomplete="name"
+          />
+        </label>
+        <button type="submit" class="acct-btn">Save name</button>
+      </form>
+    </section>
+
+    <section class="acct-card">
+      <h2 class="acct-card-title">Change password</h2>
+      <form method="post" action="{{ url_for('account') }}" class="acct-form">
+        <input type="hidden" name="action" value="password" />
+        <label class="acct-field">
+          <span class="acct-label">Current password</span>
+          <input type="password" name="current_password" required autocomplete="current-password" />
+        </label>
+        <label class="acct-field">
+          <span class="acct-label">New password</span>
+          <input type="password" name="new_password" required minlength="6" autocomplete="new-password" />
+        </label>
+        <label class="acct-field">
+          <span class="acct-label">Confirm new password</span>
+          <input type="password" name="confirm_password" required minlength="6" autocomplete="new-password" />
+        </label>
+        <button type="submit" class="acct-btn">Update password</button>
+      </form>
+    </section>
+  </div>
+</section>
+{% endblock %}

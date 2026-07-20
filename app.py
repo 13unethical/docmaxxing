@@ -24,7 +24,7 @@ from typing import Any
 
 import requests
 from docx import Document
-from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
+from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from formatter import FormatJob, format_document_full
 from formatter.document_reconstruction import reconstruct_document_before_format
@@ -84,9 +84,75 @@ from services.zerogpt_business import (
     ZeroGPTProviderError,
     orchestrator_review,
 )
+from services.citation_service import CitationService, CrossrefProvider
+from services.economy import (
+    FEATURE_LABELS,
+    TOPUP_PACKAGES,
+    WELCOME_BONUS,
+    InsufficientCoins,
+    WalletService,
+    feature_cost,
+    init_db as economy_init_db,
+    package as economy_package,
+)
+from services.economy import auth as economy_auth
+from services.economy.admin import AdminError, AdminService, bootstrap_admin_from_env
+from services.economy.pricing import USD_TO_COINS
+from services.turnitin_service import TurnitinService, init_db as turnitin_init_db
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB uploads
+app.secret_key = (os.environ.get("SECRET_KEY") or "").strip() or "dev-insecure-change-me"
+app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days
+
+economy_init_db()
+turnitin_init_db()
+bootstrap_admin_from_env()
+wallet = WalletService()
+admin_service = AdminService(wallet)
+turnitin_service = TurnitinService()
+
+
+def _charge_current_user(feature: str, cost: int, *, ref_id: str | None = None, meta: dict | None = None):
+    """Debit the logged-in user. Returns (user_id, tx) or an error response.
+
+    Callers use it as::
+
+        charged = _charge_current_user("humanize", cost)
+        if isinstance(charged, tuple) is False:
+            return charged  # error Response
+        user_id, _tx = charged
+    """
+    user = economy_auth.current_user()
+    if user is None:
+        resp = jsonify(
+            {"success": False, "error": "AUTH_REQUIRED", "message": "Please sign in to continue."}
+        )
+        resp.status_code = 401
+        return resp
+    try:
+        tx = wallet.debit(user["id"], int(cost), feature, ref_id=ref_id, meta=meta)
+    except InsufficientCoins as exc:
+        resp = jsonify(
+            {
+                "success": False,
+                "error": "INSUFFICIENT_COINS",
+                "message": f"Not enough coins. This costs {exc.required}; you have {exc.balance}.",
+                "required": exc.required,
+                "balance": exc.balance,
+            }
+        )
+        resp.status_code = 402
+        return resp
+    return (user["id"], tx)
+
+
+def _refund_safe(user_id: int, cost: int, feature: str, *, ref_id: str | None = None) -> None:
+    """Best-effort refund; never raises into the request path."""
+    try:
+        wallet.refund(user_id, int(cost), feature, ref_id=ref_id, meta={"reason": "auto-refund"})
+    except Exception:  # noqa: BLE001
+        app.logger.exception("refund failed for user=%s feature=%s", user_id, feature)
 
 assignment_pipeline = AssignmentPipelineService()
 research_engine = ResearchEngineService()
@@ -97,6 +163,7 @@ revision_engine = RevisionEngineService(draft_store=writer_engine.drafts)
 ai_detection_engine = AIDetectionEngineService()
 delivery_engine = DeliveryEngineService()
 zerogpt_client = ZeroGPTClient()
+citation_service = CitationService(CrossrefProvider())
 
 
 def _zerogpt_configured() -> bool:
@@ -306,6 +373,328 @@ def parse_cover_page(form, *, fallback_paragraphs: list[str] | None = None) -> C
     return cover
 
 
+@app.context_processor
+def inject_account():
+    """Expose the current user and coin balance to every template."""
+    user = economy_auth.current_user()
+    balance = wallet.get_balance(user["id"]) if user else 0
+    return {
+        "current_user": user,
+        "coin_balance": balance,
+        "welcome_bonus": WELCOME_BONUS,
+        "is_admin": bool(user and user.get("is_admin")),
+    }
+
+
+# ---------------------------------------------------------------- auth routes
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if economy_auth.current_user():
+        return redirect(url_for("workspace"))
+    if request.method == "GET":
+        return render_template("register.html", nav_active=None)
+
+    email = (request.form.get("email") or "").strip()
+    name = (request.form.get("name") or "").strip()
+    password = request.form.get("password") or ""
+    try:
+        user = economy_auth.create_user(email, password, name=name)
+    except economy_auth.DuplicateEmail:
+        return render_template(
+            "register.html",
+            nav_active=None,
+            error="An account with this email already exists. Try signing in.",
+            form={"email": email, "name": name},
+        ), 409
+    except economy_auth.AuthError as exc:
+        return render_template(
+            "register.html",
+            nav_active=None,
+            error=str(exc),
+            form={"email": email, "name": name},
+        ), 400
+
+    economy_auth.login_user(user["id"])
+    return redirect(url_for("workspace"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    next_url = request.values.get("next") or ""
+    if economy_auth.current_user():
+        return redirect(next_url or url_for("workspace"))
+    if request.method == "GET":
+        return render_template("login.html", nav_active=None, next_url=next_url)
+
+    email = (request.form.get("email") or "").strip()
+    password = request.form.get("password") or ""
+    user = economy_auth.verify_credentials(email, password)
+    if user is None:
+        return render_template(
+            "login.html",
+            nav_active=None,
+            error="Incorrect email or password.",
+            form={"email": email},
+            next_url=next_url,
+        ), 401
+
+    economy_auth.login_user(user["id"])
+    if next_url.startswith("/"):
+        return redirect(next_url)
+    return redirect(url_for("workspace"))
+
+
+@app.post("/logout")
+def logout():
+    economy_auth.logout_user()
+    return redirect(url_for("index"))
+
+
+@app.route("/account", methods=["GET", "POST"])
+@economy_auth.login_required
+def account():
+    profile_message = None
+    profile_error = None
+    password_message = None
+    password_error = None
+    user = economy_auth.current_user()
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        if action == "profile":
+            try:
+                user = economy_auth.update_profile(
+                    int(user["id"]),
+                    name=request.form.get("name") or "",
+                )
+                profile_message = "Display name updated."
+            except economy_auth.AuthError as exc:
+                profile_error = str(exc)
+        elif action == "password":
+            current_password = request.form.get("current_password") or ""
+            new_password = request.form.get("new_password") or ""
+            confirm_password = request.form.get("confirm_password") or ""
+            if new_password != confirm_password:
+                password_error = "New password and confirmation do not match."
+            else:
+                try:
+                    economy_auth.change_password(
+                        int(user["id"]),
+                        current_password=current_password,
+                        new_password=new_password,
+                    )
+                    password_message = "Password updated."
+                except economy_auth.AuthError as exc:
+                    password_error = str(exc)
+
+    return render_template(
+        "account.html",
+        nav_active=None,
+        profile_message=profile_message,
+        profile_error=profile_error,
+        password_message=password_message,
+        password_error=password_error,
+    )
+
+
+# ---------------------------------------------------------------- admin
+
+
+@app.route("/admin")
+@economy_auth.admin_required
+def admin_panel():
+    return render_template("admin.html", nav_active="admin")
+
+
+@app.get("/api/admin/users")
+@economy_auth.admin_required
+def api_admin_users():
+    search = (request.args.get("q") or request.args.get("search") or "").strip()
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except ValueError:
+        limit = 100
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+    payload = admin_service.list_users(search=search, limit=limit, offset=offset)
+    return jsonify({"success": True, **payload})
+
+
+@app.patch("/api/admin/users/<int:user_id>/balance")
+@economy_auth.admin_required
+def api_admin_set_balance(user_id: int):
+    body = request.get_json(silent=True) or {}
+    if "balance" not in body:
+        return jsonify({"success": False, "error": "balance is required."}), 400
+    try:
+        new_balance = int(body["balance"])
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "balance must be an integer."}), 400
+    reason = (body.get("reason") or "").strip() or None
+    admin_id = economy_auth.current_user_id()
+    try:
+        result = admin_service.set_balance(
+            user_id,
+            new_balance,
+            admin_id=int(admin_id),
+            reason=reason,
+        )
+    except AdminError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, **result})
+
+
+@app.patch("/api/admin/users/<int:user_id>/admin")
+@economy_auth.admin_required
+def api_admin_set_role(user_id: int):
+    body = request.get_json(silent=True) or {}
+    if "is_admin" not in body:
+        return jsonify({"success": False, "error": "is_admin is required."}), 400
+    is_admin_flag = bool(body["is_admin"])
+    actor_id = economy_auth.current_user_id()
+    try:
+        result = admin_service.set_admin(
+            user_id,
+            is_admin=is_admin_flag,
+            actor_id=int(actor_id),
+        )
+    except AdminError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, **result})
+
+
+# ------------------------------------------------- JSON auth (register modal)
+
+
+def _auth_success_payload(user: dict) -> dict:
+    return {
+        "success": True,
+        "user": {"id": user["id"], "email": user["email"], "name": user.get("name")},
+        "balance": wallet.get_balance(user["id"]),
+    }
+
+
+@app.post("/api/auth/register")
+def api_auth_register():
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email") or "").strip()
+    name = str(payload.get("name") or "").strip()
+    password = str(payload.get("password") or "")
+    try:
+        user = economy_auth.create_user(email, password, name=name)
+    except economy_auth.DuplicateEmail as exc:
+        return jsonify({"success": False, "error": str(exc)}), 409
+    except economy_auth.AuthError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    economy_auth.login_user(user["id"])
+    return jsonify(_auth_success_payload(user))
+
+
+@app.post("/api/auth/login")
+def api_auth_login():
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email") or "").strip()
+    password = str(payload.get("password") or "")
+    user = economy_auth.verify_credentials(email, password)
+    if user is None:
+        return jsonify({"success": False, "error": "Incorrect email or password."}), 401
+    economy_auth.login_user(user["id"])
+    return jsonify(_auth_success_payload(user))
+
+
+@app.post("/api/auth/logout")
+def api_auth_logout():
+    economy_auth.logout_user()
+    return jsonify({"success": True})
+
+
+# ------------------------------------------------------------- economy API
+
+
+@app.get("/api/economy/balance")
+def api_economy_balance():
+    user = economy_auth.current_user()
+    if user is None:
+        return jsonify({"authenticated": False, "balance": 0})
+    return jsonify(
+        {"authenticated": True, "balance": wallet.get_balance(user["id"])}
+    )
+
+
+@app.post("/api/economy/quote")
+def api_economy_quote():
+    payload = request.get_json(silent=True) or {}
+    feature = str(payload.get("feature") or "").strip().lower()
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    try:
+        cost = feature_cost(feature, **params)
+    except KeyError:
+        return jsonify({"error": f"Unknown feature: {feature}"}), 400
+    user = economy_auth.current_user()
+    balance = wallet.get_balance(user["id"]) if user else 0
+    return jsonify(
+        {
+            "feature": feature,
+            "label": FEATURE_LABELS.get(feature, feature),
+            "cost": cost,
+            "balance": balance,
+            "authenticated": user is not None,
+            "affordable": (user is not None) and balance >= cost,
+        }
+    )
+
+
+@app.get("/api/economy/transactions")
+@economy_auth.login_required
+def api_economy_transactions():
+    user = economy_auth.current_user()
+    try:
+        limit = int(request.args.get("limit") or 50)
+    except (TypeError, ValueError):
+        limit = 50
+    return jsonify(
+        {
+            "balance": wallet.get_balance(user["id"]),
+            "transactions": wallet.history(user["id"], limit=limit),
+        }
+    )
+
+
+@app.get("/api/economy/packages")
+def api_economy_packages():
+    return jsonify({"packages": list(TOPUP_PACKAGES.values())})
+
+
+@app.post("/api/economy/topup")
+@economy_auth.login_required
+def api_economy_topup():
+    """Mock top-up: instantly grant a package's coins (real checkout later)."""
+    user = economy_auth.current_user()
+    payload = request.get_json(silent=True) or {}
+    pkg = economy_package(str(payload.get("package") or ""))
+    if pkg is None:
+        return jsonify({"error": "Unknown package"}), 400
+    result = wallet.credit(
+        user["id"],
+        int(pkg["coins"]),
+        "topup",
+        ref_id=pkg["id"],
+        meta={"usd": pkg["usd"], "package": pkg["id"], "mock": True},
+    )
+    return jsonify(
+        {
+            "success": True,
+            "coins_added": int(pkg["coins"]),
+            "balance": result["balance"],
+            "package": pkg,
+        }
+    )
+
+
 @app.route("/")
 def index():
     return render_template("index.html", nav_active="home")
@@ -492,7 +881,22 @@ def api_assignment_project_upload():
 
 @app.post("/api/assignment/projects/<project_id>/analyze-requirements")
 def api_assignment_project_analyze_requirements(project_id: str):
-    """Run requirement analysis via Gemini."""
+    """Run requirement analysis via Gemini.
+
+    Uploading a brief and filling the form is free/anonymous; running the
+    analysis (which leads to pricing) requires an account.
+    """
+    if economy_auth.current_user() is None:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "REGISTER_REQUIRED",
+                    "message": "Create a free account to analyze and price your assignment.",
+                }
+            ),
+            403,
+        )
     trace(
         "api.analyze.received",
         **project_service.store.lookup_diagnostics(project_id),
@@ -545,29 +949,77 @@ def api_assignment_project_pricing(project_id: str):
 
 
 @app.post("/api/assignment/projects/<project_id>/confirm-payment")
+@economy_auth.login_required
 def api_assignment_project_confirm_payment(project_id: str):
     trace(
         "api.confirm_payment.received",
         **project_service.store.lookup_diagnostics(project_id),
     )
+    user_id = economy_auth.current_user_id()
+
+    # Determine coin cost before confirming (skip charge if already paid).
+    already_paid = False
+    coins = 0
+    try:
+        existing = project_service.store.require_bundle(project_id)
+        already_paid = bool(existing.project.artifacts.get("payment_confirmed"))
+        price_usd = existing.project.price
+        if price_usd is None:
+            pricing_artifact = existing.project.artifacts.get("pricing") or {}
+            price_usd = pricing_artifact.get("amount_usd")
+        if price_usd is not None:
+            coins = max(1, int(round(float(price_usd) * USD_TO_COINS)))
+    except KeyError as exc:
+        return _assignment_not_found("confirm-payment", project_id, exc)
+
+    charged_here = False
+    if not already_paid and coins > 0:
+        try:
+            wallet.debit(user_id, coins, "assignment", ref_id=project_id)
+            charged_here = True
+        except InsufficientCoins as exc:
+            return (
+                jsonify(
+                    {
+                        "error": "INSUFFICIENT_COINS",
+                        "message": f"Not enough coins. This project costs {exc.required}; you have {exc.balance}.",
+                        "required": exc.required,
+                        "balance": exc.balance,
+                    }
+                ),
+                402,
+            )
+
     try:
         bundle = project_service.confirm_payment(project_id)
     except KeyError as exc:
+        if charged_here:
+            _refund_safe(user_id, coins, "assignment", ref_id=project_id)
         return _assignment_not_found("confirm-payment", project_id, exc)
     except ValueError as exc:
+        if charged_here:
+            _refund_safe(user_id, coins, "assignment", ref_id=project_id)
         trace(
             "api.confirm_payment.failed",
             error=str(exc),
             **project_service.store.lookup_diagnostics(project_id),
         )
         return jsonify({"error": str(exc)}), 400
+    except Exception:
+        if charged_here:
+            _refund_safe(user_id, coins, "assignment", ref_id=project_id)
+        raise
     trace(
         "api.confirm_payment.completed",
         project_id=project_id,
         price=bundle.project.price,
         payment_confirmed=bool(bundle.project.artifacts.get("payment_confirmed")),
     )
-    return jsonify(_project_api_payload(bundle))
+    payload = _project_api_payload(bundle)
+    if isinstance(payload, dict):
+        payload["coins_charged"] = coins if charged_here else 0
+        payload["balance"] = wallet.get_balance(user_id)
+    return jsonify(payload)
 
 
 @app.post("/api/assignment/projects/<project_id>/research")
@@ -765,6 +1217,34 @@ def api_browser_health():
     if health_monitor is not None:
         data["last_monitor_check"] = health_monitor.last
     return jsonify(data)
+
+
+@app.get("/api/browser/cdp-diagnostics")
+def api_browser_cdp_diagnostics():
+    """Diagnose the CDP connection layer (Chrome/Playwright versions, download-behavior support).
+
+    Read-only: uses HTTP + a throwaway Playwright instance, never touches the
+    long-lived BrowserService connection.
+    """
+    from services.browser.cdp_compat import cdp_diagnostics
+    from services.browser.chrome_launcher import ChromeLauncher
+
+    try:
+        cdp_url = ChromeLauncher().cdp_url
+        report = cdp_diagnostics(cdp_url)
+        return jsonify({"success": bool(report.get("connect_ok")), **report})
+    except Exception as exc:  # noqa: BLE001
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                }
+            ),
+            500,
+        )
 
 
 @app.get("/api/browser/connect")
@@ -987,6 +1467,12 @@ def api_browser_stealthwriter_humanize():
     if not isinstance(text, str) or not text.strip():
         return jsonify({"success": False, "error": "text is required"}), 400
 
+    cost = feature_cost("humanize")
+    charged = _charge_current_user("humanize", cost)
+    if not isinstance(charged, tuple):
+        return charged
+    user_id, _tx = charged
+
     try:
         ensure_engine_started()
         job = job_manager.create(
@@ -996,6 +1482,7 @@ def api_browser_stealthwriter_humanize():
         job_manager.wait(job.id, timeout=max_wait)
         job = job_manager.get(job.id)
         if job is None:
+            _refund_safe(user_id, cost, "humanize")
             return jsonify({"success": False, "error": "job not found"}), 500
 
         status = job.status.value
@@ -1007,14 +1494,32 @@ def api_browser_stealthwriter_humanize():
                     "humanized_text": res.get("humanized_text"),
                     "elapsed_seconds": res.get("elapsed_seconds"),
                     "job_id": job.id,
+                    "coins_charged": cost,
+                    "balance": wallet.get_balance(user_id),
                 }
             )
+
+        # Any non-completed terminal/failure state refunds the charge.
+        _refund_safe(user_id, cost, "humanize", ref_id=job.id)
+
         if status == "CANCELLED":
             return jsonify({"success": False, "error": "cancelled", "job_id": job.id}), 409
 
         code = job.error_code
         if code == "LOGIN_REQUIRED":
             return jsonify({"success": False, "error": "LOGIN_REQUIRED", "job_id": job.id}), 401
+        if code == "NO_CHANGE":
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "NO_CHANGE",
+                        "message": job.error,
+                        "job_id": job.id,
+                    }
+                ),
+                409,
+            )
         if code == "TIMEOUT":
             return jsonify({"success": False, "error": "timeout", "job_id": job.id}), 504
         if code == "AUTOMATION_ERROR" and job.error_details:
@@ -1044,6 +1549,7 @@ def api_browser_stealthwriter_humanize():
             )
         return jsonify({"success": False, "error": job.error or "failed", "job_id": job.id}), 500
     except Exception as exc:  # noqa: BLE001
+        _refund_safe(user_id, cost, "humanize")
         return (
             jsonify(
                 {
@@ -1993,20 +2499,67 @@ def api_humanizer_run():
             }
         ), 400
 
+    # Access model: anonymous users get ONE free humanize; after that they must
+    # register. Logged-in users pay coins per run (with refund on failure).
+    user = economy_auth.current_user()
+    cost = feature_cost("humanize")
+    user_id = None
+    if user is None:
+        if session.get("anon_humanize_used"):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "REGISTER_REQUIRED",
+                        "message": "Create a free account to keep humanizing.",
+                    }
+                ),
+                403,
+            )
+    else:
+        user_id = user["id"]
+        try:
+            wallet.debit(user_id, cost, "humanize")
+        except InsufficientCoins as exc:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "INSUFFICIENT_COINS",
+                        "message": f"Not enough coins. This costs {exc.required}; you have {exc.balance}.",
+                        "required": exc.required,
+                        "balance": exc.balance,
+                    }
+                ),
+                402,
+            )
+
     try:
         humanizer = ZeroGPTTextHumanizer(client=zerogpt_client, mode=DEFAULT_HUMANIZER_MODE)
         output = humanizer.humanize(text, academic_tone="Academic")
     except (ZeroGPTError, ZeroGPTProviderError) as exc:
+        if user_id is not None:
+            _refund_safe(user_id, cost, "humanize")
         return jsonify({"error": str(exc)}), 502
     except ValueError as exc:
+        if user_id is not None:
+            _refund_safe(user_id, cost, "humanize")
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:  # noqa: BLE001
+        if user_id is not None:
+            _refund_safe(user_id, cost, "humanize")
         app.logger.exception("humanizer/run failed")
         return jsonify({"error": f"Humanizer failed: {exc}"}), 502
 
     output = output.strip()
     if not output:
+        if user_id is not None:
+            _refund_safe(user_id, cost, "humanize")
         return jsonify({"error": "Humanizer returned empty text"}), 502
+
+    if user_id is None:
+        # Consume the single free anonymous run.
+        session["anon_humanize_used"] = True
 
     return jsonify(
         {
@@ -2014,8 +2567,118 @@ def api_humanizer_run():
             "provider": getattr(humanizer, "VERSION", "humanizer"),
             "original_words": count_words(text),
             "humanized_words": count_words(output),
+            "coins_charged": cost if user_id is not None else 0,
+            "balance": wallet.get_balance(user_id) if user_id is not None else None,
+            "free_use": user_id is None,
         }
     )
+
+
+def _extract_flagged_sentences(raw: dict) -> list[str]:
+    """Pull the AI-flagged sentence strings from a ZeroGPT detect payload."""
+    data = raw.get("data") if isinstance(raw, dict) else None
+    container = data if isinstance(data, dict) else raw
+    for key in ("h", "highlighted_sentences", "highlightedSentences", "ai_sentences"):
+        value = container.get(key) if isinstance(container, dict) else None
+        if isinstance(value, list):
+            return [str(s).strip() for s in value if str(s).strip()]
+    return []
+
+
+def _detect_number(container: dict, *keys) -> float | int | None:
+    for key in keys:
+        value = container.get(key)
+        if isinstance(value, (int, float)):
+            return value
+    return None
+
+
+@app.post("/api/workspace/detect")
+def api_workspace_detect():
+    """Run the existing ZeroGPT AI detector on editor text and return spans.
+
+    This is a thin frontend adapter over ``zerogpt_client.detect`` — no browser
+    automation is involved.
+    """
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+    if not _zerogpt_configured():
+        return jsonify({"error": "ZeroGPT is not configured. Set ZEROGPT_API_KEY in .env"}), 503
+
+    cost = feature_cost("detect")
+    charged = _charge_current_user("detect", cost)
+    if not isinstance(charged, tuple):
+        return charged
+    user_id, _tx = charged
+
+    try:
+        raw = zerogpt_client.detect(text)
+    except (ZeroGPTError, ZeroGPTProviderError) as exc:
+        _refund_safe(user_id, cost, "detect")
+        return jsonify({"error": str(exc)}), 502
+    except Exception as exc:  # noqa: BLE001
+        _refund_safe(user_id, cost, "detect")
+        app.logger.exception("workspace/detect failed")
+        return jsonify({"error": f"Detection failed: {exc}"}), 502
+
+    data = raw.get("data") if isinstance(raw, dict) else {}
+    container = data if isinstance(data, dict) else raw
+    flagged = _extract_flagged_sentences(raw)
+    ai_percentage = _detect_number(container, "fakePercentage", "aiPercentage", "ai_percentage", "score") or 0
+    text_words = _detect_number(container, "textWords", "text_words", "words") or count_words(text)
+    ai_words = _detect_number(container, "aiWords", "ai_words")
+    if ai_words is None:
+        ai_words = sum(count_words(s) for s in flagged)
+
+    return jsonify(
+        {
+            "ai_percentage": round(float(ai_percentage), 1),
+            "is_ai": float(ai_percentage) >= 50.0,
+            "flagged_sentences": flagged,
+            "flagged_parts": len(flagged),
+            "text_words": int(text_words),
+            "ai_words": int(ai_words),
+            "coins_charged": cost,
+            "balance": wallet.get_balance(user_id),
+        }
+    )
+
+
+@app.post("/api/workspace/citations/search")
+def api_workspace_citations_search():
+    """Search scholarly works via the CitationService (Crossref provider).
+
+    The frontend never talks to Crossref directly and never sees provider
+    fields — only normalized works plus formatted in-text/reference strings.
+    """
+    payload = request.get_json(silent=True) or {}
+    query = str(payload.get("query") or "").strip()
+    style = str(payload.get("style") or "APA 7").strip()
+    try:
+        limit = int(payload.get("limit") or 6)
+    except (TypeError, ValueError):
+        limit = 6
+    if not query:
+        return jsonify({"error": "query is required"}), 400
+
+    cost = feature_cost("cite")
+    charged = _charge_current_user("cite", cost)
+    if not isinstance(charged, tuple):
+        return charged
+    user_id, _tx = charged
+
+    try:
+        result = citation_service.search(query, style=style, limit=limit)
+    except Exception as exc:  # noqa: BLE001 — provider network/parse errors
+        _refund_safe(user_id, cost, "cite")
+        app.logger.warning("citation search failed: %s", exc)
+        return jsonify({"error": f"Citation search failed: {exc}"}), 502
+
+    if isinstance(result, dict):
+        result = {**result, "coins_charged": cost, "balance": wallet.get_balance(user_id)}
+    return jsonify(result)
 
 
 @app.post("/api/humanizer/session")
@@ -2503,6 +3166,312 @@ def turnitin():
     return render_template("turnitin.html", nav_active="turnitin")
 
 
+def _turnitin_row_api(row: dict[str, Any]) -> dict[str, Any]:
+    return turnitin_service.to_api_row(row)
+
+
+@app.get("/api/turnitin/reports")
+@economy_auth.login_required
+def api_turnitin_reports():
+    user_id = economy_auth.current_user_id()
+    rows = turnitin_service.store.list_for_user(user_id)
+    return jsonify({"success": True, "reports": [_turnitin_row_api(r) for r in rows]})
+
+
+@app.get("/api/turnitin/submissions/<submission_id>")
+@economy_auth.login_required
+def api_turnitin_submission(submission_id: str):
+    user_id = economy_auth.current_user_id()
+    row = turnitin_service.store.get_for_user(submission_id, user_id)
+    if row is None:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    return jsonify({"success": True, "report": _turnitin_row_api(row)})
+
+
+@app.delete("/api/turnitin/submissions/<submission_id>")
+@economy_auth.login_required
+def api_turnitin_delete(submission_id: str):
+    user_id = economy_auth.current_user_id()
+    if not turnitin_service.store.delete_for_user(submission_id, user_id):
+        return jsonify({"success": False, "error": "Not found"}), 404
+    return jsonify({"success": True})
+
+
+@app.post("/api/turnitin/submissions/<submission_id>/highlights")
+@economy_auth.login_required
+def api_turnitin_request_highlights(submission_id: str):
+    """Queue a PlagDetect AI Highlights job (optional, user-initiated)."""
+    user_id = economy_auth.current_user_id()
+    row = turnitin_service.store.get_for_user(submission_id, user_id)
+    if row is None:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if row.get("status") != "completed":
+        return jsonify({"success": False, "error": "Wait for the check to finish first."}), 400
+    if not row.get("external_id"):
+        return jsonify({"success": False, "error": "PlagDetect submission id missing."}), 400
+
+    hl_status = (row.get("highlights_status") or "").strip().lower()
+    if hl_status in ("queued", "running"):
+        return jsonify({"success": False, "error": "AI Highlights already in progress."}), 409
+    if row.get("has_highlights_report"):
+        return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
+
+    meta = row.get("meta") or {}
+    # Allow re-fetch when score exists but PDF is missing.
+    if row.get("ai_highlights") is not None and not row.get("has_highlights_report"):
+        pass
+    elif meta.get("ai_score_display") != "*%":
+        return jsonify(
+            {
+                "success": False,
+                "error": "AI Highlights are available when the AI score shows *%.",
+            }
+        ), 400
+
+    try:
+        from services.browser.providers import plagdetect as pd
+
+        pd._validate_urls()
+        report_dir = str(turnitin_service.report_dir(submission_id))
+        ensure_engine_started()
+        job = job_manager.create(
+            "plagdetect",
+            "highlights",
+            {
+                "external_id": row["external_id"],
+                "report_dir": report_dir,
+                "submission_id": submission_id,
+            },
+            max_retries=0,
+        )
+        turnitin_service.store.update(
+            submission_id,
+            highlights_status="queued",
+            highlights_job_id=job.id,
+        )
+        turnitin_service.watch_highlights_job(
+            submission_id=submission_id,
+            job_id=job.id,
+            job_manager=job_manager,
+        )
+    except Exception as exc:  # noqa: BLE001
+        turnitin_service.store.update(submission_id, highlights_status="failed")
+        app.logger.exception("turnitin/highlights failed")
+        return jsonify({"success": False, "error": f"Could not queue highlights: {exc}"}), 500
+
+    updated = turnitin_service.store.get_for_user(submission_id, user_id)
+    return jsonify(
+        {
+            "success": True,
+            "submission_id": submission_id,
+            "highlights_status": "queued",
+            "job_id": job.id,
+            "report": _turnitin_row_api(updated or row),
+        }
+    )
+
+
+@app.post("/api/turnitin/submissions/<submission_id>/fetch-reports")
+@economy_auth.login_required
+def api_turnitin_fetch_reports(submission_id: str):
+    """Re-download missing Similarity / AI / Highlights PDFs from PlagDetect."""
+    user_id = economy_auth.current_user_id()
+    row = turnitin_service.store.get_for_user(submission_id, user_id)
+    if row is None:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if row.get("status") != "completed":
+        return jsonify({"success": False, "error": "Wait for the check to finish first."}), 400
+    if not row.get("external_id"):
+        return jsonify({"success": False, "error": "PlagDetect submission id missing."}), 400
+
+    body = request.get_json(silent=True) or {}
+    want_sim = body.get("similarity", True)
+    want_ai = body.get("ai", True)
+    want_hl = body.get("highlights", False)
+
+    fetch_similarity = bool(want_sim) and not row.get("has_similarity_report")
+    fetch_ai = bool(want_ai) and not row.get("has_ai_report")
+    fetch_highlights = bool(want_hl) and not row.get("has_highlights_report")
+
+    if not fetch_similarity and not fetch_ai and not fetch_highlights:
+        return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
+
+    try:
+        from services.browser.providers import plagdetect as pd
+
+        pd._validate_urls()
+        report_dir = str(turnitin_service.report_dir(submission_id))
+        ensure_engine_started()
+        job = job_manager.create(
+            "plagdetect",
+            "fetch_reports",
+            {
+                "external_id": row["external_id"],
+                "report_dir": report_dir,
+                "submission_id": submission_id,
+                "fetch_similarity": fetch_similarity,
+                "fetch_ai": fetch_ai,
+                "fetch_highlights": fetch_highlights,
+            },
+            max_retries=0,
+        )
+        turnitin_service.watch_fetch_reports_job(
+            submission_id=submission_id,
+            job_id=job.id,
+            job_manager=job_manager,
+        )
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("turnitin/fetch-reports failed")
+        return jsonify({"success": False, "error": f"Could not queue report download: {exc}"}), 500
+
+    return jsonify(
+        {
+            "success": True,
+            "submission_id": submission_id,
+            "job_id": job.id,
+            "fetching": {
+                "similarity": fetch_similarity,
+                "ai": fetch_ai,
+                "highlights": fetch_highlights,
+            },
+            "report": _turnitin_row_api(row),
+        }
+    )
+
+
+@app.get("/api/turnitin/submissions/<submission_id>/report/<kind>")
+@economy_auth.login_required
+def api_turnitin_report_download(submission_id: str, kind: str):
+    from services.turnitin_service.store import resolve_report_path
+
+    user_id = economy_auth.current_user_id()
+    row = turnitin_service.store.get_for_user(submission_id, user_id)
+    if row is None:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    if kind not in ("similarity", "ai", "highlights"):
+        return jsonify({"success": False, "error": "Invalid report type."}), 400
+    key_map = {
+        "similarity": "similarity_report_path",
+        "ai": "ai_report_path",
+        "highlights": "ai_highlights_report_path",
+    }
+    key = key_map[kind]
+    path = resolve_report_path(row.get(key))
+    if not path:
+        return jsonify({"success": False, "error": "Report not ready yet."}), 404
+    download_name = f"{Path(row['filename']).stem}_{kind}_report.pdf"
+    return send_file(path, mimetype="application/pdf", as_attachment=True, download_name=download_name)
+
+
+@app.post("/api/turnitin/check")
+@economy_auth.login_required
+def api_turnitin_check():
+    """Upload a document, charge coins, and queue a PlagDetect browser job."""
+    user_id = economy_auth.current_user_id()
+    f = request.files.get("file")
+    if f is None or not f.filename:
+        return jsonify({"success": False, "error": "A document is required."}), 400
+
+    filename = Path(f.filename).name
+    exclude_bibliography = request.form.get("exclude_bibliography", "0") in ("1", "true", "on", "yes")
+    exclude_quotes = request.form.get("exclude_quotes", "0") in ("1", "true", "on", "yes")
+
+    cost = feature_cost("turnitin")
+    submission_id = uuid.uuid4().hex[:12]
+    charged = _charge_current_user("turnitin", cost, ref_id=submission_id, meta={"filename": filename})
+    if not isinstance(charged, tuple):
+        return charged
+    user_id, _tx = charged
+
+    try:
+        from services.browser.providers import plagdetect as pd
+
+        pd._validate_urls()
+        upload_path = turnitin_service.save_upload(submission_id, filename, f.read())
+        report_dir = str(turnitin_service.report_dir(submission_id))
+        ensure_engine_started()
+        job = job_manager.create(
+            "plagdetect",
+            "check",
+            {
+                "file_path": upload_path,
+                "exclude_bibliography": exclude_bibliography,
+                "exclude_quotes": exclude_quotes,
+                "report_dir": report_dir,
+                "submission_id": submission_id,
+            },
+            max_retries=0,
+        )
+        turnitin_service.store.create(
+            submission_id=submission_id,
+            user_id=user_id,
+            filename=filename,
+            upload_path=upload_path,
+            exclude_bibliography=exclude_bibliography,
+            exclude_quotes=exclude_quotes,
+            job_id=job.id,
+        )
+        turnitin_service.watch_job(
+            submission_id=submission_id,
+            job_id=job.id,
+            user_id=user_id,
+            cost=cost,
+            job_manager=job_manager,
+            wallet=wallet,
+            refund_fn=_refund_safe,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _refund_safe(user_id, cost, "turnitin", ref_id=submission_id)
+        app.logger.exception("turnitin/check failed")
+        return jsonify({"success": False, "error": f"Could not queue check: {exc}"}), 500
+
+    return jsonify(
+        {
+            "success": True,
+            "submission_id": submission_id,
+            "filename": filename,
+            "status": "queued",
+            "job_id": job.id,
+            "coins_charged": cost,
+            "balance": wallet.get_balance(user_id),
+        }
+    )
+
+
+@app.get("/api/browser/providers/plagdetect/config")
+def api_browser_plagdetect_config():
+    from services.browser.providers import plagdetect as pd
+
+    cfg = pd.plagdetect_config()
+    return jsonify({"success": True, **cfg})
+
+
+@app.get("/api/browser/providers/plagdetect/status")
+def api_browser_plagdetect_status():
+    try:
+        ensure_engine_started()
+        from services.browser.providers import plagdetect as pd
+
+        payload = _browser_submit(pd.get_session_status, timeout=60)
+        return jsonify({"success": True, **payload})
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("plagdetect status failed")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.get("/api/browser/providers/plagdetect/login")
+def api_browser_plagdetect_login():
+    try:
+        ensure_engine_started()
+        from services.browser.providers import plagdetect as pd
+
+        payload = _browser_submit(pd.start_interactive_login, timeout=60)
+        return jsonify(payload)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("plagdetect login failed")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
 @app.route("/pricing")
 def pricing():
     """Coin packages — clear pricing without subscription pressure."""
@@ -2967,6 +3936,7 @@ def api_check_document():
             {"error": "Provide non-empty text or upload a .docx or .pdf with readable content."}
         ), 400
 
+    # Academic Check is free for everyone (no login, no coins).
     try:
         result = check_document(
             text=text,
@@ -3336,10 +4306,12 @@ def _register_browser_providers() -> None:
     """Register providers with BrowserService (cheap; no Chrome launch)."""
     try:
         from services.browser.browser_service import BrowserService
+        from services.browser.providers.plagdetect import PlagDetectProvider
         from services.browser.providers.stealthwriter import StealthWriterProvider
 
         service = BrowserService.instance()
         service.register_provider(StealthWriterProvider())
+        service.register_provider(PlagDetectProvider())
     except Exception as exc:  # noqa: BLE001
         print(f"[browser] provider registration skipped: {exc}", flush=True)
 

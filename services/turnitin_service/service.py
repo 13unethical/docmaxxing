@@ -1,0 +1,244 @@
+"""Orchestrates Turnitin submissions and browser job completion."""
+
+from __future__ import annotations
+
+import json
+import os
+import threading
+from pathlib import Path
+from typing import Any, Callable
+
+from .store import REPORT_ROOT, TurnitinStore, UPLOAD_ROOT
+
+
+class TurnitinService:
+    def __init__(self, store: TurnitinStore | None = None) -> None:
+        self.store = store or TurnitinStore()
+
+    def save_upload(self, submission_id: str, filename: str, data: bytes) -> str:
+        safe_name = Path(filename).name
+        dest_dir = UPLOAD_ROOT / submission_id
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / safe_name
+        dest.write_bytes(data)
+        return str(dest.resolve())
+
+    def report_dir(self, submission_id: str) -> Path:
+        dest = REPORT_ROOT / submission_id
+        dest.mkdir(parents=True, exist_ok=True)
+        return dest
+
+    def to_api_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        meta = row.get("meta") or {}
+        ai_display = meta.get("ai_score_display")
+        sim_display = meta.get("similarity_display")
+        ai_score = row.get("ai_score")
+        similarity = row.get("similarity")
+        if not ai_display and ai_score is not None:
+            ai_display = f"{int(ai_score) if ai_score == int(ai_score) else ai_score:g}%"
+        if not sim_display and similarity is not None:
+            sim_display = f"{int(similarity) if similarity == int(similarity) else similarity:g}%"
+        hl_display = meta.get("ai_highlights_display")
+        hl_score = row.get("ai_highlights")
+        if not hl_display and hl_score is not None:
+            hl_display = f"{int(hl_score) if hl_score == int(hl_score) else hl_score:g}%"
+        return {
+            "id": row["id"],
+            "filename": row["filename"],
+            "similarity": similarity,
+            "similarityDisplay": sim_display,
+            "aiScore": ai_score,
+            "aiScoreDisplay": ai_display,
+            "aiHighlights": hl_score,
+            "aiHighlightsDisplay": hl_display,
+            "status": row.get("status") or "queued",
+            "createdAt": row.get("created_at"),
+            "hasReport": bool(row.get("has_report")),
+            "hasSimilarityReport": bool(row.get("has_similarity_report")),
+            "hasAiReport": bool(row.get("has_ai_report")),
+            "hasHighlightsReport": bool(row.get("has_highlights_report")),
+            "highlightsStatus": row.get("highlights_status"),
+            "errorMessage": row.get("error_message"),
+            "externalId": row.get("external_id"),
+        }
+
+    def watch_job(
+        self,
+        *,
+        submission_id: str,
+        job_id: str,
+        user_id: int,
+        cost: int,
+        job_manager: Any,
+        wallet: Any,
+        refund_fn: Callable[..., None],
+    ) -> None:
+        """Background thread: wait for browser job, persist result, refund on failure."""
+
+        def _run() -> None:
+            timeout = int(os.environ.get("PLAGDETECT_JOB_TIMEOUT", "600")) + 90
+            self.store.update(submission_id, status="running")
+            try:
+                job_manager.wait(job_id, timeout=timeout)
+            except Exception as exc:  # noqa: BLE001
+                self.store.update(
+                    submission_id,
+                    status="failed",
+                    error_message=str(exc),
+                )
+                refund_fn(user_id, cost, "turnitin", ref_id=submission_id)
+                return
+
+            job = job_manager.get(job_id)
+            if job is None:
+                self.store.update(submission_id, status="failed", error_message="Job not found")
+                refund_fn(user_id, cost, "turnitin", ref_id=submission_id)
+                return
+
+            status = job.status.value if hasattr(job.status, "value") else str(job.status)
+            if status == "COMPLETED":
+                res = job.result or {}
+                meta = {
+                    "elapsed_seconds": res.get("elapsed_seconds"),
+                    "external_id": res.get("external_id"),
+                    "ai_score_display": res.get("ai_score_display"),
+                    "similarity_display": res.get("similarity_display"),
+                }
+                self.store.update(
+                    submission_id,
+                    status="completed",
+                    similarity=res.get("similarity"),
+                    ai_score=res.get("ai_score"),
+                    external_id=res.get("external_id"),
+                    similarity_report_path=res.get("similarity_report_path"),
+                    ai_report_path=res.get("ai_report_path"),
+                    meta_json=json.dumps(meta),
+                    completed_at=job.finished_at.isoformat() if job.finished_at else None,
+                )
+                return
+
+            if status not in ("FAILED", "CANCELLED"):
+                self.store.update(
+                    submission_id,
+                    status="failed",
+                    error_message="Check timed out before PlagDetect finished.",
+                    meta_json=json.dumps({"error_code": "TIMEOUT"}),
+                )
+                refund_fn(user_id, cost, "turnitin", ref_id=submission_id)
+                return
+
+            code = job.error_code or "ERROR"
+            message = job.error or code
+            self.store.update(
+                submission_id,
+                status="failed",
+                error_message=message,
+                meta_json=json.dumps({"error_code": code}),
+            )
+            if code not in ("LOGIN_REQUIRED",):
+                refund_fn(user_id, cost, "turnitin", ref_id=submission_id)
+
+        threading.Thread(target=_run, name=f"turnitin-{submission_id[:8]}", daemon=True).start()
+
+    def watch_highlights_job(
+        self,
+        *,
+        submission_id: str,
+        job_id: str,
+        job_manager: Any,
+    ) -> None:
+        """Background thread: wait for highlights job and persist result."""
+
+        def _run() -> None:
+            timeout = int(os.environ.get("PLAGDETECT_HIGHLIGHTS_TIMEOUT", "180")) + 60
+            self.store.update(submission_id, highlights_status="running")
+            try:
+                job_manager.wait(job_id, timeout=timeout)
+            except Exception as exc:  # noqa: BLE001
+                self.store.update(
+                    submission_id,
+                    highlights_status="failed",
+                    error_message=str(exc),
+                )
+                return
+
+            job = job_manager.get(job_id)
+            if job is None:
+                self.store.update(submission_id, highlights_status="failed")
+                return
+
+            status = job.status.value if hasattr(job.status, "value") else str(job.status)
+            if status == "COMPLETED":
+                res = job.result or {}
+                row = self.store.get(submission_id) or {}
+                meta = dict(row.get("meta") or {})
+                if res.get("ai_highlights_display"):
+                    meta["ai_highlights_display"] = res.get("ai_highlights_display")
+                self.store.update(
+                    submission_id,
+                    highlights_status="completed",
+                    ai_highlights=res.get("ai_highlights"),
+                    ai_highlights_report_path=res.get("ai_highlights_report_path"),
+                    meta_json=json.dumps(meta),
+                )
+                return
+
+            message = job.error or job.error_code or "Highlights failed"
+            self.store.update(
+                submission_id,
+                highlights_status="failed",
+                error_message=message,
+            )
+
+        threading.Thread(
+            target=_run,
+            name=f"turnitin-hl-{submission_id[:8]}",
+            daemon=True,
+        ).start()
+
+    def watch_fetch_reports_job(
+        self,
+        *,
+        submission_id: str,
+        job_id: str,
+        job_manager: Any,
+    ) -> None:
+        """Background thread: wait for report re-download and persist paths."""
+
+        def _run() -> None:
+            timeout = int(os.environ.get("PLAGDETECT_HIGHLIGHTS_TIMEOUT", "180")) + 90
+            try:
+                job_manager.wait(job_id, timeout=timeout)
+            except Exception:  # noqa: BLE001
+                return
+
+            job = job_manager.get(job_id)
+            if job is None:
+                return
+            status = job.status.value if hasattr(job.status, "value") else str(job.status)
+            if status != "COMPLETED":
+                return
+
+            res = job.result or {}
+            row = self.store.get(submission_id) or {}
+            meta = dict(row.get("meta") or {})
+            if res.get("ai_highlights_display"):
+                meta["ai_highlights_display"] = res.get("ai_highlights_display")
+
+            fields: dict[str, Any] = {"meta_json": json.dumps(meta)}
+            if res.get("similarity_report_path"):
+                fields["similarity_report_path"] = res["similarity_report_path"]
+            if res.get("ai_report_path"):
+                fields["ai_report_path"] = res["ai_report_path"]
+            if res.get("ai_highlights") is not None:
+                fields["ai_highlights"] = res["ai_highlights"]
+            if res.get("ai_highlights_report_path"):
+                fields["ai_highlights_report_path"] = res["ai_highlights_report_path"]
+                fields["highlights_status"] = "completed"
+            self.store.update(submission_id, **fields)
+
+        threading.Thread(
+            target=_run,
+            name=f"turnitin-fetch-{submission_id[:8]}",
+            daemon=True,
+        ).start()

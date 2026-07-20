@@ -56,12 +56,10 @@
         </label>
       </div>
 
-      <fieldset class="assignment-priority">
-        <legend>Priority</legend>
-        <label class="humanizer-radio"><input type="radio" name="asg_priority" value="standard" checked /> Standard</label>
-        <label class="humanizer-radio"><input type="radio" name="asg_priority" value="express" /> Express</label>
-        <label class="humanizer-radio"><input type="radio" name="asg_priority" value="urgent" /> Urgent</label>
-      </fieldset>
+      <p class="assignment-priority-note">
+        The price is based on length and how difficult the task is. You'll see an
+        estimated preparation time before you pay.
+      </p>
 
       <div class="assignment-submit-row">
         <button type="button" class="assignment-submit-btn" data-asg-analyze disabled>Analyze &amp; Get Price</button>
@@ -107,9 +105,14 @@
       <h2 class="dash-card-title">Project Summary</h2>
       <dl class="order-summary-list asg-project-summary-list">
         <div><dt>Words</dt><dd data-asg-summary-words>—</dd></div>
+        <div><dt>Type</dt><dd data-asg-summary-type>—</dd></div>
+        <div><dt>Complexity</dt><dd data-asg-summary-difficulty>—</dd></div>
+        <div data-asg-summary-eta-row hidden><dt>Est. time</dt><dd data-asg-summary-eta>—</dd></div>
         <div><dt>Deadline</dt><dd data-asg-summary-deadline>—</dd></div>
       </dl>
+      <div class="asg-price-breakdown" data-asg-price-breakdown hidden></div>
       <p class="order-total"><span>Total</span><strong data-asg-summary-total>—</strong></p>
+      <p class="asg-price-coins" data-asg-summary-coins hidden></p>
       <button type="button" class="assignment-pay-btn" data-asg-continue disabled>Start Writing</button>
       <ul class="order-trust">
         <li>Secure payment</li>

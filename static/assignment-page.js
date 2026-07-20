@@ -137,6 +137,7 @@
     clearSavedProject();
     state.requirement = null;
     state.price = null;
+    state.pricing = null;
     state.paymentConfirmed = false;
     state.research = null;
     state.blueprint = null;
@@ -202,6 +203,11 @@
     }
     var payload = await res.json().catch(function () { return {}; });
     if (!res.ok) {
+      if (payload.error === "REGISTER_REQUIRED" || payload.error === "AUTH_REQUIRED") {
+        var authErr = new Error(payload.message || "Create a free account to continue.");
+        authErr.code = "REGISTER_REQUIRED";
+        throw authErr;
+      }
       if (responseMeansProjectMissing(res, payload)) {
         resetProjectState();
       }
@@ -394,11 +400,90 @@
     state.paymentConfirmed = !!(data && data.project && data.project.artifacts && data.project.artifacts.payment_confirmed);
   }
 
+  function formatMinutes(m) {
+    m = Math.max(1, parseInt(m, 10) || 0);
+    if (m < 60) return "~" + m + " min";
+    var h = Math.floor(m / 60);
+    var rem = m % 60;
+    return rem ? "~" + h + "h " + rem + "m" : "~" + h + "h";
+  }
+
+  function titleCase(s) {
+    if (!s) return "";
+    return String(s).replace(/[_-]+/g, " ").replace(/\b\w/g, function (c) { return c.toUpperCase(); });
+  }
+
+  function difficultyLabel(n) {
+    if (n <= 2) return "Very easy";
+    if (n <= 4) return "Easy";
+    if (n <= 6) return "Moderate";
+    if (n <= 8) return "Hard";
+    return "Very hard";
+  }
+
+  function difficultyText(n) {
+    n = Math.max(1, Math.min(10, parseInt(n, 10) || 5));
+    return n + "/10 · " + difficultyLabel(n);
+  }
+
+  function showRow(sel, on) {
+    var el = $(sel);
+    if (el) el.hidden = !on;
+  }
+
+  function renderPriceBreakdown(p) {
+    var box = $("[data-asg-price-breakdown]");
+    if (!box) return;
+    if (!p || p.amount_usd == null) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    var rows = [];
+    rows.push(["Base · " + (p.word_count || 0).toLocaleString() + " words", fmtMoney(p.base_usd)]);
+    if (p.difficulty_multiplier && Math.abs(p.difficulty_multiplier - 1) > 0.001) {
+      rows.push(["Difficulty " + (p.difficulty_stars || "") + "/10", "×" + p.difficulty_multiplier]);
+    }
+    box.innerHTML = rows
+      .map(function (r) {
+        return '<div class="asg-price-row"><span>' + r[0] + "</span><span>" + r[1] + "</span></div>";
+      })
+      .join("");
+    box.hidden = false;
+  }
+
   function renderSummary() {
     var req = state.requirement || {};
+    var p = state.pricing || {};
     set("[data-asg-summary-words]", req.word_count);
     set("[data-asg-summary-deadline]", req.deadline);
+    set("[data-asg-summary-type]", titleCase(req.assignment_type) || "—");
+
+    var stars = p.difficulty_stars;
+    if (stars != null) {
+      set("[data-asg-summary-difficulty]", difficultyText(stars) + (p.difficulty_estimated ? " (est.)" : ""));
+    } else {
+      set("[data-asg-summary-difficulty]", "—");
+    }
+
+    showRow("[data-asg-summary-eta-row]", !!p.estimated_minutes);
+    if (p.estimated_minutes) {
+      set("[data-asg-summary-eta]", formatMinutes(p.estimated_minutes));
+    }
+
     set("[data-asg-summary-total]", fmtMoney(state.price));
+    renderPriceBreakdown(state.pricing);
+
+    var coinsEl = $("[data-asg-summary-coins]");
+    if (coinsEl) {
+      if (p.amount_coins) {
+        coinsEl.textContent = "≈ " + p.amount_coins.toLocaleString() + " coins";
+        coinsEl.hidden = false;
+      } else {
+        coinsEl.hidden = true;
+      }
+    }
+
     var note = $("[data-asg-summary-note]");
     if (note) {
       if (state.deliveryPackage) {
@@ -587,6 +672,9 @@
     var data = await api(projectUrl(""));
     state.requirement = data.requirement || null;
     state.price = data.project && data.project.price != null ? data.project.price : state.price;
+    if (data.project && data.project.artifacts && data.project.artifacts.pricing) {
+      state.pricing = data.project.artifacts.pricing;
+    }
     syncPaymentFromServer(data);
     state.research = data.research_plan || null;
     state.blueprint = data.blueprint || null;
@@ -658,6 +746,9 @@
       body: JSON.stringify({ priority: getPriority() }),
     });
     state.price = payload.project && payload.project.price != null ? payload.project.price : state.price;
+    if (payload.project && payload.project.artifacts && payload.project.artifacts.pricing) {
+      state.pricing = payload.project.artifacts.pricing;
+    }
   }
 
   async function runPrePayment() {
@@ -1257,6 +1348,16 @@
     if (analyze) {
       analyze.addEventListener("click", function () {
         runPrePayment().catch(function (err) {
+          if (err && err.code === "REGISTER_REQUIRED" && window.DMAuth) {
+            setBusy(false);
+            set("[data-asg-analysis-status]", "");
+            window.DMAuth.require({
+              reason: err.message || "Create a free account to analyze and price your assignment.",
+            }).then(function () {
+              analyze.click();
+            }).catch(function () {});
+            return;
+          }
           var status = isStaleProjectError(err)
             ? staleSessionMessage()
             : (err.message || "Failed");

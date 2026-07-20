@@ -1,61 +1,292 @@
 {% extends "workspace_base.html" %}
-{% block title %}Assignment Workspace — DocMaxxing{% endblock %}
+{% block title %}Document Editor — DocMaxxing{% endblock %}
+{% block head_extra %}
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+{% endblock %}
 {% block content %}
-<div class="ws-assignment" data-workspace>
-  <header class="ws-assignment-header">
-    <div>
-      <h1 class="ws-assignment-title">Assignment Workspace</h1>
-      <p class="ws-assignment-subtitle" data-ws-project-name>Project Monitor</p>
-    </div>
-    <div class="ws-assignment-controls">
-      <label class="ws-project-id-wrap" for="ws_project_id">Project ID</label>
-      <input id="ws_project_id" class="ws-project-id-input" type="text" placeholder="paste project id" data-ws-project-id-input />
-      <button type="button" class="ws-refresh-btn" data-ws-project-load>Load</button>
-    </div>
-  </header>
+<div class="ws" data-workspace data-tour="editor-page">
 
-  <div class="ws-assignment-main">
-    <aside class="ws-left-sidebar">
-      <h2>Project</h2>
-      <ul class="ws-stage-list" data-ws-stage-list></ul>
-    </aside>
-
-    <section class="ws-center-panel">
-      <h2>Current Stage</h2>
-      <p class="ws-current-stage" data-ws-current-stage>Waiting for project</p>
-      <div class="ws-progress-wrap">
-        <div class="ws-progress-bar">
-          <span data-ws-progress-fill></span>
-        </div>
-        <span data-ws-progress-label>0%</span>
+  <!-- ============================ LANDING / DOCUMENT PICKER ============================ -->
+  <section class="ws-landing" data-ws-landing hidden>
+    <div class="ws-landing-card ws-landing-head">
+      <div class="ws-landing-brand">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#2563eb" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+        <span>Document Editor</span>
       </div>
-      <dl class="ws-center-meta">
-        <div><dt>Current task</dt><dd data-ws-current-task>-</dd></div>
-        <div><dt>Model</dt><dd data-ws-current-model>-</dd></div>
-        <div><dt>Estimated remaining time</dt><dd data-ws-est-remaining>-</dd></div>
-      </dl>
-    </section>
+      <div class="ws-landing-actions">
+        <span class="ws-coins-pill"><span data-ws-coins-landing>0</span> coins</span>
+        <button type="button" class="ws-btn ws-btn-ghost" data-ws-tutorial>Tutorial</button>
+        <a href="{{ url_for('index') }}" class="ws-btn ws-btn-ghost">← Dashboard</a>
+      </div>
+    </div>
 
-    <aside class="ws-right-sidebar">
-      <h2>Project Summary</h2>
-      <dl class="ws-summary-list">
-        <div><dt>Assignment Type</dt><dd data-ws-assignment-type>-</dd></div>
-        <div><dt>Word Count</dt><dd data-ws-word-count>-</dd></div>
-        <div><dt>Citation Style</dt><dd data-ws-citation-style>-</dd></div>
-        <div><dt>Deadline</dt><dd data-ws-deadline>-</dd></div>
-        <div><dt>Current AI Model</dt><dd data-ws-current-ai-model>-</dd></div>
-        <div><dt>Credits Used</dt><dd data-ws-credits-used>0</dd></div>
-        <div><dt>Time Elapsed</dt><dd data-ws-time-elapsed>-</dd></div>
-      </dl>
-    </aside>
+    <label class="ws-landing-card ws-dropzone" data-ws-dropzone>
+      <input type="file" accept=".docx" hidden data-ws-import-input />
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#2563eb" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+      <h3>Import a Word document</h3>
+      <p>Drop a .docx here or click to browse — images and tables are preserved (max 20&nbsp;MB)</p>
+      <p class="ws-dropzone-note">⏱ Documents are kept for 7 days after upload, then deleted automatically — export anything you want to keep.</p>
+    </label>
+
+    <button type="button" class="ws-landing-card ws-turnitin-row" data-ws-open-turnitin>
+      <span class="ws-turnitin-icon">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+      </span>
+      <span class="ws-turnitin-text">
+        <strong>Open a file from your Turnitin reports</strong>
+        <small>Pick a document you already scanned — its AI-flagged parts are highlighted in the editor so you can humanize exactly those sections.</small>
+      </span>
+      <span class="ws-turnitin-chev">›</span>
+    </button>
+
+    <div class="ws-landing-grid">
+      <button type="button" class="ws-landing-card ws-blank-card" data-ws-new-blank>
+        <span class="ws-blank-plus">+</span>
+        <span>Blank document</span>
+      </button>
+      <button type="button" class="ws-landing-card ws-recent-card" data-ws-open-sample>
+        <span class="ws-recent-title" data-ws-recent-title>Welcome tour — sample document</span>
+        <span class="ws-recent-meta" data-ws-recent-words>262 words</span>
+        <span class="ws-recent-meta" data-ws-recent-updated>Updated just now</span>
+        <span class="ws-recent-pill">⏱ Deletes in 7 days</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ================================ EDITOR ================================ -->
+  <section class="ws-editor-view" data-ws-editor hidden>
+
+    <!-- Top bar -->
+    <header class="ws-topbar">
+      <div class="ws-topbar-left">
+        <button type="button" class="ws-icon-btn" data-ws-back title="Back to documents" aria-label="Back">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="ws-doc-titlewrap">
+          <input class="ws-doc-title" data-ws-doc-title value="Welcome tour — sample document" aria-label="Document title" />
+          <span class="ws-doc-saved" data-ws-saved>All changes saved</span>
+        </div>
+      </div>
+      <div class="ws-topbar-right">
+        <span class="ws-pill ws-pill-muted" title="Auto-deletes for privacy">⏱ Deletes in 7 days</span>
+        <span class="ws-pill ws-pill-muted"><span data-ws-wordcount>0 words</span> · <span data-ws-charcount>0 chars</span></span>
+        <span class="ws-pill ws-pill-coins" data-tour="coins"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10.5h3.5a1.5 1.5 0 0 1 0 3H10a1.5 1.5 0 0 0 0 3h4" stroke-linecap="round"/></svg> <span data-ws-coins>0</span> coins</span>
+        <button type="button" class="ws-pill ws-pill-topup" data-ws-topup>⊕ Top up</button>
+        <button type="button" class="ws-icon-btn" data-ws-help data-tour-help title="Help / tutorial" aria-label="Help">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7"/><path d="M12 17h.01"/></svg>
+        </button>
+        <button type="button" class="ws-icon-btn" data-ws-history-btn data-tour="history" title="Version history" aria-label="History">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>
+        </button>
+        <button type="button" class="ws-btn ws-btn-ghost" data-ws-share data-tour="share">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5 8.6 10.5"/></svg>
+          Share
+        </button>
+        <button type="button" class="ws-btn ws-btn-primary" data-ws-export data-tour="export">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          Export
+        </button>
+      </div>
+    </header>
+
+    <!-- Formatting toolbar -->
+    <div class="ws-toolbar" role="toolbar" aria-label="Formatting" data-tour="toolbar">
+      <div class="ws-tool-group">
+        <button type="button" class="ws-tool" data-cmd="undo" title="Undo" aria-label="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="redo" title="Redo" aria-label="Redo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/></svg></button>
+      </div>
+      <span class="ws-tool-sep"></span>
+      <div class="ws-tool-group">
+        <select class="ws-tool-select" data-cmd-block title="Paragraph style">
+          <option value="p">Normal text</option>
+          <option value="h1">Heading 1</option>
+          <option value="h2">Heading 2</option>
+          <option value="h3">Heading 3</option>
+          <option value="blockquote">Quote</option>
+        </select>
+      </div>
+      <span class="ws-tool-sep"></span>
+      <div class="ws-tool-group">
+        <button type="button" class="ws-tool" data-cmd="bold" title="Bold"><b>B</b></button>
+        <button type="button" class="ws-tool" data-cmd="italic" title="Italic"><i>I</i></button>
+        <button type="button" class="ws-tool" data-cmd="underline" title="Underline"><u>U</u></button>
+        <button type="button" class="ws-tool" data-cmd="strikeThrough" title="Strikethrough"><s>S</s></button>
+      </div>
+      <span class="ws-tool-sep"></span>
+      <div class="ws-tool-group">
+        <button type="button" class="ws-tool" data-cmd="superscript" title="Superscript">X<sup>2</sup></button>
+        <button type="button" class="ws-tool" data-cmd="subscript" title="Subscript">X<sub>2</sub></button>
+        <button type="button" class="ws-tool" data-cmd="removeFormat" title="Clear formatting">T<sub>x</sub></button>
+      </div>
+      <span class="ws-tool-sep"></span>
+      <div class="ws-tool-group">
+        <button type="button" class="ws-tool" data-cmd="justifyLeft" title="Align left"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h18M3 12h12M3 18h15"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="justifyCenter" title="Align center"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h18M6 12h12M4 18h16"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="justifyRight" title="Align right"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h18M9 12h12M6 18h15"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="justifyFull" title="Justify"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button>
+      </div>
+      <span class="ws-tool-sep"></span>
+      <div class="ws-tool-group">
+        <button type="button" class="ws-tool" data-cmd="insertUnorderedList" title="Bullet list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="insertOrderedList" title="Numbered list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 6h1v4M4 10h2"/><path d="M6 18H4c0-1 2-1.5 2-2.5S5 14 4 14.5"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="outdent" title="Decrease indent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 6H3M21 12h-9M21 18H3M7 9l-3 3 3 3"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="indent" title="Increase indent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M12 12h9M3 18h18M4 9l3 3-3 3"/></svg></button>
+      </div>
+      <span class="ws-tool-sep"></span>
+      <div class="ws-tool-group">
+        <button type="button" class="ws-tool" data-cmd="createLink" title="Insert link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="formatBlock:blockquote" title="Quote">❝</button>
+        <button type="button" class="ws-tool" data-cmd="insertTable" title="Insert table"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="insertImage" title="Insert image"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m21 16-5-5L5 21"/></svg></button>
+        <button type="button" class="ws-tool" data-cmd="insertHorizontalRule" title="Horizontal line"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 12h18"/></svg></button>
+      </div>
+    </div>
+
+    <!-- Editor body + sidebar -->
+    <div class="ws-editor-body">
+      <div class="ws-doc-scroll">
+        <article class="ws-page" data-ws-editor-surface contenteditable="true" spellcheck="true" aria-label="Document"></article>
+      </div>
+
+      <aside class="ws-sidebar">
+        <nav class="ws-tabs" role="tablist">
+          <button type="button" class="ws-tab is-active" data-ws-tab="humanize" role="tab">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg> Humanize
+          </button>
+          <button type="button" class="ws-tab" data-ws-tab="ai" role="tab">AI</button>
+          <button type="button" class="ws-tab" data-ws-tab="cite" role="tab">❝ Cite</button>
+          <button type="button" class="ws-tab" data-ws-tab="comments" role="tab">💬 Comments</button>
+        </nav>
+
+        <div class="ws-panels">
+          <!-- HUMANIZE PANEL -->
+          <div class="ws-panel is-active" data-ws-panel="humanize">
+            <p class="ws-panel-intro">Select sentences or paragraphs in the document, then <b>mark</b> them. Marks are saved with the document — build up your list across sessions, then run <b>one</b> Humanize pass. Everything marked is packed into as few humanizer calls as possible (10 coins per call, up to 4,500 words each), so many small selections still humanize together for the same 10 coins.</p>
+
+            <div class="ws-btn-row">
+              <button type="button" class="ws-action ws-action-blue" data-ws-mark data-tour="mark-selection"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Mark selection</button>
+              <button type="button" class="ws-action ws-action-ghost" data-ws-unmark>⌫ Unmark</button>
+            </div>
+            <button type="button" class="ws-action ws-action-ghost ws-action-block" data-ws-unmark-all>⊘ Unmark everything</button>
+
+            <h4 class="ws-panel-h">AI DETECTION</h4>
+            <p class="ws-panel-sub">Check the whole document with our own AI detector: likely AI-written parts get <span class="ws-chip ws-chip-purple">purple highlights</span> and you see an overall AI score — right here in the editor, no report to download. Costs 10 coins per check.</p>
+            <button type="button" class="ws-action ws-action-outline ws-action-block" data-ws-detect data-tour="detect-ai">✷ Detect AI</button>
+
+            <h4 class="ws-panel-h" data-tour="ai-highlights">AI REPORT HIGHLIGHTS</h4>
+            <p class="ws-panel-sub"><span class="ws-chip ws-chip-violet">Violet highlights</span> are the parts flagged as AI-written — by your Turnitin AI report or a Detect AI check. Use the arrows to jump from one highlight to the next. Select inside one and <b>Mark selection</b> to humanize just that part, or mark them all at once.</p>
+            <dl class="ws-stat-rows">
+              <div><dt>AI-flagged parts</dt><dd data-ws-flagged-parts>0</dd></div>
+              <div><dt>AI-flagged words</dt><dd data-ws-flagged-words>0</dd></div>
+              <div class="ws-stat-nav"><dt>Go to highlight</dt><dd><button type="button" class="ws-mini-btn" data-ws-hl-prev>▲</button><span data-ws-hl-index>0</span><button type="button" class="ws-mini-btn" data-ws-hl-next>▼</button></dd></div>
+              <div class="ws-stat-toggle"><dt>Show AI highlights</dt><dd><button type="button" class="ws-switch is-on" data-ws-hl-toggle aria-label="Toggle AI highlights"><span></span></button></dd></div>
+            </dl>
+            <button type="button" class="ws-action ws-action-outline ws-action-block" data-ws-mark-all-ai data-tour="mark-all"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Mark all AI parts for humanization</button>
+
+            <h4 class="ws-panel-h">PENDING SELECTIONS</h4>
+            <dl class="ws-stat-rows">
+              <div><dt>Selections</dt><dd data-ws-pending-count>0</dd></div>
+              <div><dt>Marked words</dt><dd data-ws-pending-words>0</dd></div>
+              <div><dt>Estimated cost</dt><dd data-ws-pending-cost>—</dd></div>
+            </dl>
+
+            <button type="button" class="ws-action ws-action-amber ws-action-block ws-action-run" data-ws-humanize-run data-tour="humanize-run">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+              Humanize marked selections
+            </button>
+
+            <!-- Progress (reused component: label + bar only) -->
+            <div class="ws-progress" data-ws-progress hidden aria-live="polite">
+              <div class="ws-progress-label">Humanizing…</div>
+              <div class="ws-progress-track"><div class="ws-progress-bar" data-ws-progress-bar></div></div>
+            </div>
+
+            <h4 class="ws-panel-h">AFTER HUMANIZATION</h4>
+            <p class="ws-panel-sub">Rewritten text is shown with a <span class="ws-chip ws-chip-green">green highlight</span>, anything the humanizer returned unchanged in <span class="ws-chip ws-chip-gray">gray</span>, failures in <span class="ws-chip ws-chip-red">red</span> (failed runs are refunded).</p>
+          </div>
+
+          <!-- AI PANEL -->
+          <div class="ws-panel" data-ws-panel="ai">
+            <p class="ws-panel-intro">Select text in the document, then choose an action. The rewrite appears here first — nothing changes until you click <b>Replace selection</b>. Each action costs 0.1 coin per 500 words selected (refunded if it fails).</p>
+            <div class="ws-ai-grid" data-tour="ai-panel">
+              <button type="button" class="ws-ai-btn" data-ws-ai-action="Improve">⇄ Improve</button>
+              <button type="button" class="ws-ai-btn" data-ws-ai-action="Paraphrase">✕ Paraphrase</button>
+              <button type="button" class="ws-ai-btn" data-ws-ai-action="Shorten">Shorten</button>
+              <button type="button" class="ws-ai-btn" data-ws-ai-action="Expand">Expand</button>
+              <button type="button" class="ws-ai-btn" data-ws-ai-action="Fix grammar">✓ Fix grammar</button>
+              <button type="button" class="ws-ai-btn" data-ws-ai-action="More formal">▤ More formal</button>
+              <button type="button" class="ws-ai-btn" data-ws-ai-action="Simplify">◐ Simplify</button>
+            </div>
+            <h4 class="ws-panel-h">CUSTOM INSTRUCTION</h4>
+            <textarea class="ws-input ws-textarea" data-ws-ai-custom placeholder="e.g. rewrite in third person and past tense"></textarea>
+            <div class="ws-ai-preview" data-ws-ai-preview hidden></div>
+            <button type="button" class="ws-action ws-action-blue ws-action-block" data-ws-ai-apply>Apply to selection</button>
+          </div>
+
+          <!-- CITE PANEL -->
+          <div class="ws-panel" data-ws-panel="cite" data-tour="cite-panel">
+            <p class="ws-panel-intro">Search 160M+ scholarly works (CrossRef) by title, keywords, author or DOI, then insert the in-text citation at your cursor and add the full reference to the end of the document.</p>
+            <div class="ws-cite-search">
+              <input type="text" class="ws-input" placeholder="e.g. attention is all you need" data-ws-cite-query />
+              <button type="button" class="ws-icon-btn ws-cite-go" data-ws-cite-search aria-label="Search"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button>
+            </div>
+            <label class="ws-cite-style">Style:
+              <select class="ws-input ws-input-sm" data-ws-cite-style><option>APA 7</option><option>MLA 9</option><option>Harvard</option></select>
+            </label>
+            <div class="ws-cite-results" data-ws-cite-results></div>
+            <h4 class="ws-panel-h">CITATION CHECKER</h4>
+            <p class="ws-panel-sub">Scan the document for author-date citations before humanizing, and double-check they came through intact afterwards — humanizers occasionally reword references.</p>
+            <button type="button" class="ws-action ws-action-outline ws-action-block" data-ws-cite-scan>⟳ Scan document for citations</button>
+          </div>
+
+          <!-- COMMENTS PANEL -->
+          <div class="ws-panel" data-ws-panel="comments" data-tour="comments-panel">
+            <p class="ws-panel-intro">Select text in the document before writing to attach the selection as a quote. Everyone the document is shared with can comment.</p>
+            <div class="ws-quote-preview" data-ws-comment-quote hidden></div>
+            <textarea class="ws-input ws-textarea" placeholder="Add a comment…" data-ws-comment-input></textarea>
+            <button type="button" class="ws-action ws-action-blue ws-action-block" data-ws-comment-add>💬 Comment</button>
+            <h4 class="ws-panel-h">ALL COMMENTS</h4>
+            <div class="ws-comments-list" data-ws-comments-list><p class="ws-empty-note">No comments yet.</p></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ================================ TOUR OVERLAY ================================ -->
+  <div class="ws-tour" data-ws-tour hidden>
+    <div class="ws-tour-backdrop" data-ws-tour-backdrop></div>
+    <div class="ws-tour-spot" data-ws-tour-spot></div>
+    <div class="ws-tour-card" data-ws-tour-card role="dialog" aria-modal="true">
+      <button type="button" class="ws-tour-close" data-ws-tour-close aria-label="Close tour">×</button>
+      <h3 class="ws-tour-title" data-ws-tour-title></h3>
+      <p class="ws-tour-body" data-ws-tour-body></p>
+      <div class="ws-tour-foot">
+        <span class="ws-tour-progress" data-ws-tour-progress>1 / 15</span>
+        <div class="ws-tour-nav">
+          <button type="button" class="ws-btn ws-btn-ghost" data-ws-tour-back>Back</button>
+          <button type="button" class="ws-btn ws-btn-primary" data-ws-tour-next>Next →</button>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <section class="ws-bottom-feed">
-    <div class="ws-feed-header">
-      <h2>Activity Feed</h2>
-      <span data-ws-feed-updated>Not synced</span>
-    </div>
-    <ul class="ws-feed-list" data-ws-activity-feed></ul>
-  </section>
+  <!-- Floating selection toolbar -->
+  <div class="ws-floatbar" data-ws-floatbar hidden role="toolbar" aria-label="Selection actions">
+    <button type="button" class="ws-fb ws-fb-accent" data-ws-fb="ai" title="AI assistant">✦ AI</button>
+    <button type="button" class="ws-fb ws-fb-accent" data-ws-fb="humanize" title="Humanize">Humanize</button>
+    <span class="ws-fb-sep"></span>
+    <button type="button" class="ws-fb" data-ws-fb="cite" title="Cite selection">@Cite</button>
+    <span class="ws-fb-sep"></span>
+    <button type="button" class="ws-fb" data-ws-fb="bold" title="Bold"><b>B</b></button>
+    <button type="button" class="ws-fb" data-ws-fb="italic" title="Italic"><i>I</i></button>
+    <button type="button" class="ws-fb" data-ws-fb="underline" title="Underline"><u>U</u></button>
+    <button type="button" class="ws-fb" data-ws-fb="link" title="Insert link"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
+  </div>
+
+  <!-- Toast -->
+  <div class="ws-toast" data-ws-toast hidden></div>
 </div>
 {% endblock %}

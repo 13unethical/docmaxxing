@@ -10,6 +10,12 @@
   </head>
   <body class="ws-body">
     {% block content %}{% endblock %}
+    {% include "_register_wall.html" %}
+    <script>
+      window.DM_AUTH = { authenticated: {{ 'true' if current_user else 'false' }} };
+    </script>
+    <script src="{{ url_for('static', filename='common.js') }}"></script>
+    <script src="{{ url_for('static', filename='auth-modal.js') }}"></script>
     <script src="{{ url_for('static', filename='workspace/mock-services.js') }}"></script>
     <script src="{{ url_for('static', filename='workspace/tour-steps.js') }}"></script>
     <script src="{{ url_for('static', filename='workspace/workspace-app.js') }}"></script>

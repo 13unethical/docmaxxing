@@ -83,7 +83,84 @@
               {% if _nav == 'turnitin' %}aria-current="page"{% endif %}
               >Turnitin</a
             >
+            {% if is_admin %}
+            <a
+              href="{{ url_for('admin_panel') }}"
+              class="nav-link{% if _nav == 'admin' %} is-active{% endif %}"
+              {% if _nav == 'admin' %}aria-current="page"{% endif %}
+              >Admin</a
+            >
+            {% endif %}
           </nav>
+          <div class="nav-account">
+            {% if current_user %}
+            {% set _display_name = current_user.name or current_user.email.split('@')[0] %}
+            {% set _initial = (_display_name[0] if _display_name else 'U')|upper %}
+            <a href="{{ url_for('pricing') }}" class="coin-pill" title="Your coin balance">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6" />
+                <path d="M12 8.5v7M9.75 10.25h3.5a1.5 1.5 0 0 1 0 3h-2.5a1.5 1.5 0 0 0 0 3h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              </svg>
+              <span data-coin-balance>{{ coin_balance }}</span>
+            </a>
+            <div class="nav-user-menu" data-user-menu>
+              <button
+                type="button"
+                class="nav-user-trigger"
+                data-user-menu-toggle
+                aria-expanded="false"
+                aria-haspopup="true"
+                aria-controls="nav_user_dropdown"
+              >
+                <span class="nav-user-avatar" aria-hidden="true">{{ _initial }}</span>
+                <span class="nav-user-meta">
+                  <span class="nav-user-name">{{ _display_name }}</span>
+                  <span class="nav-user-email">{{ current_user.email }}</span>
+                </span>
+                <svg class="nav-user-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <div class="nav-user-dropdown" id="nav_user_dropdown" data-user-menu-panel hidden>
+                <div class="nav-user-dropdown-head">
+                  <span class="nav-user-avatar nav-user-avatar--lg" aria-hidden="true">{{ _initial }}</span>
+                  <div class="nav-user-dropdown-meta">
+                    <span class="nav-user-dropdown-name">{{ _display_name }}</span>
+                    <span class="nav-user-dropdown-email">{{ current_user.email }}</span>
+                  </div>
+                </div>
+                <div class="nav-user-dropdown-links">
+                  <a href="{{ url_for('account') }}" class="nav-user-dropdown-link">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="12" cy="8" r="3.25" stroke="currentColor" stroke-width="1.6"/>
+                      <path d="M5.5 19c1.6-3 4-4.5 6.5-4.5S16.9 16 18.5 19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                    </svg>
+                    Account
+                  </a>
+                  <a href="{{ url_for('pricing') }}" class="nav-user-dropdown-link">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <rect x="3.5" y="6.5" width="17" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/>
+                      <path d="M3.5 10.5h17" stroke="currentColor" stroke-width="1.6"/>
+                    </svg>
+                    Billing
+                  </a>
+                  <form method="post" action="{{ url_for('logout') }}" class="nav-user-dropdown-form">
+                    <button type="submit" class="nav-user-dropdown-link nav-user-dropdown-link--btn">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M10 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                        <path d="M14 16l4-4-4-4M18 12H10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                      Log out
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+            {% else %}
+            <a href="{{ url_for('login') }}" class="nav-link nav-link--auth">Sign in</a>
+            <a href="{{ url_for('register') }}" class="nav-auth-cta">Sign up</a>
+            {% endif %}
+          </div>
         </div>
       </header>
 
@@ -92,12 +169,6 @@
         {% block content %}{% endblock %}
       </main>
 
-      <footer class="foot site-footer shell">
-        <p>
-          Formatting and document checks run locally. Optional &ldquo;Auto Setup Format&rdquo; may call OpenAI;
-          reference metadata uses free public APIs (Crossref, Open Library).
-        </p>
-      </footer>
     </div>
 
     <div
@@ -148,8 +219,14 @@
       </svg>
     </button>
 
+    {% include "_register_wall.html" %}
+
+    <script>
+      window.DM_AUTH = { authenticated: {{ 'true' if current_user else 'false' }} };
+    </script>
     <script src="{{ url_for('static', filename='ui.js') }}"></script>
     <script src="{{ url_for('static', filename='common.js') }}"></script>
+    <script src="{{ url_for('static', filename='auth-modal.js') }}"></script>
     <script src="{{ url_for('static', filename='support-chat.js') }}"></script>
     {% block scripts %}{% endblock %}
   </body>

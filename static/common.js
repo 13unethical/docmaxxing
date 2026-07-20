@@ -533,3 +533,57 @@
     citationStyleForFormat: citationStyleForFormat,
   };
 })(typeof window !== "undefined" ? window : this);
+
+/* Coin balance: keep every header pill in sync from the server. */
+(function (global) {
+  function setBalance(n) {
+    var els = document.querySelectorAll("[data-coin-balance]");
+    Array.prototype.forEach.call(els, function (el) { el.textContent = n; });
+  }
+  function refreshCoinBalance() {
+    return fetch("/api/economy/balance", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && typeof d.balance === "number") setBalance(d.balance);
+        return d;
+      })
+      .catch(function () {});
+  }
+  global.refreshCoinBalance = refreshCoinBalance;
+})(typeof window !== "undefined" ? window : this);
+
+/* User account dropdown in the top nav. */
+(function () {
+  function closeAllMenus(except) {
+    document.querySelectorAll("[data-user-menu].is-open").forEach(function (menu) {
+      if (except && menu === except) return;
+      menu.classList.remove("is-open");
+      var panel = menu.querySelector("[data-user-menu-panel]");
+      var toggle = menu.querySelector("[data-user-menu-toggle]");
+      if (panel) panel.hidden = true;
+      if (toggle) toggle.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    var toggle = e.target.closest("[data-user-menu-toggle]");
+    if (toggle) {
+      var menu = toggle.closest("[data-user-menu]");
+      if (!menu) return;
+      var panel = menu.querySelector("[data-user-menu-panel]");
+      var open = !menu.classList.contains("is-open");
+      closeAllMenus(open ? menu : null);
+      menu.classList.toggle("is-open", open);
+      if (panel) panel.hidden = !open;
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      return;
+    }
+    if (!e.target.closest("[data-user-menu]")) {
+      closeAllMenus();
+    }
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closeAllMenus();
+  });
+})();

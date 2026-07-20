@@ -124,6 +124,13 @@ class BrowserWorker(threading.Thread):
         except Exception:  # noqa: BLE001
             return "cdp"
 
+    def _timeout_for(self, job: Job) -> int:
+        if job.provider == "plagdetect":
+            if job.operation == "highlights":
+                return _env_int("PLAGDETECT_HIGHLIGHTS_TIMEOUT", 180)
+            return _env_int("PLAGDETECT_JOB_TIMEOUT", 600)
+        return self._job_timeout
+
     def _execute_job(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
         if job is None:
@@ -149,10 +156,10 @@ class BrowserWorker(threading.Thread):
 
             try:
                 self._jobs.log(job, "Provider opened", f"{job.provider} (attempt {attempt})")
-                self._jobs.log(job, "Humanize clicked", "dispatching workflow")
-                self._jobs.log(job, "Waiting result", f"timeout {self._job_timeout}s")
+                self._jobs.log(job, "Workflow started", f"{job.provider}/{job.operation}")
+                self._jobs.log(job, "Waiting result", f"timeout {self._timeout_for(job)}s")
 
-                result = self._run_with_timeout(job, lambda: self._dispatch(job))
+                result = self._run_with_timeout(job, lambda: self._dispatch(job), timeout=self._timeout_for(job))
 
                 if isinstance(result, dict) and result.get("success"):
                     self._jobs.log(job, "Result received", "success")
@@ -164,6 +171,13 @@ class BrowserWorker(threading.Thread):
                 if code == "LOGIN_REQUIRED":
                     self._jobs.log(job, "Result received", "LOGIN_REQUIRED")
                     self._jobs.fail(job, "LOGIN_REQUIRED", code="LOGIN_REQUIRED")
+                    return
+                if code == "NO_CHANGE":
+                    # StealthWriter produced no change (daily limit / already human).
+                    # Not retryable — retrying would only burn more quota.
+                    self._jobs.log(job, "Result received", "NO_CHANGE")
+                    message = (result or {}).get("message") or "NO_CHANGE"
+                    self._jobs.fail(job, message, code="NO_CHANGE")
                     return
                 # e.g. "text is required" — not retryable.
                 self._jobs.fail(job, str(code), code="ERROR")
@@ -207,9 +221,36 @@ class BrowserWorker(threading.Thread):
             if job.operation == "humanize":
                 return sw.humanize_text(str(job.payload.get("text") or ""))
             raise NotImplementedError(f"Unsupported stealthwriter operation: {job.operation!r}")
+        if job.provider == "plagdetect":
+            from services.browser.providers import plagdetect as pd
+
+            if job.operation == "check":
+                return pd.submit_check(
+                    str(job.payload.get("file_path") or ""),
+                    exclude_bibliography=bool(job.payload.get("exclude_bibliography")),
+                    exclude_quotes=bool(job.payload.get("exclude_quotes")),
+                    report_dir=job.payload.get("report_dir"),
+                    submission_id=job.payload.get("submission_id"),
+                )
+            if job.operation == "highlights":
+                return pd.submit_highlights(
+                    external_id=str(job.payload.get("external_id") or ""),
+                    report_dir=str(job.payload.get("report_dir") or ""),
+                    submission_id=job.payload.get("submission_id"),
+                )
+            if job.operation == "fetch_reports":
+                return pd.fetch_reports(
+                    external_id=str(job.payload.get("external_id") or ""),
+                    report_dir=str(job.payload.get("report_dir") or ""),
+                    submission_id=job.payload.get("submission_id"),
+                    fetch_similarity=bool(job.payload.get("fetch_similarity", True)),
+                    fetch_ai=bool(job.payload.get("fetch_ai", True)),
+                    fetch_highlights=bool(job.payload.get("fetch_highlights", False)),
+                )
+            raise NotImplementedError(f"Unsupported plagdetect operation: {job.operation!r}")
         raise NotImplementedError(f"Unsupported provider: {job.provider!r}")
 
-    def _run_with_timeout(self, job: Job, fn: Callable[[], Any]) -> Any:
+    def _run_with_timeout(self, job: Job, fn: Callable[[], Any], *, timeout: int | None = None) -> Any:
         """Bound an attempt to the job timeout via a watchdog.
 
         The provider workflow is left untouched and all of its Playwright calls
@@ -217,9 +258,10 @@ class BrowserWorker(threading.Thread):
         flags timeout; the escalation ladder then reopens/restarts as needed.
         """
         done = threading.Event()
+        limit = timeout if timeout is not None else self._job_timeout
 
         def _watchdog() -> None:
-            if not done.wait(self._job_timeout):
+            if not done.wait(limit):
                 job.timed_out = True
 
         wd = threading.Thread(target=_watchdog, name=f"{self.name}-wd", daemon=True)
@@ -229,7 +271,7 @@ class BrowserWorker(threading.Thread):
         finally:
             done.set()
         if job.timed_out:
-            raise JobTimeout(f"attempt exceeded {self._job_timeout}s")
+            raise JobTimeout(f"attempt exceeded {limit}s")
         return result
 
     def _escalate(self, step: str | None, job: Job) -> None:

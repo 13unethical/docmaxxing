@@ -209,7 +209,12 @@
           throw parseErr;
         }
       }
-      if (!res.ok) throw new Error(payload.error || "HTTP " + res.status);
+      if (!res.ok) {
+        var err = new Error(payload.message || payload.error || "HTTP " + res.status);
+        err.code = payload.error;
+        err.status = res.status;
+        throw err;
+      }
       return payload;
     });
   }
@@ -250,6 +255,22 @@
         });
       })
       .catch(function (err) {
+        var code = err && err.code;
+        if ((code === "REGISTER_REQUIRED" || code === "AUTH_REQUIRED") && window.DMAuth) {
+          finishProgress(false, function () { updateEmptyState(); });
+          window.DMAuth.require({
+            reason: (err && err.message) || "Create a free account to keep humanizing.",
+          }).then(function () {
+            runHumanize();
+          }).catch(function () {});
+          return;
+        }
+        if (code === "INSUFFICIENT_COINS") {
+          finishProgress(false, function () {
+            showError((err && err.message ? err.message : "Not enough coins.") + " Add coins on the Pricing page.");
+          });
+          return;
+        }
         finishProgress(false, function () {
           showError(err && err.message ? err.message : String(err));
         });

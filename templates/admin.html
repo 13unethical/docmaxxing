@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Admin Panel — DocMaxxing{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}" />
+{% endblock %}
+{% block content %}
+<div class="adm-page" data-admin-page>
+  <header class="adm-header">
+    <div>
+      <h1 class="adm-title">Admin Panel</h1>
+      <p class="adm-desc">Manage users, coin balances, and admin access.</p>
+    </div>
+    <div class="adm-stats" data-adm-stats hidden>
+      <span class="adm-stat"><strong data-adm-total-users>0</strong> users</span>
+    </div>
+  </header>
+
+  <section class="adm-card">
+    <div class="adm-toolbar">
+      <div class="adm-search-wrap">
+        <svg class="adm-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.75"/>
+          <path d="M20 20l-3-3" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+        </svg>
+        <input
+          type="search"
+          class="adm-search"
+          placeholder="Search by ID, email or name"
+          data-adm-search
+          aria-label="Search users"
+        />
+      </div>
+    </div>
+
+    <p class="adm-status" data-adm-status role="status" aria-live="polite"></p>
+
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead>
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">Email</th>
+            <th scope="col">Name</th>
+            <th scope="col">Coins</th>
+            <th scope="col">Registered</th>
+            <th scope="col">Admin</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody data-adm-body></tbody>
+      </table>
+      <p class="adm-empty" data-adm-empty hidden>No users found.</p>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='admin-page.js') }}"></script>
+{% endblock %}

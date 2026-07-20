@@ -667,9 +667,14 @@ class ProjectService:
         if not requirement.get("analyzed_at") and not requirement.get("assignment_type"):
             raise ValueError("Requirement analysis must complete before pricing")
 
-        pricing = calculate_project_price(requirement, priority=priority)
         project = bundle.project
+        pricing = calculate_project_price(requirement)
+        from services.economy.pricing import USD_TO_COINS
+
+        coins = max(1, int(round(float(pricing["amount_usd"]) * USD_TO_COINS)))
+        pricing["amount_coins"] = coins
         project.price = float(pricing["amount_usd"])
+        project.credits = coins
         project.artifacts["pricing"] = pricing
         project.updated_at = utc_now()
         self.store.save_project(project)

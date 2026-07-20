@@ -178,9 +178,6 @@
               placeholder="Separate paragraphs with a blank line…"
             ></textarea>
           </label>
-          <button type="button" class="btn-secondary btn-preview-toggle" id="preview_changes_btn">
-            Refresh preview
-          </button>
         </section>
       </div>
 
@@ -376,24 +373,6 @@
           </div>
         </div>
       </div>
-
-      <section class="card preview-section" id="home_preview_section" aria-live="polite">
-        <h2 class="card-title">Before / After preview</h2>
-        <div class="preview-pair" data-preview-container>
-          <div class="preview-card">
-            <p class="preview-label">Before</p>
-            <p class="preview-sublabel">Original</p>
-            <div class="preview-frame" data-preview-before></div>
-          </div>
-          <div class="preview-card preview-card--after">
-            <p class="preview-label">After</p>
-            <p class="preview-sublabel">Formatted</p>
-            <div class="preview-frame" data-preview-after></div>
-          </div>
-        </div>
-        <h3 class="preview-diff-title">Changes applied</h3>
-        <ul class="preview-diff-list" data-preview-diff></ul>
-      </section>
       </div>
 {% endblock %}
 {% block scripts %}

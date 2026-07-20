@@ -188,16 +188,128 @@ def _find_output_area(page: Any, input_locator: Any) -> Any:
     return input_locator
 
 
-def _generation_busy(page: Any) -> bool:
+# StealthWriter renders the result inside the "Humanized Result" card as a
+# `div.whitespace-pre-wrap` whose sentences are clickable <span>s — NOT a second
+# <textarea>. We read that div's innerText directly.
+_RESULT_EXTRACTION_JS = r"""(cleaned) => {
+    const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+    const cleanedN = norm(cleaned);
+
+    // Preferred: the result prose container inside the Humanized Result card.
+    const selectors = [
+        'div.whitespace-pre-wrap',
+        '[class*="whitespace-pre-wrap"]',
+    ];
+    let best = '';
+    for (const sel of selectors) {
+        for (const el of Array.from(document.querySelectorAll(sel))) {
+            // A <textarea> is never matched by these div selectors, so this is
+            // always the rendered output, never the input.
+            const tx = norm(el.innerText);
+            if (tx.length > 20 && tx !== cleanedN && tx.length > best.length) best = tx;
+        }
+        if (best) break;
+    }
+    if (best) return best;
+
+    // Fallback: locate the result card via its action buttons, then take the
+    // longest prose block that isn't the input or the help/footer line.
+    const marker = Array.from(document.querySelectorAll('button')).find(
+        b => /rehumanize|humanize more/i.test(norm(b.innerText))
+    );
+    if (marker) {
+        let panel = marker;
+        for (let k = 0; k < 8 && panel.parentElement; k++) {
+            panel = panel.parentElement;
+            if (norm(panel.innerText).length > 200) break;
+        }
+        const skip = /green = high human|click sentences|deep scan|^\d+\s+words$/i;
+        panel.querySelectorAll('div, p, span').forEach(el => {
+            if (el.querySelector('button')) return;
+            const tx = norm(el.innerText);
+            if (tx.length > 25 && tx !== cleanedN && !skip.test(tx) && tx.length > best.length) {
+                best = tx;
+            }
+        });
+    }
+    return best;
+}"""
+
+
+def _extract_result_text(page: Any, cleaned: str) -> str:
+    """Return the rendered humanized text, or '' if not present yet."""
     try:
-        if page.get_by_text(re.compile(r"humanizing", re.I)).count() > 0:
-            return True
-        busy = page.locator(
-            '[aria-busy="true"], .animate-spin, [class*="loading"], [class*="spinner"]'
+        value = page.evaluate(_RESULT_EXTRACTION_JS, cleaned)
+        return (value or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _result_ready(page: Any) -> bool:
+    """The result card exposes Rehumanize / Humanize More once generation is done."""
+    try:
+        return (
+            page.get_by_role(
+                "button", name=re.compile(r"rehumanize|humanize more", re.I)
+            ).count()
+            > 0
         )
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _generation_busy(page: Any) -> bool:
+    """True only while generation is actually running.
+
+    IMPORTANT: match the transient "Humanizing…" *button* only — a loose page
+    text match for "humanizing" also hits StealthWriter's permanent FAQ line
+    ("Common questions about humanizing text…"), which would make this return
+    True forever and never let us read the result.
+    """
+    try:
+        if (
+            page.get_by_role("button", name=re.compile(r"humanizing", re.I)).count()
+            > 0
+        ):
+            return True
+        busy = page.locator('[aria-busy="true"], .animate-spin, [class*="spinner"]')
         return busy.count() > 0
     except Exception:  # noqa: BLE001
         return False
+
+
+def _detect_limit_message(page: Any) -> str:
+    """Return a visible StealthWriter limit/error toast message, or ''.
+
+    Scans only toast/alert regions (not the FAQ body) for limit wording.
+    """
+    try:
+        txt = page.evaluate(
+            r"""() => {
+                const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+                const nodes = document.querySelectorAll(
+                    '[data-sonner-toast], [role="alert"], [role="status"], [class*="toast"]'
+                );
+                for (const n of nodes) {
+                    const t = norm(n.innerText);
+                    if (t && t.length < 240 &&
+                        /limit|reached|upgrade|too many|no more|out of|daily|quota|suspend/i.test(t)) {
+                        return t;
+                    }
+                }
+                return '';
+            }"""
+        )
+        return (txt or "").strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _safe_url(page: Any) -> str | None:
+    try:
+        return page.url
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _is_sign_in_url(url: str) -> bool:
@@ -272,52 +384,93 @@ def humanize_text(text: str) -> dict[str, Any]:
             _collect_page_diagnostics(page, step="click_humanize"),
         ) from exc
 
-    # Wait until generation finishes
-    output = _find_output_area(page, input_box)
-    deadline = time.monotonic() + (_HUMANIZE_TIMEOUT_MS / 1000)
+    # Wait until generation finishes. The result renders in the "Humanized
+    # Result" card (a div.whitespace-pre-wrap), not a textarea.
+    # Capture any pre-existing result so we only accept the freshly generated one.
+    previous_result = _extract_result_text(page, cleaned)
+    started_wait = time.monotonic()
+    deadline = started_wait + (_HUMANIZE_TIMEOUT_MS / 1000)
     humanized = ""
     last_value = ""
     stable_reads = 0
     saw_busy = False
+    busy_cleared_at: float | None = None
+    noop_reads = 0
+
+    def _no_change(reason: str) -> dict[str, Any]:
+        return {
+            "success": False,
+            "error": "NO_CHANGE",
+            "message": reason,
+            "current_url": _safe_url(page),
+        }
+
+    _limit_reason = (
+        "StealthWriter didn't rewrite the text — your free-plan daily "
+        "humanization limit is likely reached (it resets at midnight UTC). "
+        "Try again after the reset or upgrade the plan."
+    )
 
     while time.monotonic() < deadline:
-        page.wait_for_timeout(800)
-        busy = _generation_busy(page)
-        if busy:
-            saw_busy = True
-            continue
+        try:
+            page.wait_for_timeout(800)
 
-        current = _read_locator_text(output)
-        # If output panel is empty, also check all textareas for changed content
-        if (not current or current == cleaned) and page.locator("textarea").count() >= 1:
-            for i in range(page.locator("textarea").count()):
-                candidate = _read_locator_text(page.locator("textarea").nth(i))
-                if candidate and candidate != cleaned and len(candidate) > 20:
-                    current = candidate
+            if _generation_busy(page):
+                saw_busy = True
+                busy_cleared_at = None
+                noop_reads = 0
+                continue
+            if saw_busy and busy_cleared_at is None:
+                busy_cleared_at = time.monotonic()
+
+            # An explicit limit/error toast → stop immediately with a clear reason.
+            toast = _detect_limit_message(page)
+            if toast:
+                return _no_change(toast)
+
+            current = _extract_result_text(page, cleaned)
+
+            # A genuinely rewritten result: different from input AND any leftover.
+            if current and len(current) > 20 and current != cleaned and current != previous_result:
+                if current == last_value:
+                    stable_reads += 1
+                else:
+                    stable_reads = 0
+                    last_value = current
+                if stable_reads >= 2 or (_result_ready(page) and stable_reads >= 1):
+                    humanized = current
                     break
+                continue
 
-        if current and current != cleaned and len(current) > 20:
-            if current == last_value:
-                stable_reads += 1
+            # No fresh result. Decide whether generation actually finished:
+            #   * result card is present (Rehumanize/Humanize More), or
+            #   * we saw "Humanizing…" and it cleared a few seconds ago, or
+            #   * we never saw it start after a reasonable grace (limit blocked it).
+            finished = (
+                _result_ready(page)
+                or (busy_cleared_at is not None and time.monotonic() - busy_cleared_at > 5)
+                or (not saw_busy and time.monotonic() - started_wait > 25)
+            )
+            if finished:
+                noop_reads += 1
+                if noop_reads >= 3:
+                    return _no_change(_limit_reason)
             else:
-                stable_reads = 0
-                last_value = current
-            # Prefer waiting until Humanizing... has been seen and gone, but don't require it
-            if stable_reads >= 2 and (saw_busy or stable_reads >= 3):
-                humanized = current
-                break
-            if (
-                not busy
-                and len(current) > max(40, len(cleaned) // 4)
-                and page.get_by_role(
-                    "button", name=re.compile(r"humanize more|rehumanize|re-humanize", re.I)
-                ).count()
-                > 0
-            ):
-                humanized = current
-                break
+                noop_reads = 0
+        except Exception:  # noqa: BLE001 — page may be torn down by recovery mid-wait
+            if page.is_closed():
+                raise
+            page.wait_for_timeout(400)
 
     if not humanized:
+        # Persist a full DOM snapshot so a real failure can be diagnosed without
+        # spending another humanization.
+        try:
+            debug_path = Path("browser_profiles/debug/stealthwriter-output-timeout.html")
+            debug_path.parent.mkdir(parents=True, exist_ok=True)
+            debug_path.write_text(page.content(), encoding="utf-8")
+        except Exception:  # noqa: BLE001
+            pass
         raise StealthWriterAutomationError(
             "Timed out waiting for humanized output.",
             _collect_page_diagnostics(
