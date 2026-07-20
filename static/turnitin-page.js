@@ -460,10 +460,15 @@
         }
         return acc;
       }
-      if (!r.ok || !r.data || !r.data.success) {
-        acc.failCount += 1;
-        return acc;
-      }
+        if (!r.ok || !r.data || !r.data.success) {
+          acc.failCount += 1;
+          if (els.submitStatus) {
+            els.submitStatus.textContent =
+              (r.data && (r.data.error || r.data.message)) ||
+              ("Submission failed (HTTP " + r.status + "). Please try again.");
+          }
+          return acc;
+        }
       if (typeof r.data.balance === "number") {
         acc.lastBalance = r.data.balance;
         state.credits = r.data.balance;

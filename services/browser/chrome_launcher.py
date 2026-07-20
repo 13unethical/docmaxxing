@@ -83,7 +83,25 @@ class ChromeLauncher:
             or _DEFAULT_USER_DATA_DIR
         ).expanduser()
         self._chrome_path = chrome_path or resolve_chrome_path()
-        self._extra_args = extra_args or []
+        if extra_args is not None:
+            self._extra_args = list(extra_args)
+        else:
+            raw = (os.environ.get("BROWSER_EXTRA_ARGS") or "").strip()
+            self._extra_args = [a for a in raw.split() if a]
+            # Headless Linux VPS defaults when no display is available.
+            if (
+                sys.platform.startswith("linux")
+                and not os.environ.get("DISPLAY")
+                and not any(a.startswith("--headless") for a in self._extra_args)
+            ):
+                self._extra_args.extend(
+                    [
+                        "--headless=new",
+                        "--no-sandbox",
+                        "--disable-gpu",
+                        "--disable-dev-shm-usage",
+                    ]
+                )
 
         self._process: subprocess.Popen[bytes] | None = None
         self._launched_here = False
