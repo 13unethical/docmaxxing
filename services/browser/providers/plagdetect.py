@@ -1050,11 +1050,24 @@ def _fetch_ai_highlights(
     return parsed, ok
 
 
-def _click_download_in_row(page: Any, external_id: str, column: str) -> Any:
-    """Click Download in the PlagDetect row (AI=2, similarity=3, highlights=5)."""
+def _inspect_download_control(page: Any, external_id: str, column: str) -> dict[str, Any]:
+    """Locate the Download control in a PlagDetect score cell (href preferred)."""
     col_idx = _column_index(column)
     return page.evaluate(
         """([externalId, colIdx]) => {
+            const score = (el) => {
+                const label = ((el.innerText || el.textContent || '') + ' '
+                    + (el.getAttribute('aria-label') || '') + ' '
+                    + (el.getAttribute('title') || '') + ' '
+                    + (el.getAttribute('href') || '')).toLowerCase();
+                let pts = 0;
+                if (label.includes('download')) pts += 5;
+                if (label.includes('.pdf') || (el.getAttribute('href') || '').includes('pdf')) pts += 4;
+                if (el.hasAttribute('download')) pts += 4;
+                if ((el.tagName || '').toLowerCase() === 'a' && el.getAttribute('href')) pts += 2;
+                if ((el.tagName || '').toLowerCase() === 'button') pts += 1;
+                return pts;
+            };
             const trs = Array.from(document.querySelectorAll('table tbody tr'));
             for (const tr of trs) {
                 const cells = Array.from(tr.querySelectorAll('td'));
@@ -1062,32 +1075,235 @@ def _click_download_in_row(page: Any, external_id: str, column: str) -> Any:
                 const idText = (cells[0].innerText || cells[0].textContent || '').trim();
                 if (!idText.includes(externalId)) continue;
                 const cell = cells[colIdx];
-                if (!cell) return false;
-                const btn = cell.querySelector('a, button');
-                if (!btn) return false;
-                const label = (btn.innerText || btn.textContent || '').trim().toLowerCase();
-                if (!label.includes('download')) return false;
-                btn.click();
-                return true;
+                if (!cell) return { found: false };
+                const candidates = Array.from(
+                    cell.querySelectorAll('a, button, [role="button"]')
+                );
+                if (!candidates.length) return { found: false, cellText: (cell.innerText || '').trim() };
+                candidates.sort((a, b) => score(b) - score(a));
+                const el = candidates[0];
+                const href = el.getAttribute('href') || null;
+                return {
+                    found: true,
+                    href,
+                    label: (el.innerText || el.textContent || el.getAttribute('aria-label') || '').trim(),
+                    tag: (el.tagName || '').toLowerCase(),
+                    score: score(el),
+                };
             }
-            return false;
+            return { found: false };
         }""",
         [external_id, col_idx],
+    ) or {"found": False}
+
+
+def _click_download_in_row(page: Any, external_id: str, column: str) -> bool:
+    """Click Download in the PlagDetect row (AI=2, similarity=3, highlights=5)."""
+    col_idx = _column_index(column)
+    return bool(
+        page.evaluate(
+            """([externalId, colIdx]) => {
+                const score = (el) => {
+                    const label = ((el.innerText || el.textContent || '') + ' '
+                        + (el.getAttribute('aria-label') || '') + ' '
+                        + (el.getAttribute('title') || '') + ' '
+                        + (el.getAttribute('href') || '')).toLowerCase();
+                    let pts = 0;
+                    if (label.includes('download')) pts += 5;
+                    if (label.includes('.pdf') || (el.getAttribute('href') || '').includes('pdf')) pts += 4;
+                    if (el.hasAttribute('download')) pts += 4;
+                    if ((el.tagName || '').toLowerCase() === 'a' && el.getAttribute('href')) pts += 2;
+                    if ((el.tagName || '').toLowerCase() === 'button') pts += 1;
+                    return pts;
+                };
+                const trs = Array.from(document.querySelectorAll('table tbody tr'));
+                for (const tr of trs) {
+                    const cells = Array.from(tr.querySelectorAll('td'));
+                    if (!cells.length) continue;
+                    const idText = (cells[0].innerText || cells[0].textContent || '').trim();
+                    if (!idText.includes(externalId)) continue;
+                    const cell = cells[colIdx];
+                    if (!cell) return false;
+                    const candidates = Array.from(
+                        cell.querySelectorAll('a, button, [role="button"]')
+                    );
+                    if (!candidates.length) return false;
+                    candidates.sort((a, b) => score(b) - score(a));
+                    const el = candidates[0];
+                    if (score(el) <= 0) return false;
+                    el.click();
+                    return true;
+                }
+                return false;
+            }""",
+            [external_id, col_idx],
+        )
     )
 
 
-def _download_report(page: Any, external_id: str, column: str, dest: Path) -> bool:
-    dest.parent.mkdir(parents=True, exist_ok=True)
+def _absolute_url(page: Any, href: str) -> str:
+    from urllib.parse import urljoin
+
+    return urljoin(page.url or _dashboard_url(), href)
+
+
+def _download_via_http(page: Any, href: str, dest: Path) -> bool:
+    """Fetch a report PDF using the authenticated browser cookie jar."""
+    if not href or href.startswith("javascript:") or href == "#":
+        return False
+    url = _absolute_url(page, href)
+    try:
+        response = page.context.request.get(url, timeout=_DOWNLOAD_TIMEOUT_MS)
+        if not response.ok:
+            print(f"[plagdetect] HTTP download failed ({response.status}): {url}", flush=True)
+            return False
+        body = response.body()
+        if not body or len(body) < 64:
+            return False
+        ctype = (response.headers.get("content-type") or "").lower()
+        looks_pdf = (
+            body[:4] == b"%PDF"
+            or "pdf" in ctype
+            or "octet-stream" in ctype
+            or url.lower().endswith(".pdf")
+        )
+        if not looks_pdf:
+            print(f"[plagdetect] HTTP download was not a PDF ({ctype}): {url}", flush=True)
+            return False
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(body)
+        return dest.is_file() and dest.stat().st_size > 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"[plagdetect] HTTP download error: {exc}", flush=True)
+        return False
+
+
+def _download_via_playwright_event(page: Any, external_id: str, column: str, dest: Path) -> bool:
     try:
         with page.expect_download(timeout=_DOWNLOAD_TIMEOUT_MS) as dl_info:
-            clicked = _click_download_in_row(page, external_id, column)
-            if not clicked:
+            if not _click_download_in_row(page, external_id, column):
                 return False
         download = dl_info.value
+        dest.parent.mkdir(parents=True, exist_ok=True)
         download.save_as(str(dest))
         return dest.is_file() and dest.stat().st_size > 0
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        print(f"[plagdetect] Playwright download event failed ({column}): {exc}", flush=True)
         return False
+
+
+def _download_via_cdp_dir(page: Any, external_id: str, column: str, dest: Path) -> bool:
+    """Last resort: force Chrome download path via CDP, then pick up the file."""
+    import tempfile
+
+    tmp = Path(tempfile.mkdtemp(prefix="plagdetect-dl-"))
+    session = None
+    try:
+        session = page.context.new_cdp_session(page)
+        # Prefer Page.setDownloadBehavior — Browser.setDownloadBehavior is rejected
+        # on some Chrome+CDP combos (see cdp_compat.py).
+        try:
+            session.send(
+                "Page.setDownloadBehavior",
+                {"behavior": "allow", "downloadPath": str(tmp), "eventsEnabled": True},
+            )
+        except Exception:  # noqa: BLE001
+            try:
+                session.send(
+                    "Browser.setDownloadBehavior",
+                    {
+                        "behavior": "allow",
+                        "downloadPath": str(tmp),
+                        "eventsEnabled": True,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[plagdetect] CDP setDownloadBehavior failed: {exc}", flush=True)
+                return False
+
+        before = {p.name for p in tmp.iterdir()} if tmp.is_dir() else set()
+        if not _click_download_in_row(page, external_id, column):
+            return False
+
+        deadline = time.monotonic() + (_DOWNLOAD_TIMEOUT_MS / 1000.0)
+        chosen: Path | None = None
+        while time.monotonic() < deadline:
+            page.wait_for_timeout(400)
+            files = [
+                p
+                for p in tmp.iterdir()
+                if p.is_file()
+                and not p.name.endswith(".crdownload")
+                and not p.name.endswith(".tmp")
+                and p.name not in before
+            ]
+            pdfs = [p for p in files if p.suffix.lower() == ".pdf" or p.read_bytes()[:4] == b"%PDF"]
+            pool = pdfs or files
+            if pool:
+                chosen = max(pool, key=lambda p: p.stat().st_mtime)
+                if chosen.stat().st_size > 0:
+                    break
+                chosen = None
+        if chosen is None:
+            return False
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(chosen.read_bytes())
+        return dest.is_file() and dest.stat().st_size > 0
+    except Exception as exc:  # noqa: BLE001
+        print(f"[plagdetect] CDP dir download failed ({column}): {exc}", flush=True)
+        return False
+    finally:
+        if session is not None:
+            try:
+                session.detach()
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            for p in tmp.iterdir():
+                p.unlink(missing_ok=True)
+            tmp.rmdir()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _wait_for_download_controls(page: Any, external_id: str, timeout_s: float = 20.0) -> bool:
+    """Wait until score cells expose Download controls after processing finishes."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        ai = _inspect_download_control(page, external_id, "ai")
+        sim = _inspect_download_control(page, external_id, "similarity")
+        if ai.get("found") and sim.get("found"):
+            return True
+        if ai.get("found") or sim.get("found"):
+            # Partial is still useful — keep waiting briefly for the other.
+            page.wait_for_timeout(800)
+            return True
+        page.wait_for_timeout(800)
+        _refresh_submissions_view(page, force_reload=False)
+    return False
+
+
+def _download_report(page: Any, external_id: str, column: str, dest: Path) -> bool:
+    """Download one PlagDetect report PDF into ``dest``.
+
+    Order: authenticated HTTP (href) → Playwright download event → CDP download dir.
+    CDP ``expect_download`` often fails with ``connect_over_cdp(no_defaults=True)``.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    info = _inspect_download_control(page, external_id, column)
+    href = (info or {}).get("href")
+    if href and _download_via_http(page, str(href), dest):
+        return True
+    if _download_via_playwright_event(page, external_id, column, dest):
+        return True
+    if _download_via_cdp_dir(page, external_id, column, dest):
+        return True
+    print(
+        f"[plagdetect] Could not download {column} report for {external_id} "
+        f"(control={info})",
+        flush=True,
+    )
+    return False
 
 
 def _download_both_reports(
@@ -1096,13 +1312,15 @@ def _download_both_reports(
     ai_dest: Path,
     sim_dest: Path,
 ) -> tuple[bool, bool]:
-    """Best-effort PDF download — never blocks job success."""
+    """Download both PDFs after scores complete; never blocks job success."""
     _reload_dashboard(page)
+    _wait_for_download_controls(page, external_id)
     ai_ok = _download_report(page, external_id, "ai", ai_dest)
     sim_ok = _download_report(page, external_id, "similarity", sim_dest)
     if ai_ok and sim_ok:
         return ai_ok, sim_ok
     _reload_dashboard(page)
+    _wait_for_download_controls(page, external_id, timeout_s=10.0)
     if not ai_ok:
         ai_ok = _download_report(page, external_id, "ai", ai_dest)
     if not sim_ok:
@@ -1242,10 +1460,21 @@ def submit_check(
     ai_ok = False
     sim_ok = False
     if external_id:
-        try:
-            ai_ok, sim_ok = _download_both_reports(page, external_id, ai_report, sim_report)
-        except Exception:  # noqa: BLE001
-            pass
+        for attempt in range(1, 4):
+            try:
+                ai_ok, sim_ok = _download_both_reports(page, external_id, ai_report, sim_report)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[plagdetect] report download attempt {attempt} failed: {exc}", flush=True)
+                ai_ok, sim_ok = False, False
+            if ai_ok and sim_ok:
+                break
+            print(
+                f"[plagdetect] report download incomplete "
+                f"(ai={ai_ok}, similarity={sim_ok}) — retry {attempt}/3",
+                flush=True,
+            )
+            page.wait_for_timeout(1500)
+            _reload_dashboard(page)
 
     _clear_checkpoint(submission_id)
     elapsed = round(time.monotonic() - started, 3)
@@ -1310,12 +1539,14 @@ def fetch_reports(
     hl_parsed: dict[str, Any] = {"numeric": None, "display": None}
 
     _reload_dashboard(page)
+    _wait_for_download_controls(page, ext)
     if fetch_ai:
         ai_ok = _download_report(page, ext, "ai", ai_report)
     if fetch_similarity:
         sim_ok = _download_report(page, ext, "similarity", sim_report)
     if (fetch_ai and not ai_ok) or (fetch_similarity and not sim_ok):
         _reload_dashboard(page)
+        _wait_for_download_controls(page, ext, timeout_s=10.0)
         if fetch_ai and not ai_ok:
             ai_ok = _download_report(page, ext, "ai", ai_report)
         if fetch_similarity and not sim_ok:

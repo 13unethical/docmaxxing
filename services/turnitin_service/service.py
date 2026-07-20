@@ -115,6 +115,32 @@ class TurnitinService:
                     meta_json=json.dumps(meta),
                     completed_at=job.finished_at.isoformat() if job.finished_at else None,
                 )
+                # If scores landed but PDFs did not, queue a follow-up download.
+                need_sim = not res.get("similarity_report_path")
+                need_ai = not res.get("ai_report_path")
+                external_id = res.get("external_id")
+                if external_id and (need_sim or need_ai):
+                    try:
+                        fetch_job = job_manager.create(
+                            "plagdetect",
+                            "fetch_reports",
+                            {
+                                "external_id": external_id,
+                                "report_dir": str(self.report_dir(submission_id)),
+                                "submission_id": submission_id,
+                                "fetch_similarity": need_sim,
+                                "fetch_ai": need_ai,
+                                "fetch_highlights": False,
+                            },
+                            max_retries=1,
+                        )
+                        self.watch_fetch_reports_job(
+                            submission_id=submission_id,
+                            job_id=fetch_job.id,
+                            job_manager=job_manager,
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
                 return
 
             if status not in ("FAILED", "CANCELLED"):

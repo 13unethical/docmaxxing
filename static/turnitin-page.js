@@ -27,7 +27,6 @@
     searchQuery: "",
     pollTimer: null,
     highlightsPending: {},
-    fetchPending: {},
   };
 
   var els = {
@@ -83,38 +82,21 @@
         : kind === "ai"
           ? !!report.hasAiReport
           : !!report.hasHighlightsReport;
-    var fetching = !!(state.fetchPending[report.id] && state.fetchPending[report.id][kind]);
     var html =
       '<div class="tt-score-cell">' +
       '<span class="tt-score ' + cls + '">' + escapeHtml(label) + "</span>";
-    if (report.status === "completed") {
-      if (hasFile) {
-        html +=
-          '<button type="button" class="tt-score-download' +
-          (type === "highlights" ? " tt-score-download--blue" : "") +
-          '" data-tt-download="' +
-          escapeAttr(report.id) +
-          '" data-tt-kind="' +
-          kind +
-          '">' +
-          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-          '<path d="M12 4v10m0 0l-3.5-3.5M12 14l3.5-3.5M5 20h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
-          "</svg>Download</button>";
-      } else if (fetching) {
-        html += '<span class="tt-badge tt-badge--running tt-badge--compact">Fetching</span>';
-      } else if (kind === "similarity" || kind === "ai" || (kind === "highlights" && label)) {
-        html +=
-          '<button type="button" class="tt-score-download' +
-          (type === "highlights" ? " tt-score-download--blue" : "") +
-          '" data-tt-fetch-report="' +
-          escapeAttr(report.id) +
-          '" data-tt-kind="' +
-          kind +
-          '">' +
-          '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-          '<path d="M12 4v10m0 0l-3.5-3.5M12 14l3.5-3.5M5 20h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
-          "</svg>Get report</button>";
-      }
+    if (report.status === "completed" && hasFile) {
+      html +=
+        '<button type="button" class="tt-score-download' +
+        (type === "highlights" ? " tt-score-download--blue" : "") +
+        '" data-tt-download="' +
+        escapeAttr(report.id) +
+        '" data-tt-kind="' +
+        kind +
+        '">' +
+        '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+        '<path d="M12 4v10m0 0l-3.5-3.5M12 14l3.5-3.5M5 20h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+        "</svg>Download</button>";
     }
     html += "</div>";
     return html;
@@ -321,73 +303,7 @@
     ) {
       delete state.highlightsPending[report.id];
     }
-    var pending = state.fetchPending[report.id];
-    if (pending) {
-      if (pending.similarity && report.hasSimilarityReport) delete pending.similarity;
-      if (pending.ai && report.hasAiReport) delete pending.ai;
-      if (pending.highlights && report.hasHighlightsReport) delete pending.highlights;
-      if (!pending.similarity && !pending.ai && !pending.highlights) {
-        delete state.fetchPending[report.id];
-      }
-    }
     renderTable();
-  }
-
-  function requestFetchReports(id, kinds) {
-    if (!id) return;
-    kinds = kinds || ["similarity", "ai"];
-    if (!state.fetchPending[id]) state.fetchPending[id] = {};
-    kinds.forEach(function (k) {
-      state.fetchPending[id][k] = true;
-    });
-    renderTable();
-
-    var body = {
-      similarity: kinds.indexOf("similarity") >= 0,
-      ai: kinds.indexOf("ai") >= 0,
-      highlights: kinds.indexOf("highlights") >= 0,
-    };
-
-    fetch("/api/turnitin/submissions/" + encodeURIComponent(id) + "/fetch-reports", {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    })
-      .then(function (res) {
-        return res
-          .json()
-          .catch(function () { return {}; })
-          .then(function (data) { return { ok: res.ok, data: data }; });
-      })
-      .then(function (r) {
-        if (!r.ok || !r.data || !r.data.success) {
-          delete state.fetchPending[id];
-          renderTable();
-          if (els.submitStatus) {
-            var msg =
-              (r.data && r.data.error) ||
-              (r.status === 404
-                ? "Server needs a restart (fetch-reports route missing)."
-                : "Could not fetch reports from PlagDetect.");
-            els.submitStatus.textContent = msg;
-          }
-          return;
-        }
-        if (r.data.report) {
-          upsertReport(r.data.report);
-        }
-        schedulePoll();
-      })
-      .catch(function () {
-        delete state.fetchPending[id];
-        renderTable();
-        if (els.submitStatus) {
-          els.submitStatus.textContent = "Network error while fetching reports.";
-        }
-      });
   }
 
   function submitOneFile(file, options) {
@@ -631,7 +547,6 @@
           return r.id !== id;
         });
         delete state.highlightsPending[id];
-        delete state.fetchPending[id];
         renderTable();
         schedulePoll();
       });
@@ -645,7 +560,14 @@
     if (hs === "queued" || hs === "running" || !!state.highlightsPending[report.id]) {
       return true;
     }
-    return !!state.fetchPending[report.id];
+    // Keep polling until PDFs are attached after scores complete.
+    if (
+      report.status === "completed" &&
+      (!report.hasSimilarityReport || !report.hasAiReport)
+    ) {
+      return true;
+    }
+    return false;
   }
 
   if (els.submitBtn && els.fileInput) {
@@ -673,16 +595,11 @@
   if (els.reportsBody) {
     els.reportsBody.addEventListener("click", function (e) {
       var dlBtn = e.target.closest("[data-tt-download]");
-      var fetchBtn = e.target.closest("[data-tt-fetch-report]");
       var delBtn = e.target.closest("[data-tt-delete]");
       var hlBtn = e.target.closest("[data-tt-get-highlights]");
 
       if (dlBtn) {
         downloadReport(dlBtn.getAttribute("data-tt-download"), dlBtn.getAttribute("data-tt-kind") || "similarity");
-      } else if (fetchBtn) {
-        requestFetchReports(fetchBtn.getAttribute("data-tt-fetch-report"), [
-          fetchBtn.getAttribute("data-tt-kind") || "similarity",
-        ]);
       } else if (hlBtn) {
         requestHighlights(hlBtn.getAttribute("data-tt-get-highlights"));
       } else if (delBtn) {
