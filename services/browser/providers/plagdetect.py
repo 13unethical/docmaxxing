@@ -136,17 +136,167 @@ def _collect_diagnostics(page: Any, *, step: str, extra: dict[str, Any] | None =
     return diag
 
 
+def _credentials() -> tuple[str, str]:
+    email = (os.environ.get("PLAGDETECT_EMAIL") or "").strip()
+    password = (os.environ.get("PLAGDETECT_PASSWORD") or "").strip()
+    return email, password
+
+
+def _is_session_logged_in(page: Any) -> bool:
+    if _is_login_url(page.url):
+        return False
+    return _ensure_logged_in(page)
+
+
+def _login_with_credentials(page: Any, email: str, password: str) -> bool:
+    """Fill PlagDetect's email/password form and submit. Returns True if session looks logged in."""
+    login_url = f"{_base_url()}/accounts/login"
+    if not _is_login_url(page.url):
+        page.goto(login_url, wait_until="domcontentloaded")
+    else:
+        # Already on a login redirect; stay put.
+        pass
+    page.wait_for_timeout(600)
+
+    filled = bool(
+        page.evaluate(
+            """([email, password]) => {
+                const visible = (el) => {
+                    if (!el) return false;
+                    const st = getComputedStyle(el);
+                    if (st.display === 'none' || st.visibility === 'hidden') return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                };
+                const inputs = Array.from(document.querySelectorAll('input')).filter(visible);
+                const emailEl = inputs.find(el => {
+                    const t = (el.type || '').toLowerCase();
+                    const n = (el.name || el.id || el.autocomplete || '').toLowerCase();
+                    return t === 'email' || n.includes('email') || n.includes('login') || n.includes('user');
+                }) || inputs.find(el => (el.type || '').toLowerCase() === 'text');
+                const passEl = inputs.find(el => (el.type || '').toLowerCase() === 'password');
+                if (!emailEl || !passEl) return false;
+                const setVal = (el, val) => {
+                    el.focus();
+                    el.value = '';
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.value = val;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                };
+                setVal(emailEl, email);
+                setVal(passEl, password);
+                return true;
+            }""",
+            [email, password],
+        )
+    )
+    if not filled:
+        # Playwright fallbacks for React-controlled inputs
+        try:
+            email_loc = page.locator(
+                'input[type="email"], input[name="email"], input[name="login"], '
+                'input[autocomplete="email"], input[autocomplete="username"]'
+            ).first
+            pass_loc = page.locator('input[type="password"]').first
+            email_loc.fill(email, timeout=5_000)
+            pass_loc.fill(password, timeout=5_000)
+            filled = True
+        except Exception:  # noqa: BLE001
+            return False
+
+    # Prefer clicking the Log In button; fall back to form submit / Enter.
+    clicked = bool(
+        page.evaluate(
+            """() => {
+                const visible = (el) => {
+                    if (!el) return false;
+                    const st = getComputedStyle(el);
+                    if (st.display === 'none' || st.visibility === 'hidden') return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                };
+                const buttons = Array.from(
+                    document.querySelectorAll('button, input[type="submit"], a')
+                ).filter(visible);
+                const btn = buttons.find(el => {
+                    const t = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
+                    return t === 'log in' || t === 'login' || t === 'sign in';
+                });
+                if (btn) { btn.click(); return true; }
+                const form = document.querySelector('form');
+                if (form) { form.requestSubmit ? form.requestSubmit() : form.submit(); return true; }
+                return false;
+            }"""
+        )
+    )
+    if not clicked:
+        try:
+            page.locator('input[type="password"]').first.press("Enter")
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=20_000)
+    except Exception:  # noqa: BLE001
+        pass
+    page.wait_for_timeout(1500)
+
+    # If still on login, try navigating to dashboard once (cookie may have been set).
+    if _is_login_url(page.url):
+        page.goto(_dashboard_url(), wait_until="domcontentloaded")
+        page.wait_for_timeout(1200)
+
+    return _is_session_logged_in(page)
+
+
+def _require_login(page: Any) -> bool:
+    """Ensure an authenticated PlagDetect session; auto-login when env credentials exist."""
+    if _is_session_logged_in(page):
+        return True
+    email, password = _credentials()
+    if not email or not password:
+        return False
+    return _login_with_credentials(page, email, password)
+
+
 def start_interactive_login() -> dict[str, Any]:
     _validate_urls()
     page = _page()
     page.goto(_dashboard_url(), wait_until="domcontentloaded")
+    page.wait_for_timeout(800)
+
+    logged_in = _is_session_logged_in(page)
+    auto_attempted = False
+    if not logged_in:
+        email, password = _credentials()
+        if email and password:
+            auto_attempted = True
+            logged_in = _login_with_credentials(page, email, password)
+
+    if logged_in:
+        message = "Logged in to PlagDetect."
+    elif auto_attempted:
+        message = (
+            "Auto-login failed. Check PLAGDETECT_EMAIL / PLAGDETECT_PASSWORD, "
+            "or sign in manually in the Chrome profile."
+        )
+    elif not _credentials()[0]:
+        message = (
+            "Not logged in. Set PLAGDETECT_EMAIL and PLAGDETECT_PASSWORD in .env "
+            "(then restart), or sign in manually in Chrome."
+        )
+    else:
+        message = "Chrome opened PlagDetect. Sign in manually if needed."
+
     return {
-        "success": True,
+        "success": logged_in,
+        "logged_in": logged_in,
         "cdp_url": BrowserService.instance().cdp_url,
         "profile": _profile_path(),
         "current_url": page.url,
         "configured_dashboard_url": _dashboard_url(),
-        "message": "Chrome opened your PlagDetect dashboard. Sign in manually if needed.",
+        "message": message,
     }
 
 
@@ -155,7 +305,7 @@ def check_interactive_login() -> dict[str, Any]:
     page = _page()
     page.goto(_dashboard_url(), wait_until="domcontentloaded")
     page.wait_for_timeout(1500)
-    logged_in = not _is_login_url(page.url)
+    logged_in = _require_login(page)
     return {
         "success": True,
         "logged_in": logged_in,
@@ -163,7 +313,7 @@ def check_interactive_login() -> dict[str, Any]:
         "title": page.title(),
         "profile": _profile_path(),
         "configured_dashboard_url": _dashboard_url(),
-        "message": "Logged in." if logged_in else "Not logged in yet — finish login in Chrome.",
+        "message": "Logged in." if logged_in else "Not logged in yet — set PLAGDETECT_EMAIL/PASSWORD or finish login in Chrome.",
     }
 
 
@@ -172,7 +322,7 @@ def get_session_status() -> dict[str, Any]:
     page = _page()
     page.goto(_dashboard_url(), wait_until="domcontentloaded")
     page.wait_for_timeout(1200)
-    logged_in = not _is_login_url(page.url)
+    logged_in = _is_session_logged_in(page)
     identity = page.evaluate(
         """() => {
             const emailRe = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i;
@@ -181,12 +331,14 @@ def get_session_status() -> dict[str, Any]:
             return { email };
         }"""
     )
+    cred_email, cred_password = _credentials()
     return {
         "logged_in": logged_in,
         "current_url": page.url,
         "configured_dashboard_url": _dashboard_url(),
         "username": (identity or {}).get("email"),
         "plan": None,
+        "credentials_configured": bool(cred_email and cred_password),
     }
 
 
@@ -527,9 +679,10 @@ def _ensure_logged_in(page: Any) -> bool:
             page.evaluate(
                 """() => {
                     const text = (document.body.innerText || '').toLowerCase();
-                    return text.includes('welcome back')
-                        || text.includes('my submissions')
-                        || text.includes('available slots');
+                    return text.includes('my submissions')
+                        || text.includes('available slots')
+                        || text.includes('upload document')
+                        || text.includes('exclude bibliography');
                 }"""
             )
         )
@@ -986,12 +1139,20 @@ def submit_check(
         pass
     page.wait_for_timeout(800)
 
-    if _is_login_url(page.url) or not _ensure_logged_in(page):
-        return {"success": False, "error": "LOGIN_REQUIRED"}
+    if not _require_login(page):
+        return {
+            "success": False,
+            "error": "LOGIN_REQUIRED",
+            "message": (
+                "PlagDetect session is not logged in. "
+                "Set PLAGDETECT_EMAIL and PLAGDETECT_PASSWORD in .env and restart, "
+                "then call /api/browser/providers/plagdetect/login once."
+            ),
+        }
 
     if not uploaded:
         _reload_dashboard(page)
-        if not _ensure_logged_in(page):
+        if not _require_login(page):
             return {"success": False, "error": "LOGIN_REQUIRED"}
         _apply_exclude_toggles(
             page,
@@ -1036,7 +1197,7 @@ def submit_check(
     poll_count = 0
 
     while time.monotonic() < deadline:
-        if _is_login_url(page.url):
+        if _is_login_url(page.url) and not _require_login(page):
             return {"success": False, "error": "LOGIN_REQUIRED", "external_id": external_id}
 
         page.wait_for_timeout(int(_POLL_INTERVAL_S * 1000))
@@ -1131,7 +1292,7 @@ def fetch_reports(
         pass
     page.wait_for_timeout(800)
 
-    if _is_login_url(page.url) or not _ensure_logged_in(page):
+    if not _require_login(page):
         return {"success": False, "error": "LOGIN_REQUIRED"}
 
     out_dir = Path(report_dir)
@@ -1211,7 +1372,7 @@ def submit_highlights(
         pass
     page.wait_for_timeout(800)
 
-    if _is_login_url(page.url) or not _ensure_logged_in(page):
+    if not _require_login(page):
         return {"success": False, "error": "LOGIN_REQUIRED"}
 
     out_dir = Path(report_dir)
