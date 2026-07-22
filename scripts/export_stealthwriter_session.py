@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export StealthWriter cookies from local Chrome → JSON for VPS upload."""
+"""Export StealthWriter Playwright storageState for VPS upload."""
 
 from __future__ import annotations
 
@@ -20,25 +20,26 @@ except ImportError:
 os.environ.setdefault("BROWSER_EXTRA_ARGS", "")
 
 from services.browser.browser_service import BrowserService  # noqa: E402
-from services.browser.providers.stealthwriter import (  # noqa: E402
-    _page,
-    get_session_status,
-    save_storage_state,
-)
+from services.browser.providers.stealthwriter import get_session_status  # noqa: E402
+
+PROVIDER = "stealthwriter"
 
 
 def main() -> int:
-    BrowserService.instance().start()
+    svc = BrowserService.instance()
+    svc.start()
     status = get_session_status()
     if not status.get("logged_in"):
         print("Not logged in locally. Run: python3 scripts/bootstrap_stealthwriter_login.py", flush=True)
         return 1
-    path = save_storage_state(_page())
+    if not svc.save_session(PROVIDER):
+        print("Could not save storageState.", flush=True)
+        return 1
+    path = ROOT / "browser_profiles" / "sessions" / f"{PROVIDER}.json"
     print(f"Saved: {path}", flush=True)
     print(f"Size: {path.stat().st_size} bytes", flush=True)
     print("\nUpload to VPS:", flush=True)
-    print(f"  scp {path} root@YOUR_VPS:~/docmaxxing/browser_profiles/", flush=True)
-    print("Then on VPS: sudo systemctl restart docmaxxing", flush=True)
+    print(f"  bash scripts/push_stealthwriter_session_to_vps.sh root@YOUR_VPS_IP", flush=True)
     return 0
 
 

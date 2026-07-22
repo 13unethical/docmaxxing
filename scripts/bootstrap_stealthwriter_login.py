@@ -1,16 +1,8 @@
 #!/usr/bin/env python3
 """One-time StealthWriter login with a visible Chrome window.
 
-StealthWriter uses Cloudflare Turnstile on sign-in. Headless VPS auto-login
-often fails even with correct STEALTHWRITER_EMAIL/PASSWORD.
-
-Run this on your Mac (with a screen), log in manually in the Chrome window,
-then copy the browser profile to the VPS:
-
-  rsync -avz browser_profiles/chrome_user_data/ \\
-    root@YOUR_VPS:~/docmaxxing/browser_profiles/chrome_user_data/
-
-Then on VPS: sudo systemctl restart docmaxxing
+After login, exports Playwright storageState via BrowserService/SessionStore.
+Upload browser_profiles/sessions/stealthwriter.json to the VPS.
 """
 
 from __future__ import annotations
@@ -30,35 +22,28 @@ try:
 except ImportError:
     pass
 
-# Headed Chrome — do not force headless on Linux if DISPLAY is set.
 os.environ.setdefault("BROWSER_EXTRA_ARGS", "")
 
 from services.browser.browser_service import BrowserService  # noqa: E402
 from services.browser.providers.stealthwriter import (  # noqa: E402
     get_session_status,
-    save_storage_state,
     start_interactive_login,
-    _page,
 )
+
+PROVIDER = "stealthwriter"
 
 
 def main() -> int:
     print("Starting Chrome for StealthWriter login…", flush=True)
-    BrowserService.instance().start()
-    print(f"Profile: {BrowserService.instance().user_data_dir.resolve()}", flush=True)
-    print(f"CDP: {BrowserService.instance().cdp_url}", flush=True)
+    svc = BrowserService.instance()
+    svc.start()
+    print(f"Profile: {svc.user_data_dir.resolve()}", flush=True)
+    print(f"CDP: {svc.cdp_url}", flush=True)
 
     result = start_interactive_login()
     print(result.get("message") or result, flush=True)
 
-    if result.get("logged_in"):
-        try:
-            path = save_storage_state(_page())
-            print(f"Session exported: {path}", flush=True)
-        except Exception as exc:  # noqa: BLE001
-            print(f"Could not export session: {exc}", flush=True)
-        print("\nOK — StealthWriter session is logged in.", flush=True)
-        _print_upload_hint()
+    if _save_and_report(svc):
         return 0
 
     print(
@@ -72,31 +57,31 @@ def main() -> int:
         time.sleep(3)
         status = get_session_status()
         if status.get("logged_in"):
-            try:
-                path = save_storage_state(_page())
-                print(f"Session exported: {path}", flush=True)
-            except Exception as exc:  # noqa: BLE001
-                print(f"Could not export session: {exc}", flush=True)
-            print(f"\nOK — logged in ({status.get('username') or 'dashboard ready'}).", flush=True)
-            _print_upload_hint()
-            return 0
+            if _save_and_report(svc):
+                return 0
 
-    print("\nStill not logged in. Check credentials or complete Turnstile in Chrome.", flush=True)
+    print("\nStill not logged in.", flush=True)
     return 1
 
 
-def _print_upload_hint() -> None:
-    session = ROOT / "browser_profiles" / "stealthwriter_storage_state.json"
+def _save_and_report(svc: BrowserService) -> bool:
+    status = get_session_status()
+    if not status.get("logged_in"):
+        return False
+    if not svc.save_session(PROVIDER):
+        print("Logged in but could not export storageState.", flush=True)
+        return False
+    path = ROOT / "browser_profiles" / "sessions" / f"{PROVIDER}.json"
+    print(f"\nOK — session saved to {path} ({path.stat().st_size} bytes)", flush=True)
     print(
-        "\nUpload session to VPS (small file, works Mac → Linux):\n"
+        "\nUpload to VPS:\n"
         f"  bash scripts/push_stealthwriter_session_to_vps.sh root@YOUR_VPS_IP\n"
-        f"  # or FileZilla: upload {session}\n"
-        "     → /root/docmaxxing/browser_profiles/stealthwriter_storage_state.json\n"
         "Then on VPS:\n"
         "  sudo systemctl restart docmaxxing\n"
         "  curl -sS http://127.0.0.1:8000/api/browser/providers/stealthwriter/status\n",
         flush=True,
     )
+    return True
 
 
 if __name__ == "__main__":

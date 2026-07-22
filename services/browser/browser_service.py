@@ -169,7 +169,9 @@ class BrowserService:
 
     def get_or_create_page(self, name: str) -> Any:
         self.ensure_running()
-        return self._pool.acquire().get_or_create_page(name)
+        page = self._pool.acquire().get_or_create_page(name)
+        self._sessions.apply_to_page(name, page)
+        return page
 
     def save_session(self, name: str) -> bool:
         try:

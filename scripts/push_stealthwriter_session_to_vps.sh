@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Run ON YOUR MAC. Uploads the small session JSON (works Mac → Linux).
+# Run ON YOUR MAC. Uploads Playwright storageState (browser_profiles/sessions/stealthwriter.json).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SESSION="$ROOT/browser_profiles/stealthwriter_storage_state.json"
+SESSION="$ROOT/browser_profiles/sessions/stealthwriter.json"
 DEST="${1:-}"
 
 if [[ -z "$DEST" ]]; then
@@ -17,9 +17,9 @@ if [[ ! -f "$SESSION" ]]; then
   exit 1
 fi
 
-echo "Uploading StealthWriter session ($(du -h "$SESSION" | cut -f1)) → $DEST"
-ssh "$DEST" "mkdir -p ~/docmaxxing/browser_profiles"
-scp "$SESSION" "$DEST:~/docmaxxing/browser_profiles/stealthwriter_storage_state.json"
+echo "Uploading StealthWriter storageState ($(du -h "$SESSION" | cut -f1)) → $DEST"
+ssh "$DEST" "mkdir -p ~/docmaxxing/browser_profiles/sessions"
+scp "$SESSION" "$DEST:~/docmaxxing/browser_profiles/sessions/stealthwriter.json"
 
 echo ""
 echo "On VPS:"

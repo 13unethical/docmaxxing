@@ -6,6 +6,8 @@ git fetch origin main
 git reset --hard origin/main
 source venv/bin/activate
 pip install -r requirements.txt
+python -c "import playwright"
+playwright install chromium
 mkdir -p /root/docmaxxing/data/projects /root/docmaxxing/data/project_engine
 touch /root/docmaxxing/data/assignment-trace.log
 install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service

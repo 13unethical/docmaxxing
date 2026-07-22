@@ -264,7 +264,7 @@
           finishProgress(false, function () {
             showError(
               (err && err.message) ||
-                "StealthWriter is not logged in on the server. Set STEALTHWRITER_EMAIL and STEALTHWRITER_PASSWORD in .env."
+                "StealthWriter is not logged in on the server. Export storageState on Mac and upload browser_profiles/sessions/stealthwriter.json to the VPS."
             );
           });
           return;

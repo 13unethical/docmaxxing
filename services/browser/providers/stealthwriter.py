@@ -10,8 +10,6 @@ implementation — only the source of the page has moved to BrowserService.
 
 from __future__ import annotations
 
-import json
-import os
 import re
 import time
 from datetime import datetime, timezone
@@ -40,267 +38,18 @@ def _profile_path() -> str:
     return str(BrowserService.instance().user_data_dir.resolve())
 
 
-def _storage_state_path() -> Path:
-    root = Path(__file__).resolve().parents[3]
-    return root / "browser_profiles" / "stealthwriter_storage_state.json"
-
-
-_STORAGE_STATE_APPLIED = False
-
-
-def save_storage_state(page: Any) -> Path:
-    """Export cookies/localStorage for cross-platform VPS transfer (Mac → Linux)."""
-    path = _storage_state_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    page.context.storage_state(path=str(path))
-    return path
-
-
-def apply_storage_state(page: Any) -> bool:
-    """Load exported session into the live CDP context (once per process)."""
-    global _STORAGE_STATE_APPLIED
-    if _STORAGE_STATE_APPLIED:
-        return True
-    path = _storage_state_path()
-    if not path.is_file():
-        return False
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-        cookies = state.get("cookies") or []
-        if cookies:
-            page.context.add_cookies(cookies)
-        for origin in state.get("origins") or []:
-            origin_url = (origin.get("origin") or "").strip()
-            if not origin_url or "stealthwriter" not in origin_url.lower():
-                continue
-            try:
-                page.goto(origin_url, wait_until="domcontentloaded", timeout=20_000)
-                for entry in origin.get("localStorage") or []:
-                    name = entry.get("name")
-                    value = entry.get("value")
-                    if name is None:
-                        continue
-                    page.evaluate(
-                        "([k, v]) => { try { localStorage.setItem(k, v); } catch (_) {} }",
-                        [name, value or ""],
-                    )
-            except Exception:  # noqa: BLE001
-                continue
-        _STORAGE_STATE_APPLIED = True
-        print(f"[stealthwriter] loaded storage_state from {path}", flush=True)
-        return True
-    except Exception as exc:  # noqa: BLE001
-        print(f"[stealthwriter] storage_state apply failed: {exc}", flush=True)
-        return False
-
-
-def _prepare_session(page: Any) -> None:
-    apply_storage_state(page)
-
-
-def _credentials() -> tuple[str, str]:
-    email = (os.environ.get("STEALTHWRITER_EMAIL") or "").strip()
-    password = (os.environ.get("STEALTHWRITER_PASSWORD") or "").strip()
-    return email, password
-
-
-def _is_sign_in_url(url: str) -> bool:
-    lower = (url or "").lower()
-    return "/sign-in" in lower or "/signin" in lower
-
-
-def _is_session_logged_in(page: Any) -> bool:
-    url = (page.url or "").lower()
-    if _is_sign_in_url(url):
-        return False
-    return "/dashboard" in url
-
-
-def _login_with_credentials(page: Any, email: str, password: str) -> bool:
-    """Fill StealthWriter email/password form and submit."""
-    if not _is_sign_in_url(page.url):
-        page.goto(_SIGN_IN_URL, wait_until="domcontentloaded")
-    page.wait_for_timeout(800)
-
-    filled = bool(
-        page.evaluate(
-            """([email, password]) => {
-                const visible = (el) => {
-                    if (!el) return false;
-                    const st = getComputedStyle(el);
-                    if (st.display === 'none' || st.visibility === 'hidden') return false;
-                    const r = el.getBoundingClientRect();
-                    return r.width > 0 && r.height > 0;
-                };
-                const inputs = Array.from(document.querySelectorAll('input')).filter(visible);
-                const emailEl = inputs.find(el => {
-                    const t = (el.type || '').toLowerCase();
-                    const n = (el.name || el.id || el.autocomplete || '').toLowerCase();
-                    return t === 'email' || n.includes('email') || n.includes('login');
-                }) || inputs.find(el => (el.type || '').toLowerCase() === 'text');
-                const passEl = inputs.find(el => (el.type || '').toLowerCase() === 'password');
-                if (!emailEl || !passEl) return false;
-                const setVal = (el, val) => {
-                    el.focus();
-                    el.value = '';
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.value = val;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                };
-                setVal(emailEl, email);
-                setVal(passEl, password);
-                return true;
-            }""",
-            [email, password],
-        )
-    )
-    if not filled:
-        try:
-            page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first.fill(
-                email, timeout=5_000
-            )
-            page.locator('input[type="password"]').first.fill(password, timeout=5_000)
-            filled = True
-        except Exception:  # noqa: BLE001
-            return False
-
-    clicked = bool(
-        page.evaluate(
-            """() => {
-                const visible = (el) => {
-                    if (!el) return false;
-                    const st = getComputedStyle(el);
-                    if (st.display === 'none' || st.visibility === 'hidden') return false;
-                    const r = el.getBoundingClientRect();
-                    return r.width > 0 && r.height > 0;
-                };
-                const buttons = Array.from(
-                    document.querySelectorAll('button, input[type="submit"], a')
-                ).filter(visible);
-                const btn = buttons.find(el => {
-                    const t = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                    return t === 'sign in' || t === 'log in' || t === 'login';
-                });
-                if (btn) { btn.click(); return true; }
-                const form = document.querySelector('form');
-                if (form) { form.requestSubmit ? form.requestSubmit() : form.submit(); return true; }
-                return false;
-            }"""
-        )
-    )
-    if not clicked:
-        try:
-            page.locator('input[type="password"]').first.press("Enter")
-        except Exception:  # noqa: BLE001
-            pass
-
-    try:
-        page.wait_for_load_state("networkidle", timeout=25_000)
-    except Exception:  # noqa: BLE001
-        pass
-    page.wait_for_timeout(1500)
-
-    if _is_sign_in_url(page.url):
-        page.goto(_DASHBOARD_URL, wait_until="domcontentloaded")
-        page.wait_for_timeout(1200)
-
-    return _is_session_logged_in(page)
-
-
-def _login_page_hint(page: Any) -> str | None:
-    """Return a visible sign-in error or Turnstile hint after a failed attempt."""
-    try:
-        return page.evaluate(
-            """() => {
-                const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
-                const body = norm(document.body ? document.body.innerText : '');
-                const turnstile = !!(
-                    document.querySelector('#cf-turnstile')
-                    || document.querySelector('[data-sitekey]')
-                    || document.querySelector('iframe[src*="challenges.cloudflare.com"]')
-                    || document.querySelector('iframe[src*="turnstile"]')
-                );
-                if (turnstile) {
-                    return 'Cloudflare Turnstile is present — headless auto-login usually fails. Log in once in a visible Chrome window, then copy browser_profiles/chrome_user_data to the VPS.';
-                }
-                const alerts = Array.from(
-                    document.querySelectorAll('[role="alert"], [class*="error"], [class*="toast"]')
-                );
-                for (const el of alerts) {
-                    const t = norm(el.innerText || el.textContent);
-                    if (t && t.length < 240) return t;
-                }
-                if (/invalid|incorrect|wrong password|not found|verify/i.test(body)) {
-                    const line = body.split(/\\n/).find(l => /invalid|incorrect|wrong password|not found|verify/i.test(l));
-                    if (line) return norm(line).slice(0, 200);
-                }
-                return null;
-            }"""
-        )
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _require_login(page: Any) -> bool:
-    """Ensure StealthWriter session; auto-login when env credentials exist."""
-    if _is_session_logged_in(page):
-        return True
-    email, password = _credentials()
-    if not email or not password:
-        return False
-    return _login_with_credentials(page, email, password)
-
-
 # ------------------------------------------------------------------ login helpers
 def start_interactive_login() -> dict[str, Any]:
-    """Navigate to sign-in; auto-login when STEALTHWRITER_EMAIL/PASSWORD are set."""
+    """Navigate the StealthWriter tab to sign-in for manual login."""
     page = _page()
     already = BrowserService.instance().is_running()
     page.goto(_SIGN_IN_URL, wait_until="domcontentloaded")
-    page.wait_for_timeout(800)
-
-    logged_in = _is_session_logged_in(page)
-    auto_attempted = False
-    login_hint: str | None = None
-    if not logged_in:
-        email, password = _credentials()
-        if email and password:
-            auto_attempted = True
-            logged_in = _login_with_credentials(page, email, password)
-            if not logged_in:
-                login_hint = _login_page_hint(page)
-
-    if logged_in:
-        message = "Logged in to StealthWriter."
-        try:
-            save_storage_state(page)
-        except Exception:  # noqa: BLE001
-            pass
-    elif auto_attempted:
-        message = (
-            login_hint
-            or "Auto-login failed. Check STEALTHWRITER_EMAIL / STEALTHWRITER_PASSWORD, "
-            "or run: python3 scripts/bootstrap_stealthwriter_login.py (local Mac), "
-            "then rsync browser_profiles/chrome_user_data to the VPS."
-        )
-    elif not _credentials()[0]:
-        message = (
-            "Not logged in. Set STEALTHWRITER_EMAIL and STEALTHWRITER_PASSWORD in .env "
-            "(then restart), or sign in manually in Chrome."
-        )
-    else:
-        message = "Attached to Chrome. Please login manually in the open browser."
-
     return {
-        "success": logged_in,
-        "logged_in": logged_in,
+        "success": True,
         "already_open": already,
         "cdp_url": BrowserService.instance().cdp_url,
         "profile": _profile_path(),
-        "current_url": page.url,
-        "message": message,
-        "login_hint": login_hint,
+        "message": "Attached to Chrome. Please login manually in the open browser.",
     }
 
 
@@ -309,10 +58,12 @@ def check_interactive_login() -> dict[str, Any]:
     page = _page()
     page.goto(_DASHBOARD_URL, wait_until="domcontentloaded")
     page.wait_for_timeout(1500)
-    logged_in = _require_login(page) if _is_sign_in_url(page.url) else _is_session_logged_in(page)
     current_url = page.url
     title = page.title()
     redirected = _is_sign_in_url(current_url)
+    logged_in = (not redirected) and ("/dashboard" in current_url.lower())
+    if logged_in:
+        BrowserService.instance().save_session(PROVIDER_NAME)
     return {
         "success": True,
         "logged_in": logged_in,
@@ -326,7 +77,7 @@ def check_interactive_login() -> dict[str, Any]:
         "message": (
             "Login confirmed. Browser kept alive (CDP session)."
             if logged_in
-            else "Not logged in yet. Set STEALTHWRITER_EMAIL/PASSWORD or finish login in Chrome."
+            else "Not logged in yet. Finish login in Chrome, then call check-login again."
         ),
     }
 
@@ -334,6 +85,11 @@ def check_interactive_login() -> dict[str, Any]:
 def open_manual_login_browser() -> dict[str, Any]:
     """Alias for start_interactive_login (legacy /open endpoint)."""
     return start_interactive_login()
+
+
+def _is_sign_in_url(url: str) -> bool:
+    lower = (url or "").lower()
+    return "/sign-in" in lower or "/signin" in lower
 
 
 # ------------------------------------------------------------------ diagnostics
@@ -576,7 +332,7 @@ def humanize_text(text: str) -> dict[str, Any]:
     page = _page()
     started = time.monotonic()
 
-    _prepare_session(page)
+    # Open humanizer directly — never navigate to /sign-in or attempt login.
     page.goto(_HUMANIZER_URL, wait_until="domcontentloaded")
     try:
         page.wait_for_load_state("networkidle", timeout=30_000)
@@ -584,21 +340,8 @@ def humanize_text(text: str) -> dict[str, Any]:
         pass
     page.wait_for_timeout(800)
 
-    if _is_sign_in_url(page.url) and not _require_login(page):
-        return {
-            "success": False,
-            "error": "LOGIN_REQUIRED",
-            "message": (
-                "StealthWriter session is not logged in. "
-                "Set STEALTHWRITER_EMAIL and STEALTHWRITER_PASSWORD in .env and restart."
-            ),
-        }
-
     if _is_sign_in_url(page.url):
-        page.goto(_HUMANIZER_URL, wait_until="domcontentloaded")
-        page.wait_for_timeout(800)
-        if _is_sign_in_url(page.url):
-            return {"success": False, "error": "LOGIN_REQUIRED"}
+        return {"success": False, "error": "LOGIN_REQUIRED"}
 
     # Locate textarea
     input_box = _find_input_textarea(page)
@@ -828,8 +571,7 @@ def _read_sidebar_identity(page: Any) -> dict[str, str | None]:
 def get_session_status() -> dict[str, Any]:
     """Read login state, username, and plan from the dashboard sidebar."""
     page = _page()
-    _prepare_session(page)
-    page.goto(_DASHBOARD_URL, wait_until="domcontentloaded", timeout=45_000)
+    page.goto(_DASHBOARD_URL, wait_until="domcontentloaded")
     page.wait_for_timeout(1200)
 
     current_url = page.url
@@ -842,13 +584,11 @@ def get_session_status() -> dict[str, Any]:
         }
 
     identity = _read_sidebar_identity(page) or {}
-    cred_email, cred_password = _credentials()
     return {
         "logged_in": True,
         "current_url": current_url,
         "plan": identity.get("plan"),
         "username": identity.get("username"),
-        "credentials_configured": bool(cred_email and cred_password),
     }
 
 
