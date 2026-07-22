@@ -149,6 +149,40 @@ def _login_with_credentials(page: Any, email: str, password: str) -> bool:
     return _is_session_logged_in(page)
 
 
+def _login_page_hint(page: Any) -> str | None:
+    """Return a visible sign-in error or Turnstile hint after a failed attempt."""
+    try:
+        return page.evaluate(
+            """() => {
+                const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+                const body = norm(document.body ? document.body.innerText : '');
+                const turnstile = !!(
+                    document.querySelector('#cf-turnstile')
+                    || document.querySelector('[data-sitekey]')
+                    || document.querySelector('iframe[src*="challenges.cloudflare.com"]')
+                    || document.querySelector('iframe[src*="turnstile"]')
+                );
+                if (turnstile) {
+                    return 'Cloudflare Turnstile is present — headless auto-login usually fails. Log in once in a visible Chrome window, then copy browser_profiles/chrome_user_data to the VPS.';
+                }
+                const alerts = Array.from(
+                    document.querySelectorAll('[role="alert"], [class*="error"], [class*="toast"]')
+                );
+                for (const el of alerts) {
+                    const t = norm(el.innerText || el.textContent);
+                    if (t && t.length < 240) return t;
+                }
+                if (/invalid|incorrect|wrong password|not found|verify/i.test(body)) {
+                    const line = body.split(/\\n/).find(l => /invalid|incorrect|wrong password|not found|verify/i.test(l));
+                    if (line) return norm(line).slice(0, 200);
+                }
+                return null;
+            }"""
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _require_login(page: Any) -> bool:
     """Ensure StealthWriter session; auto-login when env credentials exist."""
     if _is_session_logged_in(page):
@@ -169,18 +203,23 @@ def start_interactive_login() -> dict[str, Any]:
 
     logged_in = _is_session_logged_in(page)
     auto_attempted = False
+    login_hint: str | None = None
     if not logged_in:
         email, password = _credentials()
         if email and password:
             auto_attempted = True
             logged_in = _login_with_credentials(page, email, password)
+            if not logged_in:
+                login_hint = _login_page_hint(page)
 
     if logged_in:
         message = "Logged in to StealthWriter."
     elif auto_attempted:
         message = (
-            "Auto-login failed. Check STEALTHWRITER_EMAIL / STEALTHWRITER_PASSWORD, "
-            "or sign in manually in the Chrome profile."
+            login_hint
+            or "Auto-login failed. Check STEALTHWRITER_EMAIL / STEALTHWRITER_PASSWORD, "
+            "or run: python3 scripts/bootstrap_stealthwriter_login.py (local Mac), "
+            "then rsync browser_profiles/chrome_user_data to the VPS."
         )
     elif not _credentials()[0]:
         message = (
@@ -198,6 +237,7 @@ def start_interactive_login() -> dict[str, Any]:
         "profile": _profile_path(),
         "current_url": page.url,
         "message": message,
+        "login_hint": login_hint,
     }
 
 
