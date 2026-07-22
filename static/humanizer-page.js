@@ -239,15 +239,19 @@
     updateEmptyState(true);
     startProgress();
 
-    fetch("/api/humanizer/run", {
+    fetch("/api/browser/providers/stealthwriter/humanize", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify({ text: source }),
     })
       .then(parseApiResponse)
       .then(function (payload) {
         finishProgress(true, function () {
-          editorOut.textContent = payload.text || "";
+          editorOut.textContent = payload.humanized_text || payload.text || "";
+          if (typeof payload.balance === "number" && window.refreshCoinBalance) {
+            window.refreshCoinBalance();
+          }
           refreshOutputCount();
           setOutputEnabled(true);
           updateEmptyState();
@@ -256,6 +260,21 @@
       })
       .catch(function (err) {
         var code = err && err.code;
+        if (code === "LOGIN_REQUIRED") {
+          finishProgress(false, function () {
+            showError(
+              (err && err.message) ||
+                "StealthWriter is not logged in on the server. Set STEALTHWRITER_EMAIL and STEALTHWRITER_PASSWORD in .env."
+            );
+          });
+          return;
+        }
+        if (code === "NO_CHANGE") {
+          finishProgress(false, function () {
+            showError((err && err.message) || "StealthWriter did not rewrite the text (daily limit or same output).");
+          });
+          return;
+        }
         if ((code === "REGISTER_REQUIRED" || code === "AUTH_REQUIRED") && window.DMAuth) {
           finishProgress(false, function () { updateEmptyState(); });
           window.DMAuth.require({

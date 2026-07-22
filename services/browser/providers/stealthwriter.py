@@ -10,6 +10,7 @@ implementation — only the source of the page has moved to BrowserService.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -38,18 +39,165 @@ def _profile_path() -> str:
     return str(BrowserService.instance().user_data_dir.resolve())
 
 
+def _credentials() -> tuple[str, str]:
+    email = (os.environ.get("STEALTHWRITER_EMAIL") or "").strip()
+    password = (os.environ.get("STEALTHWRITER_PASSWORD") or "").strip()
+    return email, password
+
+
+def _is_sign_in_url(url: str) -> bool:
+    lower = (url or "").lower()
+    return "/sign-in" in lower or "/signin" in lower
+
+
+def _is_session_logged_in(page: Any) -> bool:
+    url = (page.url or "").lower()
+    if _is_sign_in_url(url):
+        return False
+    return "/dashboard" in url
+
+
+def _login_with_credentials(page: Any, email: str, password: str) -> bool:
+    """Fill StealthWriter email/password form and submit."""
+    if not _is_sign_in_url(page.url):
+        page.goto(_SIGN_IN_URL, wait_until="domcontentloaded")
+    page.wait_for_timeout(800)
+
+    filled = bool(
+        page.evaluate(
+            """([email, password]) => {
+                const visible = (el) => {
+                    if (!el) return false;
+                    const st = getComputedStyle(el);
+                    if (st.display === 'none' || st.visibility === 'hidden') return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                };
+                const inputs = Array.from(document.querySelectorAll('input')).filter(visible);
+                const emailEl = inputs.find(el => {
+                    const t = (el.type || '').toLowerCase();
+                    const n = (el.name || el.id || el.autocomplete || '').toLowerCase();
+                    return t === 'email' || n.includes('email') || n.includes('login');
+                }) || inputs.find(el => (el.type || '').toLowerCase() === 'text');
+                const passEl = inputs.find(el => (el.type || '').toLowerCase() === 'password');
+                if (!emailEl || !passEl) return false;
+                const setVal = (el, val) => {
+                    el.focus();
+                    el.value = '';
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.value = val;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                };
+                setVal(emailEl, email);
+                setVal(passEl, password);
+                return true;
+            }""",
+            [email, password],
+        )
+    )
+    if not filled:
+        try:
+            page.locator('input[type="email"], input[name="email"], input[autocomplete="email"]').first.fill(
+                email, timeout=5_000
+            )
+            page.locator('input[type="password"]').first.fill(password, timeout=5_000)
+            filled = True
+        except Exception:  # noqa: BLE001
+            return False
+
+    clicked = bool(
+        page.evaluate(
+            """() => {
+                const visible = (el) => {
+                    if (!el) return false;
+                    const st = getComputedStyle(el);
+                    if (st.display === 'none' || st.visibility === 'hidden') return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                };
+                const buttons = Array.from(
+                    document.querySelectorAll('button, input[type="submit"], a')
+                ).filter(visible);
+                const btn = buttons.find(el => {
+                    const t = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
+                    return t === 'sign in' || t === 'log in' || t === 'login';
+                });
+                if (btn) { btn.click(); return true; }
+                const form = document.querySelector('form');
+                if (form) { form.requestSubmit ? form.requestSubmit() : form.submit(); return true; }
+                return false;
+            }"""
+        )
+    )
+    if not clicked:
+        try:
+            page.locator('input[type="password"]').first.press("Enter")
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=25_000)
+    except Exception:  # noqa: BLE001
+        pass
+    page.wait_for_timeout(1500)
+
+    if _is_sign_in_url(page.url):
+        page.goto(_DASHBOARD_URL, wait_until="domcontentloaded")
+        page.wait_for_timeout(1200)
+
+    return _is_session_logged_in(page)
+
+
+def _require_login(page: Any) -> bool:
+    """Ensure StealthWriter session; auto-login when env credentials exist."""
+    if _is_session_logged_in(page):
+        return True
+    email, password = _credentials()
+    if not email or not password:
+        return False
+    return _login_with_credentials(page, email, password)
+
+
 # ------------------------------------------------------------------ login helpers
 def start_interactive_login() -> dict[str, Any]:
-    """Navigate the StealthWriter tab to sign-in for manual login."""
+    """Navigate to sign-in; auto-login when STEALTHWRITER_EMAIL/PASSWORD are set."""
     page = _page()
     already = BrowserService.instance().is_running()
     page.goto(_SIGN_IN_URL, wait_until="domcontentloaded")
+    page.wait_for_timeout(800)
+
+    logged_in = _is_session_logged_in(page)
+    auto_attempted = False
+    if not logged_in:
+        email, password = _credentials()
+        if email and password:
+            auto_attempted = True
+            logged_in = _login_with_credentials(page, email, password)
+
+    if logged_in:
+        message = "Logged in to StealthWriter."
+    elif auto_attempted:
+        message = (
+            "Auto-login failed. Check STEALTHWRITER_EMAIL / STEALTHWRITER_PASSWORD, "
+            "or sign in manually in the Chrome profile."
+        )
+    elif not _credentials()[0]:
+        message = (
+            "Not logged in. Set STEALTHWRITER_EMAIL and STEALTHWRITER_PASSWORD in .env "
+            "(then restart), or sign in manually in Chrome."
+        )
+    else:
+        message = "Attached to Chrome. Please login manually in the open browser."
+
     return {
-        "success": True,
+        "success": logged_in,
+        "logged_in": logged_in,
         "already_open": already,
         "cdp_url": BrowserService.instance().cdp_url,
         "profile": _profile_path(),
-        "message": "Attached to Chrome. Please login manually in the open browser.",
+        "current_url": page.url,
+        "message": message,
     }
 
 
@@ -58,10 +206,10 @@ def check_interactive_login() -> dict[str, Any]:
     page = _page()
     page.goto(_DASHBOARD_URL, wait_until="domcontentloaded")
     page.wait_for_timeout(1500)
+    logged_in = _require_login(page) if _is_sign_in_url(page.url) else _is_session_logged_in(page)
     current_url = page.url
     title = page.title()
     redirected = _is_sign_in_url(current_url)
-    logged_in = (not redirected) and ("/dashboard" in current_url.lower())
     return {
         "success": True,
         "logged_in": logged_in,
@@ -75,7 +223,7 @@ def check_interactive_login() -> dict[str, Any]:
         "message": (
             "Login confirmed. Browser kept alive (CDP session)."
             if logged_in
-            else "Not logged in yet. Finish login in Chrome, then call check-login again."
+            else "Not logged in yet. Set STEALTHWRITER_EMAIL/PASSWORD or finish login in Chrome."
         ),
     }
 
@@ -312,11 +460,6 @@ def _safe_url(page: Any) -> str | None:
         return None
 
 
-def _is_sign_in_url(url: str) -> bool:
-    lower = (url or "").lower()
-    return "/sign-in" in lower or "/signin" in lower
-
-
 # ------------------------------------------------------------------ humanize workflow
 def humanize_text(text: str) -> dict[str, Any]:
     """Run one end-to-end humanization in the shared long-lived browser.
@@ -330,7 +473,6 @@ def humanize_text(text: str) -> dict[str, Any]:
     page = _page()
     started = time.monotonic()
 
-    # Open humanizer directly — never navigate to /sign-in or attempt login.
     page.goto(_HUMANIZER_URL, wait_until="domcontentloaded")
     try:
         page.wait_for_load_state("networkidle", timeout=30_000)
@@ -338,8 +480,21 @@ def humanize_text(text: str) -> dict[str, Any]:
         pass
     page.wait_for_timeout(800)
 
+    if _is_sign_in_url(page.url) and not _require_login(page):
+        return {
+            "success": False,
+            "error": "LOGIN_REQUIRED",
+            "message": (
+                "StealthWriter session is not logged in. "
+                "Set STEALTHWRITER_EMAIL and STEALTHWRITER_PASSWORD in .env and restart."
+            ),
+        }
+
     if _is_sign_in_url(page.url):
-        return {"success": False, "error": "LOGIN_REQUIRED"}
+        page.goto(_HUMANIZER_URL, wait_until="domcontentloaded")
+        page.wait_for_timeout(800)
+        if _is_sign_in_url(page.url):
+            return {"success": False, "error": "LOGIN_REQUIRED"}
 
     # Locate textarea
     input_box = _find_input_textarea(page)
@@ -586,11 +741,13 @@ def get_session_status() -> dict[str, Any]:
         }
 
     identity = _read_sidebar_identity(page) or {}
+    cred_email, cred_password = _credentials()
     return {
         "logged_in": True,
         "current_url": current_url,
         "plan": identity.get("plan"),
         "username": identity.get("username"),
+        "credentials_configured": bool(cred_email and cred_password),
     }
 
 

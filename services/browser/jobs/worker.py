@@ -170,7 +170,8 @@ class BrowserWorker(threading.Thread):
                 code = (result or {}).get("error") if isinstance(result, dict) else "ERROR"
                 if code == "LOGIN_REQUIRED":
                     self._jobs.log(job, "Result received", "LOGIN_REQUIRED")
-                    self._jobs.fail(job, "LOGIN_REQUIRED", code="LOGIN_REQUIRED")
+                    message = (result or {}).get("message") or "LOGIN_REQUIRED"
+                    self._jobs.fail(job, message, code="LOGIN_REQUIRED")
                     return
                 if code == "NO_CHANGE":
                     # StealthWriter produced no change (daily limit / already human).

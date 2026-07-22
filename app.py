@@ -1507,7 +1507,14 @@ def api_browser_stealthwriter_humanize():
 
         code = job.error_code
         if code == "LOGIN_REQUIRED":
-            return jsonify({"success": False, "error": "LOGIN_REQUIRED", "job_id": job.id}), 401
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "LOGIN_REQUIRED",
+                    "message": job.error or "StealthWriter session is not logged in.",
+                    "job_id": job.id,
+                }
+            ), 401
         if code == "NO_CHANGE":
             return (
                 jsonify(
@@ -2469,7 +2476,13 @@ def api_assignment_project_restore_draft(project_id: str):
 
 @app.post("/api/humanizer/run")
 def api_humanizer_run():
-    """Humanize standalone text via ZeroGPT AI Humanizer (max 5,000 words per request)."""
+    """Humanize via StealthWriter browser automation (legacy alias for the humanizer page)."""
+    return api_browser_stealthwriter_humanize()
+
+
+@app.post("/api/humanizer/run-zerogpt")
+def api_humanizer_run_zerogpt():
+    """Deprecated ZeroGPT humanizer — kept for debugging only."""
     if not _zerogpt_configured():
         return jsonify({"error": "ZeroGPT is not configured. Set ZEROGPT_API_KEY in .env"}), 503
 
