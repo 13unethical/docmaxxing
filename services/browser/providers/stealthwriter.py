@@ -764,12 +764,8 @@ def _read_sidebar_identity(page: Any) -> dict[str, str | None]:
 def get_session_status() -> dict[str, Any]:
     """Read login state, username, and plan from the dashboard sidebar."""
     page = _page()
-    page.goto(_DASHBOARD_URL, wait_until="domcontentloaded")
-    try:
-        page.wait_for_load_state("networkidle", timeout=30_000)
-    except Exception:  # noqa: BLE001
-        pass
-    page.wait_for_timeout(800)
+    page.goto(_DASHBOARD_URL, wait_until="domcontentloaded", timeout=45_000)
+    page.wait_for_timeout(1200)
 
     current_url = page.url
     if _is_sign_in_url(current_url):

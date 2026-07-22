@@ -1576,7 +1576,7 @@ def api_browser_stealthwriter_status():
     from services.browser.providers.stealthwriter import get_session_status
 
     try:
-        status = _browser_submit(get_session_status, timeout=60)
+        status = _browser_submit(get_session_status, timeout=120)
         return jsonify(
             {
                 "logged_in": bool(status.get("logged_in")),
