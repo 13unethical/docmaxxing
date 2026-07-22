@@ -36,7 +36,9 @@ os.environ.setdefault("BROWSER_EXTRA_ARGS", "")
 from services.browser.browser_service import BrowserService  # noqa: E402
 from services.browser.providers.stealthwriter import (  # noqa: E402
     get_session_status,
+    save_storage_state,
     start_interactive_login,
+    _page,
 )
 
 
@@ -50,8 +52,13 @@ def main() -> int:
     print(result.get("message") or result, flush=True)
 
     if result.get("logged_in"):
+        try:
+            path = save_storage_state(_page())
+            print(f"Session exported: {path}", flush=True)
+        except Exception as exc:  # noqa: BLE001
+            print(f"Could not export session: {exc}", flush=True)
         print("\nOK — StealthWriter session is logged in.", flush=True)
-        _print_rsync_hint()
+        _print_upload_hint()
         return 0
 
     print(
@@ -65,19 +72,26 @@ def main() -> int:
         time.sleep(3)
         status = get_session_status()
         if status.get("logged_in"):
+            try:
+                path = save_storage_state(_page())
+                print(f"Session exported: {path}", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"Could not export session: {exc}", flush=True)
             print(f"\nOK — logged in ({status.get('username') or 'dashboard ready'}).", flush=True)
-            _print_rsync_hint()
+            _print_upload_hint()
             return 0
 
     print("\nStill not logged in. Check credentials or complete Turnstile in Chrome.", flush=True)
     return 1
 
 
-def _print_rsync_hint() -> None:
-    profile = BrowserService.instance().user_data_dir.resolve()
+def _print_upload_hint() -> None:
+    session = ROOT / "browser_profiles" / "stealthwriter_storage_state.json"
     print(
-        "\nCopy this profile to the VPS (replace YOUR_VPS):\n"
-        f"  rsync -avz {profile}/ root@YOUR_VPS:~/docmaxxing/browser_profiles/chrome_user_data/\n"
+        "\nUpload session to VPS (small file, works Mac → Linux):\n"
+        f"  bash scripts/push_stealthwriter_session_to_vps.sh root@YOUR_VPS_IP\n"
+        f"  # or FileZilla: upload {session}\n"
+        "     → /root/docmaxxing/browser_profiles/stealthwriter_storage_state.json\n"
         "Then on VPS:\n"
         "  sudo systemctl restart docmaxxing\n"
         "  curl -sS http://127.0.0.1:8000/api/browser/providers/stealthwriter/status\n",

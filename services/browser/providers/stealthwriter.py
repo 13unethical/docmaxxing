@@ -10,6 +10,7 @@ implementation — only the source of the page has moved to BrowserService.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -37,6 +38,64 @@ def _page() -> Any:
 
 def _profile_path() -> str:
     return str(BrowserService.instance().user_data_dir.resolve())
+
+
+def _storage_state_path() -> Path:
+    root = Path(__file__).resolve().parents[3]
+    return root / "browser_profiles" / "stealthwriter_storage_state.json"
+
+
+_STORAGE_STATE_APPLIED = False
+
+
+def save_storage_state(page: Any) -> Path:
+    """Export cookies/localStorage for cross-platform VPS transfer (Mac → Linux)."""
+    path = _storage_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    page.context.storage_state(path=str(path))
+    return path
+
+
+def apply_storage_state(page: Any) -> bool:
+    """Load exported session into the live CDP context (once per process)."""
+    global _STORAGE_STATE_APPLIED
+    if _STORAGE_STATE_APPLIED:
+        return True
+    path = _storage_state_path()
+    if not path.is_file():
+        return False
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        cookies = state.get("cookies") or []
+        if cookies:
+            page.context.add_cookies(cookies)
+        for origin in state.get("origins") or []:
+            origin_url = (origin.get("origin") or "").strip()
+            if not origin_url or "stealthwriter" not in origin_url.lower():
+                continue
+            try:
+                page.goto(origin_url, wait_until="domcontentloaded", timeout=20_000)
+                for entry in origin.get("localStorage") or []:
+                    name = entry.get("name")
+                    value = entry.get("value")
+                    if name is None:
+                        continue
+                    page.evaluate(
+                        "([k, v]) => { try { localStorage.setItem(k, v); } catch (_) {} }",
+                        [name, value or ""],
+                    )
+            except Exception:  # noqa: BLE001
+                continue
+        _STORAGE_STATE_APPLIED = True
+        print(f"[stealthwriter] loaded storage_state from {path}", flush=True)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        print(f"[stealthwriter] storage_state apply failed: {exc}", flush=True)
+        return False
+
+
+def _prepare_session(page: Any) -> None:
+    apply_storage_state(page)
 
 
 def _credentials() -> tuple[str, str]:
@@ -214,6 +273,10 @@ def start_interactive_login() -> dict[str, Any]:
 
     if logged_in:
         message = "Logged in to StealthWriter."
+        try:
+            save_storage_state(page)
+        except Exception:  # noqa: BLE001
+            pass
     elif auto_attempted:
         message = (
             login_hint
@@ -513,6 +576,7 @@ def humanize_text(text: str) -> dict[str, Any]:
     page = _page()
     started = time.monotonic()
 
+    _prepare_session(page)
     page.goto(_HUMANIZER_URL, wait_until="domcontentloaded")
     try:
         page.wait_for_load_state("networkidle", timeout=30_000)
@@ -764,6 +828,7 @@ def _read_sidebar_identity(page: Any) -> dict[str, str | None]:
 def get_session_status() -> dict[str, Any]:
     """Read login state, username, and plan from the dashboard sidebar."""
     page = _page()
+    _prepare_session(page)
     page.goto(_DASHBOARD_URL, wait_until="domcontentloaded", timeout=45_000)
     page.wait_for_timeout(1200)
 
