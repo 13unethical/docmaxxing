@@ -42,7 +42,7 @@ from services.browser.providers.stealthwriter import (  # noqa: E402
 
 def main() -> int:
     print("Starting Chrome for StealthWriter login…", flush=True)
-    BrowserService.instance().ensure_started()
+    BrowserService.instance().start()
     print(f"Profile: {BrowserService.instance().user_data_dir.resolve()}", flush=True)
     print(f"CDP: {BrowserService.instance().cdp_url}", flush=True)
 
