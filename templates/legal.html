@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }} — DocMaxxing{% endblock %}
+{% block page_header %}
+      <header class="top legal-hero">
+        <h1>{{ page_title }}</h1>
+        <p class="lede">DocMaxxing policies. Last updated: 24 July 2026.</p>
+      </header>
+{% endblock %}
+{% block content %}
+<section class="legal-page">
+  <nav class="legal-toc" aria-label="Policy sections">
+    <a href="{{ url_for('legal_terms') }}">Terms of service</a>
+    <a href="{{ url_for('legal_privacy') }}">Privacy policy</a>
+    <a href="{{ url_for('legal_refund') }}">Refund policy</a>
+  </nav>
+
+  <article class="legal-section{% if focus == 'terms' %} is-focus{% endif %}" id="terms">
+    <h2>Terms of service</h2>
+    <p>
+      By using DocMaxxing you agree to these terms. The service provides document formatting,
+      academic tools, credit-based features, and related products.
+    </p>
+    <p>
+      You are responsible for the content you upload and for complying with your institution’s
+      academic integrity rules. Credits purchased are for personal use of the account that bought them
+      unless we agree otherwise in writing (for example a team or university package).
+    </p>
+    <p>
+      We may update features, pricing, and these terms. Continued use after changes means you accept
+      the updated terms. If you do not agree, stop using the service and contact support.
+    </p>
+    <p>
+      Contact: <a href="https://wa.me/998990779909">WhatsApp +998 99 077 99 09</a>
+    </p>
+  </article>
+
+  <article class="legal-section{% if focus == 'privacy' %} is-focus{% endif %}" id="privacy">
+    <h2>Privacy policy</h2>
+    <p>
+      We collect account data (such as email and display name), usage needed to run the product
+      (uploads, job logs, credit balance), and payment-related metadata processed by our payment
+      provider (Paddle). We do not sell your personal data.
+    </p>
+    <p>
+      Documents and text you submit are processed to deliver the requested feature. We retain
+      operational records as needed for security, fraud prevention, and support.
+    </p>
+    <p>
+      You may request access or deletion of account data by contacting us. Some records may be kept
+      where required by law or payment compliance.
+    </p>
+    <p>
+      Contact: <a href="https://wa.me/998990779909">WhatsApp +998 99 077 99 09</a>
+    </p>
+  </article>
+
+  <article class="legal-section{% if focus == 'refund' %} is-focus{% endif %}" id="refund">
+    <h2>Refund policy</h2>
+    <p>
+      Credits are digital goods. If a paid action fails on our side, credits for that action are
+      refunded to your balance automatically when possible.
+    </p>
+    <p>
+      Unused credit purchases may be eligible for a refund within 14 days of purchase if credits have
+      not been substantially consumed. Chargebacks and abuse may result in account suspension.
+    </p>
+    <p>
+      To request a refund, contact sales/support with your account email and Paddle transaction id.
+    </p>
+    <p>
+      Contact: <a href="https://wa.me/998990779909">WhatsApp +998 99 077 99 09</a>
+    </p>
+  </article>
+</section>
+{% endblock %}

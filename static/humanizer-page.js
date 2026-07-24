@@ -17,21 +17,6 @@
     return (el && (el.innerText || el.textContent) ? el.innerText || el.textContent : "").trim();
   }
 
-  function escapeHtml(str) {
-    return String(str || "").replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
-
-  function downloadText(filename, text) {
-    var blob = new Blob([text || ""], { type: "text/plain;charset=utf-8" });
-    var a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
   var root = $("[data-humanizer-page]");
   if (!root) return;
 
@@ -40,58 +25,81 @@
   var countIn = $("[data-hz-wordcount]", root);
   var countOut = $("[data-hz-out-words]", root);
   var runBtn = $("[data-hz-run]", root);
+  var runLabel = $("[data-hz-run-label]", root);
+  var runIcon = $("[data-hz-run-icon]", root);
+  var runSpinner = $("[data-hz-run-spinner]", root);
   var copyBtn = $("[data-hz-copy]", root);
   var copyLabel = $("[data-hz-copy-label]", root);
   var copyIcon = $("[data-hz-copy-icon]", root);
-  var dlToggle = $("[data-hz-dl-toggle]", root);
-  var dropdown = $("[data-hz-dropdown]", root);
-  var dlMenu = $("[data-hz-dl-menu]", root);
-  var dlDocxBtn = $("[data-hz-dl-docx]", root);
-  var dlTxtBtn = $("[data-hz-dl-txt]", root);
+  var clearBtn = $("[data-hz-clear]", root);
   var fileInput = $("[data-hz-file]", root);
-  var fileNameEl = $("[data-hz-filename]", root);
   var pasteBtn = $("[data-hz-paste-focus]", root);
   var fontSelect = $("[data-hz-font]", root);
   var segment = $("[data-hz-segment]", root);
   var sourceBtns = $all("[data-hz-source]", root);
-  var uploadZone = $("[data-hz-upload]", root);
-  var emptyEl = $("[data-hz-empty]", root);
-  var progress = $("[data-hz-progress]", root);
-  var progressBar = $("[data-hz-progress-bar]", root);
-  var steps = $all("[data-hz-progress-steps] li", root);
+  var stageEl = $("[data-hz-stage]", root);
+  var loadingEl = $("[data-hz-loading]", root);
+  var resultEl = $("[data-hz-result]", root);
+  var errorPanel = $("[data-hz-error]", root);
+  var errorMsg = $("[data-hz-error-msg]", root);
 
   var outputReady = false;
   var origCopyIcon = copyIcon ? copyIcon.innerHTML : "";
   var CHECK_ICON = '<polyline points="20 6 9 17 4 12"></polyline>';
   var copyTimer = null;
+  var currentStage = "idle";
 
-  /* --------------------------------------------------------- output state */
-  function setOutputEnabled(enabled) {
-    outputReady = !!enabled;
-    [copyBtn, dlToggle].forEach(function (btn) {
-      if (btn) btn.disabled = !enabled;
-    });
-    if (!enabled) closeMenu();
+  /* -------------------------------------------------------------- stages */
+  function setStage(stage) {
+    currentStage = stage;
+    if (stageEl) stageEl.setAttribute("data-stage", stage);
+
+    if (loadingEl) loadingEl.hidden = stage !== "loading";
+    if (resultEl) resultEl.hidden = stage !== "result";
+    if (errorPanel) errorPanel.hidden = stage !== "error";
+
+    var loading = stage === "loading";
+    if (runBtn) {
+      runBtn.disabled = loading;
+      runBtn.classList.toggle("is-loading", loading);
+    }
+    if (runLabel) runLabel.textContent = loading ? "Humanizing..." : "Humanize";
+    if (runIcon) runIcon.hidden = loading;
+    if (runSpinner) runSpinner.hidden = !loading;
+
+    if (stage !== "result") {
+      setOutputEnabled(false);
+    }
+
+    var scrollTarget =
+      stage === "loading" ? loadingEl : stage === "result" ? resultEl : stage === "error" ? errorPanel : null;
+    if (scrollTarget && typeof scrollTarget.scrollIntoView === "function") {
+      setTimeout(function () {
+        scrollTarget.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }, 40);
+    }
   }
 
-  function updateEmptyState(loading) {
-    if (!emptyEl) return;
-    var hasContent = plainText(editorOut).length > 0;
-    emptyEl.classList.toggle("is-hidden", !!loading || hasContent);
+  function setOutputEnabled(enabled) {
+    outputReady = !!enabled;
+    if (copyBtn) copyBtn.disabled = !enabled;
+    $all("[data-hz-format]", root).forEach(function (btn) {
+      btn.disabled = !enabled;
+    });
+    if (fontSelect) fontSelect.disabled = !enabled;
+    if (editorOut) editorOut.setAttribute("contenteditable", enabled ? "true" : "false");
   }
 
   function revealOutput() {
     if (!editorOut) return;
     editorOut.classList.remove("hz-reveal");
-    void editorOut.offsetWidth; // reflow to restart animation
+    void editorOut.offsetWidth;
     editorOut.classList.add("hz-reveal");
   }
 
   function showError(message) {
-    if (!editorOut) return;
-    editorOut.innerHTML = '<p class="hz-error">' + escapeHtml(message) + "</p>";
-    refreshOutputCount();
-    updateEmptyState();
+    if (errorMsg) errorMsg.textContent = message || "Something went wrong.";
+    setStage("error");
   }
 
   /* ----------------------------------------------------------- word counts */
@@ -99,96 +107,12 @@
     if (!countIn || !editorIn) return;
     var words = countWords(plainText(editorIn));
     countIn.textContent = words.toLocaleString() + " / " + MAX_WORDS.toLocaleString() + " words";
+    if (clearBtn) clearBtn.hidden = words === 0;
   }
 
   function refreshOutputCount() {
     if (!countOut || !editorOut) return;
     countOut.textContent = countWords(plainText(editorOut)).toLocaleString();
-  }
-
-  /* ------------------------------------------------------------- progress */
-  var progressTimers = [];
-  var creepTimer = null;
-
-  function clearProgressTimers() {
-    progressTimers.forEach(clearTimeout);
-    progressTimers = [];
-    if (creepTimer) {
-      clearInterval(creepTimer);
-      creepTimer = null;
-    }
-  }
-
-  function setStep(idx) {
-    steps.forEach(function (li, i) {
-      li.classList.toggle("is-active", i === idx);
-      if (i < idx) li.classList.add("is-done");
-      else li.classList.remove("is-done");
-    });
-  }
-
-  function setBar(pct) {
-    if (progressBar) progressBar.style.width = pct + "%";
-  }
-
-  function startProgress() {
-    if (runBtn) runBtn.hidden = true;
-    if (progress) progress.hidden = false;
-    clearProgressTimers();
-    steps.forEach(function (li) {
-      li.classList.remove("is-done", "is-active");
-    });
-    setBar(6);
-    setStep(0);
-    progressTimers.push(
-      setTimeout(function () {
-        setStep(1);
-        setBar(30);
-      }, 700)
-    );
-    progressTimers.push(
-      setTimeout(function () {
-        setStep(2);
-        setBar(58);
-      }, 1700)
-    );
-    progressTimers.push(
-      setTimeout(function () {
-        var pct = 58;
-        creepTimer = setInterval(function () {
-          pct = Math.min(90, pct + 1.5);
-          setBar(pct);
-        }, 900);
-      }, 2000)
-    );
-  }
-
-  function hideProgress() {
-    if (progress) progress.hidden = true;
-    if (runBtn) {
-      runBtn.hidden = false;
-      runBtn.disabled = false;
-    }
-  }
-
-  function finishProgress(success, done) {
-    clearProgressTimers();
-    if (success) {
-      setStep(3);
-      steps.forEach(function (li, i) {
-        if (i < 3) li.classList.add("is-done");
-      });
-      setBar(100);
-      progressTimers.push(
-        setTimeout(function () {
-          hideProgress();
-          if (done) done();
-        }, 450)
-      );
-    } else {
-      hideProgress();
-      if (done) done();
-    }
   }
 
   /* --------------------------------------------------------- API response */
@@ -222,6 +146,8 @@
   /* ------------------------------------------------------------- humanize */
   function runHumanize() {
     if (!editorIn || !editorOut || !runBtn) return;
+    if (currentStage === "loading") return;
+
     var source = plainText(editorIn);
     if (!source) {
       editorIn.focus();
@@ -235,9 +161,9 @@
 
     setOutputEnabled(false);
     editorOut.classList.remove("hz-reveal");
-    editorOut.innerHTML = "";
-    updateEmptyState(true);
-    startProgress();
+    editorOut.textContent = "";
+    refreshOutputCount();
+    setStage("loading");
 
     fetch("/api/browser/providers/stealthwriter/humanize", {
       method: "POST",
@@ -247,52 +173,44 @@
     })
       .then(parseApiResponse)
       .then(function (payload) {
-        finishProgress(true, function () {
-          editorOut.textContent = payload.humanized_text || payload.text || "";
-          if (typeof payload.balance === "number" && window.refreshCoinBalance) {
-            window.refreshCoinBalance();
-          }
-          refreshOutputCount();
-          setOutputEnabled(true);
-          updateEmptyState();
-          revealOutput();
-        });
+        editorOut.textContent = payload.humanized_text || payload.text || "";
+        if (typeof payload.balance === "number" && window.refreshCoinBalance) {
+          window.refreshCoinBalance();
+        }
+        refreshOutputCount();
+        setStage("result");
+        setOutputEnabled(true);
+        revealOutput();
       })
       .catch(function (err) {
         var code = err && err.code;
         if (code === "LOGIN_REQUIRED") {
-          finishProgress(false, function () {
-            showError(
-              (err && err.message) ||
-                "StealthWriter is not logged in on the server. Export storageState on Mac and upload browser_profiles/sessions/stealthwriter.json to the VPS."
-            );
-          });
+          showError(
+            (err && err.message) ||
+              "StealthWriter is not logged in on the server. Export storageState on Mac and upload browser_profiles/sessions/stealthwriter.json to the VPS."
+          );
           return;
         }
         if (code === "NO_CHANGE") {
-          finishProgress(false, function () {
-            showError((err && err.message) || "StealthWriter did not rewrite the text (daily limit or same output).");
-          });
+          showError((err && err.message) || "StealthWriter did not rewrite the text (daily limit or same output).");
           return;
         }
         if ((code === "REGISTER_REQUIRED" || code === "AUTH_REQUIRED") && window.DMAuth) {
-          finishProgress(false, function () { updateEmptyState(); });
+          setStage("idle");
           window.DMAuth.require({
             reason: (err && err.message) || "Create a free account to keep humanizing.",
-          }).then(function () {
-            runHumanize();
-          }).catch(function () {});
+          })
+            .then(function () {
+              runHumanize();
+            })
+            .catch(function () {});
           return;
         }
         if (code === "INSUFFICIENT_COINS") {
-          finishProgress(false, function () {
-            showError((err && err.message ? err.message : "Not enough coins.") + " Add coins on the Pricing page.");
-          });
+          showError((err && err.message ? err.message : "Not enough coins.") + " Add coins on the Pricing page.");
           return;
         }
-        finishProgress(false, function () {
-          showError(err && err.message ? err.message : String(err));
-        });
+        showError(err && err.message ? err.message : String(err));
       });
   }
 
@@ -305,47 +223,111 @@
       b.classList.toggle("is-active", active);
       b.setAttribute("aria-selected", active ? "true" : "false");
     });
-    if (uploadZone) uploadZone.hidden = !isUpload;
-    if (!isUpload && editorIn) editorIn.focus();
+    if (!isUpload && editorIn) {
+      editorIn.focus();
+    }
   }
 
   sourceBtns.forEach(function (btn) {
     btn.addEventListener("click", function () {
-      setSource(btn.getAttribute("data-hz-source"));
+      var src = btn.getAttribute("data-hz-source");
+      setSource(src);
+      // Same pattern as home Upload DOC: open native file chooser immediately.
+      if (src === "upload" && fileInput) {
+        fileInput.click();
+      }
     });
   });
 
-  /* ------------------------------------------------------------ dropdown */
-  function openMenu() {
-    if (dlMenu) dlMenu.hidden = false;
-    if (dropdown) dropdown.classList.add("is-open");
-    if (dlToggle) dlToggle.setAttribute("aria-expanded", "true");
-  }
-  function closeMenu() {
-    if (dlMenu) dlMenu.hidden = true;
-    if (dropdown) dropdown.classList.remove("is-open");
-    if (dlToggle) dlToggle.setAttribute("aria-expanded", "false");
+  /* -------------------------------------------------------------- upload */
+  function applyUploadedText(text) {
+    if (!editorIn) return;
+    editorIn.textContent = text || "";
+    refreshInputCount();
+    setSource("paste");
+    editorIn.focus();
   }
 
-  if (dlToggle) {
-    dlToggle.addEventListener("click", function (e) {
-      e.stopPropagation();
-      if (dlToggle.disabled) return;
-      if (dlMenu && dlMenu.hidden) openMenu();
-      else closeMenu();
+  function readPlainTextFile(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        resolve(String(reader.result || ""));
+      };
+      reader.onerror = function () {
+        reject(new Error("Could not read the file."));
+      };
+      reader.readAsText(file, "UTF-8");
     });
   }
-  document.addEventListener("click", function (e) {
-    if (dropdown && !dropdown.contains(e.target)) closeMenu();
-  });
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") closeMenu();
-  });
+
+  function extractUploadedText(file) {
+    var lower = (file.name || "").toLowerCase();
+    if (/\.txt$/i.test(lower) || (file.type || "").indexOf("text/") === 0) {
+      return readPlainTextFile(file).then(function (text) {
+        return { ok: true, text: text };
+      });
+    }
+    if (window.FC && typeof window.FC.extractDocumentText === "function") {
+      return window.FC.extractDocumentText(file).then(function (result) {
+        return result || { ok: false, error: "Could not read the uploaded file." };
+      });
+    }
+    var fd = new FormData();
+    fd.append("file", file);
+    return fetch("/api/extract-document", { method: "POST", body: fd })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok) {
+            return { ok: false, error: (data && data.error) || "Could not read the uploaded file." };
+          }
+          return { ok: true, text: (data && data.text) || "" };
+        });
+      })
+      .catch(function () {
+        return { ok: false, error: "Network error while reading the uploaded file." };
+      });
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener("change", function () {
+      var file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+
+      extractUploadedText(file)
+        .then(function (result) {
+          if (!result || !result.ok) {
+            showError((result && result.error) || "Could not read the uploaded file.");
+            return;
+          }
+          var text = String(result.text || "").trim();
+          if (!text) {
+            showError("No readable text found in that file.");
+            return;
+          }
+          applyUploadedText(text);
+        })
+        .catch(function (err) {
+          showError(err && err.message ? err.message : "Could not read the uploaded file.");
+        })
+        .finally(function () {
+          fileInput.value = "";
+        });
+    });
+  }
 
   /* -------------------------------------------------------------- inputs */
   if (editorIn) {
     editorIn.addEventListener("input", refreshInputCount);
     refreshInputCount();
+  }
+
+  if (clearBtn && editorIn) {
+    clearBtn.addEventListener("click", function () {
+      editorIn.innerHTML = "";
+      refreshInputCount();
+      editorIn.focus();
+    });
   }
 
   if (pasteBtn && editorIn) {
@@ -354,30 +336,26 @@
     });
   }
 
-  if (fontSelect && editorIn) {
+  if (fontSelect && editorOut) {
     fontSelect.addEventListener("change", function () {
-      editorIn.style.fontFamily = fontSelect.value + ", sans-serif";
-      editorIn.focus();
+      if (!outputReady) return;
+      editorOut.style.fontFamily = fontSelect.value + ", sans-serif";
+      editorOut.focus();
     });
   }
 
   $all("[data-hz-format]", root).forEach(function (btn) {
     btn.addEventListener("click", function () {
       var command = btn.getAttribute("data-hz-format");
-      if (!command || !editorIn) return;
-      editorIn.focus();
+      if (!command || !editorOut || !outputReady) return;
+      editorOut.focus();
       document.execCommand(command, false, null);
-      refreshInputCount();
+      refreshOutputCount();
     });
   });
 
-  if (fileInput) {
-    fileInput.addEventListener("change", function () {
-      var file = fileInput.files && fileInput.files[0];
-      if (!file || !fileNameEl) return;
-      fileNameEl.hidden = false;
-      fileNameEl.textContent = file.name;
-    });
+  if (editorOut) {
+    editorOut.addEventListener("input", refreshOutputCount);
   }
 
   if (runBtn) {
@@ -408,26 +386,8 @@
     });
   }
 
-  /* ------------------------------------------------------------ download */
-  if (dlTxtBtn && editorOut) {
-    dlTxtBtn.addEventListener("click", function () {
-      if (!outputReady) return;
-      downloadText("humanized.txt", plainText(editorOut));
-      closeMenu();
-    });
-  }
-
-  if (dlDocxBtn && editorOut) {
-    dlDocxBtn.addEventListener("click", function () {
-      if (!outputReady) return;
-      // Placeholder until a DOCX generation endpoint exists (unchanged behavior).
-      downloadText("humanized.docx.txt", plainText(editorOut));
-      closeMenu();
-    });
-  }
-
   /* --------------------------------------------------------------- init */
+  setStage("idle");
   setOutputEnabled(false);
   refreshOutputCount();
-  updateEmptyState();
 })();

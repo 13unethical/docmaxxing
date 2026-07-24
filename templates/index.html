@@ -1,190 +1,149 @@
 {% extends "base.html" %}
 {% block title %}Academic Document Studio{% endblock %}
-{% block page_header %}
-      <header class="top home-hero">
-        <h1>Academic Document Studio</h1>
-      </header>
-{% endblock %}
 {% block content %}
       <div class="home-layout">
       <div class="home-upload-zones" aria-label="Upload areas">
-        <div class="home-setup-column">
-        <section class="card home-zone-card home-brief-card" aria-labelledby="brief-label">
-          <h2 class="card-title" id="brief-label">Assignment Brief / Rubric</h2>
-          <div class="req-chat-section" aria-labelledby="brief-input-label">
-            <p class="upload-zone-sr-label" id="brief-input-label">Brief input</p>
-            <div class="req-chat-composer">
-              <input
-                type="file"
-                id="requirements_attach"
-                class="req-chat-file-input"
-                accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,text/plain"
-                tabindex="-1"
-                aria-hidden="true"
-              />
-              <button
-                type="button"
-                class="req-chat-icon-btn req-chat-plus"
-                id="requirements_attach_btn"
-                aria-label="Attach brief file (PDF, DOCX, TXT, JPG, PNG)"
-                title="Attach brief: PDF, DOCX, TXT, JPG, PNG"
-              >
-                <span class="req-chat-plus-icon" aria-hidden="true">+</span>
-              </button>
-              <textarea
-                id="requirements_text"
-                class="req-chat-textarea"
-                rows="1"
-                placeholder="Paste rubric or brief — or attach PDF, DOCX, TXT, JPG, PNG…"
-                autocomplete="off"
-              ></textarea>
-              <button
-                type="button"
-                class="req-chat-icon-btn req-chat-send"
-                id="analyze_requirements_btn"
-                aria-label="Auto Setup Format from brief"
-                title="Auto Setup Format"
-              >
-                <svg class="req-chat-send-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <path
-                    d="M12 5v12M12 5l4.5 4.5M12 5L7.5 9.5"
-                    stroke="currentColor"
-                    stroke-width="2.2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+        <div class="home-doc-brief-row">
+          <div class="home-column home-brief-column">
+            <section class="card home-zone-card home-brief-card home-input-card" aria-labelledby="brief-label">
+              <div class="home-unified-top" data-home-brief-card>
+                <div class="home-zone-head">
+                  <h2 class="card-title" id="brief-label">Requirements</h2>
+                </div>
+                <p class="upload-zone-sr-label" id="brief-input-label">Brief input</p>
+                <div class="home-doc-toolbar home-brief-toolbar">
+                  <div class="home-doc-segment home-brief-segment" role="tablist" aria-label="Requirements input mode" data-home-brief-segment>
+                    <span class="home-doc-segment-thumb" aria-hidden="true"></span>
+                    <button
+                      type="button"
+                      class="home-doc-segment-btn is-active"
+                      role="tab"
+                      aria-selected="true"
+                      data-home-brief-source="paste"
+                    >
+                      Paste
+                    </button>
+                    <button
+                      type="button"
+                      class="home-doc-segment-btn"
+                      role="tab"
+                      aria-selected="false"
+                      data-home-brief-source="upload"
+                      id="requirements_attach_btn"
+                      aria-label="Upload brief file (PDF, DOCX, TXT, JPG, PNG)"
+                      title="Upload brief: PDF, DOCX, TXT, JPG, PNG"
+                    >
+                      <svg class="home-doc-upload-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <path d="M17 8l-5-5-5 5" />
+                        <path d="M12 3v12" />
+                      </svg>
+                      Upload DOC
+                    </button>
+                  </div>
+                  <input
+                    type="file"
+                    id="requirements_attach"
+                    class="req-chat-file-input"
+                    accept=".pdf,.docx,.txt,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/jpeg,image/png,text/plain"
+                    tabindex="-1"
+                    aria-hidden="true"
                   />
-                </svg>
-              </button>
-            </div>
-            <p id="requirements_status" class="req-chat-status req-status" role="status"></p>
-          </div>
-        </section>
+                </div>
+                <div class="home-doc-panel home-brief-panel" data-home-brief-panel="paste">
+                  <label class="field home-brief-paste">
+                    <textarea
+                      id="requirements_text"
+                      rows="8"
+                      placeholder="Paste your requirements"
+                      autocomplete="off"
+                    ></textarea>
+                  </label>
+                </div>
+                <p id="requirements_status" class="req-chat-status req-status" role="status"></p>
+              </div>
+            </section>
 
-        <section class="card settings-section text-settings-card" aria-labelledby="text-settings">
-          <h2 class="card-title" id="text-settings">Text</h2>
-          <input type="hidden" id="format_style" value="harvard" />
-          <div class="field text-preset-field" role="group" aria-label="Academic style preset">
-            <span class="label">Academic preset</span>
-            <div class="preset-row preset-row--text">
-              <button type="button" class="preset-chip" data-preset="harvard">Harvard</button>
-              <button type="button" class="preset-chip" data-preset="apa">APA</button>
-              <button type="button" class="preset-chip" data-preset="mla">MLA</button>
-              <button type="button" class="preset-chip preset-chip--ghost" data-preset="custom">Custom</button>
-            </div>
-          </div>
-          <div class="field-row two">
-            <label class="field">
-              <span class="label">Font</span>
-              <select id="font_family">
-                <option value="Times New Roman">Times New Roman</option>
-                <option value="Arial">Arial</option>
-                <option value="Calibri">Calibri</option>
-                <option value="Cambria">Cambria</option>
-                <option value="Georgia">Georgia</option>
-                <option value="Verdana">Verdana</option>
-                <option value="Tahoma">Tahoma</option>
-              </select>
-            </label>
-            <label class="field">
-              <span class="label">Size (pt)</span>
-              <select id="font_size">
-                <option value="10">10</option>
-                <option value="11">11</option>
-                <option value="12" selected>12</option>
-                <option value="13">13</option>
-                <option value="14">14</option>
-                <option value="16">16</option>
-                <option value="18">18</option>
-                <option value="20">20</option>
-              </select>
-            </label>
-          </div>
-          <div class="field-row two">
-            <label class="field">
-              <span class="label">Line spacing</span>
-              <select id="line_spacing">
-                <option value="1.0">1.0</option>
-                <option value="1.15">1.15</option>
-                <option value="1.5" selected>1.5</option>
-                <option value="2.0">2.0</option>
-              </select>
-            </label>
-            <label class="field">
-              <span class="label">Alignment</span>
-              <select id="alignment">
-                <option value="left">Left</option>
-                <option value="justify">Justify</option>
-              </select>
-            </label>
-          </div>
-          <fieldset class="field toggles">
-            <legend class="label">Headings</legend>
-            <label class="check">
-              <input type="checkbox" id="auto_headings" checked />
-              <span>Auto-detect headings → Word <strong>Heading 1–3</strong> styles</span>
-            </label>
-            <label class="check">
-              <input type="checkbox" id="heading_all_caps" />
-              <span>Make detected headings <strong>ALL CAPS</strong></span>
-            </label>
-          </fieldset>
-          <label class="check">
-            <input type="checkbox" id="first_line_indent" />
-            <span>First-line indent (0.5″) on body paragraphs</span>
-          </label>
-        </section>
+            <details class="card settings-section settings-accordion home-accordion-card text-settings-card" aria-labelledby="text-settings">
+              <summary class="settings-summary" id="text-settings">
+                <span class="settings-summary-title">Text</span>
+                <span class="settings-summary-hint">Font, spacing, presets</span>
+              </summary>
+              <div class="settings-body">
+                <input type="hidden" id="format_style" value="harvard" />
+                <div class="field text-preset-field" role="group" aria-label="Academic style preset">
+                  <span class="label">Academic preset</span>
+                  <div class="preset-row preset-row--text">
+                    <button type="button" class="preset-chip" data-preset="harvard">Harvard</button>
+                    <button type="button" class="preset-chip" data-preset="apa">APA</button>
+                    <button type="button" class="preset-chip" data-preset="mla">MLA</button>
+                    <button type="button" class="preset-chip preset-chip--ghost" data-preset="custom">Custom</button>
+                  </div>
+                </div>
+                <div class="field-row two">
+                  <label class="field">
+                    <span class="label">Font</span>
+                    <select id="font_family">
+                      <option value="Times New Roman">Times New Roman</option>
+                      <option value="Arial">Arial</option>
+                      <option value="Calibri">Calibri</option>
+                      <option value="Cambria">Cambria</option>
+                      <option value="Georgia">Georgia</option>
+                      <option value="Verdana">Verdana</option>
+                      <option value="Tahoma">Tahoma</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="label">Size (pt)</span>
+                    <select id="font_size">
+                      <option value="10">10</option>
+                      <option value="11">11</option>
+                      <option value="12" selected>12</option>
+                      <option value="13">13</option>
+                      <option value="14">14</option>
+                      <option value="16">16</option>
+                      <option value="18">18</option>
+                      <option value="20">20</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="field-row two">
+                  <label class="field">
+                    <span class="label">Line spacing</span>
+                    <select id="line_spacing">
+                      <option value="1.0">1.0</option>
+                      <option value="1.15">1.15</option>
+                      <option value="1.5" selected>1.5</option>
+                      <option value="2.0">2.0</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="label">Alignment</span>
+                    <select id="alignment">
+                      <option value="left">Left</option>
+                      <option value="justify">Justify</option>
+                    </select>
+                  </label>
+                </div>
+                <fieldset class="field toggles">
+                  <legend class="label">Headings</legend>
+                  <label class="check">
+                    <input type="checkbox" id="auto_headings" checked />
+                    <span>Auto-detect headings → Word <strong>Heading 1–3</strong> styles</span>
+                  </label>
+                  <label class="check">
+                    <input type="checkbox" id="heading_all_caps" />
+                    <span>Make detected headings <strong>ALL CAPS</strong></span>
+                  </label>
+                </fieldset>
+                <label class="check">
+                  <input type="checkbox" id="first_line_indent" />
+                  <span>First-line indent (0.5″) on body paragraphs</span>
+                </label>
+              </div>
+            </details>
 
-        <section class="card settings-section home-doc-type-card" aria-labelledby="document-type-settings">
-          <h2 class="card-title" id="document-type-settings">Document Type</h2>
-          <label class="field">
-            <span class="label">Preset</span>
-            <select id="document_type">
-              <option value="">Choose document type…</option>
-              <option value="essay">Essay</option>
-              <option value="report">Report</option>
-              <option value="literature_review">Literature Review</option>
-              <option value="research_paper">Research Paper</option>
-              <option value="case_study">Case Study</option>
-              <option value="reflection">Reflection</option>
-              <option value="dissertation">Dissertation</option>
-              <option value="presentation">Presentation</option>
-            </select>
-          </label>
-          <p class="card-hint">
-            Choosing a document type applies recommended formatting presets. You can still edit any setting manually.
-          </p>
-        </section>
-        </div>
-
-        <section class="card home-zone-card home-document-card" aria-labelledby="document-label">
-          <div class="home-zone-head">
-            <h2 class="card-title" id="document-label">Document</h2>
-            <p class="upload-zone-lede">Upload or paste the essay, report, or assignment you want to format.</p>
-            <p class="upload-zone-formats"><span class="upload-zone-formats-label">Supported:</span> DOCX, PDF</p>
-          </div>
-          <label class="field">
-            <span class="label">Upload file</span>
-            <input
-              type="file"
-              id="file"
-              accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
-            />
-          </label>
-          <label class="field home-document-paste">
-            <span class="label">Or paste plain text</span>
-            <textarea
-              id="pasted_text"
-              rows="8"
-              placeholder="Separate paragraphs with a blank line…"
-            ></textarea>
-          </label>
-        </section>
-      </div>
-
-      <div class="grid-main home-format-grid">
-        <div class="settings-stack">
-          <div class="settings-row-two">
-            <details class="card settings-section settings-accordion" aria-labelledby="layout-settings">
+            <details class="card settings-section settings-accordion home-accordion-card" aria-labelledby="layout-settings">
               <summary class="settings-summary" id="layout-settings">
                 <span class="settings-summary-title">Layout</span>
                 <span class="settings-summary-hint">Margins, page numbers, spacing</span>
@@ -235,7 +194,7 @@
               </div>
             </details>
 
-            <details class="card settings-section settings-accordion" aria-labelledby="adv-settings">
+            <details class="card settings-section settings-accordion home-accordion-card" aria-labelledby="adv-settings">
               <summary class="settings-summary" id="adv-settings">
                 <span class="settings-summary-title">Advanced</span>
                 <span class="settings-summary-hint">Cleanup and special rules</span>
@@ -281,86 +240,198 @@
             </details>
           </div>
 
-          <details class="card settings-accordion home-cover-card">
-            <summary class="settings-summary">
-              <span class="settings-summary-title">Cover Page (optional)</span>
-              <span class="settings-summary-hint">Add basic submission details</span>
-            </summary>
-            <div class="settings-body">
-              <label class="check cover-toggle">
-                <input type="checkbox" id="include_cover_page" />
-                <span>Include title page in formatted document</span>
-              </label>
-              <label class="field">
-                <span class="label">Assignment Title</span>
-                <input type="text" id="cover_assignment_title" placeholder="Essay title or assignment name" />
-              </label>
-              <div class="field-row two">
-                <label class="field">
-                  <span class="label">Student Name</span>
-                  <input type="text" id="cover_student_name" placeholder="Jane Smith" />
-                </label>
-                <label class="field">
-                  <span class="label">Student ID</span>
-                  <input type="text" id="cover_student_id" placeholder="202400123" />
-                </label>
-              </div>
-              <div class="field-row two">
-                <label class="field">
-                  <span class="label">University</span>
-                  <input type="text" id="cover_university" placeholder="University Name" />
-                </label>
-                <label class="field">
-                  <span class="label">Module</span>
-                  <input type="text" id="cover_module" placeholder="Module title/code" />
-                </label>
-              </div>
-              <div class="field-row two">
-                <label class="field">
-                  <span class="label">Lecturer</span>
-                  <input type="text" id="cover_lecturer" placeholder="Dr. Brown" />
-                </label>
-                <label class="field">
-                  <span class="label">Submission Date</span>
-                  <input type="date" id="cover_submission_date" />
-                </label>
-              </div>
-            </div>
-          </details>
+          <div class="home-column home-document-column">
+            <section class="card home-zone-card home-document-card home-input-card" aria-labelledby="document-label" data-home-doc-card>
+              <div class="home-unified-top">
+                <div class="home-zone-head">
+                  <h2 class="card-title" id="document-label">Text</h2>
+                </div>
 
-          <details class="card settings-accordion home-references-card" open>
-            <summary class="settings-summary">
-              <span class="settings-summary-title">References</span>
-              <span class="settings-summary-hint">One unified citation generation flow</span>
-            </summary>
-            <div class="settings-body">
-              <fieldset class="field toggles">
-                <legend class="label">Reference source</legend>
-                <label class="check"><input type="radio" name="reference_source" value="none" checked /> <span>None</span></label>
-                <label class="check"><input type="radio" name="reference_source" value="auto_ai" /> <span>Generate Automatically (AI)</span></label>
-                <label class="check"><input type="radio" name="reference_source" value="doi" /> <span>Import from DOI</span></label>
-                <label class="check"><input type="radio" name="reference_source" value="url" /> <span>Import from URL</span></label>
-                <label class="check"><input type="radio" name="reference_source" value="scholar" /> <span>Import from Google Scholar</span></label>
-                <label class="check"><input type="radio" name="reference_source" value="paste" /> <span>Paste Existing Bibliography</span></label>
-              </fieldset>
-              <div class="field-row two">
-                <label class="field">
-                  <span class="label">Citation style</span>
-                  <select id="citation_style_format">
-                    <option value="APA">APA 7</option>
-                    <option value="Harvard">Harvard</option>
-                    <option value="MLA">MLA</option>
-                    <option value="Chicago">Chicago</option>
-                    <option value="IEEE">IEEE</option>
-                  </select>
-                </label>
-              </div>
-              <button type="button" class="btn-secondary" id="generate_citations_btn">Generate Citations</button>
-              <p id="references_status" class="format-status status" role="status" aria-live="polite"></p>
-              <ul id="references_preview_list" class="ref-list hidden" aria-label="Generated references"></ul>
-            </div>
-          </details>
+                <div class="home-doc-toolbar">
+                  <div class="home-doc-segment" role="tablist" aria-label="Document input mode" data-home-doc-segment>
+                    <span class="home-doc-segment-thumb" aria-hidden="true"></span>
+                    <button
+                      type="button"
+                      class="home-doc-segment-btn is-active"
+                      role="tab"
+                      aria-selected="true"
+                      data-home-doc-source="paste"
+                    >
+                      Paste
+                    </button>
+                    <button
+                      type="button"
+                      class="home-doc-segment-btn"
+                      role="tab"
+                      aria-selected="false"
+                      data-home-doc-source="upload"
+                    >
+                      <svg class="home-doc-upload-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <path d="M17 8l-5-5-5 5" />
+                        <path d="M12 3v12" />
+                      </svg>
+                      Upload DOC
+                    </button>
+                  </div>
 
+                  <input
+                    type="file"
+                    id="file"
+                    hidden
+                    accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+                  />
+                </div>
+
+                <div class="home-doc-panel" data-home-doc-panel="paste">
+                  <label class="field home-document-paste">
+                    <textarea
+                      id="pasted_text"
+                      rows="8"
+                      placeholder="Paste your text here"
+                    ></textarea>
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <details class="card settings-section settings-accordion home-accordion-card home-cover-card" aria-labelledby="cover-settings">
+              <summary class="settings-summary" id="cover-settings">
+                <span class="settings-summary-title">Cover Page (optional)</span>
+                <span class="settings-summary-hint">Add basic submission details</span>
+              </summary>
+              <div class="settings-body">
+                <label class="check cover-toggle">
+                  <input type="checkbox" id="include_cover_page" />
+                  <span>Include title page in formatted document</span>
+                </label>
+                <label class="field">
+                  <span class="label">Assignment Title</span>
+                  <input type="text" id="cover_assignment_title" placeholder="Essay title or assignment name" />
+                </label>
+                <div class="field-row two">
+                  <label class="field">
+                    <span class="label">Student Name</span>
+                    <input type="text" id="cover_student_name" placeholder="Jane Smith" />
+                  </label>
+                  <label class="field">
+                    <span class="label">Student ID</span>
+                    <input type="text" id="cover_student_id" placeholder="202400123" />
+                  </label>
+                </div>
+                <div class="field-row two">
+                  <label class="field">
+                    <span class="label">University</span>
+                    <input type="text" id="cover_university" placeholder="University Name" />
+                  </label>
+                  <label class="field">
+                    <span class="label">Module</span>
+                    <input type="text" id="cover_module" placeholder="Module title/code" />
+                  </label>
+                </div>
+                <div class="field-row two">
+                  <label class="field">
+                    <span class="label">Lecturer</span>
+                    <input type="text" id="cover_lecturer" placeholder="Dr. Brown" />
+                  </label>
+                  <label class="field">
+                    <span class="label">Submission Date</span>
+                    <input type="date" id="cover_submission_date" />
+                  </label>
+                </div>
+              </div>
+            </details>
+
+            <details class="card settings-section settings-accordion home-accordion-card home-references-card" aria-labelledby="references-settings">
+              <summary class="settings-summary" id="references-settings">
+                <span class="settings-summary-title">References</span>
+                <span class="settings-summary-hint">Bibliography · up to 20</span>
+              </summary>
+              <div class="settings-body">
+                <fieldset class="field toggles">
+                  <legend class="label">Reference source</legend>
+                  <label class="check"><input type="radio" name="reference_source" value="none" checked /> <span>None</span></label>
+                  <label class="check"><input type="radio" name="reference_source" value="auto_ai" /> <span>Generate Automatically (AI)</span></label>
+                  <label class="check"><input type="radio" name="reference_source" value="doi" /> <span>Import from DOI</span></label>
+                  <label class="check"><input type="radio" name="reference_source" value="url" /> <span>Import from URL</span></label>
+                  <label class="check"><input type="radio" name="reference_source" value="scholar" /> <span>Import from Google Scholar</span></label>
+                  <label class="check"><input type="radio" name="reference_source" value="paste" /> <span>Paste Existing Bibliography</span></label>
+                </fieldset>
+                <div class="field-row two">
+                  <label class="field">
+                    <span class="label">Citation style</span>
+                    <select id="citation_style_format" data-citation-style-select>
+                      <option value="APA">APA 7</option>
+                      <option value="Harvard">Harvard</option>
+                      <option value="MLA">MLA</option>
+                      <option value="Chicago">Chicago</option>
+                      <option value="IEEE">IEEE</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="label">References to add</span>
+                    <input
+                      type="number"
+                      id="references_count"
+                      min="0"
+                      max="20"
+                      step="1"
+                      value="3"
+                      inputmode="numeric"
+                      aria-describedby="references_count_hint"
+                    />
+                    <span id="references_count_hint" class="field-hint">0–20 bibliography entries</span>
+                  </label>
+                </div>
+                <button type="button" class="btn-secondary" id="generate_references_btn">Generate References</button>
+                <p id="references_status" class="format-status status" role="status" aria-live="polite"></p>
+                <ul id="references_preview_list" class="ref-list hidden" aria-label="Generated references"></ul>
+              </div>
+            </details>
+
+            <details class="card settings-section settings-accordion home-accordion-card home-citations-card" aria-labelledby="citations-settings">
+              <summary class="settings-summary" id="citations-settings">
+                <span class="settings-summary-title">Citations</span>
+                <span class="settings-summary-hint">In-text · up to 20</span>
+              </summary>
+              <div class="settings-body">
+                <div class="field-row two">
+                  <label class="field">
+                    <span class="label">Citation style</span>
+                    <select id="citation_style_citations" data-citation-style-select>
+                      <option value="APA">APA 7</option>
+                      <option value="Harvard">Harvard</option>
+                      <option value="MLA">MLA</option>
+                      <option value="Chicago">Chicago</option>
+                      <option value="IEEE">IEEE</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span class="label">Citations to add</span>
+                    <input
+                      type="number"
+                      id="citations_count"
+                      min="0"
+                      max="20"
+                      step="1"
+                      value="3"
+                      inputmode="numeric"
+                      aria-describedby="citations_count_hint"
+                    />
+                    <span id="citations_count_hint" class="field-hint">0–20 in-text citations</span>
+                  </label>
+                </div>
+                <button type="button" class="btn-secondary" id="generate_citations_btn">Generate Citations</button>
+                <p id="citations_status" class="format-status status" role="status" aria-live="polite"></p>
+                <ul id="citations_preview_list" class="ref-list hidden" aria-label="Generated in-text citations"></ul>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-main home-format-grid">
+        <div class="settings-stack home-format-actions">
           <button type="button" class="cta" id="format_btn">Format document</button>
           <p id="format_status" class="format-status status" role="status" aria-live="polite"></p>
           <div id="home_workspace_cta" class="home-workspace-cta is-hidden" aria-live="polite">

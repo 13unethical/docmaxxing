@@ -2,96 +2,80 @@
 {% block title %}Pricing — DocMaxxing{% endblock %}
 {% block page_header %}
       <header class="top pricing-hero">
-        <p class="brand">Pricing</p>
-        <h1>Coins when you need them</h1>
+        <h1>Simple credit pricing</h1>
         <p class="lede">
-          Format on the home page stays simple. Workspace tools (Humanize, Cite, Academic Check) use coins —
-          pay only for what you run, with clear costs on every button.
+          Buy credits once. Use them for Humanize, Turnitin, citations, and more —
+          only when you need them.
         </p>
       </header>
 {% endblock %}
 {% block content %}
-      <section class="pricing-grid" aria-label="Coin packages">
-        <article class="card pricing-card">
-          <h2 class="pricing-name">Starter</h2>
-          <p class="pricing-price"><span>$5</span></p>
-          <p class="pricing-coins">500 coins</p>
-          <ul class="pricing-features">
-            <li>~50 Humanize runs</li>
-            <li>~50 AI Detect checks</li>
-            <li>Best for one short assignment</li>
-          </ul>
-          <button type="button" class="btn-secondary" data-topup="starter">Get Starter</button>
+      <section class="pricing-plans" aria-label="Credit packages" data-pricing-grid>
+        <article class="pricing-plan" data-plan="starter">
+          <h2 class="pricing-plan-title">Starter</h2>
+          <p class="pricing-plan-price"><span class="pricing-plan-amount">$9</span></p>
+          <p class="pricing-plan-credits">1,000 Credits</p>
+          <button
+            type="button"
+            class="pricing-plan-btn"
+            data-topup="credits_1000"
+          >
+            Buy Credits
+          </button>
         </article>
 
-        <article class="card pricing-card pricing-card--featured">
-          <p class="pricing-badge">Most students</p>
-          <h2 class="pricing-name">Student</h2>
-          <p class="pricing-price"><span>$15</span></p>
-          <p class="pricing-coins">1,500 coins</p>
-          <ul class="pricing-features">
-            <li>~150 Humanize runs</li>
-            <li>Cites + AI helpers through the term</li>
-            <li>Best for a busy term</li>
-          </ul>
-          <button type="button" class="cta" data-topup="student">Get Student</button>
+        <article class="pricing-plan pricing-plan--featured" data-plan="pro">
+          <p class="pricing-plan-badge">Most Popular</p>
+          <h2 class="pricing-plan-title">Pro</h2>
+          <p class="pricing-plan-price"><span class="pricing-plan-amount">$20</span></p>
+          <p class="pricing-plan-credits">2,500 Credits</p>
+          <button
+            type="button"
+            class="pricing-plan-btn pricing-plan-btn--primary"
+            data-topup="credits_2500"
+          >
+            Buy Credits
+          </button>
         </article>
 
-        <article class="card pricing-card">
-          <h2 class="pricing-name">Cram</h2>
-          <p class="pricing-price"><span>$29</span></p>
-          <p class="pricing-coins">2,900 coins</p>
-          <ul class="pricing-features">
-            <li>Heavy deadline week</li>
-            <li>Many Humanize + Check cycles</li>
-            <li>Best value per coin</li>
+        <article class="pricing-plan pricing-plan--custom" data-plan="custom">
+          <h2 class="pricing-plan-title">Need More?</h2>
+          <p class="pricing-plan-lead">Need more than 2,500 credits?</p>
+          <p class="pricing-plan-copy">
+            We offer custom credit packages for power users, universities and teams.
+          </p>
+          <ul class="pricing-plan-benefits">
+            <li>Any credit amount</li>
+            <li>Volume discounts</li>
+            <li>Team purchases</li>
+            <li>Priority support</li>
           </ul>
-          <button type="button" class="btn-secondary" data-topup="cram">Get Cram</button>
+          <a
+            class="pricing-plan-btn pricing-plan-btn--ghost"
+            href="https://wa.me/998990779909"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Contact Sales
+          </a>
         </article>
       </section>
 
-      <section class="card pricing-explainer">
-        <h2 class="card-title">What coins pay for</h2>
-        <table class="pricing-table">
-          <thead>
-            <tr>
-              <th>Action</th>
-              <th>Typical cost</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Home Format &amp; Academic Check</td>
-              <td>Free — no account needed</td>
-            </tr>
-            <tr>
-              <td>Humanize marked selections</td>
-              <td>10 coins / call</td>
-            </tr>
-            <tr>
-              <td>AI detect in editor</td>
-              <td>10 coins</td>
-            </tr>
-            <tr>
-              <td>Citation search</td>
-              <td>2 coins</td>
-            </tr>
-            <tr>
-              <td>Turnitin similarity check</td>
-              <td>25 coins</td>
-            </tr>
-            <tr>
-              <td>Failed paid action</td>
-              <td>Refunded automatically</td>
-            </tr>
-          </tbody>
-        </table>
+      <p class="pricing-status" data-topup-status role="status" aria-live="polite"></p>
+
+      <section class="pricing-explainer" aria-label="What credits pay for">
+        <h2 class="pricing-explainer-title">What credits pay for</h2>
+        <dl class="pricing-costs">
+          <div><dt>Home Format &amp; Academic Check</dt><dd>Free</dd></div>
+          <div><dt>Humanize marked selections</dt><dd>10 credits / call</dd></div>
+          <div><dt>AI detect in editor</dt><dd>10 credits</dd></div>
+          <div><dt>Citation search</dt><dd>2 credits</dd></div>
+          <div><dt>Turnitin similarity check</dt><dd>300 credits</dd></div>
+          <div><dt>Failed paid action</dt><dd>Refunded</dd></div>
+        </dl>
         <p class="pricing-note">
-          New accounts get <strong>{{ welcome_bonus }} welcome coins</strong> to try Workspace before buying.
-          No hard sell on the Format page — Workspace is opt-in when you need deeper help.
+          New accounts get <strong>{{ welcome_bonus }} welcome credits</strong> to try Workspace before buying.
         </p>
-        <p class="pricing-status" data-topup-status role="status" aria-live="polite"></p>
-        <a class="cta" href="{{ url_for('workspace') }}">Open Workspace</a>
       </section>
 {% endblock %}
 {% block scripts %}

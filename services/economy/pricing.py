@@ -23,6 +23,10 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_str(name: str, default: str = "") -> str:
+    return (os.environ.get(name) or default).strip()
+
+
 # Coins granted to a brand-new account.
 WELCOME_BONUS: int = _env_int("COINS_WELCOME_BONUS", 50)
 
@@ -35,7 +39,7 @@ FEATURE_COSTS: dict[str, int] = {
     "detect": _env_int("COST_DETECT", 10),
     "check": _env_int("COST_CHECK", 20),
     "cite": _env_int("COST_CITE", 2),
-    "turnitin": _env_int("COST_TURNITIN", 25),
+    "turnitin": _env_int("COST_TURNITIN", 300),
 }
 
 # Human-readable labels for ledger/UI.
@@ -51,11 +55,25 @@ FEATURE_LABELS: dict[str, str] = {
     "admin_adjustment": "Admin adjustment",
 }
 
-# Mock top-up packages (real checkout wired later). coins == usd * 100.
+# Top-up packages — Pricing UI + Paddle price_id → credits (Starter / Pro only).
 TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
-    "starter": {"id": "starter", "name": "Starter", "usd": 5, "coins": 500},
-    "student": {"id": "student", "name": "Student", "usd": 15, "coins": 1500},
-    "cram": {"id": "cram", "name": "Cram", "usd": 29, "coins": 2900},
+    "credits_1000": {
+        "id": "credits_1000",
+        "name": "Starter",
+        "usd": 9.0,
+        "coins": 1000,
+        "featured": False,
+        "price_id": _env_str("PADDLE_PRICE_CREDITS_1000"),
+    },
+    "credits_2500": {
+        "id": "credits_2500",
+        "name": "Pro",
+        "usd": 20.0,
+        "coins": 2500,
+        "featured": True,
+        "badge": "MOST POPULAR",
+        "price_id": _env_str("PADDLE_PRICE_CREDITS_2500"),
+    },
 }
 
 

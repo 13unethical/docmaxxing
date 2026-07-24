@@ -109,15 +109,12 @@
       (typeof balance === "number" ? balance : 0) +
       "</span></a>" +
       '<div class="nav-user-menu" data-user-menu>' +
-      '<button type="button" class="nav-user-trigger" data-user-menu-toggle aria-expanded="false" aria-haspopup="true">' +
+      '<button type="button" class="nav-user-trigger" data-user-menu-toggle aria-label="' +
+      escapeHtml(name) +
+      '" aria-expanded="false" aria-haspopup="true">' +
       '<span class="nav-user-avatar" aria-hidden="true">' +
       escapeHtml(initial) +
       "</span>" +
-      '<span class="nav-user-meta"><span class="nav-user-name">' +
-      escapeHtml(name) +
-      '</span><span class="nav-user-email">' +
-      escapeHtml(email) +
-      "</span></span>" +
       '<svg class="nav-user-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
       '<path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
       "</svg></button>" +
@@ -131,6 +128,16 @@
       '</span><span class="nav-user-dropdown-email">' +
       escapeHtml(email) +
       "</span></div></div>" +
+      '<div class="nav-theme-switch" role="group" aria-label="Color theme">' +
+      '<button type="button" class="nav-theme-option" data-theme-set="light" aria-pressed="true" aria-label="Light mode">' +
+      '<svg class="theme-toggle-icon theme-toggle-icon--sun" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+      '<circle cx="12" cy="12" r="3.75" stroke="currentColor" stroke-width="1.6" />' +
+      '<path d="M12 2.75v2.1M12 19.15v2.1M2.75 12h2.1M19.15 12h2.1M5.22 5.22l1.48 1.48M17.3 17.3l1.48 1.48M5.22 18.78l1.48-1.48M17.3 6.7l1.48-1.48" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' +
+      "</svg></button>" +
+      '<button type="button" class="nav-theme-option" data-theme-set="dark" aria-pressed="false" aria-label="Dark mode">' +
+      '<svg class="theme-toggle-icon theme-toggle-icon--moon" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+      '<path d="M20.5 14.2A8.2 8.2 0 1 1 9.8 3.5 6.7 6.7 0 0 0 20.5 14.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' +
+      "</svg></button></div>" +
       '<div class="nav-user-dropdown-links">' +
       '<a href="/account" class="nav-user-dropdown-link">' +
       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
@@ -149,6 +156,9 @@
       '<path d="M14 16l4-4-4-4M18 12H10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
       "</svg>Log out</button></form>" +
       "</div></div></div>";
+    if (typeof global.DMThemeApply === "function") {
+      global.DMThemeApply();
+    }
   }
 
   function escapeHtml(s) {

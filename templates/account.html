@@ -70,6 +70,31 @@
         <button type="submit" class="acct-btn">Update password</button>
       </form>
     </section>
+
+    <section class="acct-card acct-card--wide">
+      <h2 class="acct-card-title">Legal</h2>
+      <p class="acct-legal-intro">
+        Policy pages for checkout (Paddle). Paste these URLs into Terms / Privacy / Refund fields:
+      </p>
+      <ul class="acct-legal-links">
+        <li>
+          <span>Terms of service</span>
+          <a href="{{ url_for('legal_terms', _external=True) }}">{{ url_for('legal_terms', _external=True) }}</a>
+        </li>
+        <li>
+          <span>Privacy policy</span>
+          <a href="{{ url_for('legal_privacy', _external=True) }}">{{ url_for('legal_privacy', _external=True) }}</a>
+        </li>
+        <li>
+          <span>Refund policy</span>
+          <a href="{{ url_for('legal_refund', _external=True) }}">{{ url_for('legal_refund', _external=True) }}</a>
+        </li>
+      </ul>
+      <p class="acct-legal-note">
+        All three sections also live on one page:
+        <a href="{{ url_for('legal') }}">{{ url_for('legal', _external=True) }}</a>
+      </p>
+    </section>
   </div>
 </section>
 {% endblock %}

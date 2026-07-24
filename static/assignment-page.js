@@ -46,8 +46,7 @@
   var MAX_DETECTION_ATTEMPTS = 1;
 
   var FILE_KIND_LABELS = {
-    brief: "Assignment brief",
-    rubric: "Rubric",
+    brief: "Requirements",
     extra: "Additional file",
   };
 
@@ -159,7 +158,7 @@
   }
 
   function staleSessionMessage() {
-    return "Previous session expired. Upload your brief and click Analyze & get price.";
+    return "Previous session expired. Upload your requirements and click Analyze & get price.";
   }
 
   function responseMeansProjectMissing(res, payload) {
@@ -484,22 +483,6 @@
       }
     }
 
-    var note = $("[data-asg-summary-note]");
-    if (note) {
-      if (state.deliveryPackage) {
-        note.textContent = "Your assignment is ready to download.";
-      } else if (state.autoRunning) {
-        note.textContent = "";
-      } else if (state.paymentConfirmed) {
-        note.textContent = "Payment confirmed — click Continue to start generation.";
-      } else if (state.price != null) {
-        note.textContent = "Confirm to begin writing.";
-      } else if (state.requirement) {
-        note.textContent = "Click Analyze & get price to calculate your quote.";
-      } else {
-        note.textContent = "Upload your brief to see the price.";
-      }
-    }
     updateSummaryPayButton();
   }
 
@@ -631,10 +614,8 @@
   function collectUploadFiles() {
     var files = [];
     var brief = $("[data-asg-brief]");
-    var rubric = $("[data-asg-rubric]");
     var extra = $("[data-asg-extra]");
     if (brief && brief.files && brief.files[0]) files.push({ kind: "brief", file: brief.files[0] });
-    if (rubric && rubric.files && rubric.files[0]) files.push({ kind: "rubric", file: rubric.files[0] });
     if (extra && extra.files) {
       Array.prototype.forEach.call(extra.files, function (f) { files.push({ kind: "extra", file: f }); });
     }
@@ -647,15 +628,15 @@
   }
 
   function renderFiles(entries) {
+    var section = $("[data-asg-files-section]");
     var list = $("[data-asg-files]");
-    var empty = $("[data-asg-files-empty]");
     if (!list) return;
     list.innerHTML = "";
     if (!entries.length) {
-      show(empty, true);
+      show(section, false);
       return;
     }
-    show(empty, false);
+    show(section, true);
     entries.forEach(function (entry) {
       var li = document.createElement("li");
       var kind = entry.kind || "extra";
@@ -717,10 +698,9 @@
     var note = noteEl ? noteEl.value : "";
     files.forEach(function (entry) {
       if (entry.kind === "brief") form.append("assignment_brief", entry.file, entry.file.name);
-      else if (entry.kind === "rubric") form.append("rubric", entry.file, entry.file.name);
       else form.append("additional_files", entry.file, entry.file.name);
     });
-    if (!files.length) throw new Error("Please upload at least an assignment brief.");
+    if (!files.length) throw new Error("Please upload at least your requirements.");
     if (note) form.append("note", note);
     var deadline = parseDeadline();
     if (deadline) form.append("deadline", deadline);
@@ -760,9 +740,9 @@
       set("[data-asg-analysis-status]", "Uploading files…");
       await uploadProject();
     } else if (!pid()) {
-      throw new Error("Please upload at least an assignment brief.");
+      throw new Error("Please upload at least your requirements.");
     }
-    set("[data-asg-analysis-status]", "Analyzing your brief…");
+    set("[data-asg-analysis-status]", "Analyzing your requirements…");
     await analyzeRequirements();
     set("[data-asg-analysis-status]", "Calculating price…");
     await calculatePrice();
@@ -1335,7 +1315,7 @@
   }
 
   function wire() {
-    var inputs = [$("[data-asg-brief]"), $("[data-asg-rubric]"), $("[data-asg-extra]")].filter(Boolean);
+    var inputs = [$("[data-asg-brief]"), $("[data-asg-extra]")].filter(Boolean);
     inputs.forEach(function (input) {
       input.addEventListener("change", function () {
         renderFiles(collectUploadFiles());

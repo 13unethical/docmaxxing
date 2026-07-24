@@ -1,29 +1,98 @@
 /**
- * Pricing page — mock top-up. Real checkout wires in later; for now clicking a
- * package instantly credits coins via POST /api/economy/topup.
+ * Pricing page — Starter / Pro checkout via Paddle.
+ * Package ids come from the page; availability from GET /api/economy/packages.
  */
 (function () {
   "use strict";
 
   var statusEl = document.querySelector("[data-topup-status]");
-  var buttons = document.querySelectorAll("[data-topup]");
-  if (!buttons.length) return;
+  var buyButtons = document.querySelectorAll("[data-topup]");
+  if (!buyButtons.length) return;
+
+  var paddleReady = null;
 
   function setStatus(msg, isError) {
     if (!statusEl) return;
-    statusEl.textContent = msg;
+    statusEl.textContent = msg || "";
     statusEl.classList.toggle("is-error", !!isError);
   }
 
-  Array.prototype.forEach.call(buttons, function (btn) {
+  function loadPaddleJs(clientToken, environment) {
+    if (paddleReady) return paddleReady;
+    paddleReady = new Promise(function (resolve, reject) {
+      if (window.Paddle && window.Paddle.Initialized) {
+        resolve(window.Paddle);
+        return;
+      }
+      var script = document.createElement("script");
+      script.src = "https://cdn.paddle.com/paddle/v2/paddle.js";
+      script.async = true;
+      script.onload = function () {
+        try {
+          if (environment === "sandbox") {
+            window.Paddle.Environment.set("sandbox");
+          }
+          window.Paddle.Initialize({ token: clientToken });
+          resolve(window.Paddle);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      script.onerror = function () {
+        reject(new Error("Failed to load Paddle.js"));
+      };
+      document.head.appendChild(script);
+    });
+    return paddleReady;
+  }
+
+  function openCheckout(data) {
+    var txnId = data.transaction_id;
+    var url = data.checkout_url;
+    var token = data.client_token;
+    var env = data.environment || "sandbox";
+
+    if (token && txnId && window.Promise) {
+      return loadPaddleJs(token, env)
+        .then(function (Paddle) {
+          Paddle.Checkout.open({ transactionId: txnId });
+          setStatus("Checkout opened. Complete payment in the Paddle window.");
+        })
+        .catch(function () {
+          if (url) {
+            window.location.href = url;
+            return;
+          }
+          setStatus("Could not open checkout. Please try again.", true);
+        });
+    }
+    if (url) {
+      window.location.href = url;
+      return Promise.resolve();
+    }
+    setStatus("Checkout URL missing. Check Paddle configuration.", true);
+    return Promise.resolve();
+  }
+
+  function setButtonAvailable(btn, available) {
+    btn.disabled = !available;
+    if (!available) {
+      btn.title = "This package is not configured in Paddle yet.";
+    } else {
+      btn.removeAttribute("title");
+    }
+  }
+
+  function bindPurchase(btn) {
     btn.addEventListener("click", function () {
       var pkg = btn.getAttribute("data-topup");
+      if (!pkg || btn.disabled) return;
       var original = btn.textContent;
       btn.disabled = true;
-      btn.textContent = "Processing…";
+      btn.textContent = "Opening checkout…";
       setStatus("");
 
-      fetch("/api/economy/topup", {
+      fetch("/api/economy/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({ package: pkg }),
@@ -31,27 +100,49 @@
         .then(function (res) {
           return res
             .json()
-            .catch(function () { return {}; })
-            .then(function (data) { return { status: res.status, ok: res.ok, data: data }; });
+            .catch(function () {
+              return {};
+            })
+            .then(function (data) {
+              return { status: res.status, ok: res.ok, data: data };
+            });
         })
         .then(function (r) {
-          btn.disabled = false;
-          btn.textContent = original;
           if (r.status === 401 || (r.data && r.data.error === "AUTH_REQUIRED")) {
-            setStatus("Please sign in to buy coins.", true);
-            setTimeout(function () { window.location.href = "/login?next=/pricing"; }, 900);
+            btn.disabled = false;
+            btn.textContent = original;
+            setStatus("Please sign in to buy credits.", true);
+            setTimeout(function () {
+              window.location.href = "/login?next=/pricing";
+            }, 900);
             return;
           }
+
+          if (r.status === 503 && r.data && r.data.error === "PADDLE_NOT_CONFIGURED") {
+            btn.disabled = false;
+            btn.textContent = original;
+            setStatus(
+              "Paddle API key is missing. Set PADDLE_API_KEY (and PADDLE_CLIENT_TOKEN) in .env, then restart the server.",
+              true
+            );
+            return;
+          }
+
           if (!r.ok || !r.data || !r.data.success) {
-            setStatus((r.data && r.data.error) || "Top-up failed. Please try again.", true);
+            btn.disabled = false;
+            btn.textContent = original;
+            setStatus(
+              (r.data && (r.data.message || r.data.error)) ||
+                "Checkout failed. Please try again.",
+              true
+            );
             return;
           }
-          if (typeof window.refreshCoinBalance === "function") {
-            window.refreshCoinBalance();
-          }
-          setStatus(
-            "Added " + r.data.coins_added + " coins. New balance: " + r.data.balance + " coins."
-          );
+
+          return openCheckout(r.data).then(function () {
+            btn.disabled = false;
+            btn.textContent = original;
+          });
         })
         .catch(function () {
           btn.disabled = false;
@@ -59,5 +150,38 @@
           setStatus("Network error. Please try again.", true);
         });
     });
+  }
+
+  buyButtons.forEach(function (btn) {
+    bindPurchase(btn);
   });
+
+  fetch("/api/economy/packages", { headers: { Accept: "application/json" } })
+    .then(function (res) {
+      return res
+        .json()
+        .catch(function () {
+          return {};
+        })
+        .then(function (data) {
+          return { ok: res.ok, data: data };
+        });
+    })
+    .then(function (r) {
+      var byId = {};
+      if (r.ok && r.data && Array.isArray(r.data.packages)) {
+        r.data.packages.forEach(function (pkg) {
+          byId[pkg.id] = pkg;
+        });
+      }
+      buyButtons.forEach(function (btn) {
+        var id = btn.getAttribute("data-topup");
+        var pkg = byId[id];
+        var hasPrice = !!(pkg && pkg.price_id && String(pkg.price_id).trim());
+        setButtonAvailable(btn, hasPrice);
+      });
+    })
+    .catch(function () {
+      /* Keep buttons enabled; checkout will surface config errors. */
+    });
 })();

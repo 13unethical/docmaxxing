@@ -11,89 +11,45 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='humanizer.css') }}" />
 
 <div class="hz" data-humanizer-page>
-  <header class="hz-head">
-    <h1 class="hz-title">Humanizer</h1>
-    <p class="hz-subtitle">
-      Transform AI-generated writing into natural academic language while preserving meaning and citations.
-    </p>
-  </header>
-
   <div class="hz-workspace">
-    <!-- ============================ LEFT: ORIGINAL ============================ -->
+    <!-- ============================ INPUT ============================ -->
     <section class="hz-card hz-card--input">
       <div class="hz-card-head">
         <div>
-          <h2 class="hz-card-title">Original Text</h2>
-          <p class="hz-card-sub">Paste AI-generated text or upload a document.</p>
+          <h2 class="hz-card-title">Humanizer</h2>
         </div>
       </div>
 
-      <!-- Segmented control -->
-      <div class="hz-segment" role="tablist" data-hz-segment>
-        <span class="hz-segment-thumb" aria-hidden="true"></span>
-        <button
-          type="button"
-          class="hz-segment-btn is-active"
-          role="tab"
-          aria-selected="true"
-          data-hz-source="paste"
-          data-hz-paste-focus
-        >
-          Paste Text
-        </button>
-        <button
-          type="button"
-          class="hz-segment-btn"
-          role="tab"
-          aria-selected="false"
-          data-hz-source="upload"
-        >
-          Upload DOCX
-        </button>
-      </div>
+      <div class="hz-source-row">
+        <div class="hz-segment" role="tablist" data-hz-segment>
+          <span class="hz-segment-thumb" aria-hidden="true"></span>
+          <button
+            type="button"
+            class="hz-segment-btn is-active"
+            role="tab"
+            aria-selected="true"
+            data-hz-source="paste"
+            data-hz-paste-focus
+          >
+            Paste Text
+          </button>
+          <button
+            type="button"
+            class="hz-segment-btn"
+            role="tab"
+            aria-selected="false"
+            data-hz-source="upload"
+          >
+            <svg class="hz-upload-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <path d="M17 8l-5-5-5 5" />
+              <path d="M12 3v12" />
+            </svg>
+            Upload DOC
+          </button>
+        </div>
 
-      <!-- Upload dropzone (revealed by the Upload tab) -->
-      <label class="hz-upload" data-hz-upload hidden>
         <input type="file" accept=".doc,.docx,.pdf,.txt,.rtf,.odt" hidden data-hz-file />
-        <svg class="hz-upload-icon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-          <path d="M17 8l-5-5-5 5" />
-          <path d="M12 3v12" />
-        </svg>
-        <span class="hz-upload-title">Click to upload a document</span>
-        <span class="hz-upload-hint">DOCX, PDF, TXT, RTF or ODT</span>
-        <span class="hz-file-name" data-hz-filename hidden></span>
-      </label>
-
-      <!-- Icon toolbar -->
-      <div class="hz-toolbar" role="toolbar" aria-label="Text formatting">
-        <button type="button" class="hz-tool" data-hz-format="bold" aria-label="Bold" title="Bold">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/></svg>
-        </button>
-        <button type="button" class="hz-tool" data-hz-format="italic" aria-label="Italic" title="Italic">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg>
-        </button>
-        <button type="button" class="hz-tool" data-hz-format="underline" aria-label="Underline" title="Underline">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 12 0V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
-        </button>
-        <span class="hz-toolbar-sep" aria-hidden="true"></span>
-        <button type="button" class="hz-tool" data-hz-format="insertUnorderedList" aria-label="Bullet list" title="Bullet list">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
-        </button>
-        <button type="button" class="hz-tool" data-hz-format="insertOrderedList" aria-label="Numbered list" title="Numbered list">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
-        </button>
-        <span class="hz-toolbar-sep" aria-hidden="true"></span>
-        <button type="button" class="hz-tool" data-hz-format="removeFormat" aria-label="Clear formatting" title="Clear formatting">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M5 20h6"/><path d="M13 4 8 20"/><line x1="18" y1="14" x2="22" y2="18"/><line x1="22" y1="14" x2="18" y2="18"/></svg>
-        </button>
-        <span class="hz-toolbar-sep" aria-hidden="true"></span>
-        <select class="hz-font" data-hz-font aria-label="Font family">
-          <option>Inter</option>
-          <option>Arial</option>
-          <option>Times New Roman</option>
-          <option>Georgia</option>
-        </select>
       </div>
 
       <div
@@ -108,74 +64,106 @@
 
       <footer class="hz-editor-foot">
         <span class="hz-wordcount" data-hz-wordcount>0 / 5000 words</span>
+        <button type="button" class="hz-clear" data-hz-clear hidden>
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          Clear
+        </button>
       </footer>
     </section>
 
-    <!-- ============================ CENTER: ACTION ============================ -->
+    <!-- ============================ ACTION ============================ -->
     <div class="hz-action">
       <button type="button" class="hz-run" data-hz-run>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
-        <span>Humanize Text</span>
+        <svg class="hz-run-icon" data-hz-run-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
+        <svg class="hz-run-spinner" data-hz-run-spinner viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden>
+          <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" stroke-opacity="0.25"/>
+          <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+        <span data-hz-run-label>Humanize</span>
       </button>
-
-      <div class="hz-progress" data-hz-progress hidden aria-live="polite">
-        <div class="hz-progress-label">Humanizing…</div>
-        <div class="hz-progress-track">
-          <div class="hz-progress-bar" data-hz-progress-bar></div>
-        </div>
-      </div>
     </div>
 
-    <!-- ============================ RIGHT: RESULT ============================ -->
-    <section class="hz-card hz-card--output">
-      <div class="hz-card-head">
-        <div>
-          <h2 class="hz-card-title">Humanized Result</h2>
-          <p class="hz-card-sub">Your rewritten academic version.</p>
+    <!-- ============================ STAGE ============================ -->
+    <div class="hz-stage" data-hz-stage data-stage="idle" aria-live="polite">
+      <div class="hz-loading" data-hz-loading hidden>
+        <div class="hz-loading-icon" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="24" cy="24" r="18"/>
+            <path d="M17 28c2.2-3.5 5.2-5.2 7-5.2s4.8 1.7 7 5.2"/>
+            <path d="M18.5 20.5h.01M29.5 20.5h.01"/>
+            <path d="M24 12v3M12 24h3M33 24h3"/>
+          </svg>
         </div>
-
-        <div class="hz-result-tools">
-          <button type="button" class="hz-icon-btn" data-hz-copy disabled>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-hz-copy-icon><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            <span data-hz-copy-label>Copy</span>
-          </button>
-
-          <div class="hz-dropdown" data-hz-dropdown>
-            <button type="button" class="hz-icon-btn" data-hz-dl-toggle disabled aria-haspopup="true" aria-expanded="false">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
-              <span>Download</span>
-              <svg class="hz-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-            </button>
-            <div class="hz-menu" data-hz-dl-menu hidden role="menu">
-              <button type="button" class="hz-menu-item" data-hz-dl-docx role="menuitem">DOCX</button>
-              <button type="button" class="hz-menu-item" data-hz-dl-txt role="menuitem">TXT</button>
-              <button type="button" class="hz-menu-item" data-hz-dl-pdf role="menuitem" disabled>
-                PDF <span class="hz-menu-tag">Soon</span>
-              </button>
-            </div>
-          </div>
+        <p class="hz-loading-title">Humanizing your text...</p>
+        <p class="hz-loading-sub">This usually takes under 10 seconds</p>
+        <div class="hz-loading-dots" aria-hidden="true">
+          <span></span><span></span><span></span>
         </div>
       </div>
 
-      <div class="hz-output-wrap">
+      <section class="hz-card hz-card--result" data-hz-result hidden>
+        <div class="hz-card-head">
+          <div class="hz-result-title-row">
+            <svg class="hz-result-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
+            <h2 class="hz-card-title">Humanized Result</h2>
+          </div>
+
+          <div class="hz-result-tools">
+            <button type="button" class="hz-icon-btn" data-hz-copy disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-hz-copy-icon><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span data-hz-copy-label>Copy</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="hz-toolbar" role="toolbar" aria-label="Result formatting">
+          <button type="button" class="hz-tool" data-hz-format="bold" aria-label="Bold" title="Bold">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h8a4 4 0 0 1 0 8H6z"/><path d="M6 12h9a4 4 0 0 1 0 8H6z"/></svg>
+          </button>
+          <button type="button" class="hz-tool" data-hz-format="italic" aria-label="Italic" title="Italic">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg>
+          </button>
+          <button type="button" class="hz-tool" data-hz-format="underline" aria-label="Underline" title="Underline">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v7a6 6 0 0 0 12 0V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
+          </button>
+          <span class="hz-toolbar-sep" aria-hidden="true"></span>
+          <button type="button" class="hz-tool" data-hz-format="insertUnorderedList" aria-label="Bullet list" title="Bullet list">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+          </button>
+          <button type="button" class="hz-tool" data-hz-format="insertOrderedList" aria-label="Numbered list" title="Numbered list">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
+          </button>
+          <span class="hz-toolbar-sep" aria-hidden="true"></span>
+          <button type="button" class="hz-tool" data-hz-format="removeFormat" aria-label="Clear formatting" title="Clear formatting">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M5 20h6"/><path d="M13 4 8 20"/><line x1="18" y1="14" x2="22" y2="18"/><line x1="22" y1="14" x2="18" y2="18"/></svg>
+          </button>
+          <span class="hz-toolbar-sep" aria-hidden="true"></span>
+          <select class="hz-font" data-hz-font aria-label="Font family">
+            <option>Inter</option>
+            <option>Arial</option>
+            <option>Times New Roman</option>
+            <option>Georgia</option>
+          </select>
+        </div>
+
         <div
           class="hz-editor hz-editor--output"
           data-hz-output
-          role="region"
+          contenteditable="true"
+          role="textbox"
+          aria-multiline="true"
           aria-label="Humanized output"
         ></div>
 
-        <div class="hz-empty" data-hz-empty>
-          <svg class="hz-empty-icon" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
-          <p class="hz-empty-title">No humanized text yet.</p>
-          <p class="hz-empty-sub">When your document is processed it will appear here.</p>
-        </div>
-      </div>
+        <footer class="hz-editor-foot">
+          <span class="hz-wordcount"><strong data-hz-out-words>0</strong> words</span>
+        </footer>
+      </section>
 
-      <footer class="hz-editor-foot">
-        <span class="hz-wordcount"><strong data-hz-out-words>0</strong> words</span>
-      </footer>
-    </section>
+      <div class="hz-error-panel" data-hz-error hidden>
+        <p class="hz-error" data-hz-error-msg></p>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

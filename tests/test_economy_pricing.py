@@ -6,6 +6,7 @@ import pytest
 
 from services.economy.pricing import (
     FEATURE_COSTS,
+    TOPUP_PACKAGES,
     USD_TO_COINS,
     assignment_cost_coins,
     feature_cost,
@@ -40,13 +41,32 @@ def test_assignment_via_feature_cost():
 
 
 def test_package_lookup():
-    assert package("starter")["coins"] == 500
-    assert package("student")["coins"] == 1500
-    assert package("cram")["coins"] == 2900
+    assert package("credits_1000")["coins"] == 1000
+    assert package("credits_1000")["usd"] == 9.0
+    assert package("credits_1000")["name"] == "Starter"
+    assert package("credits_2500")["coins"] == 2500
+    assert package("credits_2500")["usd"] == 20.0
+    assert package("credits_2500")["name"] == "Pro"
+    assert package("credits_2500")["featured"] is True
+    assert package("credits_100") is None
+    assert package("credits_500") is None
+    assert package("credits_2000") is None
+    assert package("credits_5000") is None
+    assert package("credits_10000") is None
     assert package("unknown") is None
 
 
-def test_packages_convert_usd_at_fixed_rate():
-    for pkg in ("starter", "student", "cram"):
-        info = package(pkg)
-        assert info["coins"] == info["usd"] * USD_TO_COINS
+def test_catalog_is_starter_and_pro_only():
+    """Pricing UI and checkout share this catalog — only Starter + Pro."""
+    assert set(TOPUP_PACKAGES) == {"credits_1000", "credits_2500"}
+    expected = {
+        "credits_1000": (1000, 9.0, "Starter"),
+        "credits_2500": (2500, 20.0, "Pro"),
+    }
+    for pkg_id, (coins, usd, name) in expected.items():
+        info = package(pkg_id)
+        assert info is not None
+        assert info["coins"] == coins
+        assert info["usd"] == usd
+        assert info["name"] == name
+        assert "price_id" in info

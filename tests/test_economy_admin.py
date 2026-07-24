@@ -63,6 +63,25 @@ def test_set_balance_rejects_negative(fresh_db):
         fresh_db.set_balance(user["id"], -5, admin_id=admin["id"])
 
 
+def test_get_ledger_for_user(fresh_db):
+    admin = _make_admin()
+    user = auth.create_user("ledger@example.com", "secret123")
+    fresh_db.set_balance(user["id"], WELCOME_BONUS + 100, admin_id=admin["id"], reason="promo")
+
+    payload = fresh_db.get_ledger(user["id"])
+    assert payload["user"]["email"] == "ledger@example.com"
+    assert payload["balance"] == WELCOME_BONUS + 100
+    assert payload["total"] >= 2
+    types = {e["type"] for e in payload["entries"]}
+    assert "BONUS" in types or "ADMIN_ADD" in types
+    assert any(e["type"] == "ADMIN_ADD" for e in payload["entries"])
+
+
+def test_get_ledger_unknown_user(fresh_db):
+    with pytest.raises(AdminError):
+        fresh_db.get_ledger(99999)
+
+
 def test_set_admin_grant_and_revoke(fresh_db):
     admin = _make_admin()
     user = auth.create_user("promote@example.com", "secret123")

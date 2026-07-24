@@ -66,16 +66,10 @@
   };
   var REF_STYLE_KEY = "academic_formatter_citation_style";
   var REF_STORAGE_KEY = "academic_formatter_saved_references";
-  var DOC_TYPE_TO_TEMPLATE = {
-    essay: "essay",
-    report: "report",
-    literature_review: "literature_review",
-    research_paper: "research_paper",
-    case_study: "case_study",
-    reflection: "reflection",
-    dissertation: "dissertation_chapter",
-    presentation: "presentation_notes",
-  };
+  var CITATION_STORAGE_KEY = "academic_formatter_saved_citations";
+  var REF_COUNT_KEY = "academic_formatter_references_count";
+  var CITATION_COUNT_KEY = "academic_formatter_citations_count";
+  var MAX_REF_ITEMS = 20;
 
   function applyPreset(name) {
     var cfg = PRESETS[name];
@@ -140,46 +134,46 @@
       return;
     }
     FC.writeStorage(REF_STYLE_KEY, v);
-    if ($("citation_style_format")) {
-      $("citation_style_format").value = v;
-    }
+    syncCitationStyleSelects(v);
   }
 
-  function applyDocumentTypePreset(docType) {
-    var tplLib = window.AssignmentTemplates;
-    var templateId = DOC_TYPE_TO_TEMPLATE[docType];
-    if (!tplLib || !templateId || !tplLib.getById) {
-      return;
-    }
-    var tpl = tplLib.getById(templateId);
-    if (!tpl || !tpl.settings) {
-      return;
-    }
-    FC.applyFormatterConfig(tpl.settings);
-    if ($("format_style")) {
-      $("format_style").value = String(tpl.settings.format_style || "harvard");
-    }
-    if (tpl.citationStyle) {
-      FC.writeStorage(REF_STYLE_KEY, tpl.citationStyle);
-      if ($("citation_style_format")) {
-        $("citation_style_format").value = tpl.citationStyle;
+  function citationStyleSelects() {
+    return document.querySelectorAll("[data-citation-style-select]");
+  }
+
+  function syncCitationStyleSelects(value) {
+    citationStyleSelects().forEach(function (el) {
+      if (Array.prototype.some.call(el.options, function (o) { return o.value === value; })) {
+        el.value = value;
+      }
+    });
+  }
+
+  function getSelectedCitationStyle() {
+    var selects = citationStyleSelects();
+    var i;
+    for (i = 0; i < selects.length; i += 1) {
+      if (selects[i].value) {
+        return selects[i].value;
       }
     }
-    setPresetChipActiveOnly("custom");
-    FC.saveFormatterSettingsFromHome();
+    return FC.readStorage(REF_STYLE_KEY) || "APA";
   }
 
   function loadCitationStyleIntoFormat() {
-    var styleSelect = $("citation_style_format");
-    if (!styleSelect) {
+    var selects = citationStyleSelects();
+    if (!selects.length) {
       return;
     }
     var stored = FC.readStorage(REF_STYLE_KEY);
-    if (stored && Array.prototype.some.call(styleSelect.options, function (o) { return o.value === stored; })) {
-      styleSelect.value = stored;
+    if (stored) {
+      syncCitationStyleSelects(stored);
     }
-    styleSelect.addEventListener("change", function () {
-      FC.writeStorage(REF_STYLE_KEY, styleSelect.value);
+    selects.forEach(function (styleSelect) {
+      styleSelect.addEventListener("change", function () {
+        FC.writeStorage(REF_STYLE_KEY, styleSelect.value);
+        syncCitationStyleSelects(styleSelect.value);
+      });
     });
   }
 
@@ -192,8 +186,78 @@
     el.className = "format-status status" + (kind ? " " + kind : "");
   }
 
+  function setCitationsStatus(message, kind) {
+    var el = $("citations_status");
+    if (!el) {
+      return;
+    }
+    el.textContent = message || "";
+    el.className = "format-status status" + (kind ? " " + kind : "");
+  }
+
+  function clampCount(value, fallback) {
+    var n = parseInt(value, 10);
+    if (!isFinite(n)) {
+      n = fallback;
+    }
+    if (n < 0) {
+      n = 0;
+    }
+    if (n > MAX_REF_ITEMS) {
+      n = MAX_REF_ITEMS;
+    }
+    return n;
+  }
+
+  function readCountInput(id, storageKey, fallback) {
+    var el = $(id);
+    var stored = FC.readStorage(storageKey);
+    var initial = clampCount(el && el.value !== "" ? el.value : stored, fallback);
+    if (el) {
+      el.value = String(initial);
+    }
+    return initial;
+  }
+
+  function bindCountInput(id, storageKey, fallback) {
+    var el = $(id);
+    if (!el) {
+      return;
+    }
+    readCountInput(id, storageKey, fallback);
+    el.addEventListener("change", function () {
+      var n = clampCount(el.value, fallback);
+      el.value = String(n);
+      FC.writeStorage(storageKey, String(n));
+    });
+    el.addEventListener("input", function () {
+      var raw = el.value;
+      if (raw === "") {
+        return;
+      }
+      var n = clampCount(raw, fallback);
+      if (String(n) !== raw) {
+        el.value = String(n);
+      }
+    });
+  }
+
+  function getReferencesCount() {
+    return clampCount(($("references_count") && $("references_count").value) || FC.readStorage(REF_COUNT_KEY), 3);
+  }
+
+  function getCitationsCount() {
+    return clampCount(($("citations_count") && $("citations_count").value) || FC.readStorage(CITATION_COUNT_KEY), 3);
+  }
+
   function saveGeneratedReferences(list) {
-    FC.writeStorage(REF_STORAGE_KEY, JSON.stringify(list || []));
+    var capped = (list || []).slice(0, MAX_REF_ITEMS);
+    FC.writeStorage(REF_STORAGE_KEY, JSON.stringify(capped));
+  }
+
+  function saveGeneratedCitations(list) {
+    var capped = (list || []).slice(0, MAX_REF_ITEMS);
+    FC.writeStorage(CITATION_STORAGE_KEY, JSON.stringify(capped));
   }
 
   function renderGeneratedReferences(list) {
@@ -201,7 +265,7 @@
     if (!el) {
       return;
     }
-    var refs = Array.isArray(list) ? list : [];
+    var refs = Array.isArray(list) ? list.slice(0, MAX_REF_ITEMS) : [];
     el.innerHTML = "";
     refs.forEach(function (ref) {
       var li = document.createElement("li");
@@ -213,47 +277,155 @@
     el.classList.toggle("hidden", refs.length === 0);
   }
 
+  function renderGeneratedCitations(list) {
+    var el = $("citations_preview_list");
+    if (!el) {
+      return;
+    }
+    var cites = Array.isArray(list) ? list.slice(0, MAX_REF_ITEMS) : [];
+    el.innerHTML = "";
+    cites.forEach(function (cite) {
+      var li = document.createElement("li");
+      var span = document.createElement("span");
+      span.textContent = cite;
+      li.appendChild(span);
+      el.appendChild(li);
+    });
+    el.classList.toggle("hidden", cites.length === 0);
+  }
+
   function selectedReferenceSource() {
     var node = document.querySelector("input[name='reference_source']:checked");
     return node ? node.value : "none";
   }
 
-  function buildMockReferences(style, source, docType) {
-    var styleLabel = style || "APA";
-    var typeLabel = docType || "essay";
-    var sourceLabel = source || "auto_ai";
-    return [
-      "Smith, J. (2024). Renewable transition planning in modern grids. Journal of Energy Systems, 14(2), 44-61.",
-      "Lopez, M., & Kim, S. (2023). AI-assisted citation generation for academic writing workflows. Computing in Education, 9(4), 201-219.",
-      "Source mode: " + sourceLabel + " · Doc type: " + typeLabel + " · Style: " + styleLabel + ".",
-    ];
+  var MOCK_REF_POOL = [
+    "Smith, J. (2024). Renewable transition planning in modern grids. Journal of Energy Systems, 14(2), 44-61.",
+    "Lopez, M., & Kim, S. (2023). AI-assisted citation generation for academic writing workflows. Computing in Education, 9(4), 201-219.",
+    "Chen, L. (2022). Evidence-based writing in higher education. Academic Practice Review, 11(1), 18-36.",
+    "Patel, R., & Nguyen, T. (2021). Digital libraries and scholarly discovery. Information Studies Quarterly, 7(3), 90-112.",
+    "Brown, A. (2020). Peer review and research integrity. Science Policy Notes, 5(2), 55-70.",
+    "Ivanova, K. (2024). Citation density and argument quality in student essays. Writing Research Forum, 16(1), 12-29.",
+    "Garcia, P., & Lee, H. (2019). Open access publishing trends. Scholarly Communication Today, 3(4), 140-158.",
+    "Williams, D. (2023). Method sections that graders trust. Journal of Academic Skills, 8(2), 77-94.",
+    "Ahmed, S. (2021). Cross-disciplinary referencing practices. Interdisciplinary Review, 12(3), 201-220.",
+    "Thompson, E., & Rossi, F. (2022). Paraphrase quality and plagiarism risk. Integrity in Learning, 4(1), 33-49.",
+    "Nakamura, Y. (2020). Structured abstracts for applied research. Methods Digest, 6(2), 88-101.",
+    "Okafor, C. (2024). Local case studies in global literature reviews. Comparative Education Briefs, 10(1), 5-22.",
+    "Martin, B. (2018). Footnotes versus parenthetical citations. Style & Rhetoric, 2(3), 41-57.",
+    "Silva, R., & Costa, M. (2023). Dataset citation standards. Data Stewardship Journal, 1(2), 15-31.",
+    "Hughes, N. (2021). Reading strategies for dense academic sources. Student Learning Review, 9(4), 110-126.",
+    "Zhou, W. (2022). Meta-analysis reporting checklists. Quantitative Methods Today, 14(3), 66-84.",
+    "Andersson, L. (2019). Nordic approaches to source evaluation. Library Pedagogy, 5(1), 23-39.",
+    "Khan, A., & Park, J. (2024). Generative tools and academic honesty. Ethics in Education, 13(2), 150-169.",
+    "Diaz, V. (2020). Grey literature in policy essays. Public Policy Writing, 7(1), 8-24.",
+    "Foster, G. (2023). Closing the loop between in-text citations and reference lists. Editor Notes, 18(4), 200-214.",
+  ];
+
+  var MOCK_CITE_AUTHORS = [
+    ["Smith", 2024],
+    ["Lopez & Kim", 2023],
+    ["Chen", 2022],
+    ["Patel & Nguyen", 2021],
+    ["Brown", 2020],
+    ["Ivanova", 2024],
+    ["Garcia & Lee", 2019],
+    ["Williams", 2023],
+    ["Ahmed", 2021],
+    ["Thompson & Rossi", 2022],
+    ["Nakamura", 2020],
+    ["Okafor", 2024],
+    ["Martin", 2018],
+    ["Silva & Costa", 2023],
+    ["Hughes", 2021],
+    ["Zhou", 2022],
+    ["Andersson", 2019],
+    ["Khan & Park", 2024],
+    ["Diaz", 2020],
+    ["Foster", 2023],
+  ];
+
+  function formatInTextCitation(style, author, year, index) {
+    var s = (style || "APA").toUpperCase();
+    if (s === "IEEE") {
+      return "[" + (index + 1) + "]";
+    }
+    if (s === "MLA") {
+      return "(" + author + ")";
+    }
+    if (s === "CHICAGO") {
+      return "(" + author + " " + year + ")";
+    }
+    if (s === "HARVARD") {
+      return "(" + author + ", " + year + ")";
+    }
+    return "(" + author + ", " + year + ")";
   }
 
-  function runCitationWorkflow() {
+  function buildMockReferences(style, source, count) {
+    var n = clampCount(count, 0);
+    var styleLabel = style || "APA";
+    var sourceLabel = source || "auto_ai";
+    var out = [];
+    var i;
+    for (i = 0; i < n; i += 1) {
+      out.push(MOCK_REF_POOL[i % MOCK_REF_POOL.length]);
+    }
+    if (n > 0) {
+      out[n - 1] =
+        out[n - 1].replace(/\.$/, "") +
+        " [Source: " +
+        sourceLabel +
+        " · Style: " +
+        styleLabel +
+        "].";
+    }
+    return out;
+  }
+
+  function buildMockCitations(style, count) {
+    var n = clampCount(count, 0);
+    var out = [];
+    var i;
+    for (i = 0; i < n; i += 1) {
+      var pair = MOCK_CITE_AUTHORS[i % MOCK_CITE_AUTHORS.length];
+      out.push(formatInTextCitation(style, pair[0], pair[1], i));
+    }
+    return out;
+  }
+
+  function runReferencesWorkflow() {
     var source = selectedReferenceSource();
-    var styleSelect = $("citation_style_format");
-    var style = (styleSelect && styleSelect.value) || "APA";
-    var docType = ($("document_type") && $("document_type").value) || "essay";
+    var style = getSelectedCitationStyle();
+    var refCount = getReferencesCount();
     FC.writeStorage(REF_STYLE_KEY, style);
+    FC.writeStorage(REF_COUNT_KEY, String(refCount));
+    syncCitationStyleSelects(style);
 
     if (source === "none") {
       saveGeneratedReferences([]);
       renderGeneratedReferences([]);
-      setReferencesStatus("Reference source: None. No citations will be generated.", "warn");
+      setReferencesStatus("Reference source: None. No references will be generated.", "warn");
       return;
     }
 
-    setReferencesStatus("Analyzing document…");
-    var btn = $("generate_citations_btn");
+    if (refCount === 0) {
+      saveGeneratedReferences([]);
+      renderGeneratedReferences([]);
+      setReferencesStatus("Set references count (1–20) before generating.", "warn");
+      return;
+    }
+
+    setReferencesStatus("Building bibliography…");
+    var btn = $("generate_references_btn");
     if (btn) {
       btn.disabled = true;
     }
 
     var steps = [
-      "Identifying statements that need citations…",
-      "Searching relevant academic sources…",
-      "Building bibliography entries…",
-      "Inserting in-text citations and References section…",
+      "Searching academic sources…",
+      "Formatting bibliography entries…",
+      "Preparing References section…",
     ];
     var i = 0;
     var timer = setInterval(function () {
@@ -263,17 +435,63 @@
         return;
       }
       clearInterval(timer);
-      var refs = buildMockReferences(style, source, docType);
+      var refs = buildMockReferences(style, source, refCount);
       saveGeneratedReferences(refs);
       renderGeneratedReferences(refs);
-      setReferencesStatus("Citations generated with one unified AI workflow.", "success");
+      setReferencesStatus("Generated " + refs.length + " reference(s).", "success");
+      if (btn) {
+        btn.disabled = false;
+      }
+      if (window.AppUI) {
+        window.AppUI.showToast("References generated", "success");
+      }
+    }, 450);
+  }
+
+  function runCitationsWorkflow() {
+    var style = getSelectedCitationStyle();
+    var citeCount = getCitationsCount();
+    FC.writeStorage(REF_STYLE_KEY, style);
+    FC.writeStorage(CITATION_COUNT_KEY, String(citeCount));
+    syncCitationStyleSelects(style);
+
+    if (citeCount === 0) {
+      saveGeneratedCitations([]);
+      renderGeneratedCitations([]);
+      setCitationsStatus("Set citations count (1–20) before generating.", "warn");
+      return;
+    }
+
+    setCitationsStatus("Building in-text citations…");
+    var btn = $("generate_citations_btn");
+    if (btn) {
+      btn.disabled = true;
+    }
+
+    var steps = [
+      "Matching sources to claims…",
+      "Formatting in-text citations…",
+      "Preparing citation list…",
+    ];
+    var i = 0;
+    var timer = setInterval(function () {
+      if (i < steps.length) {
+        setCitationsStatus(steps[i]);
+        i += 1;
+        return;
+      }
+      clearInterval(timer);
+      var cites = buildMockCitations(style, citeCount);
+      saveGeneratedCitations(cites);
+      renderGeneratedCitations(cites);
+      setCitationsStatus("Generated " + cites.length + " citation(s).", "success");
       if (btn) {
         btn.disabled = false;
       }
       if (window.AppUI) {
         window.AppUI.showToast("Citations generated", "success");
       }
-    }, 500);
+    }, 450);
   }
 
   presetChipButtons().forEach(function (btn) {
@@ -304,6 +522,20 @@
   }
 
   loadCitationStyleIntoFormat();
+  bindCountInput("references_count", REF_COUNT_KEY, 3);
+  bindCountInput("citations_count", CITATION_COUNT_KEY, 3);
+  try {
+    var savedRefs = JSON.parse(FC.readStorage(REF_STORAGE_KEY) || "[]");
+    renderGeneratedReferences(Array.isArray(savedRefs) ? savedRefs : []);
+  } catch (e) {
+    renderGeneratedReferences([]);
+  }
+  try {
+    var savedCites = JSON.parse(FC.readStorage(CITATION_STORAGE_KEY) || "[]");
+    renderGeneratedCitations(Array.isArray(savedCites) ? savedCites : []);
+  } catch (e2) {
+    renderGeneratedCitations([]);
+  }
 
   function refreshHomePreview() {
     var DP = window.DocPreview;
@@ -342,7 +574,7 @@
     refreshHomePreview();
   }
 
-  ["font_family", "font_size", "line_spacing", "alignment", "first_line_indent", "auto_headings", "requirement_headings", "heading_size_pt", "document_type", "citation_style_format"].forEach(
+  ["font_family", "font_size", "line_spacing", "alignment", "first_line_indent", "auto_headings", "requirement_headings", "heading_size_pt", "citation_style_format"].forEach(
     function (id) {
       var el = $(id);
       if (el && previewSection && !previewSection.classList.contains("hidden")) {
@@ -371,11 +603,93 @@
     });
   }
 
+  (function bindHomeDocSegment() {
+    var card = document.querySelector("[data-home-doc-card]");
+    if (!card) {
+      return;
+    }
+    var segment = card.querySelector("[data-home-doc-segment]");
+    var sourceBtns = card.querySelectorAll("[data-home-doc-source]");
+    var panels = card.querySelectorAll("[data-home-doc-panel]");
+    var pasted = $("pasted_text");
+
+    function setDocSource(src) {
+      var isUpload = src === "upload";
+      if (segment) {
+        segment.classList.toggle("is-upload", isUpload);
+      }
+      sourceBtns.forEach(function (btn) {
+        var active = btn.getAttribute("data-home-doc-source") === src;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      panels.forEach(function (panel) {
+        // Upload is file-picker only (no visible panel); keep paste available.
+        if (panel.getAttribute("data-home-doc-panel") === "paste") {
+          panel.hidden = false;
+          return;
+        }
+        panel.hidden = panel.getAttribute("data-home-doc-panel") !== src;
+      });
+      if (!isUpload && pasted) {
+        pasted.focus();
+      }
+    }
+
+    sourceBtns.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var src = btn.getAttribute("data-home-doc-source");
+        setDocSource(src);
+        if (src === "upload") {
+          var fileInput = $("file");
+          if (fileInput) {
+            fileInput.click();
+          }
+        }
+      });
+    });
+  })();
+
   var requirementsText = $("requirements_text");
   var requirementsAttach = $("requirements_attach");
   var requirementsAttachBtn = $("requirements_attach_btn");
   var analyzeBtn = $("analyze_requirements_btn");
   var requirementsStatus = $("requirements_status");
+  var setBriefSource = null;
+
+  (function bindHomeBriefSegment() {
+    var root = document.querySelector("[data-home-brief-card]");
+    if (!root) {
+      return;
+    }
+    var segment = root.querySelector("[data-home-brief-segment]");
+    var sourceBtns = root.querySelectorAll("[data-home-brief-source]");
+
+    setBriefSource = function (src) {
+      var isUpload = src === "upload";
+      if (segment) {
+        segment.classList.toggle("is-upload", isUpload);
+      }
+      sourceBtns.forEach(function (btn) {
+        var active = btn.getAttribute("data-home-brief-source") === src;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      if (!isUpload && requirementsText) {
+        requirementsText.focus();
+      }
+    };
+
+    sourceBtns.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var src = btn.getAttribute("data-home-brief-source");
+        setBriefSource(src);
+        if (src === "upload" && requirementsAttach) {
+          requirementsAttach.click();
+        }
+      });
+    });
+  })();
 
   function setReqStatus(message, kind) {
     if (!requirementsStatus) {
@@ -383,33 +697,6 @@
     }
     requirementsStatus.textContent = message || "";
     requirementsStatus.className = "req-chat-status req-status" + (kind ? " " + kind : "");
-  }
-
-  function autosizeReqTextarea() {
-    var el = requirementsText;
-    if (!el || el.tagName !== "TEXTAREA") {
-      return;
-    }
-    el.style.height = "auto";
-    var maxPx = Math.min(window.innerHeight * 0.45, 288);
-    el.style.height = Math.min(el.scrollHeight, maxPx) + "px";
-    var composer = el.closest(".req-chat-composer");
-    if (composer) {
-      composer.classList.toggle("is-expanded", el.scrollHeight > 48);
-    }
-  }
-
-  if (requirementsText) {
-    requirementsText.addEventListener("input", autosizeReqTextarea);
-    autosizeReqTextarea();
-    requirementsText.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        if (analyzeBtn && !analyzeBtn.disabled) {
-          analyzeBtn.click();
-        }
-      }
-    });
   }
 
   function isSupportedBriefFile(file) {
@@ -444,12 +731,6 @@
     });
   }
 
-  if (requirementsAttachBtn && requirementsAttach) {
-    requirementsAttachBtn.addEventListener("click", function () {
-      requirementsAttach.click();
-    });
-  }
-
   if (requirementsAttach) {
     requirementsAttach.addEventListener("change", async function () {
       var file = requirementsAttach.files && requirementsAttach.files[0];
@@ -464,7 +745,9 @@
         return;
       }
 
-      requirementsAttachBtn.disabled = true;
+      if (requirementsAttachBtn) {
+        requirementsAttachBtn.disabled = true;
+      }
 
       try {
         var lower = (file.name || "").toLowerCase();
@@ -481,9 +764,11 @@
           }
           if (requirementsText) {
             requirementsText.value = plain;
-            autosizeReqTextarea();
           }
-          setReqStatus("Brief loaded — press send to apply settings.", "success");
+          if (setBriefSource) {
+            setBriefSource("paste");
+          }
+          setReqStatus("Brief loaded into Requirements.", "success");
           return;
         }
 
@@ -509,13 +794,17 @@
         }
         if (requirementsText) {
           requirementsText.value = data.text || "";
-          autosizeReqTextarea();
         }
-        setReqStatus("Brief loaded — press send to apply settings.", "success");
+        if (setBriefSource) {
+          setBriefSource("paste");
+        }
+        setReqStatus("Brief loaded into Requirements.", "success");
       } catch (err) {
         setReqStatus("Could not read file.", "error");
       } finally {
-        requirementsAttachBtn.disabled = false;
+        if (requirementsAttachBtn) {
+          requirementsAttachBtn.disabled = false;
+        }
         requirementsAttach.value = "";
       }
     });
@@ -596,17 +885,13 @@
     });
   });
 
-  var docTypeEl = $("document_type");
-  if (docTypeEl) {
-    docTypeEl.addEventListener("change", function () {
-      if (docTypeEl.value) {
-        applyDocumentTypePreset(docTypeEl.value);
-      }
-    });
+  var generateReferencesBtn = $("generate_references_btn");
+  if (generateReferencesBtn) {
+    generateReferencesBtn.addEventListener("click", runReferencesWorkflow);
   }
 
   var generateCitationsBtn = $("generate_citations_btn");
   if (generateCitationsBtn) {
-    generateCitationsBtn.addEventListener("click", runCitationWorkflow);
+    generateCitationsBtn.addEventListener("click", runCitationsWorkflow);
   }
 })();

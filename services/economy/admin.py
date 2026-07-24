@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from .analytics import AnalyticsService
 from .auth import normalize_email
 from .db import connect
+from .paddle_purchases import PaddlePurchaseService
+from .usage import UsageService
 from .wallet import InsufficientCoins, WalletService
 
 
@@ -15,8 +18,17 @@ class AdminError(Exception):
 
 
 class AdminService:
-    def __init__(self, wallet: WalletService | None = None) -> None:
+    def __init__(
+        self,
+        wallet: WalletService | None = None,
+        purchases: PaddlePurchaseService | None = None,
+        usage: UsageService | None = None,
+        analytics: AnalyticsService | None = None,
+    ) -> None:
         self.wallet = wallet or WalletService()
+        self.purchases = purchases or PaddlePurchaseService()
+        self.usage = usage or UsageService()
+        self.analytics = analytics or AnalyticsService()
 
     def list_users(
         self,
@@ -138,6 +150,109 @@ class AdminService:
             "email": row["email"],
             "isAdmin": bool(is_admin),
         }
+
+    def get_ledger(
+        self,
+        user_id: int,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        with connect() as conn:
+            row = conn.execute(
+                "SELECT id, email, name FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if row is None:
+                raise AdminError("User not found.")
+        payload = self.wallet.ledger(user_id, limit=limit, offset=offset)
+        return {
+            "user": {
+                "id": int(row["id"]),
+                "email": row["email"],
+                "name": row["name"],
+            },
+            **payload,
+        }
+
+    def get_purchases(
+        self,
+        user_id: int,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        with connect() as conn:
+            row = conn.execute(
+                "SELECT id, email, name FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if row is None:
+                raise AdminError("User not found.")
+        payload = self.purchases.list_for_user(user_id, limit=limit, offset=offset)
+        return {
+            "user": {
+                "id": int(row["id"]),
+                "email": row["email"],
+                "name": row["name"],
+            },
+            **payload,
+        }
+
+    def list_purchases(
+        self,
+        *,
+        search: str = "",
+        status: str = "",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        try:
+            return self.purchases.list_all(
+                search=search, status=status, limit=limit, offset=offset
+            )
+        except Exception as exc:  # noqa: BLE001
+            from .paddle_purchases import PaddlePurchaseError
+
+            if isinstance(exc, PaddlePurchaseError):
+                raise AdminError(str(exc)) from exc
+            raise
+
+    def get_usage(
+        self,
+        user_id: int,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        with connect() as conn:
+            row = conn.execute(
+                "SELECT id, email, name FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if row is None:
+                raise AdminError("User not found.")
+        payload = self.usage.list_for_user(user_id, limit=limit, offset=offset)
+        return {
+            "user": {
+                "id": int(row["id"]),
+                "email": row["email"],
+                "name": row["name"],
+            },
+            **payload,
+        }
+
+    def list_usage(
+        self,
+        *,
+        search: str = "",
+        feature: str = "",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        return self.usage.list_all(
+            search=search, feature=feature, limit=limit, offset=offset
+        )
+
+    def get_analytics(self, *, top_limit: int = 10) -> dict[str, Any]:
+        return self.analytics.snapshot(top_limit=top_limit)
 
 
 def bootstrap_admin_from_env() -> None:

@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}DocMaxxing{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("theme");
+          if (t === "dark" || t === "light") {
+            document.documentElement.setAttribute("data-theme", t);
+          }
+        } catch (e) {}
+      })();
+    </script>
     {% block head_extra %}{% endblock %}
   </head>
   <body>
@@ -33,6 +43,72 @@
           </a>
           <nav class="top-nav" aria-label="Main navigation">
             <a
+              href="{{ url_for('humanizer') }}"
+              class="nav-link{% if _nav == 'humanizer' %} is-active{% endif %}"
+              {% if _nav == 'humanizer' %}aria-current="page"{% endif %}
+              ><svg
+                class="nav-link-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path
+                  d="M14.5 5.5 18.5 9.5"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+                <path
+                  d="M5.75 19.25 6.9 14.85 16.75 5a1.75 1.75 0 0 1 2.475 0l.025.025A1.75 1.75 0 0 1 19.25 7.5L9.4 17.35 5.75 19.25Z"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linejoin="round"
+                />
+                <path d="M5.75 19.25 8.15 18.65" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+              <span>Humanizer</span></a
+            >
+            <a
+              href="{{ url_for('turnitin') }}"
+              class="nav-link{% if _nav == 'turnitin' %} is-active{% endif %}"
+              {% if _nav == 'turnitin' %}aria-current="page"{% endif %}
+              ><svg
+                class="nav-link-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <circle cx="10.5" cy="10.5" r="5.75" stroke="currentColor" stroke-width="1.6" />
+                <path d="M15.25 15.25 20 20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                <path d="M8.25 10.5h4.5M10.5 8.25v4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+              <span>Turnitin</span></a
+            >
+            <a
+              href="{{ url_for('assignment') }}"
+              class="nav-link{% if _nav == 'assignment' %} is-active{% endif %}"
+              {% if _nav == 'assignment' %}aria-current="page"{% endif %}
+              ><svg
+                class="nav-link-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path
+                  d="M8.5 4.75h7a2 2 0 0 1 2 2v12.5a1.5 1.5 0 0 1-1.5 1.5h-8a1.5 1.5 0 0 1-1.5-1.5V6.75a2 2 0 0 1 2-2Z"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linejoin="round"
+                />
+                <path d="M9.5 3.75h5v2.5h-5v-2.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+                <path d="M9.5 11h5M9.5 14.5h5M9.5 18h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+              <span>Assignment</span></a
+            >
+            <a
               href="{{ url_for('index') }}"
               class="nav-link{% if _nav == 'home' %} is-active{% endif %}"
               {% if _nav == 'home' %}aria-current="page"{% endif %}
@@ -57,38 +133,58 @@
               href="{{ url_for('check') }}"
               class="nav-link{% if _nav == 'check' %} is-active{% endif %}"
               {% if _nav == 'check' %}aria-current="page"{% endif %}
-              >Check</a
+              ><svg
+                class="nav-link-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6" />
+                <path
+                  d="M8.5 12.25 10.75 14.5 15.5 9.5"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <span>Check</span></a
             >
             <a
               href="{{ url_for('workspace') }}"
               class="nav-link nav-link--workspace{% if _nav == 'workspace' %} is-active{% endif %}"
               {% if _nav == 'workspace' %}aria-current="page"{% endif %}
-              >Workspace</a
-            >
-            <a
-              href="{{ url_for('humanizer') }}"
-              class="nav-link{% if _nav == 'humanizer' %} is-active{% endif %}"
-              {% if _nav == 'humanizer' %}aria-current="page"{% endif %}
-              >Humanizer</a
-            >
-            <a
-              href="{{ url_for('assignment') }}"
-              class="nav-link{% if _nav == 'assignment' %} is-active{% endif %}"
-              {% if _nav == 'assignment' %}aria-current="page"{% endif %}
-              >Assignment</a
-            >
-            <a
-              href="{{ url_for('turnitin') }}"
-              class="nav-link{% if _nav == 'turnitin' %} is-active{% endif %}"
-              {% if _nav == 'turnitin' %}aria-current="page"{% endif %}
-              >Turnitin</a
+              ><svg
+                class="nav-link-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <rect x="3.75" y="4.75" width="16.5" height="14.5" rx="2" stroke="currentColor" stroke-width="1.6" />
+                <path d="M9.5 5v14M3.75 10h16.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+              </svg>
+              <span>Workspace</span></a
             >
             {% if is_admin %}
             <a
               href="{{ url_for('admin_panel') }}"
               class="nav-link{% if _nav == 'admin' %} is-active{% endif %}"
               {% if _nav == 'admin' %}aria-current="page"{% endif %}
-              >Admin</a
+              ><svg
+                class="nav-link-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path d="M4.5 7h15M4.5 12h15M4.5 17h15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+                <circle cx="9" cy="7" r="2" stroke="currentColor" stroke-width="1.6" />
+                <circle cx="15" cy="12" r="2" stroke="currentColor" stroke-width="1.6" />
+                <circle cx="11" cy="17" r="2" stroke="currentColor" stroke-width="1.6" />
+              </svg>
+              <span>Admin</span></a
             >
             {% endif %}
           </nav>
@@ -108,15 +204,12 @@
                 type="button"
                 class="nav-user-trigger"
                 data-user-menu-toggle
+                aria-label="{{ _display_name }}"
                 aria-expanded="false"
                 aria-haspopup="true"
                 aria-controls="nav_user_dropdown"
               >
                 <span class="nav-user-avatar" aria-hidden="true">{{ _initial }}</span>
-                <span class="nav-user-meta">
-                  <span class="nav-user-name">{{ _display_name }}</span>
-                  <span class="nav-user-email">{{ current_user.email }}</span>
-                </span>
                 <svg class="nav-user-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -128,6 +221,41 @@
                     <span class="nav-user-dropdown-name">{{ _display_name }}</span>
                     <span class="nav-user-dropdown-email">{{ current_user.email }}</span>
                   </div>
+                </div>
+                <div class="nav-theme-switch" role="group" aria-label="Color theme">
+                  <button
+                    type="button"
+                    class="nav-theme-option"
+                    data-theme-set="light"
+                    aria-pressed="true"
+                    aria-label="Light mode"
+                  >
+                    <svg class="theme-toggle-icon theme-toggle-icon--sun" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="12" cy="12" r="3.75" stroke="currentColor" stroke-width="1.6" />
+                      <path
+                        d="M12 2.75v2.1M12 19.15v2.1M2.75 12h2.1M19.15 12h2.1M5.22 5.22l1.48 1.48M17.3 17.3l1.48 1.48M5.22 18.78l1.48-1.48M17.3 6.7l1.48-1.48"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="nav-theme-option"
+                    data-theme-set="dark"
+                    aria-pressed="false"
+                    aria-label="Dark mode"
+                  >
+                    <svg class="theme-toggle-icon theme-toggle-icon--moon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path
+                        d="M20.5 14.2A8.2 8.2 0 1 1 9.8 3.5 6.7 6.7 0 0 0 20.5 14.2Z"
+                        stroke="currentColor"
+                        stroke-width="1.6"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
+                  </button>
                 </div>
                 <div class="nav-user-dropdown-links">
                   <a href="{{ url_for('account') }}" class="nav-user-dropdown-link">
@@ -159,6 +287,43 @@
             {% else %}
             <a href="{{ url_for('login') }}" class="nav-link nav-link--auth">Sign in</a>
             <a href="{{ url_for('register') }}" class="nav-auth-cta">Sign up</a>
+            <button
+              type="button"
+              class="theme-toggle"
+              data-theme-toggle
+              aria-label="Switch to dark mode"
+            >
+              <svg
+                class="theme-toggle-icon theme-toggle-icon--moon"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+              >
+                <path
+                  d="M20.5 14.2A8.2 8.2 0 1 1 9.8 3.5 6.7 6.7 0 0 0 20.5 14.2Z"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <svg
+                class="theme-toggle-icon theme-toggle-icon--sun"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                aria-hidden="true"
+                hidden
+              >
+                <circle cx="12" cy="12" r="3.75" stroke="currentColor" stroke-width="1.6" />
+                <path
+                  d="M12 2.75v2.1M12 19.15v2.1M2.75 12h2.1M19.15 12h2.1M5.22 5.22l1.48 1.48M17.3 17.3l1.48 1.48M5.22 18.78l1.48-1.48M17.3 6.7l1.48-1.48"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </button>
             {% endif %}
           </div>
         </div>

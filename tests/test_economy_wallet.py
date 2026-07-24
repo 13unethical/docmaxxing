@@ -62,6 +62,48 @@ def test_ledger_records_every_movement(wallet_and_user):
     assert history[2]["balance_after"] == 100
 
 
+def test_credit_transaction_shape(wallet_and_user):
+    wallet, uid = wallet_and_user
+    wallet.credit(uid, 2000, "topup", ref_id="pkg_starter")
+    wallet.debit(uid, 10, "humanize", ref_id="job_1")
+    wallet.debit(uid, 300, "turnitin", ref_id="sub_1")
+    wallet.refund(uid, 300, "turnitin", ref_id="sub_1")
+
+    ledger = wallet.ledger(uid)
+    assert ledger["balance"] == 1990
+    assert ledger["total"] == 4
+    entries = ledger["entries"]
+
+    assert entries[0]["type"] == "REFUND"
+    assert entries[0]["credits"] == 300
+    assert entries[0]["reference_type"] == "Turnitin"
+    assert entries[0]["balance_before"] == 1690
+    assert entries[0]["balance_after"] == 1990
+
+    assert entries[1]["type"] == "USAGE"
+    assert entries[1]["credits"] == -300
+    assert entries[1]["reference_type"] == "Turnitin"
+
+    assert entries[2]["type"] == "USAGE"
+    assert entries[2]["credits"] == -10
+    assert entries[2]["reference_type"] == "Humanizer"
+
+    assert entries[3]["type"] == "PURCHASE"
+    assert entries[3]["credits"] == 2000
+    assert entries[3]["reference_type"] == "Paddle"
+    assert entries[3]["reference_id"] == "pkg_starter"
+
+
+def test_admin_add_remove_types(wallet_and_user):
+    wallet, uid = wallet_and_user
+    wallet.credit(uid, 50, "admin_adjustment")
+    wallet.debit(uid, 20, "admin_adjustment")
+    entries = wallet.history(uid)
+    assert entries[0]["type"] == "ADMIN_REMOVE"
+    assert entries[0]["reference_type"] == "Admin"
+    assert entries[1]["type"] == "ADMIN_ADD"
+
+
 def test_zero_or_negative_amount_rejected(wallet_and_user):
     wallet, uid = wallet_and_user
     with pytest.raises(Exception):

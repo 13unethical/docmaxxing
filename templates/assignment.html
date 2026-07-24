@@ -5,36 +5,45 @@
 <div class="assignment-grid" data-assignment-page>
   <section class="assignment-main-col">
     <div class="dash-card dash-card--premium" data-asg-upload-card>
-      <h2 class="dash-card-title">Assignment Upload</h2>
-
       <div class="assignment-upload-grid">
         <label class="assignment-drop">
           <input type="file" accept=".pdf,.docx" hidden data-asg-brief />
-          <span class="assignment-drop-icon" aria-hidden="true">📄</span>
-          <span class="assignment-drop-label">Assignment Brief</span>
-          <span class="assignment-drop-hint">PDF or DOCX</span>
-        </label>
-        <label class="assignment-drop assignment-drop--optional">
-          <input type="file" accept=".pdf,.docx" hidden data-asg-rubric />
-          <span class="assignment-drop-icon" aria-hidden="true">📋</span>
-          <span class="assignment-drop-label">Rubric</span>
-          <span class="assignment-drop-hint">Optional</span>
+          <span class="assignment-drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M7.5 3.75h6.5L19 8.75V20a1.25 1.25 0 0 1-1.25 1.25h-10.5A1.25 1.25 0 0 1 6 20V5a1.25 1.25 0 0 1 1.5-1.25Z"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linejoin="round"
+              />
+              <path d="M14 3.75V8.75H19" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+            </svg>
+          </span>
+          <span class="assignment-drop-label">Requirements</span>
         </label>
         <label class="assignment-drop assignment-drop--optional">
           <input type="file" accept=".pdf,.docx,.zip" hidden data-asg-extra multiple />
-          <span class="assignment-drop-icon" aria-hidden="true">📎</span>
+          <span class="assignment-drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M15.5 7.5v7.25a3.75 3.75 0 1 1-7.5 0V6.75a2.25 2.25 0 1 1 4.5 0v7.5a0.75 0.75 0 1 1-1.5 0V7.5"
+                stroke="currentColor"
+                stroke-width="1.6"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
           <span class="assignment-drop-label">Additional files / Materials</span>
-          <span class="assignment-drop-hint">Optional</span>
         </label>
       </div>
 
-      <section class="assignment-files" aria-live="polite">
+      <section class="assignment-files" data-asg-files-section hidden aria-live="polite">
         <h3 class="assignment-files-title">Uploaded files</h3>
         <ul class="assignment-files-list" data-asg-files></ul>
-        <p class="assignment-files-empty" data-asg-files-empty>No files added yet.</p>
       </section>
 
-      <div class="assignment-field-row">
+      <div class="assignment-field-row two">
         <label class="assignment-field">
           <span class="assignment-field-label">Deadline date</span>
           <input type="date" data-asg-deadline-date />
@@ -49,22 +58,19 @@
         <label class="assignment-field assignment-note-field">
           <span class="assignment-field-label">Note</span>
           <textarea
-            rows="4"
-            placeholder="Add context that may not appear in the brief (module, expectations, constraints)…"
+            rows="2"
+            placeholder="Add your notes"
             data-asg-note
           ></textarea>
         </label>
       </div>
 
-      <p class="assignment-priority-note">
-        The price is based on length and how difficult the task is. You'll see an
-        estimated preparation time before you pay.
-      </p>
-
-      <div class="assignment-submit-row">
-        <button type="button" class="assignment-submit-btn" data-asg-analyze disabled>Analyze &amp; Get Price</button>
+      <div class="assignment-card-cta">
+        <div class="assignment-submit-row">
+          <button type="button" class="assignment-submit-btn" data-asg-analyze disabled>Analyze &amp; get price</button>
+        </div>
+        <p class="asg-analysis-status" data-asg-analysis-status role="status" aria-live="polite"></p>
       </div>
-      <p class="asg-analysis-status" data-asg-analysis-status role="status" aria-live="polite"></p>
     </div>
 
     <p class="asg-page-error" data-asg-page-error hidden role="alert"></p>
@@ -114,12 +120,6 @@
       <p class="order-total"><span>Total</span><strong data-asg-summary-total>—</strong></p>
       <p class="asg-price-coins" data-asg-summary-coins hidden></p>
       <button type="button" class="assignment-pay-btn" data-asg-continue disabled>Start Writing</button>
-      <ul class="order-trust">
-        <li>Secure payment</li>
-        <li>Academic quality</li>
-        <li>Ready in minutes</li>
-      </ul>
-      <p class="humanizer-ui-note" data-asg-summary-note>Upload your brief to see the price</p>
     </div>
   </aside>
 

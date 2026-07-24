@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ feature|default('Workspace') }} — Soon — DocMaxxing{% endblock %}
+{% block content %}
+<section class="soon-page" aria-labelledby="soon-title">
+  <p class="soon-eyebrow">{{ feature|default('Workspace') }}</p>
+  <h1 class="soon-title" id="soon-title">SOON...</h1>
+  <p class="soon-lede">This section is under construction. Everything else is still available from the menu.</p>
+  <a class="btn-secondary" href="{{ url_for('index') }}">Back to Format</a>
+</section>
+{% endblock %}

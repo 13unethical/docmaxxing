@@ -243,7 +243,7 @@
     try {
       var raw = readStorage(REF_STORAGE_KEY);
       var arr = raw ? JSON.parse(raw) : [];
-      return Array.isArray(arr) ? arr.map(String).filter(Boolean) : [];
+      return Array.isArray(arr) ? arr.map(String).filter(Boolean).slice(0, 20) : [];
     } catch (e) {
       return [];
     }
@@ -550,6 +550,75 @@
       .catch(function () {});
   }
   global.refreshCoinBalance = refreshCoinBalance;
+})(typeof window !== "undefined" ? window : this);
+
+/* Theme toggle: moon/sun + data-theme + localStorage. */
+(function (global) {
+  var STORAGE_KEY = "theme";
+
+  function getStoredTheme() {
+    try {
+      var t = localStorage.getItem(STORAGE_KEY);
+      if (t === "dark" || t === "light") return t;
+    } catch (e) {}
+    return null;
+  }
+
+  function currentTheme() {
+    var attr = document.documentElement.getAttribute("data-theme");
+    if (attr === "dark" || attr === "light") return attr;
+    return getStoredTheme() || "light";
+  }
+
+  function applyTheme(theme) {
+    var next = theme === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch (e) {}
+    var isDark = next === "dark";
+    document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
+      var moon = btn.querySelector(".theme-toggle-icon--moon");
+      var sun = btn.querySelector(".theme-toggle-icon--sun");
+      if (moon) moon.hidden = isDark;
+      if (sun) sun.hidden = !isDark;
+      btn.setAttribute(
+        "aria-label",
+        isDark ? "Switch to light mode" : "Switch to dark mode"
+      );
+    });
+    document.querySelectorAll("[data-theme-set]").forEach(function (btn) {
+      var value = btn.getAttribute("data-theme-set");
+      btn.setAttribute("aria-pressed", value === next ? "true" : "false");
+    });
+  }
+
+  function initThemeToggle() {
+    applyTheme(currentTheme());
+    if (document.documentElement.dataset.themeDelegated) return;
+    document.documentElement.dataset.themeDelegated = "1";
+    document.addEventListener("click", function (e) {
+      var setBtn = e.target.closest("[data-theme-set]");
+      if (setBtn) {
+        applyTheme(setBtn.getAttribute("data-theme-set"));
+        return;
+      }
+      var toggle = e.target.closest("[data-theme-toggle]");
+      if (toggle) {
+        applyTheme(currentTheme() === "dark" ? "light" : "dark");
+      }
+    });
+  }
+
+  global.DMThemeApply = function () {
+    applyTheme(currentTheme());
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initThemeToggle);
+  } else {
+    initThemeToggle();
+  }
 })(typeof window !== "undefined" ? window : this);
 
 /* User account dropdown in the top nav. */

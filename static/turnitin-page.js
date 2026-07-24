@@ -4,7 +4,12 @@
 (function () {
   "use strict";
 
-  var CREDITS_PER_CHECK = 25;
+  var CREDITS_PER_CHECK = (function () {
+    var btn = document.querySelector("[data-tt-submit]");
+    var raw = btn && btn.getAttribute("data-tt-cost");
+    var n = raw ? parseInt(raw, 10) : 300;
+    return isNaN(n) || n < 1 ? 300 : n;
+  })();
   var TURNITIN_CHECK_URL = "/api/turnitin/check";
   var TURNITIN_REPORTS_URL = "/api/turnitin/reports";
   var POLL_MS = 2000;

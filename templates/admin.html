@@ -15,6 +15,81 @@
     </div>
   </header>
 
+  <section class="adm-card adm-analytics" aria-labelledby="adm-analytics-title" data-adm-analytics>
+    <div class="adm-analytics-head">
+      <div>
+        <h2 class="adm-section-title" id="adm-analytics-title">Analytics</h2>
+        <p class="adm-analytics-lede">Credits sold, usage, revenue, and top customers.</p>
+      </div>
+      <button type="button" class="adm-btn adm-btn--ghost" data-adm-analytics-refresh>Refresh</button>
+    </div>
+    <p class="adm-status" data-adm-analytics-status role="status" aria-live="polite"></p>
+
+    <div class="adm-kpi-grid" data-adm-kpi-grid>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Total Credits Sold</p>
+        <p class="adm-kpi-value" data-adm-kpi-sold>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Total Credits Used</p>
+        <p class="adm-kpi-value" data-adm-kpi-used>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Revenue</p>
+        <p class="adm-kpi-value" data-adm-kpi-revenue>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Most Used Feature</p>
+        <p class="adm-kpi-value adm-kpi-value--sm" data-adm-kpi-feature>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Avg Credits / User</p>
+        <p class="adm-kpi-value" data-adm-kpi-avg-credits>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Average Purchase</p>
+        <p class="adm-kpi-value adm-kpi-value--sm" data-adm-kpi-avg-purchase>—</p>
+      </article>
+    </div>
+
+    <div class="adm-analytics-cols">
+      <div class="adm-analytics-col">
+        <h3 class="adm-analytics-col-title">Top Customers</h3>
+        <div class="adm-table-wrap">
+          <table class="adm-table adm-table--compact">
+            <thead>
+              <tr>
+                <th scope="col">Customer</th>
+                <th scope="col">Purchases</th>
+                <th scope="col">Credits</th>
+                <th scope="col">Revenue</th>
+              </tr>
+            </thead>
+            <tbody data-adm-top-customers></tbody>
+          </table>
+          <p class="adm-empty" data-adm-top-customers-empty hidden>No paid purchases yet.</p>
+        </div>
+      </div>
+      <div class="adm-analytics-col">
+        <h3 class="adm-analytics-col-title">Top Countries</h3>
+        <div class="adm-table-wrap">
+          <table class="adm-table adm-table--compact">
+            <thead>
+              <tr>
+                <th scope="col">Country</th>
+                <th scope="col">Purchases</th>
+                <th scope="col">Credits</th>
+                <th scope="col">Revenue</th>
+              </tr>
+            </thead>
+            <tbody data-adm-top-countries></tbody>
+          </table>
+          <p class="adm-empty" data-adm-top-countries-empty hidden>No country data yet (filled from Paddle billing address).</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section class="adm-card">
     <div class="adm-toolbar">
       <div class="adm-search-wrap">
@@ -52,6 +127,114 @@
       <p class="adm-empty" data-adm-empty hidden>No users found.</p>
     </div>
   </section>
+
+  <div class="adm-ledger-overlay" data-adm-ledger-overlay hidden>
+    <div class="adm-ledger-panel" role="dialog" aria-modal="true" aria-labelledby="adm-ledger-title">
+      <header class="adm-ledger-header">
+        <div>
+          <h2 class="adm-ledger-title" id="adm-ledger-title">Ledger</h2>
+          <p class="adm-ledger-subtitle" data-adm-ledger-subtitle></p>
+        </div>
+        <button type="button" class="adm-btn adm-btn--ghost" data-adm-ledger-close aria-label="Close ledger">
+          Close
+        </button>
+      </header>
+      <div class="adm-ledger-meta">
+        <span>Balance: <strong data-adm-ledger-balance>0</strong> coins</span>
+        <span data-adm-ledger-count></span>
+      </div>
+      <p class="adm-ledger-status" data-adm-ledger-status role="status"></p>
+      <div class="adm-ledger-table-wrap">
+        <table class="adm-table adm-ledger-table">
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Type</th>
+              <th scope="col">Credits</th>
+              <th scope="col">Before</th>
+              <th scope="col">After</th>
+              <th scope="col">Reference</th>
+              <th scope="col">Ref ID</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody data-adm-ledger-body></tbody>
+        </table>
+        <p class="adm-empty" data-adm-ledger-empty hidden>No ledger entries yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="adm-ledger-overlay" data-adm-purchases-overlay hidden>
+    <div class="adm-ledger-panel" role="dialog" aria-modal="true" aria-labelledby="adm-purchases-title">
+      <header class="adm-ledger-header">
+        <div>
+          <h2 class="adm-ledger-title" id="adm-purchases-title">Paddle purchases</h2>
+          <p class="adm-ledger-subtitle" data-adm-purchases-subtitle></p>
+        </div>
+        <button type="button" class="adm-btn adm-btn--ghost" data-adm-purchases-close aria-label="Close purchases">
+          Close
+        </button>
+      </header>
+      <div class="adm-ledger-meta">
+        <span data-adm-purchases-count></span>
+      </div>
+      <p class="adm-ledger-status" data-adm-purchases-status role="status"></p>
+      <div class="adm-ledger-table-wrap">
+        <table class="adm-table adm-ledger-table">
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Status</th>
+              <th scope="col">Credits</th>
+              <th scope="col">Amount</th>
+              <th scope="col">Currency</th>
+              <th scope="col">Product</th>
+              <th scope="col">Price ID</th>
+              <th scope="col">Paddle TX</th>
+            </tr>
+          </thead>
+          <tbody data-adm-purchases-body></tbody>
+        </table>
+        <p class="adm-empty" data-adm-purchases-empty hidden>No purchases yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="adm-ledger-overlay" data-adm-usage-overlay hidden>
+    <div class="adm-ledger-panel" role="dialog" aria-modal="true" aria-labelledby="adm-usage-title">
+      <header class="adm-ledger-header">
+        <div>
+          <h2 class="adm-ledger-title" id="adm-usage-title">Usage</h2>
+          <p class="adm-ledger-subtitle" data-adm-usage-subtitle></p>
+        </div>
+        <button type="button" class="adm-btn adm-btn--ghost" data-adm-usage-close aria-label="Close usage">
+          Close
+        </button>
+      </header>
+      <div class="adm-ledger-meta">
+        <span data-adm-usage-count></span>
+      </div>
+      <p class="adm-ledger-status" data-adm-usage-status role="status"></p>
+      <div class="adm-ledger-table-wrap">
+        <table class="adm-table adm-ledger-table">
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Feature</th>
+              <th scope="col">Credits</th>
+              <th scope="col">Provider</th>
+              <th scope="col">Provider cost</th>
+              <th scope="col">Latency (ms)</th>
+              <th scope="col">Request ID</th>
+            </tr>
+          </thead>
+          <tbody data-adm-usage-body></tbody>
+        </table>
+        <p class="adm-empty" data-adm-usage-empty hidden>No usage events yet.</p>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}
 {% block scripts %}

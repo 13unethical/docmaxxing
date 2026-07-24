@@ -97,19 +97,74 @@ from services.economy import (
 )
 from services.economy import auth as economy_auth
 from services.economy.admin import AdminError, AdminService, bootstrap_admin_from_env
+from services.economy.paddle_purchases import (
+    PaddlePurchaseService,
+)
+from services.economy.paddle_gateway import (
+    PaddleGatewayError,
+    PaddleSignatureError,
+    apply_paid_purchase_atomic,
+    create_checkout,
+    handle_webhook_event,
+    mock_topup_allowed,
+    paddle_client_token,
+    paddle_configured,
+    paddle_environment,
+    verify_paddle_signature,
+)
 from services.economy.pricing import USD_TO_COINS
+from services.economy.usage import (
+    FEATURE_ASSIGNMENT,
+    FEATURE_DETECTION,
+    FEATURE_HUMANIZER,
+    FEATURE_TURNITIN,
+    UsageService,
+)
 from services.turnitin_service import TurnitinService, init_db as turnitin_init_db
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB uploads
-app.secret_key = (os.environ.get("SECRET_KEY") or "").strip() or "dev-insecure-change-me"
+
+
+def _require_strong_secret_key() -> str:
+    """Refuse startup if SECRET_KEY is missing or obviously weak."""
+    raw = (os.environ.get("SECRET_KEY") or "").strip()
+    weak_markers = (
+        "dev-insecure-change-me",
+        "change-me",
+        "changeme",
+        "secret",
+        "development key",
+        "your-secret",
+        "replace-me",
+    )
+    lowered = raw.lower()
+    if not raw:
+        raise SystemExit(
+            "FATAL: SECRET_KEY is required. Set a strong random value in the environment."
+        )
+    if len(raw) < 32:
+        raise SystemExit(
+            "FATAL: SECRET_KEY must be at least 32 characters."
+        )
+    if any(marker in lowered for marker in weak_markers):
+        raise SystemExit(
+            "FATAL: SECRET_KEY looks weak or is a placeholder. "
+            "Generate a strong random secret (e.g. python -c \"import secrets; print(secrets.token_urlsafe(48))\")."
+        )
+    return raw
+
+
+app.secret_key = _require_strong_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days
 
 economy_init_db()
 turnitin_init_db()
 bootstrap_admin_from_env()
 wallet = WalletService()
-admin_service = AdminService(wallet)
+paddle_purchases = PaddlePurchaseService()
+usage_service = UsageService()
+admin_service = AdminService(wallet, paddle_purchases, usage_service)
 turnitin_service = TurnitinService()
 
 
@@ -153,6 +208,31 @@ def _refund_safe(user_id: int, cost: int, feature: str, *, ref_id: str | None = 
         wallet.refund(user_id, int(cost), feature, ref_id=ref_id, meta={"reason": "auto-refund"})
     except Exception:  # noqa: BLE001
         app.logger.exception("refund failed for user=%s feature=%s", user_id, feature)
+
+
+def _record_usage_safe(
+    user_id: int,
+    *,
+    feature: str,
+    credits_used: int,
+    provider: str | None = None,
+    provider_cost: float | None = None,
+    latency: int | None = None,
+    request_id: str | None = None,
+) -> None:
+    """Best-effort Usage row; never breaks the request path."""
+    try:
+        usage_service.record(
+            user_id=int(user_id),
+            feature=feature,
+            credits_used=int(credits_used),
+            provider=provider,
+            provider_cost=provider_cost,
+            latency=latency,
+            request_id=request_id,
+        )
+    except Exception:  # noqa: BLE001
+        app.logger.exception("usage record failed for user=%s feature=%s", user_id, feature)
 
 assignment_pipeline = AssignmentPipelineService()
 research_engine = ResearchEngineService()
@@ -392,7 +472,7 @@ def inject_account():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if economy_auth.current_user():
-        return redirect(url_for("workspace"))
+        return redirect(url_for("index"))
     if request.method == "GET":
         return render_template("register.html", nav_active=None)
 
@@ -417,14 +497,14 @@ def register():
         ), 400
 
     economy_auth.login_user(user["id"])
-    return redirect(url_for("workspace"))
+    return redirect(url_for("index"))
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     next_url = request.values.get("next") or ""
     if economy_auth.current_user():
-        return redirect(next_url or url_for("workspace"))
+        return redirect(next_url or url_for("index"))
     if request.method == "GET":
         return render_template("login.html", nav_active=None, next_url=next_url)
 
@@ -443,7 +523,7 @@ def login():
     economy_auth.login_user(user["id"])
     if next_url.startswith("/"):
         return redirect(next_url)
-    return redirect(url_for("workspace"))
+    return redirect(url_for("index"))
 
 
 @app.post("/logout")
@@ -497,6 +577,41 @@ def account():
         password_message=password_message,
         password_error=password_error,
     )
+
+
+def _render_legal(focus: str | None = None):
+    titles = {
+        "terms": "Terms of service",
+        "privacy": "Privacy policy",
+        "refund": "Refund policy",
+    }
+    page_title = titles.get(focus or "", "Legal")
+    return render_template(
+        "legal.html",
+        nav_active=None,
+        focus=focus,
+        page_title=page_title if focus else "Legal",
+    )
+
+
+@app.get("/legal")
+def legal():
+    return _render_legal()
+
+
+@app.get("/legal/terms")
+def legal_terms():
+    return _render_legal("terms")
+
+
+@app.get("/legal/privacy")
+def legal_privacy():
+    return _render_legal("privacy")
+
+
+@app.get("/legal/refund")
+def legal_refund():
+    return _render_legal("refund")
 
 
 # ---------------------------------------------------------------- admin
@@ -565,6 +680,118 @@ def api_admin_set_role(user_id: int):
     except AdminError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     return jsonify({"success": True, **result})
+
+
+@app.get("/api/admin/users/<int:user_id>/ledger")
+@economy_auth.admin_required
+def api_admin_user_ledger(user_id: int):
+    """CreditTransaction journal for one user (admin audit view)."""
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except ValueError:
+        limit = 100
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+    try:
+        payload = admin_service.get_ledger(user_id, limit=limit, offset=offset)
+    except AdminError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    return jsonify({"success": True, **payload})
+
+
+@app.get("/api/admin/users/<int:user_id>/purchases")
+@economy_auth.admin_required
+def api_admin_user_purchases(user_id: int):
+    """PaddlePurchase rows for one user."""
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except ValueError:
+        limit = 100
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+    try:
+        payload = admin_service.get_purchases(user_id, limit=limit, offset=offset)
+    except AdminError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    return jsonify({"success": True, **payload})
+
+
+@app.get("/api/admin/purchases")
+@economy_auth.admin_required
+def api_admin_purchases():
+    """All PaddlePurchase rows (optional search / status filter)."""
+    search = (request.args.get("q") or request.args.get("search") or "").strip()
+    status = (request.args.get("status") or "").strip()
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except ValueError:
+        limit = 100
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+    try:
+        payload = admin_service.list_purchases(
+            search=search, status=status, limit=limit, offset=offset
+        )
+    except AdminError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, **payload})
+
+
+@app.get("/api/admin/users/<int:user_id>/usage")
+@economy_auth.admin_required
+def api_admin_user_usage(user_id: int):
+    """Usage events (AI launches) for one user."""
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except ValueError:
+        limit = 100
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+    try:
+        payload = admin_service.get_usage(user_id, limit=limit, offset=offset)
+    except AdminError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 404
+    return jsonify({"success": True, **payload})
+
+
+@app.get("/api/admin/usage")
+@economy_auth.admin_required
+def api_admin_usage():
+    """All usage events (optional search / feature filter)."""
+    search = (request.args.get("q") or request.args.get("search") or "").strip()
+    feature = (request.args.get("feature") or "").strip()
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except ValueError:
+        limit = 100
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+    payload = admin_service.list_usage(
+        search=search, feature=feature, limit=limit, offset=offset
+    )
+    return jsonify({"success": True, **payload})
+
+
+@app.get("/api/admin/analytics")
+@economy_auth.admin_required
+def api_admin_analytics():
+    """Aggregate KPIs: sold/used credits, revenue, top customers/countries."""
+    try:
+        top_limit = int(request.args.get("top", "10"))
+    except ValueError:
+        top_limit = 10
+    payload = admin_service.get_analytics(top_limit=top_limit)
+    return jsonify({"success": True, **payload})
 
 
 # ------------------------------------------------- JSON auth (register modal)
@@ -666,31 +893,119 @@ def api_economy_transactions():
 
 @app.get("/api/economy/packages")
 def api_economy_packages():
-    return jsonify({"packages": list(TOPUP_PACKAGES.values())})
+    return jsonify(
+        {
+            "packages": list(TOPUP_PACKAGES.values()),
+            "paddle_configured": paddle_configured(),
+            "paddle_environment": paddle_environment(),
+            "client_token": paddle_client_token() or None,
+        }
+    )
+
+
+@app.post("/api/economy/checkout")
+@economy_auth.login_required
+def api_economy_checkout():
+    """Create a Paddle Checkout for a credit package. Returns checkout_url / txn id."""
+    user = economy_auth.current_user()
+    payload = request.get_json(silent=True) or {}
+    package_id = str(payload.get("package") or "").strip()
+    if not package_id:
+        return jsonify({"error": "package is required"}), 400
+    if economy_package(package_id) is None:
+        return jsonify({"error": "Unknown package"}), 400
+    if not paddle_configured():
+        return (
+            jsonify(
+                {
+                    "error": "PADDLE_NOT_CONFIGURED",
+                    "message": "Paddle API key is not set. Add PADDLE_API_KEY and price ids.",
+                }
+            ),
+            503,
+        )
+    try:
+        checkout = create_checkout(
+            user_id=int(user["id"]),
+            package_id=package_id,
+            customer_email=str(user.get("email") or "") or None,
+        )
+    except PaddleGatewayError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"success": True, **checkout})
+
+
+@app.post("/api/webhooks/paddle")
+def api_paddle_webhook():
+    """Paddle Billing webhook — signature verified, fulfillment idempotent."""
+    raw = request.get_data(cache=True, as_text=False)
+    signature = request.headers.get("Paddle-Signature")
+    try:
+        verify_paddle_signature(raw, signature)
+    except PaddleSignatureError as exc:
+        app.logger.warning("paddle webhook signature failed: %s", exc)
+        return jsonify({"error": "invalid_signature"}), 400
+
+    try:
+        event = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return jsonify({"error": "invalid_json"}), 400
+
+    try:
+        result = handle_webhook_event(event if isinstance(event, dict) else {})
+    except PaddleGatewayError as exc:
+        app.logger.exception("paddle webhook fulfill failed: %s", exc)
+        # 500 so Paddle retries; idempotency protects double-credit on success path.
+        return jsonify({"error": str(exc)}), 500
+
+    return jsonify({"ok": True, **result}), 200
 
 
 @app.post("/api/economy/topup")
 @economy_auth.login_required
 def api_economy_topup():
-    """Mock top-up: instantly grant a package's coins (real checkout later)."""
+    """Dev-only mock top-up. Disabled in live mode; sandbox needs PADDLE_ALLOW_MOCK_TOPUP=1."""
+    import uuid
+
+    if not mock_topup_allowed():
+        return (
+            jsonify(
+                {
+                    "error": "MOCK_TOPUP_DISABLED",
+                    "message": "Use /api/economy/checkout for real Paddle payments.",
+                }
+            ),
+            403,
+        )
+
     user = economy_auth.current_user()
     payload = request.get_json(silent=True) or {}
     pkg = economy_package(str(payload.get("package") or ""))
     if pkg is None:
         return jsonify({"error": "Unknown package"}), 400
-    result = wallet.credit(
-        user["id"],
-        int(pkg["coins"]),
-        "topup",
-        ref_id=pkg["id"],
-        meta={"usd": pkg["usd"], "package": pkg["id"], "mock": True},
-    )
+
+    mock_txn = f"mock_{uuid.uuid4().hex[:16]}"
+    try:
+        result = apply_paid_purchase_atomic(
+            user_id=int(user["id"]),
+            paddle_transaction_id=mock_txn,
+            product_id=str(pkg["id"]),
+            price_id=f"price_{pkg['id']}",
+            credits=int(pkg["coins"]),
+            amount=float(pkg["usd"]),
+            currency="USD",
+            meta={"mock": True, "package": pkg["id"], "usd": pkg["usd"]},
+        )
+    except PaddleGatewayError as exc:
+        return jsonify({"error": str(exc)}), 400
+
     return jsonify(
         {
             "success": True,
-            "coins_added": int(pkg["coins"]),
-            "balance": result["balance"],
+            "coins_added": int(result.get("credits_added") or pkg["coins"]),
+            "balance": result.get("balance"),
             "package": pkg,
+            "purchase": result.get("purchase"),
         }
     )
 
@@ -717,9 +1032,12 @@ def references():
 
 @app.route("/workspace")
 def workspace():
-    """Full document workspace — editor, humanize, AI, cite, comments."""
-    return render_template("workspace.html")
-
+    """Workspace UI is temporarily gated — keep templates/static intact for later."""
+    return render_template(
+        "soon.html",
+        nav_active="workspace",
+        feature="Workspace",
+    )
 
 @app.route("/editor")
 def editor():
@@ -729,7 +1047,11 @@ def editor():
 
 @app.route("/humanizer")
 def humanizer():
-    return render_template("humanizer.html", nav_active="humanizer")
+    return render_template(
+        "humanizer.html",
+        nav_active="humanizer",
+        humanize_cost=feature_cost("humanize"),
+    )
 
 
 @app.route("/assignment")
@@ -1015,6 +1337,14 @@ def api_assignment_project_confirm_payment(project_id: str):
         price=bundle.project.price,
         payment_confirmed=bool(bundle.project.artifacts.get("payment_confirmed")),
     )
+    if charged_here and coins > 0:
+        _record_usage_safe(
+            user_id,
+            feature=FEATURE_ASSIGNMENT,
+            credits_used=coins,
+            provider="AssignmentPipeline",
+            request_id=project_id,
+        )
     payload = _project_api_payload(bundle)
     if isinstance(payload, dict):
         payload["coins_charged"] = coins if charged_here else 0
@@ -1488,6 +1818,16 @@ def api_browser_stealthwriter_humanize():
         status = job.status.value
         if status == "COMPLETED":
             res = job.result or {}
+            elapsed = res.get("elapsed_seconds")
+            latency_ms = int(float(elapsed) * 1000) if elapsed is not None else None
+            _record_usage_safe(
+                user_id,
+                feature=FEATURE_HUMANIZER,
+                credits_used=cost,
+                provider="StealthWriter",
+                latency=latency_ms,
+                request_id=job.id,
+            )
             return jsonify(
                 {
                     "success": True,
@@ -2606,6 +2946,7 @@ def api_workspace_detect():
         return charged
     user_id, _tx = charged
 
+    started = time.monotonic()
     try:
         raw = zerogpt_client.detect(text)
     except (ZeroGPTError, ZeroGPTProviderError) as exc:
@@ -2616,6 +2957,7 @@ def api_workspace_detect():
         app.logger.exception("workspace/detect failed")
         return jsonify({"error": f"Detection failed: {exc}"}), 502
 
+    latency_ms = int((time.monotonic() - started) * 1000)
     data = raw.get("data") if isinstance(raw, dict) else {}
     container = data if isinstance(data, dict) else raw
     flagged = _extract_flagged_sentences(raw)
@@ -2624,6 +2966,15 @@ def api_workspace_detect():
     ai_words = _detect_number(container, "aiWords", "ai_words")
     if ai_words is None:
         ai_words = sum(count_words(s) for s in flagged)
+
+    _record_usage_safe(
+        user_id,
+        feature=FEATURE_DETECTION,
+        credits_used=cost,
+        provider="ZeroGPT",
+        latency=latency_ms,
+        request_id=None,
+    )
 
     return jsonify(
         {
@@ -3156,7 +3507,11 @@ def api_assignment_stage_run(project_id: str):
 
 @app.route("/turnitin")
 def turnitin():
-    return render_template("turnitin.html", nav_active="turnitin")
+    return render_template(
+        "turnitin.html",
+        nav_active="turnitin",
+        turnitin_cost=feature_cost("turnitin"),
+    )
 
 
 def _turnitin_row_api(row: dict[str, Any]) -> dict[str, Any]:
@@ -3418,6 +3773,14 @@ def api_turnitin_check():
         app.logger.exception("turnitin/check failed")
         return jsonify({"success": False, "error": f"Could not queue check: {exc}"}), 500
 
+    _record_usage_safe(
+        user_id,
+        feature=FEATURE_TURNITIN,
+        credits_used=cost,
+        provider="PlagDetect",
+        request_id=job.id,
+    )
+
     return jsonify(
         {
             "success": True,
@@ -3468,7 +3831,14 @@ def api_browser_plagdetect_login():
 @app.route("/pricing")
 def pricing():
     """Coin packages — clear pricing without subscription pressure."""
-    return render_template("pricing.html", nav_active="pricing")
+    return render_template(
+        "pricing.html",
+        nav_active="pricing",
+        welcome_bonus=WELCOME_BONUS,
+        paddle_configured=paddle_configured(),
+        paddle_client_token=paddle_client_token(),
+        paddle_environment=paddle_environment(),
+    )
 
 
 def _git_revision() -> str:
