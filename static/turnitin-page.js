@@ -20,9 +20,12 @@
   }
 
   function readInitialCredits() {
-    var el = document.querySelector("[data-tt-credits]");
-    var n = el ? parseInt(el.textContent, 10) : 0;
-    return isNaN(n) ? 0 : n;
+    var el =
+      document.querySelector("[data-tt-credits]") ||
+      document.querySelector("[data-coin-balance]");
+    if (!el) return null;
+    var n = parseInt(String(el.textContent || "").replace(/[^\d-]/g, ""), 10);
+    return isNaN(n) ? null : n;
   }
 
   var state = {
@@ -184,6 +187,9 @@
   }
 
   function renderCredits() {
+    if (typeof state.credits !== "number" || isNaN(state.credits)) {
+      return;
+    }
     var els2 = document.querySelectorAll("[data-coin-balance]");
     Array.prototype.forEach.call(els2, function (el) {
       el.textContent = String(state.credits);
@@ -191,6 +197,30 @@
     if (els.credits && !els.credits.hasAttribute("data-coin-balance")) {
       els.credits.textContent = String(state.credits);
     }
+  }
+
+  function syncCreditsFromServer() {
+    if (typeof window.refreshCoinBalance === "function") {
+      return window.refreshCoinBalance().then(function (d) {
+        if (d && typeof d.balance === "number") {
+          state.credits = d.balance;
+          renderCredits();
+        }
+        return d;
+      });
+    }
+    return fetch("/api/economy/balance", { headers: { Accept: "application/json" } })
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (d) {
+        if (d && typeof d.balance === "number") {
+          state.credits = d.balance;
+          renderCredits();
+        }
+        return d;
+      })
+      .catch(function () {});
   }
 
   function renderTable() {
@@ -325,120 +355,146 @@
     });
   }
 
+  function handleSubmitResult(r, acc) {
+    if (r.status === 402 || (r.data && r.data.error === "INSUFFICIENT_COINS")) {
+      acc.failCount += 1;
+      if (els.submitStatus) {
+        els.submitStatus.textContent =
+          (r.data && r.data.message) || "Not enough coins. Buy coins to continue.";
+      }
+      return acc;
+    }
+    if (!r.ok || !r.data || !r.data.success) {
+      acc.failCount += 1;
+      if (els.submitStatus) {
+        els.submitStatus.textContent =
+          (r.data && (r.data.error || r.data.message)) ||
+          ("Submission failed (HTTP " + r.status + "). Please try again.");
+      }
+      return acc;
+    }
+    if (typeof r.data.balance === "number") {
+      acc.lastBalance = r.data.balance;
+      state.credits = r.data.balance;
+    }
+    upsertReport({
+      id: r.data.submission_id,
+      filename: r.file.name,
+      similarity: null,
+      aiScore: null,
+      aiHighlights: null,
+      status: r.data.status || "queued",
+      createdAt: new Date().toISOString(),
+      hasReport: false,
+    });
+    acc.okCount += 1;
+    return acc;
+  }
+
+  function finishSubmitBatch(acc) {
+    if (els.submitBtn) els.submitBtn.disabled = false;
+    if (typeof acc.lastBalance === "number") {
+      state.credits = acc.lastBalance;
+    }
+    if (typeof window.refreshCoinBalance === "function") {
+      window.refreshCoinBalance();
+    }
+    renderCredits();
+    if (els.fileInput) els.fileInput.value = "";
+    setFiles([]);
+    schedulePoll();
+    if (els.submitStatus) {
+      if (acc.okCount && !acc.failCount) {
+        els.submitStatus.textContent =
+          acc.okCount === 1
+            ? "Queued. Checking on PlagDetect…"
+            : acc.okCount + " files queued. Checking on PlagDetect…";
+      } else if (acc.okCount && acc.failCount) {
+        els.submitStatus.textContent =
+          acc.okCount + " queued, " + acc.failCount + " failed.";
+      } else if (acc.failCount) {
+        /* keep existing error text if already set */
+        if (!els.submitStatus.textContent) {
+          els.submitStatus.textContent = "Submission failed. Please try again.";
+        }
+      }
+    }
+    return acc;
+  }
+
   function submitCheck() {
     if (!state.selectedFiles.length) {
       return;
     }
     var files = state.selectedFiles.slice();
     var needed = files.length * CREDITS_PER_CHECK;
-    if (state.credits < needed) {
-      if (els.submitStatus) {
-        els.submitStatus.textContent =
-          "Not enough coins. Need " + needed + ", have " + state.credits + ".";
-      }
-      return;
-    }
 
-    var options = getOptions();
-    if (els.submitBtn) {
-      els.submitBtn.disabled = true;
-    }
-    if (els.submitStatus) {
-      els.submitStatus.textContent =
-        files.length === 1 ? "Submitting…" : "Submitting " + files.length + " files…";
-    }
-
-    var chain = Promise.resolve({ okCount: 0, failCount: 0, lastBalance: state.credits });
-    files.forEach(function (file) {
-      chain = chain.then(function (acc) {
-        return submitOneFile(file, options).then(function (r) {
-          if (
-            (r.data && (r.data.error === "AUTH_REQUIRED" || r.data.error === "REGISTER_REQUIRED")) &&
-            window.DMAuth
-          ) {
-            return window.DMAuth.require({
-              reason: (r.data && r.data.message) || "Create a free account to run a Turnitin check.",
-            }).then(function () {
-              return submitOneFile(file, options);
-            }).then(function (r2) {
-              return handleSubmitResult(r2, acc);
-            }).catch(function () {
-              acc.failCount += 1;
-              return acc;
-            });
-          }
-          return handleSubmitResult(r, acc);
-        });
-      });
-    });
-
-    function handleSubmitResult(r, acc) {
-      if (r.status === 402 || (r.data && r.data.error === "INSUFFICIENT_COINS")) {
-        acc.failCount += 1;
+    function runWithCredits() {
+      if (typeof state.credits !== "number" || state.credits < needed) {
         if (els.submitStatus) {
           els.submitStatus.textContent =
-            (r.data && r.data.message) || "Not enough coins. Buy coins to continue.";
+            "Not enough coins. Need " +
+            needed +
+            ", have " +
+            (typeof state.credits === "number" ? state.credits : "—") +
+            ".";
         }
-        return acc;
+        return;
       }
-        if (!r.ok || !r.data || !r.data.success) {
-          acc.failCount += 1;
-          if (els.submitStatus) {
-            els.submitStatus.textContent =
-              (r.data && (r.data.error || r.data.message)) ||
-              ("Submission failed (HTTP " + r.status + "). Please try again.");
-          }
-          return acc;
-        }
-      if (typeof r.data.balance === "number") {
-        acc.lastBalance = r.data.balance;
-        state.credits = r.data.balance;
+
+      var options = getOptions();
+      if (els.submitBtn) {
+        els.submitBtn.disabled = true;
       }
-      upsertReport({
-        id: r.data.submission_id,
-        filename: r.file.name,
-        similarity: null,
-        aiScore: null,
-        aiHighlights: null,
-        status: r.data.status || "queued",
-        createdAt: new Date().toISOString(),
-        hasReport: false,
+      if (els.submitStatus) {
+        els.submitStatus.textContent =
+          files.length === 1 ? "Submitting…" : "Submitting " + files.length + " files…";
+      }
+
+      var chain = Promise.resolve({ okCount: 0, failCount: 0, lastBalance: state.credits });
+      files.forEach(function (file) {
+        chain = chain.then(function (acc) {
+          return submitOneFile(file, options).then(function (r) {
+            if (
+              (r.data &&
+                (r.data.error === "AUTH_REQUIRED" || r.data.error === "REGISTER_REQUIRED")) &&
+              window.DMAuth
+            ) {
+              return window.DMAuth.require({
+                reason:
+                  (r.data && r.data.message) ||
+                  "Create a free account to run a Turnitin check.",
+              })
+                .then(function () {
+                  return submitOneFile(file, options);
+                })
+                .then(function (r2) {
+                  return handleSubmitResult(r2, acc);
+                })
+                .catch(function () {
+                  acc.failCount += 1;
+                  return acc;
+                });
+            }
+            return handleSubmitResult(r, acc);
+          });
+        });
       });
-      acc.okCount += 1;
-      return acc;
+
+      return chain
+        .then(finishSubmitBatch)
+        .catch(function () {
+          if (els.submitBtn) els.submitBtn.disabled = false;
+          if (els.submitStatus) {
+            els.submitStatus.textContent = "Network error. Please try again.";
+          }
+        });
     }
 
-    chain
-      .then(function (acc) {
-        if (els.submitBtn) els.submitBtn.disabled = false;
-        state.credits = acc.lastBalance;
-        if (typeof window.refreshCoinBalance === "function") {
-          window.refreshCoinBalance();
-        }
-        renderCredits();
-        if (els.fileInput) els.fileInput.value = "";
-        setFiles([]);
-        schedulePoll();
-        if (els.submitStatus) {
-          if (acc.okCount && !acc.failCount) {
-            els.submitStatus.textContent =
-              acc.okCount === 1
-                ? "Queued. Checking on PlagDetect…"
-                : acc.okCount + " files queued. Checking on PlagDetect…";
-          } else if (acc.okCount && acc.failCount) {
-            els.submitStatus.textContent =
-              acc.okCount + " queued, " + acc.failCount + " failed.";
-          } else if (acc.failCount) {
-            els.submitStatus.textContent = "Submission failed. Please try again.";
-          }
-        }
-      })
-      .catch(function () {
-        if (els.submitBtn) els.submitBtn.disabled = false;
-        if (els.submitStatus) {
-          els.submitStatus.textContent = "Network error. Please try again.";
-        }
-      });
+    if (typeof state.credits !== "number") {
+      return syncCreditsFromServer().then(runWithCredits);
+    }
+    return runWithCredits();
   }
 
   function needsPolling() {
@@ -614,5 +670,6 @@
   }
 
   renderCredits();
+  syncCreditsFromServer();
   loadReports();
 })();
