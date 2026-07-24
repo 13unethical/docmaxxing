@@ -66,13 +66,9 @@ from services.writer_engine import WriterEngineService
 from services.reviewer_engine import ReviewerEngineService
 from services.revision_engine import RevisionEngineService
 from services.humanizer_engine import HumanizerEngineService
-from services.humanizer_engine.constants import (
-    DEFAULT_HUMANIZER_MODE,
-    MAX_WORDS_PER_INPUT,
-    MIN_HUMANIZE_CHARS,
-)
 from services.humanizer_engine.mock_validator import ZeroGPTParagraphValidator
-from services.humanizer_engine.zerogpt_humanizer import ZeroGPTTextHumanizer, count_words
+from services.humanizer_engine.stealthwriter_humanizer import StealthWriterTextHumanizer
+from services.humanizer_engine.zerogpt_humanizer import count_words
 from services.ai_detection_engine import AIDetectionEngineService
 from services.delivery_engine import DeliveryEngineService
 from services.llm_errors import llm_error_http_status, user_friendly_llm_error
@@ -254,12 +250,15 @@ def _zerogpt_configured() -> bool:
 
 
 def _build_humanizer_engine() -> HumanizerEngineService:
+    # Assignment humanization always goes through StealthWriter Legacy 5.1.
+    # ZeroGPT remains available for detection / validation when configured.
+    humanizer = StealthWriterTextHumanizer()
     if _zerogpt_configured():
         return HumanizerEngineService(
-            humanizer=ZeroGPTTextHumanizer(client=zerogpt_client, mode=DEFAULT_HUMANIZER_MODE),
+            humanizer=humanizer,
             validator=ZeroGPTParagraphValidator(),
         )
-    return HumanizerEngineService()
+    return HumanizerEngineService(humanizer=humanizer)
 
 
 humanizer_engine = _build_humanizer_engine()

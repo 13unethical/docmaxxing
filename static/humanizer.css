@@ -409,23 +409,6 @@ body:has(.hz) {
   display: none;
 }
 
-.hz-loading-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 72px;
-  height: 72px;
-  margin-bottom: 0.5rem;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--primary) 12%, var(--bg-light));
-  color: var(--hz-primary);
-}
-
-.hz-loading-icon svg {
-  width: 40px;
-  height: 40px;
-}
-
 .hz-loading-title {
   margin: 0;
   font-size: 1.25rem;

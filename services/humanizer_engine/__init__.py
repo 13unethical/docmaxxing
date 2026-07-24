@@ -12,6 +12,7 @@ from services.humanizer_engine.models import (
 from services.humanizer_engine.mock_humanizer import MockTextHumanizer, TextHumanizer
 from services.humanizer_engine.mock_validator import MockParagraphValidator, ParagraphValidator
 from services.humanizer_engine.service import HumanizerEngineService
+from services.humanizer_engine.stealthwriter_humanizer import StealthWriterTextHumanizer
 from services.humanizer_engine.store import HumanizedDraftStore, HumanizerSessionStore
 
 __all__ = [
@@ -28,5 +29,6 @@ __all__ = [
     "MockTextHumanizer",
     "ParagraphValidation",
     "ParagraphValidator",
+    "StealthWriterTextHumanizer",
     "TextHumanizer",
 ]

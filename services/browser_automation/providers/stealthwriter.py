@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from services.browser.providers.stealthwriter import (  # noqa: F401
+    DEFAULT_STEALTHWRITER_MODEL,
     PROVIDER_NAME,
     StealthWriterAutomationError,
     StealthWriterProvider,
@@ -25,6 +26,7 @@ from services.browser.providers.stealthwriter import (  # noqa: F401
 STEALTHWRITER_PROFILE_DIR = Path("browser_profiles/chrome_user_data")
 
 __all__ = [
+    "DEFAULT_STEALTHWRITER_MODEL",
     "PROVIDER_NAME",
     "STEALTHWRITER_PROFILE_DIR",
     "StealthWriterAutomationError",

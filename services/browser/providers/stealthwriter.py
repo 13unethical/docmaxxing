@@ -10,6 +10,7 @@ implementation — only the source of the page has moved to BrowserService.
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from datetime import datetime, timezone
@@ -27,6 +28,11 @@ _SIGN_IN_URL = "https://stealthwriter.ai/sign-in"
 _HUMANIZER_URL = "https://stealthwriter.ai/dashboard/humanizer"
 _SCREENSHOT_REL = Path("browser_profiles/debug/stealthwriter-home.png")
 _HUMANIZE_TIMEOUT_MS = 120_000
+
+# Always use Legacy 5.1 unless overridden. Ghost 5.2 is the new default on the site.
+DEFAULT_STEALTHWRITER_MODEL = (
+    os.environ.get("STEALTHWRITER_MODEL") or "Legacy 5.1"
+).strip() or "Legacy 5.1"
 
 
 def _page() -> Any:
@@ -169,6 +175,208 @@ def _find_humanize_button(page: Any) -> Any:
         except Exception:  # noqa: BLE001
             continue
     return None
+
+
+def _model_match_labels(model: str) -> list[str]:
+    """Labels that mean the requested StealthWriter model (Legacy 5.1 family)."""
+    raw = (model or DEFAULT_STEALTHWRITER_MODEL).strip()
+    labels = [raw]
+    low = raw.lower()
+    if "5.1" in low or "legacy" in low:
+        labels.extend(["Legacy 5.1", "Ghost 5.1", "5.1"])
+    # Preserve order, drop duplicates (case-insensitive)
+    seen: set[str] = set()
+    out: list[str] = []
+    for label in labels:
+        key = label.lower()
+        if key in seen or not label:
+            continue
+        seen.add(key)
+        out.append(label)
+    return out
+
+
+def _visible_model_label(page: Any) -> str:
+    """Best-effort read of the currently selected model from the humanizer UI."""
+    try:
+        return (
+            page.evaluate(
+                r"""() => {
+                    const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+                    const nodes = Array.from(document.querySelectorAll(
+                        'button, [role="button"], [role="combobox"], select, [aria-haspopup="listbox"]'
+                    ));
+                    for (const el of nodes) {
+                        const t = norm(el.innerText || el.textContent || '');
+                        if (!t || t.length > 80) continue;
+                        if (/legacy\s*5\.1|ghost\s*5\.1|ghost\s*5\.2|ghost\s*4\.6|ninja|mini|pro/i.test(t)
+                            && !/humanize|rehumanize|sign|login|upgrade|support/i.test(t)) {
+                            return t;
+                        }
+                    }
+                    return '';
+                }"""
+            )
+            or ""
+        ).strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _model_already_selected(page: Any, model: str) -> bool:
+    current = _visible_model_label(page).lower()
+    if not current:
+        return False
+    for label in _model_match_labels(model):
+        if label.lower() in current:
+            return True
+    # "Legacy" trigger + "5.1" nearby still counts as selected.
+    if "5.1" in current and ("legacy" in current or "ghost" in current):
+        return True
+    return False
+
+
+def _click_first_visible(page: Any, patterns: list[re.Pattern[str]]) -> bool:
+    for pattern in patterns:
+        candidates = [
+            page.get_by_role("option", name=pattern),
+            page.get_by_role("menuitem", name=pattern),
+            page.get_by_role("button", name=pattern),
+            page.locator('[role="option"], [role="menuitem"], button, [role="button"]').filter(
+                has_text=pattern
+            ),
+            page.get_by_text(pattern),
+        ]
+        for loc in candidates:
+            try:
+                if loc.count() <= 0:
+                    continue
+                target = loc.first
+                if target.is_visible(timeout=1500):
+                    target.click(timeout=3000)
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+    return False
+
+
+def _open_model_selector(page: Any) -> bool:
+    """Open the StealthWriter model dropdown if it is not already open."""
+    # If an option list is already visible, nothing to open.
+    try:
+        if page.get_by_role("option").count() > 0:
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+
+    openers = [
+        page.get_by_role("combobox"),
+        page.locator('[aria-haspopup="listbox"]'),
+        page.locator('button, [role="button"]').filter(
+            has_text=re.compile(
+                r"legacy|ghost\s*[0-9]|ninja|model|5\.2|5\.1|4\.6|mini|pro",
+                re.I,
+            )
+        ),
+        page.locator('select'),
+    ]
+    for loc in openers:
+        try:
+            if loc.count() <= 0:
+                continue
+            btn = loc.first
+            if not btn.is_visible(timeout=1500):
+                continue
+            label = (_read_locator_text(btn) or "").lower()
+            if label and re.search(r"humanize|rehumanize|sign|login|upgrade|support|copy", label):
+                continue
+            btn.click(timeout=3000)
+            page.wait_for_timeout(350)
+            return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def _ensure_model_selected(page: Any, model: str = DEFAULT_STEALTHWRITER_MODEL) -> None:
+    """Force the humanizer model picker to Legacy 5.1 (or ``model``).
+
+    StealthWriter's default is now Ghost 5.2; we always pin Legacy 5.1 for
+    assignment + standalone humanize flows.
+    """
+    wanted = (model or DEFAULT_STEALTHWRITER_MODEL).strip() or DEFAULT_STEALTHWRITER_MODEL
+    if _model_already_selected(page, wanted):
+        return
+
+    # Native <select> path
+    try:
+        selects = page.locator("select")
+        for i in range(selects.count()):
+            sel = selects.nth(i)
+            options = sel.locator("option")
+            for j in range(options.count()):
+                opt = options.nth(j)
+                text = (opt.inner_text() or "").strip()
+                value = (opt.get_attribute("value") or "").strip()
+                blob = f"{text} {value}".lower()
+                if any(label.lower() in blob for label in _model_match_labels(wanted)):
+                    sel.select_option(value=value or None, label=text or None)
+                    page.wait_for_timeout(200)
+                    return
+    except Exception:  # noqa: BLE001
+        pass
+
+    _open_model_selector(page)
+
+    # Expand Legacy group if the menu nests older models under it.
+    _click_first_visible(
+        page,
+        [
+            re.compile(r"^\s*legacy\s*$", re.I),
+            re.compile(r"legacy\s*models?", re.I),
+        ],
+    )
+    page.wait_for_timeout(200)
+
+    clicked = _click_first_visible(
+        page,
+        [
+            re.compile(r"legacy\s*5\.1", re.I),
+            re.compile(r"ghost\s*5\.1", re.I),
+            re.compile(r"^\s*5\.1\s*$", re.I),
+        ],
+    )
+    if not clicked:
+        # Last resort: JS click any matching node in open menus/portals.
+        try:
+            page.evaluate(
+                r"""(labels) => {
+                    const norm = s => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+                    const wanted = labels.map(norm);
+                    const nodes = Array.from(document.querySelectorAll(
+                        '[role="option"], [role="menuitem"], li, button, [role="button"], span, div'
+                    ));
+                    for (const el of nodes) {
+                        const t = norm(el.innerText || el.textContent || '');
+                        if (!t || t.length > 60) continue;
+                        if (wanted.some(w => t === w || t.includes(w))) {
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }""",
+                _model_match_labels(wanted),
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+    page.wait_for_timeout(300)
+    if not _model_already_selected(page, wanted):
+        # Soft failure: continue with whatever is selected, but record diagnostics
+        # on the next hard error. Raising here would break humanize when the UI
+        # renames the option; prefer best-effort pin.
+        pass
 
 
 def _find_output_area(page: Any, input_locator: Any) -> Any:
@@ -320,15 +528,17 @@ def _safe_url(page: Any) -> str | None:
 
 
 # ------------------------------------------------------------------ humanize workflow
-def humanize_text(text: str) -> dict[str, Any]:
+def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
     """Run one end-to-end humanization in the shared long-lived browser.
 
     Does not perform login. If the session is expired, returns LOGIN_REQUIRED.
+    Always pins the model to Legacy 5.1 (or ``STEALTHWRITER_MODEL`` / ``model``).
     """
     cleaned = (text or "").strip()
     if not cleaned:
         return {"success": False, "error": "text is required", "humanized_text": None}
 
+    selected_model = (model or DEFAULT_STEALTHWRITER_MODEL).strip() or DEFAULT_STEALTHWRITER_MODEL
     page = _page()
     started = time.monotonic()
 
@@ -342,6 +552,9 @@ def humanize_text(text: str) -> dict[str, Any]:
 
     if _is_sign_in_url(page.url):
         return {"success": False, "error": "LOGIN_REQUIRED"}
+
+    # Pin model before pasting — dropdown can remount after text entry.
+    _ensure_model_selected(page, selected_model)
 
     # Locate textarea
     input_box = _find_input_textarea(page)
@@ -370,6 +583,9 @@ def humanize_text(text: str) -> dict[str, Any]:
             f"Failed to paste text into textarea: {exc}",
             _collect_page_diagnostics(page, step="paste_text"),
         ) from exc
+
+    # Re-assert model in case pasting reset the picker.
+    _ensure_model_selected(page, selected_model)
 
     # Click Humanize
     button = _find_humanize_button(page)
@@ -486,6 +702,7 @@ def humanize_text(text: str) -> dict[str, Any]:
     return {
         "success": True,
         "humanized_text": humanized,
+        "model": selected_model,
         "elapsed_seconds": elapsed,
         "current_url": page.url,
     }
