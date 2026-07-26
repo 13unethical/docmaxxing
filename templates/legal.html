@@ -9,10 +9,25 @@
 {% block content %}
 <section class="legal-page">
   <nav class="legal-toc" aria-label="Policy sections">
+    <a href="{{ url_for('legal') }}#about">About</a>
     <a href="{{ url_for('legal_terms') }}">Terms of service</a>
     <a href="{{ url_for('legal_privacy') }}">Privacy policy</a>
     <a href="{{ url_for('legal_refund') }}">Refund policy</a>
+    <a href="{{ url_for('legal') }}#faq">FAQ</a>
+    <a href="{{ url_for('legal') }}#changelog">Changelog</a>
   </nav>
+
+  <article class="legal-section" id="about">
+    <h2>About Us</h2>
+    <p>
+      DocMaxxing helps students and researchers format academic work, humanize drafts,
+      run integrity checks, and manage citations — without fighting Word styles for hours.
+    </p>
+    <p>
+      We build focused tools for real assignment workflows: Format, Humanizer, Turnitin-style
+      checks, Assignment pipeline, and Workspace editing.
+    </p>
+  </article>
 
   <article class="legal-section{% if focus == 'terms' %} is-focus{% endif %}" id="terms">
     <h2>Terms of service</h2>
@@ -31,6 +46,33 @@
     </p>
     <p>
       Contact: <a href="https://wa.me/998990779909">WhatsApp +998 99 077 99 09</a>
+      · <a href="mailto:support@docmaxxing.com">support@docmaxxing.com</a>
+    </p>
+  </article>
+
+  <article class="legal-section" id="disclaimer">
+    <h2>Disclaimer</h2>
+    <p>
+      DocMaxxing is a productivity aid. Outputs are not a guarantee of grades, originality scores,
+      or institutional acceptance. Always review generated and formatted content before submission.
+    </p>
+  </article>
+
+  <article class="legal-section" id="payment">
+    <h2>Payment Policy</h2>
+    <p>
+      Credit purchases are processed by Paddle. Prices are shown on the
+      <a href="{{ url_for('pricing') }}">pricing page</a>. You must create an account before buying.
+      Successful payments credit your DocMaxxing balance automatically after confirmation.
+    </p>
+  </article>
+
+  <article class="legal-section" id="delivery">
+    <h2>Delivery Policy</h2>
+    <p>
+      Digital features (formatting downloads, humanized text, reports, assignment packages) are
+      delivered in-product immediately after a successful paid or free action. Assignment ZIP
+      packages are available from your project’s download button once packaging completes.
     </p>
   </article>
 
@@ -69,7 +111,21 @@
     </p>
     <p>
       Contact: <a href="https://wa.me/998990779909">WhatsApp +998 99 077 99 09</a>
+      · <a href="mailto:support@docmaxxing.com">support@docmaxxing.com</a>
     </p>
+  </article>
+
+  <article class="legal-section" id="faq">
+    <h2>FAQ</h2>
+    <p><strong>Do I need an account to buy credits?</strong> Yes. You can browse pricing as a guest, but checkout requires Sign up.</p>
+    <p><strong>Where do I download my assignment?</strong> Open Assignment, finish the pipeline, then use Download assignment.</p>
+    <p><strong>Which formats do you support?</strong> DOCX downloads for Format and Assignment packages; PDF reports for Turnitin-style checks when available.</p>
+  </article>
+
+  <article class="legal-section" id="changelog">
+    <h2>Changelog</h2>
+    <p><strong>July 2026</strong> — Assignment soft-export download fix, guest Credits nav, site footer policies, Format panel icons.</p>
+    <p><strong>July 2026</strong> — Learning Journal grade gate, StealthWriter batch humanize, ±10% word budgets.</p>
   </article>
 </section>
 {% endblock %}

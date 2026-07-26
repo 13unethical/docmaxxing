@@ -10,6 +10,7 @@
   </head>
   <body class="ws-body">
     {% block content %}{% endblock %}
+    {% include "_site_footer.html" %}
     {% include "_register_wall.html" %}
     <script>
       window.DM_AUTH = { authenticated: {{ 'true' if current_user else 'false' }} };

@@ -1,0 +1,36 @@
+{% extends "info/base.html" %}
+{% set info_active = "changelog" %}
+{% set page_title = "Changelog" %}
+{% set page_lede = "Product updates for DocMaxxing. Newest first." %}
+{% block info_body %}
+<h2>26 July 2026</h2>
+<ul>
+  <li>Dedicated information pages for Account, Credits, About, policies, Contact, FAQ, and Changelog.</li>
+  <li>Site footer with policies + social icons for every account (guest and registered).</li>
+  <li>Guest nav: Sign in removed; Credits pill opens pricing (purchase still requires registration).</li>
+  <li>Format accordion panels gained icons (Text, Layout, Advanced, Cover, References, Citations).</li>
+</ul>
+
+<h2>25–26 July 2026 — Assignment quality</h2>
+<ul>
+  <li>±10% hard word budgets (was ±5%); Gemini smart-trim when merge/total is slightly over.</li>
+  <li>Humanizer batches up to ~5,000 words; heading-only passthrough fixed so body always humanizes.</li>
+  <li>Re-humanize after Gemini revision / grade-gate rewrites that undid StealthWriter output.</li>
+  <li>Heading normalization after providers collapse <code>## Title</code> onto body text.</li>
+  <li>Download UX: “ready” only when a package exists; project download endpoint rebuilds ZIP; soft-export if grade gate soft-fails.</li>
+</ul>
+
+<h2>July 2026 — Grade-driven Learning Journal</h2>
+<ul>
+  <li>AssignmentSpec source of truth: sections, budgets, formatting, rubric, LOs, lecture/seminar refs.</li>
+  <li>Rubric coverage analysis + predicted grade; validate → repair (max 5) loop.</li>
+  <li>Writer prompts and expansion/trim aligned to section targets; delivery ships Format Engine DOCX.</li>
+</ul>
+
+<h2>Earlier 2026</h2>
+<ul>
+  <li>Credits economy with Paddle checkout (Starter / Pro / custom sales).</li>
+  <li>Tools suite: Format, Humanizer, Turnitin, Assignment, Check, Workspace.</li>
+  <li>Admin analytics for credits sold/used and user activity.</li>
+</ul>
+{% endblock %}

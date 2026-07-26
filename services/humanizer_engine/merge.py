@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 
 from services.assignment_pipeline.models import utc_now
+from services.humanizer_engine.heading_utils import normalize_markdown_headings
 from services.humanizer_engine.models import HumanizedDraft, HumanizerSession, count_words
 
 
@@ -13,24 +15,32 @@ def merge_session_to_humanized_draft(session: HumanizerSession, *, title: str | 
     current_section: str | None = None
 
     for paragraph in session.paragraphs:
-        text = (paragraph.humanized_text or paragraph.original_text).strip()
+        text = normalize_markdown_headings(paragraph.humanized_text or paragraph.original_text)
         if not text:
             continue
-        if text.startswith("## "):
+        if text.startswith("## ") and "\n" not in text:
             parts.append(text)
             current_section = text[3:].strip()
             continue
-        if "## " in text:
+        if text.lstrip().startswith("## "):
             parts.append(text)
-            if paragraph.section:
+            # Track last explicit heading in the batch.
+            matches = re.findall(r"(?m)^##\s+(.+)$", text)
+            if matches:
+                current_section = matches[-1].strip()
+            elif paragraph.section:
                 current_section = paragraph.section
             continue
         if paragraph.section and paragraph.section != current_section:
-            parts.append(f"## {paragraph.section}")
-            current_section = paragraph.section
+            # Never invent placeholder structure labels.
+            if paragraph.section.strip().lower() not in {"document", "preamble"}:
+                parts.append(f"## {paragraph.section}")
+                current_section = paragraph.section
+            elif current_section is None:
+                current_section = paragraph.section
         parts.append(text)
 
-    content = "\n\n".join(parts)
+    content = normalize_markdown_headings("\n\n".join(parts))
     draft_title = title or "Humanized Assignment Draft"
     source_version = session.source_draft_version
     return HumanizedDraft(

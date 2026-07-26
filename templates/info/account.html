@@ -1,0 +1,45 @@
+{% extends "info/base.html" %}
+{% set info_active = "account" %}
+{% set page_title = "Account" %}
+{% set page_lede = "Manage your DocMaxxing profile, password, and access to paid features." %}
+{% block info_body %}
+{% if current_user %}
+<p>
+  You are signed in as <strong>{{ current_user.email }}</strong>.
+  Open your profile settings to edit your display name or password.
+</p>
+<p>
+  <a class="info-cta" href="{{ url_for('account') }}">Go to account settings</a>
+</p>
+{% else %}
+<p>
+  An account lets you buy credits, run paid Humanizer / Turnitin / Workspace actions, and keep
+  Assignment projects across sessions.
+</p>
+<ul>
+  <li>Email + password registration</li>
+  <li>Welcome credits on signup</li>
+  <li>Credit balance and billing history via Credits / Paddle</li>
+  <li>Project artifacts stored under your user</li>
+</ul>
+<p>
+  <a class="info-cta" href="{{ url_for('register') }}">Create a free account</a>
+  <a class="info-cta info-cta--ghost" href="{{ url_for('login') }}">Sign in</a>
+</p>
+{% endif %}
+
+<h2>What your account unlocks</h2>
+<ul>
+  <li><strong>Credits purchases</strong> on the Credits page (Paddle checkout)</li>
+  <li><strong>Assignment pipeline</strong> progress and delivery downloads</li>
+  <li><strong>Workspace</strong> paid tools (humanize selection, AI detect, citations)</li>
+  <li><strong>Turnitin</strong> credit-based report runs</li>
+</ul>
+
+<h2>Security tips</h2>
+<ul>
+  <li>Use a unique password</li>
+  <li>Do not share login links or session cookies</li>
+  <li>Log out on shared computers</li>
+</ul>
+{% endblock %}

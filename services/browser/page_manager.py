@@ -37,9 +37,17 @@ class PageManager:
         if existing is not None and self._alive(existing):
             return existing
 
+        # Drop dead cached handle before creating a replacement.
+        self._pages.pop(name, None)
         page = self._adopt_unassigned_page() or self._context.new_page()
         self._pages[name] = page
         return page
+
+    def peek(self, name: str) -> Any | None:
+        return self._pages.get(name)
+
+    def invalidate(self, name: str) -> None:
+        self._pages.pop(name, None)
 
     def new_page(self) -> Any:
         """Create an anonymous (unnamed) tab."""
@@ -79,6 +87,10 @@ class PageManager:
     @staticmethod
     def _alive(page: Any) -> bool:
         try:
-            return not page.is_closed()
+            if page.is_closed():
+                return False
+            # Zombie handles can report not-closed while CDP is dead.
+            _ = page.evaluate("() => 1")
+            return True
         except Exception:  # noqa: BLE001
             return False

@@ -1,0 +1,44 @@
+{% extends "info/base.html" %}
+{% set info_active = "disclaimer" %}
+{% set page_title = "Disclaimer" %}
+{% set page_lede = "Important limits of DocMaxxing outputs and third-party checks." %}
+{% block info_body %}
+<h2>Not a substitute for your judgement</h2>
+<p>
+  DocMaxxing is a productivity aid for formatting, drafting assistance, humanization, and integrity
+  tooling. It is <strong>not</strong> a guarantee of academic success, originality, or compliance with
+  any specific university policy.
+</p>
+
+<h2>AI &amp; detection scores</h2>
+<ul>
+  <li>Humanizer and LLM writers can change tone and wording; meaning should always be reviewed by you.</li>
+  <li>AI detection scores (ZeroGPT, Turnitin-style reports, or others) can produce false positives and false negatives.</li>
+  <li>A low score inside DocMaxxing does not guarantee a low score on your institution’s detector.</li>
+</ul>
+
+<h2>Assignment pipeline</h2>
+<p>
+  Automatic research, writing, revision, grade-gate repairs, and packaging aim to follow your brief
+  (sections, ±10% word budgets, rubric signals). Briefs vary; always proofread the final DOCX/ZIP
+  before submission. Soft-export may still package a file when some soft checks fail — review warnings.
+</p>
+
+<h2>Formatting</h2>
+<p>
+  Style presets (Harvard, APA, MLA, custom) approximate common rules. Institutions sometimes require
+  local variants. Verify fonts, margins, spacing, headings, and reference style against your brief.
+</p>
+
+<h2>Third-party services</h2>
+<p>
+  Features depend on external providers (LLMs, StealthWriter, ZeroGPT, Paddle, browser automation).
+  Outages, model changes, or provider policy updates can affect results.
+</p>
+
+<h2>No professional advice</h2>
+<p>
+  Nothing on DocMaxxing is legal, academic, or professional advice. If in doubt, ask your lecturer
+  or institution.
+</p>
+{% endblock %}

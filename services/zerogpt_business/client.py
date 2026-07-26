@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -217,11 +218,33 @@ class ZeroGPTClient:
         return body
 
     def detect(self, text: str) -> dict[str, Any]:
-        return self.request(
-            "POST",
-            self.config.detect_path,
-            json_body={self.config.text_field: text},
-        )
+        """Detect AI probability with retries for transient ZeroGPT 5xx blips."""
+        last_error: ZeroGPTError | None = None
+        for attempt in range(3):
+            try:
+                return self.request(
+                    "POST",
+                    self.config.detect_path,
+                    json_body={self.config.text_field: text},
+                )
+            except ZeroGPTError as exc:
+                last_error = exc
+                msg = str(exc).lower()
+                transient = (
+                    "(500)" in msg
+                    or "(502)" in msg
+                    or "(503)" in msg
+                    or "(504)" in msg
+                    or "timed out" in msg
+                    or "try again" in msg
+                    or "an error occurred" in msg
+                )
+                if not transient or attempt == 2:
+                    raise
+                time.sleep(0.6 * (attempt + 1))
+        if last_error:
+            raise last_error
+        raise ZeroGPTError(f"ZeroGPT detect request failed for {self.config.detect_path}")
 
     def humanize(self, text: str, *, tone: str | None = None) -> dict[str, Any]:
         if _is_developer_api(self.config.base_url):

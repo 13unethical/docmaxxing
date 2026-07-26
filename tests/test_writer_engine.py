@@ -197,3 +197,67 @@ def test_needs_expansion_when_draft_under_85_percent():
     assert _needs_expansion(short, 200) is True
     long_enough = " ".join(f"word{i}" for i in range(180))
     assert _needs_expansion(long_enough, 200) is False
+
+
+def test_merge_draft_injects_required_section_headings():
+    """LLM body-only sections must still produce ## Title markers in the draft."""
+    from services.writer_engine.merge import merge_session_to_draft
+    from services.writer_engine.models import WriterSection, WriterSession, WriterSessionStatus, WriterSectionStatus
+    from services.assignment_pipeline.models import utc_now
+
+    sections = [
+        WriterSection(
+            id="introduction",
+            title="Introduction",
+            objective="Open the summary",
+            estimated_words=120,
+            generated_text="This summary examines Shein marketing tactics.",
+            status=WriterSectionStatus.COMPLETED,
+        ),
+        WriterSection(
+            id="body-paragraph-1",
+            title="Body paragraph 1",
+            objective="Summarise main idea",
+            estimated_words=150,
+            generated_text="The article argues that scarcity messaging drives overspending.",
+            status=WriterSectionStatus.COMPLETED,
+        ),
+        WriterSection(
+            id="body-paragraph-2",
+            title="Body paragraph 2",
+            objective="Give opinion",
+            estimated_words=150,
+            generated_text="In my view, platforms should disclose urgency tactics clearly.",
+            status=WriterSectionStatus.COMPLETED,
+        ),
+        WriterSection(
+            id="concluding-paragraph",
+            title="Concluding Paragraph",
+            objective="Close",
+            estimated_words=100,
+            generated_text="Overall, ethical marketing requires stronger consumer safeguards.",
+            status=WriterSectionStatus.COMPLETED,
+        ),
+    ]
+    ids = [s.id for s in sections]
+    session = WriterSession(
+        id="sess-1",
+        project_id="proj-1",
+        sections=sections,
+        current_section_id=None,
+        completed_section_ids=ids,
+        remaining_section_ids=[],
+        progress=100,
+        total_words_written=sum(len(s.generated_text.split()) for s in sections),
+        estimated_remaining_time="0m",
+        status=WriterSessionStatus.COMPLETED,
+        created_at=utc_now(),
+        updated_at=utc_now(),
+    )
+    draft = merge_session_to_draft(session, title="Reading summary with opinion")
+    assert "## Introduction" in draft.content
+    assert "## Body paragraph 1" in draft.content
+    assert "## Body paragraph 2" in draft.content
+    assert "## Concluding Paragraph" in draft.content
+    assert "## Preamble" not in draft.content
+    assert "## Document" not in draft.content

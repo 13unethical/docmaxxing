@@ -1,4 +1,4 @@
-"""Humanizer Engine — paragraph-by-paragraph humanization for the assignment pipeline."""
+"""Humanizer Engine — batched humanization for the assignment pipeline."""
 
 from services.humanizer_engine.models import (
     HumanizedDraft,

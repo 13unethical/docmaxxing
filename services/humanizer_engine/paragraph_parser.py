@@ -1,4 +1,4 @@
-"""Split draft content into paragraph-level humanization tasks."""
+"""Split draft content into batched humanization tasks (up to ~5000 words)."""
 
 from __future__ import annotations
 
@@ -6,23 +6,27 @@ import re
 import uuid
 from typing import Any
 
-from services.humanizer_engine.constants import MAX_WORDS_PER_INPUT, MIN_HUMANIZE_CHARS
+from services.humanizer_engine.constants import HUMANIZE_BATCH_WORDS, MIN_HUMANIZE_CHARS
 from services.humanizer_engine.models import HumanizerParagraph
 
 
 def split_draft_into_paragraphs(content: str, blueprint: dict[str, Any] | None = None) -> list[HumanizerParagraph]:
-    """Split draft into batched humanization tasks (up to MAX_WORDS_PER_INPUT each)."""
+    """Split draft into large humanization batches (not one API call per section/part)."""
     raw = _split_raw_paragraphs(content, blueprint)
-    return group_paragraphs_into_batches(raw)
+    return group_paragraphs_into_batches(raw, max_words=HUMANIZE_BATCH_WORDS)
 
 
 def group_paragraphs_into_batches(
     paragraphs: list[HumanizerParagraph],
     *,
-    max_words: int = MAX_WORDS_PER_INPUT,
+    max_words: int = HUMANIZE_BATCH_WORDS,
     min_chars: int = MIN_HUMANIZE_CHARS,
 ) -> list[HumanizerParagraph]:
-    """Merge body paragraphs into API-sized batches instead of one call per line."""
+    """Merge body (+ headings) into API-sized batches up to ``max_words``.
+
+    Writing remains section-based. Humanizing must NOT call the provider once per
+    short paragraph/section — pack content until the ~5000-word provider limit.
+    """
     if not paragraphs:
         return []
 
@@ -31,27 +35,29 @@ def group_paragraphs_into_batches(
     buffer_section = "Document"
     buffer_words = 0
 
-    def flush_buffer(*, force: bool = False) -> None:
+    def flush_buffer() -> None:
         nonlocal buffer_parts, buffer_section, buffer_words
         if not buffer_parts:
             return
-
         combined = "\n\n".join(buffer_parts).strip()
+        buffer_parts = []
+        buffer_words = 0
         if not combined:
-            buffer_parts = []
-            buffer_words = 0
             return
-
-        if len(combined) < min_chars and not force:
+        # Heading-only leftovers stay as pass-through units.
+        if combined.startswith("## ") and "\n" not in combined:
+            batches.append(
+                HumanizerParagraph(
+                    paragraph_id=_next_id(batches),
+                    section=combined[3:].strip(),
+                    original_text=combined,
+                )
+            )
             return
-
-        if len(combined) < min_chars and batches and not batches[-1].original_text.startswith("## "):
+        if len(combined) < min_chars and batches and not batches[-1].original_text.strip().startswith("## "):
             previous = batches[-1]
             previous.original_text = f"{previous.original_text.rstrip()}\n\n{combined}"
-            buffer_parts = []
-            buffer_words = 0
             return
-
         batches.append(
             HumanizerParagraph(
                 paragraph_id=_next_id(batches),
@@ -59,36 +65,41 @@ def group_paragraphs_into_batches(
                 original_text=combined,
             )
         )
-        buffer_parts = []
-        buffer_words = 0
 
     for paragraph in paragraphs:
         text = (paragraph.original_text or "").strip()
         if not text:
             continue
 
-        if text.startswith("## "):
-            flush_buffer(force=True)
-            batches.append(
-                HumanizerParagraph(
-                    paragraph_id=_next_id(batches),
-                    section=text[3:].strip(),
-                    original_text=text,
+        word_count = max(1, len(text.split()))
+        # If this single block alone exceeds the limit, flush then emit chunked pieces.
+        if word_count > max_words:
+            flush_buffer()
+            words = text.split()
+            for index in range(0, len(words), max_words):
+                chunk = " ".join(words[index : index + max_words])
+                batches.append(
+                    HumanizerParagraph(
+                        paragraph_id=_next_id(batches),
+                        section=paragraph.section or buffer_section,
+                        original_text=chunk,
+                    )
                 )
-            )
-            buffer_section = text[3:].strip()
+            buffer_section = paragraph.section or buffer_section
             continue
 
-        word_count = len(text.split())
         if buffer_parts and buffer_words + word_count > max_words:
-            flush_buffer(force=True)
+            flush_buffer()
 
-        if not buffer_parts:
+        if text.startswith("## "):
+            buffer_section = text[3:].strip() or buffer_section
+        elif not buffer_parts:
             buffer_section = paragraph.section or buffer_section
+
         buffer_parts.append(text)
         buffer_words += word_count
 
-    flush_buffer(force=True)
+    flush_buffer()
     return batches
 
 

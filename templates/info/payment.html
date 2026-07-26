@@ -1,0 +1,56 @@
+{% extends "info/base.html" %}
+{% set info_active = "payment" %}
+{% set page_title = "Payment Policy" %}
+{% set page_lede = "How credit purchases and Assignment payments work on DocMaxxing." %}
+{% block info_body %}
+<h2>1. Who can pay</h2>
+<p>
+  You must create a DocMaxxing account before buying credits. Guests can view the
+  <a href="{{ url_for('pricing') }}">Credits</a> page, but checkout requires registration / sign-in.
+</p>
+
+<h2>2. What you pay for</h2>
+<ul>
+  <li><strong>Credit packages</strong> — prepaid balance for Humanize, AI detect, citations, Turnitin, and similar paid actions.</li>
+  <li><strong>Assignment projects</strong> — priced per project after brief analysis (shown before you confirm payment).</li>
+  <li><strong>Free tools</strong> — Home Format and Academic Check do not require credits.</li>
+</ul>
+
+<h2>3. Processor</h2>
+<p>
+  Card and wallet payments are processed by <strong>Paddle</strong>. DocMaxxing does not store full
+  payment card numbers. Paddle may appear on your bank statement as the merchant of record.
+</p>
+
+<h2>4. Prices &amp; currency</h2>
+<p>
+  Package prices are shown on the Credits page (for example Starter and Pro). Custom / volume deals
+  are arranged via sales on WhatsApp. Taxes or local fees may apply depending on your region and Paddle rules.
+</p>
+
+<h2>5. When credits appear</h2>
+<p>
+  After a successful Paddle checkout confirmation, credits are added to your account balance.
+  If payment succeeds but balance does not update within a short time, contact support with your
+  account email and Paddle transaction id.
+</p>
+
+<h2>6. Failed paid actions</h2>
+<p>
+  If a paid feature fails on our side after credits were charged, we refund those credits to your
+  balance whenever automatic recovery is possible.
+</p>
+
+<h2>7. Chargebacks</h2>
+<p>
+  Unjustified chargebacks may lead to account suspension and forfeiture of remaining credits.
+  Contact us first so we can resolve billing issues quickly.
+</p>
+
+<h2>8. Related policies</h2>
+<p>
+  <a href="{{ url_for('refund_policy') }}">Refund Policy</a>
+  · <a href="{{ url_for('delivery_policy') }}">Delivery Policy</a>
+  · <a href="{{ url_for('terms') }}">Terms and Conditions</a>
+</p>
+{% endblock %}

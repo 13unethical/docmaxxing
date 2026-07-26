@@ -142,6 +142,8 @@ class BrowserService:
                 self._started_at = time.time()
 
     def _restore_sessions(self) -> None:
+        # New CDP context → storageState must be re-applied to pages.
+        self._sessions.clear_applied()
         if not self._sessions.list():
             return
         try:
@@ -172,6 +174,34 @@ class BrowserService:
         page = self._pool.acquire().get_or_create_page(name)
         self._sessions.apply_to_page(name, page)
         return page
+
+    def invalidate_page(self, name: str) -> None:
+        """Drop a cached provider tab so the next get_or_create opens a fresh one."""
+        try:
+            conn = self._pool.acquire()
+            conn.pages.invalidate(name)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def reopen_page(self, name: str) -> Any:
+        """Close/drop a provider tab and return a brand-new page (same browser)."""
+        with self._lock:
+            self.ensure_running()
+            try:
+                conn = self._pool.acquire()
+                existing = conn.pages.peek(name)
+                if existing is not None:
+                    try:
+                        if not existing.is_closed():
+                            existing.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                conn.pages.invalidate(name)
+            except Exception:  # noqa: BLE001
+                pass
+            # Allow session restore again after tab death / reconnect.
+            self._sessions.mark_unapplied(name)
+            return self.get_or_create_page(name)
 
     def save_session(self, name: str) -> bool:
         try:

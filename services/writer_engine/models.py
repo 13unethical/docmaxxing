@@ -306,4 +306,7 @@ class WriterEngineInput:
 
 
 def count_words(text: str) -> int:
-    return len([word for word in text.split() if word.strip()])
+    """Count words consistently with AssignmentSpec (±10% gates)."""
+    import re
+
+    return len(re.findall(r"\b[\w']+\b", text or ""))

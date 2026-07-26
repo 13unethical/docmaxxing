@@ -177,6 +177,88 @@ def _find_humanize_button(page: Any) -> Any:
     return None
 
 
+def _button_looks_disabled(button: Any) -> bool:
+    try:
+        if button.get_attribute("disabled") is not None:
+            return True
+        if (button.get_attribute("aria-disabled") or "").lower() == "true":
+            return True
+        return bool(
+            button.evaluate(
+                """el => {
+                    if (el.disabled) return true;
+                    const s = window.getComputedStyle(el);
+                    return s.pointerEvents === 'none' || Number(s.opacity) < 0.6;
+                }"""
+            )
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _click_humanize_button(page: Any, button: Any) -> None:
+    """Click Humanize with overlay/disabled/animation fallbacks."""
+    _dismiss_ui_overlays(page)
+    try:
+        button.scroll_into_view_if_needed(timeout=5000)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # React often keeps the button disabled until the textarea value settles.
+    for _ in range(12):
+        if not _button_looks_disabled(button):
+            break
+        page.wait_for_timeout(250)
+    else:
+        # Still disabled — try force/JS anyway after a short wait.
+        page.wait_for_timeout(400)
+
+    last_exc: Exception | None = None
+    for kwargs in (
+        {"timeout": 8000},
+        {"timeout": 5000, "force": True},
+    ):
+        try:
+            button.click(**kwargs)
+            page.wait_for_timeout(200)
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            _dismiss_ui_overlays(page)
+            # Re-resolve in case the DOM remounted after model pin.
+            refreshed = _find_humanize_button(page)
+            if refreshed is not None:
+                button = refreshed
+            page.wait_for_timeout(250)
+
+    # Native DOM click bypasses Playwright actionability entirely.
+    try:
+        button.evaluate("el => el.click()")
+        page.wait_for_timeout(200)
+        return
+    except Exception as exc:  # noqa: BLE001
+        last_exc = exc
+
+    try:
+        page.evaluate(
+            r"""() => {
+                const nodes = Array.from(document.querySelectorAll('button, [role="button"]'));
+                const btn = nodes.find(el => /^\s*humanize\s*$/i.test((el.innerText || '').trim()));
+                if (!btn) throw new Error('Humanize button not found in DOM');
+                btn.click();
+            }"""
+        )
+        page.wait_for_timeout(200)
+        return
+    except Exception as exc:  # noqa: BLE001
+        last_exc = exc
+
+    raise StealthWriterAutomationError(
+        f"Failed to click Humanize button: {last_exc}",
+        _collect_page_diagnostics(page, step="click_humanize"),
+    )
+
+
 def _model_match_labels(model: str) -> list[str]:
     """Labels that mean the requested StealthWriter model (Legacy 5.1 family)."""
     raw = (model or DEFAULT_STEALTHWRITER_MODEL).strip()
@@ -372,11 +454,113 @@ def _ensure_model_selected(page: Any, model: str = DEFAULT_STEALTHWRITER_MODEL) 
             pass
 
     page.wait_for_timeout(300)
+    # Dropdown/portal often stays open and blocks the textarea click.
+    _dismiss_ui_overlays(page)
     if not _model_already_selected(page, wanted):
         # Soft failure: continue with whatever is selected, but record diagnostics
         # on the next hard error. Raising here would break humanize when the UI
         # renames the option; prefer best-effort pin.
         pass
+
+
+def _dismiss_ui_overlays(page: Any) -> None:
+    """Close open menus/modals that intercept clicks on the humanizer textarea."""
+    try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(150)
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(150)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # Click a neutral area so listbox portals lose focus without hitting controls.
+        page.locator("body").click(position={"x": 8, "y": 8}, timeout=1500)
+        page.wait_for_timeout(100)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _set_textarea_value(locator: Any, page: Any, text: str) -> bool:
+    """Set value on controlled React textareas when fill()/keyboard fail."""
+    try:
+        locator.evaluate(
+            """(el, value) => {
+                const proto = el.tagName === 'TEXTAREA'
+                    ? window.HTMLTextAreaElement.prototype
+                    : window.HTMLInputElement.prototype;
+                const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+                if (setter) setter.call(el, value);
+                else el.value = value;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }""",
+            text,
+        )
+        page.wait_for_timeout(200)
+        return _read_locator_text(locator).strip() == text.strip()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _paste_into_input(page: Any, input_box: Any, cleaned: str) -> None:
+    """Focus + paste with overlays/animations in mind (StealthWriter UI is flaky)."""
+    try:
+        input_box.scroll_into_view_if_needed(timeout=5000)
+    except Exception:  # noqa: BLE001
+        pass
+
+    focused = False
+    for kwargs in (
+        {"timeout": 8000},
+        {"timeout": 5000, "force": True},
+    ):
+        try:
+            input_box.click(**kwargs)
+            focused = True
+            break
+        except Exception:  # noqa: BLE001
+            _dismiss_ui_overlays(page)
+            page.wait_for_timeout(200)
+
+    if not focused:
+        try:
+            input_box.focus(timeout=3000)
+            focused = True
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Prefer Playwright fill; fall back to keyboard / native setter.
+    try:
+        if focused:
+            input_box.fill("")
+            input_box.fill(cleaned)
+        else:
+            raise RuntimeError("textarea not focused")
+        page.wait_for_timeout(300)
+        if _read_locator_text(input_box).strip() == cleaned:
+            return
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        if focused:
+            input_box.click(force=True, timeout=3000)
+        modifier = "Meta" if page.evaluate("() => navigator.platform.includes('Mac')") else "Control"
+        page.keyboard.press(f"{modifier}+A")
+        page.keyboard.insert_text(cleaned)
+        page.wait_for_timeout(300)
+        if _read_locator_text(input_box).strip() == cleaned:
+            return
+    except Exception:  # noqa: BLE001
+        pass
+
+    if _set_textarea_value(input_box, page, cleaned):
+        return
+
+    raise StealthWriterAutomationError(
+        "Failed to paste text into textarea after click/fill/keyboard/JS fallbacks.",
+        _collect_page_diagnostics(page, step="paste_text"),
+    )
 
 
 def _find_output_area(page: Any, input_locator: Any) -> Any:
@@ -527,20 +711,105 @@ def _safe_url(page: Any) -> str | None:
         return None
 
 
+def _is_stale_browser_error(exc: BaseException) -> bool:
+    blob = f"{type(exc).__name__}: {exc}".lower()
+    markers = (
+        "has been closed",
+        "target closed",
+        "target page, context or browser has been closed",
+        "browser has been closed",
+        "connection closed",
+        "execution context was destroyed",
+        "browsercontext",
+        "websocket",
+    )
+    return any(marker in blob for marker in markers)
+
+
+def _recover_stealthwriter_page(level: str) -> Any:
+    svc = BrowserService.instance()
+    if level == "restart":
+        svc.restart()
+        return svc.get_or_create_page(PROVIDER_NAME)
+    if level == "reopen":
+        return svc.reopen_page(PROVIDER_NAME)
+    return svc.get_or_create_page(PROVIDER_NAME)
+
+
 # ------------------------------------------------------------------ humanize workflow
 def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
     """Run one end-to-end humanization in the shared long-lived browser.
 
     Does not perform login. If the session is expired, returns LOGIN_REQUIRED.
     Always pins the model to Legacy 5.1 (or ``STEALTHWRITER_MODEL`` / ``model``).
+    Retries with a fresh tab / full browser restart when Playwright reports a
+    closed page (common after long idle or health-monitor recovery).
     """
     cleaned = (text or "").strip()
     if not cleaned:
         return {"success": False, "error": "text is required", "humanized_text": None}
 
     selected_model = (model or DEFAULT_STEALTHWRITER_MODEL).strip() or DEFAULT_STEALTHWRITER_MODEL
-    page = _page()
     started = time.monotonic()
+    last_exc: BaseException | None = None
+
+    for attempt, recovery in enumerate((None, "reopen", "restart"), start=1):
+        try:
+            if recovery:
+                print(
+                    f"[stealthwriter] recovering ({recovery}) before humanize "
+                    f"attempt {attempt}",
+                    flush=True,
+                )
+                _recover_stealthwriter_page(recovery)
+            result = _humanize_text_once(
+                cleaned,
+                selected_model=selected_model,
+                started=started,
+            )
+            # Authentic limit toast → NO_CHANGE. Retry once with a fresh tab in case
+            # the toast was stale; otherwise surface it.
+            if (
+                isinstance(result, dict)
+                and result.get("error") == "NO_CHANGE"
+                and attempt < 3
+            ):
+                print(
+                    f"[stealthwriter] NO_CHANGE ({result.get('message')}) — retrying "
+                    f"attempt {attempt + 1}",
+                    flush=True,
+                )
+                last_exc = RuntimeError(str(result.get("message") or "NO_CHANGE"))
+                continue
+            return result
+        except StealthWriterAutomationError as exc:
+            last_exc = exc
+            step = ""
+            if isinstance(exc.diagnostics, dict):
+                step = str(exc.diagnostics.get("step") or "")
+            retryable = step in {"wait_for_output", "navigate_humanizer", "click_humanize", "paste_text"}
+            if not retryable or attempt >= 3:
+                raise
+            continue
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if not _is_stale_browser_error(exc) or attempt >= 3:
+                raise
+            continue
+
+    raise StealthWriterAutomationError(
+        f"Humanizer failed after retries: {last_exc}",
+        {"step": "navigate_humanizer", "error": str(last_exc)},
+    )
+
+
+def _humanize_text_once(
+    cleaned: str,
+    *,
+    selected_model: str,
+    started: float,
+) -> dict[str, Any]:
+    page = _page()
 
     # Open humanizer directly — never navigate to /sign-in or attempt login.
     page.goto(_HUMANIZER_URL, wait_until="domcontentloaded")
@@ -555,6 +824,7 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
 
     # Pin model before pasting — dropdown can remount after text entry.
     _ensure_model_selected(page, selected_model)
+    _dismiss_ui_overlays(page)
 
     # Locate textarea
     input_box = _find_input_textarea(page)
@@ -564,20 +834,10 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
             _collect_page_diagnostics(page, step="locate_textarea"),
         )
 
-    # Clear and paste
     try:
-        input_box.click(timeout=5000)
-        input_box.fill("")
-        input_box.fill(cleaned)
-        # Confirm value stuck (React controlled inputs sometimes need a beat)
-        page.wait_for_timeout(300)
-        typed = _read_locator_text(input_box)
-        if typed.strip() != cleaned:
-            # Fallback: select-all + keyboard type for stubborn editors
-            input_box.click()
-            modifier = "Meta" if page.evaluate("() => navigator.platform.includes('Mac')") else "Control"
-            page.keyboard.press(f"{modifier}+A")
-            page.keyboard.insert_text(cleaned)
+        _paste_into_input(page, input_box, cleaned)
+    except StealthWriterAutomationError:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise StealthWriterAutomationError(
             f"Failed to paste text into textarea: {exc}",
@@ -586,6 +846,7 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
 
     # Re-assert model in case pasting reset the picker.
     _ensure_model_selected(page, selected_model)
+    _dismiss_ui_overlays(page)
 
     # Click Humanize
     button = _find_humanize_button(page)
@@ -595,7 +856,9 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
             _collect_page_diagnostics(page, step="locate_humanize_button"),
         )
     try:
-        button.click(timeout=5000)
+        _click_humanize_button(page, button)
+    except StealthWriterAutomationError:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise StealthWriterAutomationError(
             f"Failed to click Humanize button: {exc}",
@@ -613,7 +876,8 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
     stable_reads = 0
     saw_busy = False
     busy_cleared_at: float | None = None
-    noop_reads = 0
+    reclick_count = 0
+    last_reclick_at = started_wait
 
     def _no_change(reason: str) -> dict[str, Any]:
         return {
@@ -623,12 +887,6 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
             "current_url": _safe_url(page),
         }
 
-    _limit_reason = (
-        "StealthWriter didn't rewrite the text — your free-plan daily "
-        "humanization limit is likely reached (it resets at midnight UTC). "
-        "Try again after the reset or upgrade the plan."
-    )
-
     while time.monotonic() < deadline:
         try:
             page.wait_for_timeout(800)
@@ -636,12 +894,11 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
             if _generation_busy(page):
                 saw_busy = True
                 busy_cleared_at = None
-                noop_reads = 0
                 continue
             if saw_busy and busy_cleared_at is None:
                 busy_cleared_at = time.monotonic()
 
-            # An explicit limit/error toast → stop immediately with a clear reason.
+            # Real limit/error toast only — do not invent a free-plan diagnosis.
             toast = _detect_limit_message(page)
             if toast:
                 return _no_change(toast)
@@ -660,21 +917,49 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
                     break
                 continue
 
-            # No fresh result. Decide whether generation actually finished:
-            #   * result card is present (Rehumanize/Humanize More), or
-            #   * we saw "Humanizing…" and it cleared a few seconds ago, or
-            #   * we never saw it start after a reasonable grace (limit blocked it).
-            finished = (
-                _result_ready(page)
-                or (busy_cleared_at is not None and time.monotonic() - busy_cleared_at > 5)
-                or (not saw_busy and time.monotonic() - started_wait > 25)
-            )
-            if finished:
-                noop_reads += 1
-                if noop_reads >= 3:
-                    return _no_change(_limit_reason)
-            else:
-                noop_reads = 0
+            now = time.monotonic()
+            # Click did not start generation — re-click Humanize (common on paid plans too).
+            if (
+                not saw_busy
+                and reclick_count < 3
+                and now - last_reclick_at >= 8
+            ):
+                reclick_count += 1
+                last_reclick_at = now
+                print(
+                    f"[stealthwriter] generation not started — re-click Humanize "
+                    f"({reclick_count}/3)",
+                    flush=True,
+                )
+                btn = _find_humanize_button(page)
+                if btn is not None:
+                    try:
+                        _click_humanize_button(page, btn)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[stealthwriter] re-click failed: {exc}", flush=True)
+                continue
+
+            # Generation finished but extractor missed the text — try Rehumanize once.
+            if (
+                saw_busy
+                and busy_cleared_at is not None
+                and now - busy_cleared_at > 4
+                and reclick_count < 4
+                and _result_ready(page)
+                and not current
+            ):
+                reclick_count += 1
+                last_reclick_at = now
+                print("[stealthwriter] result card ready but empty extract — clicking Rehumanize", flush=True)
+                try:
+                    page.get_by_role(
+                        "button", name=re.compile(r"rehumanize|humanize more", re.I)
+                    ).first.click(timeout=5000, force=True)
+                    saw_busy = False
+                    busy_cleared_at = None
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[stealthwriter] rehumanize click failed: {exc}", flush=True)
+                continue
         except Exception:  # noqa: BLE001 — page may be torn down by recovery mid-wait
             if page.is_closed():
                 raise
@@ -689,12 +974,18 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
             debug_path.write_text(page.content(), encoding="utf-8")
         except Exception:  # noqa: BLE001
             pass
+        # Do NOT return NO_CHANGE with a free-plan guess — raise so the caller retries.
         raise StealthWriterAutomationError(
-            "Timed out waiting for humanized output.",
+            "StealthWriter did not produce rewritten text in time "
+            f"(saw_busy={saw_busy}, reclicks={reclick_count}).",
             _collect_page_diagnostics(
                 page,
                 step="wait_for_output",
-                extra={"last_output_preview": (last_value or "")[:500], "saw_busy": saw_busy},
+                extra={
+                    "last_output_preview": (last_value or "")[:500],
+                    "saw_busy": saw_busy,
+                    "reclick_count": reclick_count,
+                },
             ),
         )
 

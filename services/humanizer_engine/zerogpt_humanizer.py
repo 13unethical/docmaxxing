@@ -53,19 +53,24 @@ class ZeroGPTTextHumanizer:
     def humanize(self, text: str, *, academic_tone: str = "formal", mode: str | None = None) -> str:
         if not text.strip():
             return text
-        if text.strip().startswith("## "):
-            return text.strip()
         if len(text.strip()) < MIN_HUMANIZE_CHARS:
             return text.strip()
+
+        from services.humanizer_engine.heading_utils import (
+            protect_markdown_headings,
+            restore_markdown_headings,
+        )
 
         selected_mode = normalize_humanizer_mode(mode or self.mode)
         tone = map_academic_tone_to_zerogpt(academic_tone)
         chunk_words = min(MAX_WORDS_PER_INPUT, TRANSFORM_CHUNK_WORDS)
-        chunks = split_text_by_word_limit(text, max_words=chunk_words)
+        # Entire draft body is humanized; markdown headings are protected then restored.
+        protected, headings = protect_markdown_headings(text)
+        chunks = split_text_by_word_limit(protected, max_words=chunk_words)
         outputs: list[str] = []
         for chunk in chunks:
             outputs.append(self._humanize_chunk(chunk, tone=tone, mode=selected_mode))
-        return "\n\n".join(outputs)
+        return restore_markdown_headings("\n\n".join(outputs), headings)
 
     def _humanize_chunk(self, chunk: str, *, tone: str, mode: str) -> str:
         result = self._humanizer.humanize(chunk, tone=tone, mode=mode)
@@ -75,9 +80,11 @@ class ZeroGPTTextHumanizer:
         return output
 
     def estimate_ai_score(self, text: str) -> int:
+        from services.humanizer_engine.heading_utils import is_heading_only
+
         if not text.strip():
             return 0
-        if text.strip().startswith("## "):
+        if is_heading_only(text):
             return 12
         try:
             detection = self._detection.detect(text)

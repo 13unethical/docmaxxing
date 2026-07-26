@@ -79,20 +79,21 @@
       <ul class="acct-legal-links">
         <li>
           <span>Terms of service</span>
-          <a href="{{ url_for('legal_terms', _external=True) }}">{{ url_for('legal_terms', _external=True) }}</a>
+          <a href="{{ url_for('terms', _external=True) }}">{{ url_for('terms', _external=True) }}</a>
         </li>
         <li>
           <span>Privacy policy</span>
-          <a href="{{ url_for('legal_privacy', _external=True) }}">{{ url_for('legal_privacy', _external=True) }}</a>
+          <a href="{{ url_for('privacy', _external=True) }}">{{ url_for('privacy', _external=True) }}</a>
         </li>
         <li>
           <span>Refund policy</span>
-          <a href="{{ url_for('legal_refund', _external=True) }}">{{ url_for('legal_refund', _external=True) }}</a>
+          <a href="{{ url_for('refund_policy', _external=True) }}">{{ url_for('refund_policy', _external=True) }}</a>
         </li>
       </ul>
       <p class="acct-legal-note">
-        All three sections also live on one page:
-        <a href="{{ url_for('legal') }}">{{ url_for('legal', _external=True) }}</a>
+        Full policy list:
+        <a href="{{ url_for('about') }}">{{ url_for('about', _external=True) }}</a>
+        (use the sidebar for Terms, Privacy, Payment, Delivery, Disclaimer, and more).
       </p>
     </section>
   </div>

@@ -25,6 +25,7 @@ from formatter.requirement_headings import (
     _match_variants,
     _normalize_spaces,
     _valid_split_at,
+    display_section_heading,
     normalize_document_internal_spaces,
 )
 from services.document_structure_engine import (
@@ -254,18 +255,60 @@ def _remainder_is_title_subtitle_only(remainder: str) -> bool:
     return lowercase_content == 0
 
 
-def _extend_heading_text(text: str, label_end: int) -> int:
+def _infer_label_start(text: str, label_end: int) -> int:
+    """Locate the start of the heading label that ends at ``label_end``."""
+    chunk = text[:label_end]
+    patterns = (
+        r"(?:Journal\s+Entry|Body\s+Paragraph|Section|Part|Chapter|Unit|Module|Week|Entry)\s+\d+\s*$",
+        r"(?:Learning\s+Outcomes|Literature\s+Review|Executive\s+Summary|Concluding\s+Paragraph|"
+        r"Works\s+Cited|Reflection|References|Bibliography|Introduction|Conclusion|"
+        r"Abstract|Appendix|Discussion|Methodology|Methods|Results)\s*$",
+    )
+    for pat in patterns:
+        m = re.search(pat, chunk, re.IGNORECASE)
+        if m:
+            return m.start()
+    m = re.search(r"\S+\s*$", chunk)
+    return m.start() if m else 0
+
+
+def _extend_heading_text(text: str, label_end: int, label_start: int | None = None) -> int:
     """
-    After a matched label, consume subtitle words until body signals dominate.
-    Returns index where body text begins.
+    After a matched label, return the index where body text begins.
+
+    Uses HeadingDetector for labeled journal / section headings so the first
+    sentence is never absorbed into the heading. Never promotes stopwords.
+    Scoped to the current label occurrence — mid-document labels must not
+    reuse an earlier heading's body boundary.
     """
+    from services.heading_detector import DEFAULT_HEADING_DETECTOR
+
+    if label_start is None:
+        label_start = _infer_label_start(text, label_end)
+    label_start = max(0, min(label_start, label_end))
+
+    scoped = text[label_start:]
+    split = DEFAULT_HEADING_DETECTOR.split_embedded(scoped.strip())
+    if split is not None and split.body:
+        body = split.body
+        body_lstrip = body.lstrip()
+        for candidate in (
+            body,
+            body_lstrip,
+            body_lstrip[:1].lower() + body_lstrip[1:] if body_lstrip else body,
+        ):
+            if not candidate:
+                continue
+            idx = text.find(candidate, label_end)
+            if idx >= label_end:
+                return idx
+
     pos = label_end
     remainder = text[pos:].lstrip()
     if not remainder:
         return pos
 
-    # Space-merged common labels (Introduction, Conclusion, References) — body follows immediately.
-    label_prefix = text[:label_end].strip()
+    label_prefix = text[label_start:label_end].strip()
     label_key = normalize_paragraph_text(label_prefix.split(":")[0])
     simple_labels = {
         "introduction",
@@ -279,58 +322,32 @@ def _extend_heading_text(text: str, label_end: int) -> int:
         "results",
         "reflection",
     }
-    if label_key in simple_labels and not re.match(r"\s*:", text[pos:]):
+    if label_key in simple_labels:
+        after = re.match(r"\s*\.?\s*", text[pos:])
+        if after:
+            return pos + after.end()
         return pos
-    if re.match(r"^(body paragraph \d+|journal entry \d+)$", label_key) and not re.match(
-        r"\s*:", text[pos:]
-    ):
-        return pos
+
+    if re.match(r"^(body paragraph \d+|journal entry \d+)$", label_key):
+        colon = re.match(r"\s*:\s*", text[pos:])
+        if not colon:
+            return pos
+        after_colon_at = pos + colon.end()
+        rest = text[after_colon_at:]
+        for match in re.finditer(r"\.(?:\s+)(?=[A-Z“\"‘'])", rest):
+            return after_colon_at + match.end()
+        return len(text)
 
     colon = re.match(r"\s*:\s*", text[pos:])
-    if not colon:
-        if _score_body_likelihood(text, pos) >= 0.4:
-            return pos
+    if colon:
+        after_colon_at = pos + colon.end()
+        rest = text[after_colon_at:]
+        for match in re.finditer(r"\.(?:\s+)(?=[A-Z“\"‘'])", rest):
+            return after_colon_at + match.end()
         return len(text)
 
-    pos += colon.end()
-    remainder = text[pos:].lstrip()
-    if not remainder:
-        return pos
+    return pos
 
-    if _remainder_is_title_subtitle_only(remainder):
-        return len(text)
-
-    words = remainder.split()
-    for i, word in enumerate(words):
-        if word.lower() in _BODY_START_WORDS:
-            offset = pos + sum(len(words[j]) + 1 for j in range(i))
-            if word.lower() in {"today", "this", "the"}:
-                if _score_body_likelihood(text, offset) >= 0.35:
-                    return offset
-            if i + 1 < len(words) and words[i + 1][:1].isupper():
-                continue
-            body_score = _score_body_likelihood(text, offset)
-            sub_score = _score_subtitle_likelihood(text, offset)
-            if body_score >= 0.4 and body_score >= sub_score + 0.1:
-                return offset
-
-    best_body_at = None
-    best_body_score = 0.0
-    scan = 0
-    for i, word in enumerate(words):
-        scan += len(word) + 1
-        body_at = pos + scan
-        body_score = _score_body_likelihood(text, body_at)
-        sub_score = _score_subtitle_likelihood(text, body_at)
-        if body_score >= 0.38 and body_score >= sub_score + 0.05:
-            if body_score > best_body_score:
-                best_body_score = body_score
-                best_body_at = body_at
-
-    if best_body_at is not None:
-        return best_body_at
-
-    return len(text)
 
 
 def _score_heading_candidate(
@@ -352,7 +369,7 @@ def _score_heading_candidate(
             label_end = m.end()
             break
 
-    heading_end = _extend_heading_text(text, label_end)
+    heading_end = _extend_heading_text(text, label_end, label_start=start)
     if not _valid_split_at(text, start, label_end, label_key, explicit_labels=explicit_keys):
         return 0.0
 
@@ -402,7 +419,7 @@ def _find_best_heading_in_text(
             for m in _label_pattern(variant).finditer(text, search_from):
                 start = m.start()
                 label_end = m.end()
-                heading_end = _extend_heading_text(text, label_end)
+                heading_end = _extend_heading_text(text, label_end, label_start=start)
                 conf = _score_heading_candidate(
                     text,
                     start,
@@ -439,18 +456,34 @@ def _segment_paragraph(
     if not stripped:
         return []
 
+    from services.heading_detector import DEFAULT_HEADING_DETECTOR
+
+    # Deterministic peel first — identify heading, then body.
+    # Soft wraps must not create fake paragraph boundaries mid-sentence.
+    peel = DEFAULT_HEADING_DETECTOR.split_embedded(stripped)
+    if peel is not None and peel.body:
+        sec = _match_section_for_text(peel.heading, sections)
+        if sec:
+            used.add(sec.canonical)
+        return [(peel.heading, peel.body, sec, 0.95)]
+
+    stripped = DEFAULT_HEADING_DETECTOR.collapse_soft_linebreaks(stripped)
+
     if "\n" in stripped:
         first_line, rest = stripped.split("\n", 1)
         first_line = first_line.strip()
         rest = rest.strip()
-        if first_line and rest:
+        if first_line and rest and DEFAULT_HEADING_DETECTOR.is_heading_only_line(first_line):
             sec = _match_section_for_text(first_line, sections)
             if sec or is_heading_like(first_line):
                 if sec:
                     used.add(sec.canonical)
                 return [(first_line, rest, sec, 0.9)]
 
-    # Standalone short heading line
+    # Standalone short heading line — never promote forbidden tokens.
+    if DEFAULT_HEADING_DETECTOR.is_forbidden_heading(stripped):
+        return [(None, stripped, None, 0.0)]
+
     if word_heading or (
         is_heading_like(stripped)
         and len(stripped.split()) <= 14
@@ -523,7 +556,7 @@ def _segments_from_expected_labels(
         for start, end, matched, label_key in sorted(splits, key=lambda x: x[0]):
             dominated = False
             for fstart, fend, _, _ in filtered:
-                if start >= fstart and start < _extend_heading_text(stripped, fend):
+                if start >= fstart and start < _extend_heading_text(stripped, fend, label_start=fstart):
                     dominated = True
                     break
             if not dominated:
@@ -538,9 +571,23 @@ def _segments_from_expected_labels(
                 if pre:
                     segments.append((None, pre, None, 0.0))
             next_start = splits[i + 1][0] if i + 1 < len(splits) else len(stripped)
-            heading_end = _extend_heading_text(stripped, end)
-            heading_text = stripped[start:heading_end].strip()
+            heading_end = _extend_heading_text(stripped, end, label_start=start)
             body = _normalize_spaces(stripped[heading_end:next_start].strip())
+            from services.heading_detector import DEFAULT_HEADING_DETECTOR
+
+            matched_label = stripped[start:end].strip()
+            raw_heading = stripped[start:heading_end].strip()
+            if heading_end > end and raw_heading.lower().startswith(matched_label.lower()):
+                suffix = raw_heading[len(matched_label) :]
+                heading_text = display_section_heading(matched_label, label_key) + suffix
+            else:
+                heading_text = display_section_heading(matched_label, label_key)
+            peel = DEFAULT_HEADING_DETECTOR.split_embedded(stripped[start:next_start].strip())
+            if peel is not None and peel.body:
+                peel_key = normalize_paragraph_text(peel.heading.split(":")[0])
+                if peel_key == label_key or peel_key.startswith(label_key):
+                    heading_text = peel.heading
+                    body = _normalize_spaces(peel.body)
             section = next((s for s in sections if s.canonical == label_key), None)
             conf = 0.95 if section and section.source == "requirement" else 0.85
             if heading_text:
@@ -651,6 +698,11 @@ def _segments_to_blocks(
                 )
             )
         if body:
+            from services.heading_detector import DEFAULT_HEADING_DETECTOR, HeadingDetector
+
+            # Do not title-case orphan mid-sentence tokens.
+            if not DEFAULT_HEADING_DETECTOR.is_forbidden_heading(body):
+                body = HeadingDetector._ensure_capital_start(body)
             blocks.append(
                 ReconstructedBlock(
                     kind="body",
@@ -687,15 +739,63 @@ def reconstruct_blocks(
             continue
         m = meta[idx] if meta and idx < len(meta) else {}
         word_heading = bool(m.get("is_word_heading"))
+        word_level = m.get("heading_level")
 
-        label_list = [s.label for s in expected]
+        stripped = text.strip()
+        from services.heading_detector import DEFAULT_HEADING_DETECTOR
+
+        # Document titles stay intact — never scan them for in-sentence keywords.
+        # Never classify section labels (Journal Entry / Body Paragraph / …) as the doc title.
+        embedded = DEFAULT_HEADING_DETECTOR.split_embedded(stripped)
+        sectionish = bool(
+            re.match(
+                r"^(?:Journal\s+Entry|Body\s+Paragraph|Introduction|Conclusion|Discussion|"
+                r"References|Reflection|Abstract|Methodology|Methods|Results)\b",
+                stripped,
+                re.I,
+            )
+        )
+        is_title = (
+            idx == 0
+            and embedded is None
+            and not sectionish
+            and (
+                (word_heading and word_level == 1)
+                or _looks_like_title(stripped)
+            )
+        )
+        if is_title:
+            blocks.append(
+                ReconstructedBlock(
+                    kind="title",
+                    text=stripped,
+                    level=1,
+                    source="word_style" if word_heading else "reconstructed",
+                    confidence=0.95 if word_heading else 0.85,
+                    section_key="title",
+                )
+            )
+            continue
+
+        # Drop markdown leftovers like "## Document" that are not academic sections.
+        from formatter.markdown_cleanup import strip_markdown_text
+
+        cleaned = strip_markdown_text(stripped)
+        if cleaned is None:
+            continue
+        if cleaned != stripped:
+            stripped = cleaned
+            text = cleaned
+        if normalize_paragraph_text(stripped) == "document":
+            continue
+
         req_segments = _segments_from_expected_labels(text, expected, used)
         if req_segments:
             blocks.extend(
                 _segments_to_blocks(
                     req_segments,
                     para_index=idx,
-                    is_title_candidate=idx == 0 and _looks_like_title(text),
+                    is_title_candidate=False,
                 )
             )
             continue
@@ -713,11 +813,113 @@ def reconstruct_blocks(
             _segments_to_blocks(
                 segments,
                 para_index=idx,
-                is_title_candidate=idx == 0 and _looks_like_title(text),
+                is_title_candidate=False,
             )
         )
 
-    return _split_reference_paragraphs(blocks)
+    return _merge_sentence_fragments(_split_reference_paragraphs(blocks))
+
+
+_INCOMPLETE_TAIL = re.compile(
+    r"(?i)\b(?:a|an|and|or|the|that|than|then|to|of|for|with|by|from|in|on|at|as|are|is|was|were|be|been|being)\s*$"
+)
+
+
+def _is_sentence_fragment(text: str, *, previous: str | None = None) -> bool:
+    """True when ``text`` is an orphan mid-sentence piece, not a real paragraph."""
+    from services.heading_detector import DEFAULT_HEADING_DETECTOR, _NEVER_HEADING_WORDS
+
+    t = (text or "").strip()
+    if not t:
+        return True
+    if DEFAULT_HEADING_DETECTOR.is_forbidden_heading(t):
+        return True
+    words = t.split()
+    if len(words) == 1 and words[0][:1].islower():
+        return True
+    if previous:
+        prev = previous.rstrip()
+        if not prev:
+            return False
+        if _INCOMPLETE_TAIL.search(prev):
+            return True
+        if prev[-1] not in ".!?:;\"'”’)" and (
+            t[:1].islower() or words[0].lower().strip(".,;:") in _NEVER_HEADING_WORDS
+        ):
+            return True
+    return False
+
+
+def _merge_sentence_fragments(blocks: list[ReconstructedBlock]) -> list[ReconstructedBlock]:
+    """Rejoin mid-sentence orphans created by soft wraps or bad splits.
+
+    A single sentence must never become multiple paragraphs. Isolated function
+    words (are / the / as / …) are never kept as headings or standalone bodies.
+    """
+    from services.heading_detector import DEFAULT_HEADING_DETECTOR, _NEVER_HEADING_WORDS
+
+    out: list[ReconstructedBlock] = []
+    for block in blocks:
+        text = (block.text or "").strip()
+        if not text:
+            continue
+
+        kind = block.kind
+        level = block.level
+        if kind in {"heading", "title"} and DEFAULT_HEADING_DETECTOR.is_forbidden_heading(text):
+            kind = "body"
+            level = 0
+
+        if out and kind in {"body", "reference"} and _is_sentence_fragment(text, previous=out[-1].text):
+            prev = out[-1]
+            piece = text
+            if _INCOMPLETE_TAIL.search(prev.text.rstrip()):
+                words = piece.split()
+                if words and words[0][:1].isupper():
+                    first = words[0]
+                    bare = first.lower().strip(".,;:\"'“”‘’")
+                    if bare in _NEVER_HEADING_WORDS:
+                        piece = first.lower() + piece[len(first) :]
+                    else:
+                        piece = first[:1].lower() + piece[1:]
+            elif words := piece.split():
+                first = words[0]
+                if first[:1].isupper() and first.lower().strip(".,;:") in _NEVER_HEADING_WORDS:
+                    piece = first.lower() + piece[len(first) :]
+
+            if prev.kind in {"heading", "title"} and _INCOMPLETE_TAIL.search(prev.text.rstrip()):
+                # Prior block was misclassified as a heading mid-sentence.
+                out[-1] = ReconstructedBlock(
+                    kind="body",
+                    text=_normalize_spaces(f"{prev.text.rstrip()} {piece}"),
+                    level=0,
+                    source="reconstructed",
+                    confidence=0.2,
+                )
+                continue
+
+            if prev.kind in {"body", "reference"}:
+                out[-1] = ReconstructedBlock(
+                    kind="reference" if prev.kind == "reference" else "body",
+                    text=_normalize_spaces(f"{prev.text.rstrip()} {piece}"),
+                    level=prev.level if prev.kind == "reference" else 0,
+                    source=prev.source,
+                    confidence=min(prev.confidence, 0.5),
+                    section_key=prev.section_key,
+                )
+                continue
+
+        out.append(
+            ReconstructedBlock(
+                kind=kind,
+                text=text,
+                level=level,
+                source=block.source,
+                confidence=block.confidence,
+                section_key=block.section_key,
+            )
+        )
+    return out
 
 
 def _clear_document_body(doc: Document) -> None:

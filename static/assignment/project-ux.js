@@ -191,6 +191,8 @@ window.AssignmentProjectUX = (function () {
     if (step === "writing" && project.writingProgress != null) {
       progress = 35 + Math.round(project.writingProgress * 0.2);
     }
+    // Never let the displayed overall % go backwards mid-run.
+    progress = Math.max(Number(project.overallProgress) || 0, Math.max(0, Math.min(100, progress)));
     project.overallProgress = progress;
 
     var set = function (sel, value) {

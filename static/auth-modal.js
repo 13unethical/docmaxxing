@@ -101,13 +101,13 @@
     var name = (user && (user.name || email.split("@")[0])) || "Account";
     var initial = (name.charAt(0) || "U").toUpperCase();
     account.innerHTML =
-      '<a href="/pricing" class="coin-pill" title="Your coin balance">' +
+      '<a href="/pricing" class="coin-pill" title="Credits & pricing">' +
       '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
       '<circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6" />' +
       '<path d="M12 8.5v7M9.75 10.25h3.5a1.5 1.5 0 0 1 0 3h-2.5a1.5 1.5 0 0 0 0 3h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />' +
-      "</svg><span data-coin-balance>" +
+      '</svg><span data-coin-balance>' +
       (typeof balance === "number" ? balance : 0) +
-      "</span></a>" +
+      '</span><span class="coin-pill-label">Credits</span></a>' +
       '<div class="nav-user-menu" data-user-menu>' +
       '<button type="button" class="nav-user-trigger" data-user-menu-toggle aria-label="' +
       escapeHtml(name) +

@@ -7,6 +7,10 @@ from typing import Any, Callable
 
 from services.browser.providers.stealthwriter import DEFAULT_STEALTHWRITER_MODEL
 from services.humanizer_engine.constants import MIN_HUMANIZE_CHARS
+from services.humanizer_engine.heading_utils import (
+    protect_markdown_headings,
+    restore_markdown_headings,
+)
 from services.humanizer_engine.mock_humanizer import MockTextHumanizer
 from services.humanizer_engine.zerogpt_humanizer import split_text_by_word_limit
 
@@ -35,30 +39,57 @@ class StealthWriterTextHumanizer:
         del academic_tone  # StealthWriter UI has no tone parameter for Legacy 5.1.
         if not text.strip():
             return text
-        if text.strip().startswith("## "):
-            return text.strip()
         if len(text.strip()) < MIN_HUMANIZE_CHARS:
             return text.strip()
 
-        chunks = split_text_by_word_limit(text, max_words=self.max_words)
+        # All prose goes through StealthWriter. Headings are temporarily protected
+        # so structure survives, then restored after humanization.
+        protected, headings = protect_markdown_headings(text)
+        chunks = split_text_by_word_limit(protected, max_words=self.max_words)
         outputs: list[str] = []
         for chunk in chunks:
             outputs.append(self._humanize_chunk(chunk))
-        return "\n\n".join(outputs)
+        return restore_markdown_headings("\n\n".join(outputs), headings)
 
     def _humanize_chunk(self, chunk: str) -> str:
         fn = self._humanize_fn
-        if fn is None:
-            from services.browser.providers.stealthwriter import humanize_text as fn
+        last_error = "StealthWriter humanize failed"
+        # Paid plans still occasionally return NO_CHANGE when the UI click did not
+        # start generation — retry the full browser flow before failing hard.
+        for attempt in range(1, 4):
+            if fn is None:
+                from services.browser.providers.stealthwriter import humanize_text
+                from services.browser.thread_affinity import run_on_browser_thread
 
-        result = fn(chunk, model=self.model)
-        if not result.get("success"):
-            error = result.get("error") or result.get("message") or "StealthWriter humanize failed"
-            raise ValueError(str(error))
-        output = (result.get("humanized_text") or "").strip()
-        if not output:
-            raise ValueError("StealthWriter humanizer returned empty text")
-        return output
+                def _call() -> dict[str, Any]:
+                    return humanize_text(chunk, model=self.model)
+
+                result = run_on_browser_thread(_call, timeout=240)
+            else:
+                result = fn(chunk, model=self.model)
+
+            if result.get("success"):
+                output = (result.get("humanized_text") or "").strip()
+                if output and output != chunk.strip():
+                    return output
+                if output:
+                    # Identical output is not acceptable for assignment pipeline.
+                    last_error = "StealthWriter returned unchanged text"
+                else:
+                    last_error = "StealthWriter humanizer returned empty text"
+            else:
+                error = str(result.get("error") or "")
+                message = str(result.get("message") or "")
+                last_error = message or error or last_error
+                if error.upper() != "NO_CHANGE" and "NO_CHANGE" not in error.upper():
+                    raise ValueError(last_error)
+
+            if attempt < 3:
+                print(
+                    f"[stealthwriter] humanize attempt {attempt} failed ({last_error}) — retrying",
+                    flush=True,
+                )
+        raise ValueError(last_error)
 
     def estimate_ai_score(self, text: str) -> int:
         return self._fallback_scorer.estimate_ai_score(text)

@@ -1,0 +1,78 @@
+{% extends "info/base.html" %}
+{% set info_active = "terms" %}
+{% set page_title = "Terms and Conditions" %}
+{% set page_lede = "The rules for using DocMaxxing. Last updated: 26 July 2026." %}
+{% block info_body %}
+<h2>1. Agreement</h2>
+<p>
+  By creating an account or using DocMaxxing you agree to these Terms and Conditions, our
+  <a href="{{ url_for('privacy') }}">Privacy Policy</a>, and related policies linked in the footer.
+  If you do not agree, do not use the service.
+</p>
+
+<h2>2. The service</h2>
+<p>
+  DocMaxxing provides academic document tools, including:
+</p>
+<ul>
+  <li>Document formatting and style presets</li>
+  <li>Text humanization and AI-oriented detection helpers</li>
+  <li>Citation helpers and Turnitin-style report workflows</li>
+  <li>Assignment pipeline (research, writing, humanize, format, validation, delivery)</li>
+  <li>Workspace editing tools billed in credits</li>
+</ul>
+<p>
+  Features, pricing, and credit costs may change. Continued use after changes means you accept the
+  updated terms.
+</p>
+
+<h2>3. Accounts</h2>
+<ul>
+  <li>You must provide accurate registration details and keep credentials secure.</li>
+  <li>You are responsible for activity under your account.</li>
+  <li>We may suspend accounts for abuse, chargebacks, or academic-misconduct facilitation beyond the product’s intended assistive use.</li>
+</ul>
+
+<h2>4. Credits &amp; payments</h2>
+<p>
+  Paid actions consume credits. Credit packages are purchased through Paddle on the
+  <a href="{{ url_for('pricing') }}">Credits</a> page. You must be registered to buy.
+  See also <a href="{{ url_for('payment_policy') }}">Payment Policy</a> and
+  <a href="{{ url_for('refund_policy') }}">Refund Policy</a>.
+</p>
+
+<h2>5. Your content &amp; academic integrity</h2>
+<ul>
+  <li>You own the content you upload and remain responsible for submissions to your institution.</li>
+  <li>DocMaxxing is an assistive tool. It does not guarantee grades, originality scores, or acceptance by universities.</li>
+  <li>You must follow your institution’s academic integrity rules. Do not use the product to misrepresent authorship where forbidden.</li>
+</ul>
+
+<h2>6. Acceptable use</h2>
+<p>You agree not to:</p>
+<ul>
+  <li>Attack, scrape abusively, or reverse-engineer the service beyond normal use</li>
+  <li>Share accounts for commercial resale without permission</li>
+  <li>Upload unlawful or harmful material</li>
+  <li>Attempt to bypass credit metering or payment systems</li>
+</ul>
+
+<h2>7. Intellectual property</h2>
+<p>
+  DocMaxxing branding, UI, and software remain our property. Your uploaded documents remain yours.
+  Generated outputs are licensed to you for personal academic use subject to these terms.
+</p>
+
+<h2>8. Limitation of liability</h2>
+<p>
+  To the maximum extent permitted by law, DocMaxxing is provided “as is”. We are not liable for
+  lost grades, rejected submissions, detection false positives/negatives, or third-party provider outages.
+  See <a href="{{ url_for('disclaimer') }}">Disclaimer</a>.
+</p>
+
+<h2>9. Contact</h2>
+<p>
+  <a href="mailto:support@docmaxxing.com">support@docmaxxing.com</a>
+  · <a href="https://wa.me/998990779909" target="_blank" rel="noopener noreferrer">+998 99 077 99 09</a>
+</p>
+{% endblock %}

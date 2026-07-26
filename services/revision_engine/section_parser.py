@@ -172,7 +172,7 @@ def render_sections(sections: list[dict[str, str]]) -> str:
             if body:
                 parts.append(body)
             continue
-        parts.append(f"## {title}\n{body}".strip())
+        parts.append(f"## {title}\n\n{body}".strip() if body else f"## {title}")
     return "\n\n".join(part for part in parts if part)
 
 

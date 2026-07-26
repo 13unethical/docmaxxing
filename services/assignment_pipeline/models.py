@@ -17,11 +17,12 @@ class PipelineStage(StrEnum):
     BLUEPRINT = "blueprint"
     WRITING = "writing"
     MERGE = "merge"
-    STYLE_REVIEW = "style_review"
     CITATION_GENERATION = "citation_generation"
-    REQUIREMENT_VALIDATION = "requirement_validation"
-    REVISION = "revision"
     HUMANIZATION = "humanization"
+    FORMATTING = "formatting"
+    STYLE_REVIEW = "style_review"
+    REVISION = "revision"
+    REQUIREMENT_VALIDATION = "requirement_validation"
     AI_DETECTION = "ai_detection"
     DELIVERY = "delivery"
 
@@ -34,15 +35,17 @@ class StageStatus(StrEnum):
 
 
 class StageProvider(StrEnum):
-    """Integration slot for future AI / external services."""
+    """Integration slot for AI / external services."""
 
     INTERNAL = "internal"
     GEMINI = "gemini"
     CLAUDE = "claude"
     HUMANIZER = "humanizer"
     TURNITIN = "turnitin"
+    ZEROGPT = "zerogpt"
     CHECK_PIPELINE = "check_pipeline"
     CITATION_ENGINE = "citation_engine"
+    FORMAT_ENGINE = "format_engine"
 
 
 def utc_now() -> datetime:

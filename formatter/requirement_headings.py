@@ -68,15 +68,80 @@ _PROSE_SENSITIVE = frozenset(
         "methods",
         "results",
         "recommendations",
+        "references",
+        "bibliography",
+        "appendix",
     }
 )
 
-# Distinctive multi-word patterns — safe to split after whitespace when humanizers merge lines.
+# Distinctive multi-word patterns — still require structural boundaries.
 _DISTINCTIVE_LABEL = re.compile(
     r"^(body\s+paragraph\s+\d+|literature\s+review|executive\s+summary|"
     r"concluding\s+paragraph|works\s+cited|counterargument|counter-argument|"
-    r"references|bibliography)$",
+    r"journal\s+entry\s+\d+)$",
     re.I,
+)
+
+# Closed-class words immediately before a label ⇒ the label is inside a sentence.
+_PROSE_LEFT_CONTEXT = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "as",
+        "at",
+        "both",
+        "but",
+        "by",
+        "during",
+        "each",
+        "every",
+        "for",
+        "from",
+        "her",
+        "his",
+        "how",
+        "in",
+        "into",
+        "its",
+        "many",
+        "my",
+        "no",
+        "of",
+        "on",
+        "onto",
+        "or",
+        "our",
+        "over",
+        "per",
+        "some",
+        "such",
+        "than",
+        "that",
+        "the",
+        "their",
+        "then",
+        "these",
+        "this",
+        "those",
+        "through",
+        "to",
+        "under",
+        "via",
+        "what",
+        "when",
+        "where",
+        "whether",
+        "which",
+        "while",
+        "who",
+        "whom",
+        "whose",
+        "with",
+        "within",
+        "without",
+        "your",
+    }
 )
 
 _SECTION_ALIASES: dict[str, tuple[str, ...]] = {
@@ -90,7 +155,10 @@ def _title_section(raw: str) -> str:
     t = re.sub(r"\s+", " ", raw.strip().lower())
     if t.startswith("body paragraph "):
         n = t.split()[-1]
-        return f"Body paragraph {n}"
+        return f"Body Paragraph {n}"
+    if t.startswith("journal entry "):
+        n = t.split()[-1]
+        return f"Journal Entry {n}"
     if t == "concluding paragraph":
         return "Concluding Paragraph"
     return " ".join(w.capitalize() if w.isalpha() else w for w in t.split())
@@ -158,43 +226,55 @@ def _looks_like_citation_start(following: str) -> bool:
     return bool(_CITATION_START.match(following.strip()))
 
 
-def _looks_like_real_section_start(label_key: str, following: str, *, explicit: bool = False) -> bool:
-    """Body after a split should read like a new section, not mid-sentence prose."""
-    following = following.strip()
+def _has_prose_left_context(text: str, start: int) -> bool:
+    """True when the match is grammatically inside a sentence (e.g. 'the references')."""
+    if start <= 0:
+        return False
+    if text[start - 1].isalnum():
+        return True
+    before = text[:start]
+    m = re.search(r"([A-Za-z']+)\s*$", before)
+    if not m:
+        return False
+    return m.group(1).lower() in _PROSE_LEFT_CONTEXT
+
+
+def _has_prose_right_continuation(text: str, end: int) -> bool:
+    """True when text after the match continues the same sentence."""
+    following = text[end:]
+    if not following:
+        return False
+    # Optional heading terminator (. or :) then inspect what follows.
+    m = re.match(r"^\s*[.:]?\s*", following)
+    rest = following[m.end() :] if m else following.lstrip()
+    if not rest:
+        return False
+    if rest[0] in ",;)]}'\"”’":
+        return True
+    if rest[0].islower():
+        return True
+    return False
+
+
+def _looks_like_new_section_body(label_key: str, following: str) -> bool:
+    """Body after a structural heading must open a new section, not mid-sentence prose."""
+    following = re.sub(r"^\s*[.:]?\s*", "", (following or "").strip())
     if not following:
         return True
     first = following.split()[0]
-    if _DISTINCTIVE_LABEL.match(label_key):
-        return True
-    if label_key in ("references", "bibliography", "works cited"):
-        return _looks_like_citation_start(following) or bool(re.match(r"[A-Z\[]", first))
-    meta_starts = (
-        "suddenly",
-        "appears",
-        "often",
-        "sometimes",
-        "typically",
-        "usually",
-        "may",
-        "might",
-        "can",
-        "will",
-        "should",
-        "would",
-        "is",
-        "are",
-        "was",
-        "were",
-        "has",
-        "have",
-    )
-    if first.lower() in meta_starts:
+    if not first or first[0] in ",;)]}'\"”’":
         return False
-    if explicit:
-        return True
-    if label_key in _PROSE_SENSITIVE:
-        return first[0].isupper()
-    return first[0].isupper() or _DISTINCTIVE_LABEL.match(label_key)
+    if first[0].islower():
+        return False
+    if label_key in ("references", "bibliography", "works cited"):
+        return _looks_like_citation_start(following)
+    return first[0].isupper()
+
+
+def _looks_like_real_section_start(label_key: str, following: str, *, explicit: bool = False) -> bool:
+    """Compatibility wrapper — structural body check only."""
+    del explicit
+    return _looks_like_new_section_body(label_key, following)
 
 
 def _valid_split_at(
@@ -205,37 +285,37 @@ def _valid_split_at(
     *,
     explicit_labels: set[str] | None = None,
 ) -> bool:
-    explicit = bool(explicit_labels and label_key in explicit_labels)
+    """
+    Accept a label match only at a structural heading boundary.
+
+    Never promote keywords inside sentences. Requires paragraph-start or
+    post-sentence position, no prose left-context, and a new-section body.
+    """
+    del explicit_labels
+
+    if _has_prose_left_context(text, start):
+        return False
+    if _has_prose_right_continuation(text, end):
+        return False
+
+    if start > 0:
+        before = text[:start].rstrip()
+        if before and before[-1] not in ".!?\n":
+            return False
+
     following = _following_text(text, end)
-    if not _looks_like_real_section_start(label_key, following, explicit=explicit):
+    if following and not _looks_like_new_section_body(label_key, following):
         return False
 
-    if start == 0:
-        return True
+    return True
 
-    before = text[:start].rstrip()
-    if not before:
-        return True
 
-    prev_char = before[-1]
-    if prev_char in ".!?\n":
-        return True
-
-    if _DISTINCTIVE_LABEL.match(label_key):
-        return True
-
-    if label_key in ("references", "bibliography", "works cited"):
-        return _looks_like_citation_start(following)
-
-    if explicit:
-        if start > 0 and text[start - 1].isspace():
-            return True
-        return prev_char in ".!?\n"
-
-    if label_key in _PROSE_SENSITIVE:
-        return False
-
-    return False
+def display_section_heading(matched: str, label_key: str) -> str:
+    """Canonical Heading capitalization for a structural section label."""
+    del matched
+    if label_key.startswith("body paragraph") or label_key.startswith("journal entry"):
+        return _title_section(label_key)
+    return _title_section(label_key)
 
 
 def _collect_heading_splits(
@@ -315,7 +395,7 @@ def split_paragraph_by_requirement_headings(
                 segments.append((None, pre))
         next_start = splits[i + 1][0] if i + 1 < len(splits) else len(stripped)
         body = _normalize_spaces(stripped[end:next_start].strip())
-        segments.append((matched, body))
+        segments.append((display_section_heading(matched, _label_key), body))
         pos = next_start
     if pos < len(stripped):
         tail = stripped[pos:].strip()

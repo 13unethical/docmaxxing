@@ -35,17 +35,23 @@ from services.research_engine.service import ResearchEngineService
 from services.blueprint_engine.models import Blueprint
 from services.blueprint_engine.service import BlueprintEngineService
 from services.writer_engine.service import WriterEngineService
-from services.writer_engine.models import Draft, WriterSectionStatus, WriterSession, WriterSessionStatus
+from services.writer_engine.models import Draft, WriterSectionStatus, WriterSession, WriterSessionStatus, count_words
 from services.reviewer_engine.service import ReviewerEngineService
 from services.reviewer_engine.models import ReviewReport
 from services.revision_engine.service import RevisionEngineService
 from services.revision_engine.models import MAX_REVISION_ATTEMPTS
+from services.revision_engine.gemini_reviser import _strip_revision_meta
 from services.humanizer_engine.service import HumanizerEngineService
 from services.humanizer_engine.models import HumanizedDraft, HumanizerSession
 from services.ai_detection_engine.service import AIDetectionEngineService
 from services.ai_detection_engine.models import DetectionReport, DetectionSession
 from services.delivery_engine.service import DeliveryEngineService
 from services.project_engine import ProjectEngine, ProjectLifecycleStatus
+from services.assignment_citations import AssignmentCitationEngine
+from services.assignment_formatting import AssignmentFormatEngine
+from services.requirement_validation import GeminiRequirementValidator
+from services.assignment_pipeline.stages import PIPELINE_STAGES
+from services.requirement_validation import GeminiRequirementValidator
 
 
 def _parse_deadline(value: str | None) -> datetime | None:
@@ -79,6 +85,9 @@ class ProjectService:
         ai_detection: AIDetectionEngineService | None = None,
         delivery: DeliveryEngineService | None = None,
         project_engine: ProjectEngine | None = None,
+        citation_engine: AssignmentCitationEngine | None = None,
+        format_engine: AssignmentFormatEngine | None = None,
+        requirement_validator: GeminiRequirementValidator | None = None,
     ) -> None:
         self.store = store or ProjectStore()
         self.pipeline = pipeline or AssignmentPipelineService()
@@ -92,6 +101,9 @@ class ProjectService:
         self.ai_detection = ai_detection or AIDetectionEngineService()
         self.delivery = delivery or DeliveryEngineService()
         self.project_engine = project_engine or ProjectEngine()
+        self.citation_engine = citation_engine or AssignmentCitationEngine()
+        self.format_engine = format_engine or AssignmentFormatEngine()
+        self.requirement_validator = requirement_validator or GeminiRequirementValidator()
 
     def create_project(
         self,
@@ -158,7 +170,12 @@ class ProjectService:
 
     def _ensure_pipeline_project(self, project_id: str) -> None:
         try:
-            self.pipeline.get_project(project_id)
+            pipeline_project = self.pipeline.get_project(project_id)
+            known = {item.stage for item in pipeline_project.stages}
+            if known != set(PIPELINE_STAGES):
+                # Stage enum changed — recreate and restore from artifacts.
+                recreated = self.pipeline.create_project(project_id=project_id)
+                self.pipeline.store.save(recreated)
         except KeyError:
             self.pipeline.create_project(project_id=project_id)
         self._restore_pipeline_from_bundle(project_id)
@@ -565,16 +582,52 @@ class ProjectService:
                 StageResult(output={"review_report_id": artifacts["review_report_id"]}),
             )
 
-        if artifacts.get("last_revision_id"):
+        if artifacts.get("last_revision_id") or artifacts.get("revision_result"):
+            rev_artifacts = {}
+            if isinstance(artifacts.get("revision_result"), dict):
+                rev_artifacts["revision_result"] = artifacts.get("revision_result")
             complete(
                 PipelineStage.REVISION,
-                StageResult(output={"last_revision_id": artifacts["last_revision_id"]}),
+                StageResult(
+                    output={"last_revision_id": artifacts.get("last_revision_id")},
+                    artifacts=rev_artifacts,
+                ),
+            )
+
+        if artifacts.get("citation_pack"):
+            complete(
+                PipelineStage.CITATION_GENERATION,
+                StageResult(
+                    output={"citation_pack_id": (artifacts.get("citation_pack") or {}).get("id")},
+                    artifacts={"citation_pack": artifacts.get("citation_pack")},
+                ),
             )
 
         if artifacts.get("humanized_draft_id"):
             complete(
                 PipelineStage.HUMANIZATION,
                 StageResult(output={"humanized_draft_id": artifacts["humanized_draft_id"]}),
+            )
+
+        if artifacts.get("formatted_document"):
+            complete(
+                PipelineStage.FORMATTING,
+                StageResult(
+                    output={"formatted_document_id": (artifacts.get("formatted_document") or {}).get("id")},
+                    artifacts={"formatted_document": artifacts.get("formatted_document")},
+                ),
+            )
+
+        if artifacts.get("validation_report"):
+            complete(
+                PipelineStage.REQUIREMENT_VALIDATION,
+                StageResult(
+                    output={
+                        "passed": (artifacts.get("validation_report") or {}).get("passed"),
+                        "validation_report_id": (artifacts.get("validation_report") or {}).get("id"),
+                    },
+                    artifacts={"validation_report": artifacts.get("validation_report")},
+                ),
             )
 
         if artifacts.get("detection_report_id"):
@@ -1012,15 +1065,36 @@ class ProjectService:
             section_names=section_names,
         )
 
+    def _draft_for_post_format_review(self, project_id: str) -> dict:
+        """Prefer formatted/humanized text — review runs after Format."""
+        bundle = self.store.require_bundle(project_id)
+        formatted = bundle.project.artifacts.get("formatted_document")
+        if isinstance(formatted, dict) and str(formatted.get("plain_text") or "").strip():
+            try:
+                base = self._load_humanized_draft(project_id).to_dict()
+            except KeyError:
+                base = self._load_draft(project_id).to_dict()
+            return {
+                **base,
+                "content": str(formatted.get("plain_text") or base.get("content") or ""),
+                "total_words": int(
+                    formatted.get("word_count")
+                    or base.get("total_words")
+                    or len(str(formatted.get("plain_text") or "").split())
+                ),
+            }
+        return self._draft_for_review(project_id)
+
     def run_academic_review(self, project_id: str):
         bundle = self.store.require_bundle(project_id)
         requirement = bundle.requirement.to_dict()
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
-        draft = self._draft_for_review(project_id)
+        # Review runs after Format — evaluate humanized/formatted content.
+        draft = self._draft_for_post_format_review(project_id)
 
         self._ensure_pipeline_project(project_id)
-        self.pipeline.start_stage(project_id, PipelineStage.STYLE_REVIEW)
+        self.pipeline.start_stage(project_id, PipelineStage.STYLE_REVIEW, force=True)
         report = self.reviewer.review_draft(
             requirement_json=requirement,
             research_plan=research_plan,
@@ -1077,20 +1151,35 @@ class ProjectService:
         requirement = bundle.requirement.to_dict()
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
-        draft = self._draft_for_review(project_id)
+        draft = self._draft_for_post_format_review(project_id)
         review = self._load_review_report(project_id, seed=review_report).to_dict()
 
-        if review.get("passed"):
-            raise ValueError("Review report passed — revision is not required")
+        self._ensure_pipeline_project(project_id)
+        self.pipeline.start_stage(project_id, PipelineStage.REVISION, force=True)
+
+        if review.get("passed") or not list(review.get("issues") or []):
+            result_payload = {
+                "id": None,
+                "skipped": False,
+                "no_issues": True,
+                "attempt_number": 0,
+                "draft": draft,
+            }
+            self.pipeline.complete_stage(
+                project_id,
+                PipelineStage.REVISION,
+                StageResult(
+                    output={"no_issues": True, "draft_version": draft.get("version")},
+                    artifacts={"revision_result": result_payload},
+                ),
+            )
+            self._sync_pipeline_state(project_id)
+            return result_payload
 
         history = self.revision.get_history_or_empty(project_id)
         if history.revision_attempts >= MAX_REVISION_ATTEMPTS or history.needs_manual_review:
             raise ValueError("Maximum automatic revision attempts reached — project needs manual review")
 
-        self._complete_placeholder_stages_before_revision(project_id)
-
-        self._ensure_pipeline_project(project_id)
-        self.pipeline.start_stage(project_id, PipelineStage.REVISION)
         result = self.revision.revise_draft(
             requirement_json=requirement,
             research_plan=research_plan,
@@ -1100,19 +1189,36 @@ class ProjectService:
             project_id=project_id,
         )
 
+        # Strip any instructional revision markers before persisting.
+        cleaned = _strip_revision_meta(str(result.draft.get("content") or ""))
+        if cleaned != str(result.draft.get("content") or ""):
+            result.draft["content"] = cleaned
+            result.draft["total_words"] = count_words(cleaned)
+
         project = self.store.require_project(project_id)
         project.artifacts["draft_id"] = result.draft["id"]
         project.artifacts["revision_attempts"] = result.attempt_number
         project.artifacts["last_revision_id"] = result.id
         project.artifacts["last_issues_fixed"] = len(result.issues_addressed)
-        section_names = [item.section for item in result.sections_revised if item.section]
-        try:
-            self._rehumanize_revised_sections(project_id, section_names)
-        except KeyError:
-            pass
+        project.artifacts["revision_result"] = result.to_dict()
         if project.status == ProjectStatus.NEEDS_MANUAL_REVIEW and result.attempt_number < MAX_REVISION_ATTEMPTS:
             project.status = ProjectStatus.ACTIVE
         self.store.save_project(project)
+        self._persist_draft(project_id, Draft.from_dict(result.draft))
+        try:
+            humanized = self._load_humanized_draft(project_id)
+            humanized.content = str(result.draft.get("content") or humanized.content)
+            humanized.total_words = int(result.draft.get("total_words") or humanized.total_words)
+            humanized.version = int(result.draft.get("version") or humanized.version)
+            self._persist_humanized_draft(project_id, humanized)
+        except KeyError:
+            pass
+
+        # Gemini revision rewrites prose and undoes StealthWriter — re-humanize immediately.
+        try:
+            self._rehumanize_current_prose(project_id, reason="post_revision")
+        except Exception as exc:  # noqa: BLE001
+            trace("rehumanize.post_revision_failed", project_id=project_id, error=str(exc))
 
         self.pipeline.complete_stage(
             project_id,
@@ -1127,6 +1233,11 @@ class ProjectService:
             ),
         )
         self._sync_pipeline_state(project_id)
+        # Keep formatted.docx in sync with revised prose before validation/delivery.
+        try:
+            self.run_formatting(project_id)
+        except Exception:  # noqa: BLE001
+            pass
         return result
 
     def get_revision_history(self, project_id: str):
@@ -1146,12 +1257,11 @@ class ProjectService:
             pass
 
         bundle = self.store.require_bundle(project_id)
-        draft = self._draft_for_review(project_id)
+        draft = self._load_draft(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
 
         self._ensure_pipeline_project(project_id)
-        self._complete_placeholder_stages_before_humanization(project_id)
-        self.pipeline.start_stage(project_id, PipelineStage.HUMANIZATION)
+        self.pipeline.start_stage(project_id, PipelineStage.HUMANIZATION, force=True)
 
         session = self.humanizer.create_session(
             draft=draft,
@@ -1173,6 +1283,7 @@ class ProjectService:
         humanized = self.humanizer.merge_humanized_draft(session.id, title=title)
 
         self._ensure_pipeline_project(project_id)
+        self.pipeline.start_stage(project_id, PipelineStage.HUMANIZATION, force=True)
         self._persist_humanizer_session(project_id, session)
         saved = self._persist_humanized_draft(project_id, humanized)
 
@@ -1198,6 +1309,250 @@ class ProjectService:
     def get_humanized_draft(self, project_id: str):
         return self._load_humanized_draft(project_id)
 
+    def run_citation_generation(self, project_id: str):
+        bundle = self.store.require_bundle(project_id)
+        draft = self._load_draft(project_id).to_dict()
+        self._ensure_pipeline_project(project_id)
+        self.pipeline.start_stage(project_id, PipelineStage.CITATION_GENERATION, force=True)
+        pack, updated_draft = self.citation_engine.generate(
+            draft=draft,
+            requirement_json=bundle.requirement.to_dict(),
+            project_id=project_id,
+        )
+        saved_draft = self._persist_draft(project_id, Draft.from_dict(updated_draft))
+        project = self.store.require_project(project_id)
+        project.artifacts["citation_pack"] = pack.to_dict()
+        project.artifacts["draft_id"] = saved_draft.id
+        self.store.save_project(project)
+        self.pipeline.complete_stage(
+            project_id,
+            PipelineStage.CITATION_GENERATION,
+            StageResult(
+                output={
+                    "citation_pack_id": pack.id,
+                    "reference_count": len(pack.references),
+                    "unresolved_count": len(pack.unresolved),
+                },
+                artifacts={"citation_pack": pack.to_dict(), "draft": saved_draft.to_dict()},
+            ),
+        )
+        self._sync_pipeline_state(project_id)
+        return pack
+
+    def run_formatting(self, project_id: str):
+        bundle = self.store.require_bundle(project_id)
+        try:
+            draft = self._load_humanized_draft(project_id).to_dict()
+        except KeyError:
+            draft = self._load_draft(project_id).to_dict()
+        citation_pack = bundle.project.artifacts.get("citation_pack")
+        if not isinstance(citation_pack, dict):
+            citation_pack = None
+        self._ensure_pipeline_project(project_id)
+        self.pipeline.start_stage(project_id, PipelineStage.FORMATTING, force=True)
+        formatted = self.format_engine.format_draft(
+            draft=draft,
+            requirement_json=bundle.requirement.to_dict(),
+            project_id=project_id,
+            citation_pack=citation_pack,
+        )
+        project = self.store.require_project(project_id)
+        project.artifacts["formatted_document"] = formatted
+        self.store.save_project(project)
+        self.pipeline.complete_stage(
+            project_id,
+            PipelineStage.FORMATTING,
+            StageResult(
+                output={
+                    "formatted_document_id": formatted.get("id"),
+                    "path": formatted.get("path"),
+                    "style_id": formatted.get("style_id"),
+                },
+                artifacts={"formatted_document": formatted},
+            ),
+        )
+        self._sync_pipeline_state(project_id)
+        return formatted
+
+    def run_requirement_validation(self, project_id: str):
+        from services.assignment_spec import AssignmentSpec, build_assignment_spec, run_grade_gate
+        from services.assignment_spec.llm_repair import llm_rubric_repair
+
+        bundle = self.store.require_bundle(project_id)
+        formatted = bundle.project.artifacts.get("formatted_document")
+        if not isinstance(formatted, dict):
+            formatted = None
+        try:
+            text = str((formatted or {}).get("plain_text") or self._load_humanized_draft(project_id).content)
+        except KeyError:
+            text = self._load_draft(project_id).content
+        citation_pack = bundle.project.artifacts.get("citation_pack")
+        if not isinstance(citation_pack, dict):
+            citation_pack = None
+
+        self._ensure_pipeline_project(project_id)
+        self.pipeline.start_stage(project_id, PipelineStage.REQUIREMENT_VALIDATION, force=True)
+
+        requirement = bundle.requirement.to_dict()
+        spec_data = bundle.project.artifacts.get("assignment_spec")
+        if isinstance(spec_data, dict) and spec_data:
+            spec = AssignmentSpec.from_dict(spec_data)
+        else:
+            spec = build_assignment_spec(requirement, project_id=project_id)
+
+        # Validate → Repair → Validate (max 5). Persist repaired prose when improved.
+        gate = run_grade_gate(
+            content=text,
+            spec=spec,
+            formatted_profile=(formatted or {}).get("profile_summary") if formatted else None,
+            llm_repair=llm_rubric_repair,
+        )
+        if gate.content != text:
+            text = gate.content
+            self._persist_repaired_draft_content(project_id, text)
+            # Template/LLM repairs after humanization raise AI score — re-humanize.
+            try:
+                self._rehumanize_current_prose(project_id, reason="post_grade_gate")
+                try:
+                    text = self._load_humanized_draft(project_id).content
+                except KeyError:
+                    pass
+            except Exception as exc:  # noqa: BLE001
+                trace("rehumanize.post_grade_gate_failed", project_id=project_id, error=str(exc))
+
+        report = self.requirement_validator.validate(
+            document_text=text,
+            requirement_json=requirement,
+            citation_pack=citation_pack,
+            formatted_document=formatted,
+            project_id=project_id,
+        )
+        # Grade gate is authoritative for export.
+        report["passed"] = bool(gate.passed)
+        report["export_blocked"] = bool(gate.export_blocked)
+        report["blocking_issues"] = list(
+            dict.fromkeys(list(gate.blocking_issues) + list(report.get("blocking_issues") or []))
+        )
+        report["spec_validation"] = gate.spec_validation.to_dict()
+        report["rubric_coverage"] = gate.rubric_coverage.to_dict()
+        report["grade_gate"] = {
+            "iterations": gate.iterations,
+            "repair_log": gate.repair_log,
+            "overall_predicted_grade": gate.rubric_coverage.overall_predicted_grade,
+            "per_criterion_coverage": {
+                c.label: c.coverage_percent for c in gate.rubric_coverage.criteria
+            },
+        }
+        report["overall_score"] = int(round(gate.rubric_coverage.overall_predicted_grade))
+
+        project = self.store.require_project(project_id)
+        project.artifacts["validation_report"] = report
+        project.artifacts["assignment_spec"] = spec.to_dict()
+        project.artifacts["rubric_coverage"] = gate.rubric_coverage.to_dict()
+        project.artifacts["grade_gate"] = report["grade_gate"]
+        self.store.save_project(project)
+
+        self.pipeline.complete_stage(
+            project_id,
+            PipelineStage.REQUIREMENT_VALIDATION,
+            StageResult(
+                output={
+                    "passed": bool(report.get("passed")),
+                    "export_blocked": bool(report.get("export_blocked")),
+                    "overall_score": report.get("overall_score"),
+                    "predicted_grade": gate.rubric_coverage.overall_predicted_grade,
+                    "validation_report_id": report.get("id"),
+                    "blocking_issues": report.get("blocking_issues") or [],
+                    "repair_iterations": gate.iterations,
+                },
+                artifacts={"validation_report": report, "rubric_coverage": gate.rubric_coverage.to_dict()},
+            ),
+        )
+        self._sync_pipeline_state(project_id)
+        return report
+
+    def _persist_repaired_draft_content(self, project_id: str, content: str) -> None:
+        """Write repaired grade-gate content back into draft artifacts."""
+        words = count_words(content)
+        try:
+            draft = self._load_draft(project_id)
+            draft.content = content
+            draft.total_words = words
+            self._persist_draft(project_id, draft)
+        except KeyError:
+            pass
+        try:
+            humanized = self._load_humanized_draft(project_id)
+            humanized.content = content
+            humanized.total_words = words
+            self._persist_humanized_draft(project_id, humanized)
+        except KeyError:
+            pass
+        project = self.store.require_project(project_id)
+        formatted = project.artifacts.get("formatted_document")
+        if isinstance(formatted, dict):
+            formatted = {**formatted, "plain_text": content, "word_count": words}
+            project.artifacts["formatted_document"] = formatted
+            self.store.save_project(project)
+
+    def _rehumanize_current_prose(self, project_id: str, *, reason: str) -> HumanizedDraft:
+        """Re-run StealthWriter after Gemini/grade-gate rewrites that undo humanization."""
+        bundle = self.store.require_bundle(project_id)
+        try:
+            current = self._load_humanized_draft(project_id)
+            content = current.content
+            source_id = current.source_draft_id
+            source_ver = int(current.version or 1)
+            title = current.title
+        except KeyError:
+            draft = self._load_draft(project_id)
+            content = draft.content
+            source_id = draft.id
+            source_ver = int(draft.version or 1)
+            title = draft.title
+
+        try:
+            blueprint = self._load_blueprint(project_id).to_dict()
+        except KeyError:
+            blueprint = bundle.project.artifacts.get("blueprint") or {}
+        if not isinstance(blueprint, dict):
+            blueprint = {}
+
+        fresh = self.humanizer.rehumanize_full_draft(
+            content=content,
+            requirement_json=bundle.requirement.to_dict(),
+            blueprint=blueprint,
+            project_id=project_id,
+            title=title,
+            source_draft_id=source_id,
+            source_draft_version=source_ver,
+        )
+        saved = self._persist_humanized_draft(project_id, fresh)
+        project = self.store.require_project(project_id)
+        formatted = project.artifacts.get("formatted_document")
+        if isinstance(formatted, dict):
+            project.artifacts["formatted_document"] = {
+                **formatted,
+                "plain_text": saved.content,
+                "word_count": saved.total_words,
+                "needs_reformat": True,
+            }
+        project.artifacts["rehumanized_after"] = reason
+        self.store.save_project(project)
+        # Rebuild DOCX from the newly humanized prose when a formatted artifact exists.
+        if isinstance(formatted, dict):
+            try:
+                self.run_formatting(project_id)
+            except Exception as exc:  # noqa: BLE001
+                trace("rehumanize.reformat_failed", project_id=project_id, error=str(exc))
+        trace(
+            "rehumanize.applied",
+            project_id=project_id,
+            reason=reason,
+            words=saved.total_words,
+        )
+        return saved
+
     def start_ai_detection(self, project_id: str):
         try:
             return self._load_detection_session(project_id)
@@ -1215,7 +1570,7 @@ class ProjectService:
         self.store.save_project(project)
 
         self._ensure_pipeline_project(project_id)
-        self.pipeline.start_stage(project_id, PipelineStage.AI_DETECTION)
+        self.pipeline.start_stage(project_id, PipelineStage.AI_DETECTION, force=True)
         session = self.ai_detection.create_session(
             humanized_draft=humanized,
             requirement_json=bundle.requirement.to_dict(),
@@ -1343,6 +1698,90 @@ class ProjectService:
         except KeyError:
             final_draft = self._load_draft(project_id).to_dict()
 
+        formatted = bundle.project.artifacts.get("formatted_document")
+        if isinstance(formatted, dict) and formatted.get("plain_text"):
+            final_draft = {
+                **final_draft,
+                "content": formatted.get("plain_text"),
+                "title": final_draft.get("title") or bundle.requirement.title,
+            }
+
+        # Hard grade gate: validate → repair (max 5) → export only if all checks pass.
+        from services.assignment_spec import AssignmentSpec, build_assignment_spec, run_grade_gate
+        from services.assignment_spec.llm_repair import llm_rubric_repair
+
+        spec_data = bundle.project.artifacts.get("assignment_spec")
+        if isinstance(spec_data, dict) and spec_data:
+            spec = AssignmentSpec.from_dict(spec_data)
+        else:
+            spec = build_assignment_spec(bundle.requirement.to_dict(), project_id=project_id)
+
+        gate = run_grade_gate(
+            content=str(final_draft.get("content") or ""),
+            spec=spec,
+            formatted_profile=(formatted or {}).get("profile_summary") if isinstance(formatted, dict) else None,
+            llm_repair=llm_rubric_repair,
+        )
+        if gate.content != str(final_draft.get("content") or ""):
+            final_draft = {
+                **final_draft,
+                "content": gate.content,
+                "total_words": count_words(gate.content),
+            }
+            self._persist_repaired_draft_content(project_id, gate.content)
+            try:
+                humanized = self._rehumanize_current_prose(project_id, reason="post_delivery_grade_gate")
+                final_draft = {
+                    **final_draft,
+                    "content": humanized.content,
+                    "total_words": humanized.total_words,
+                }
+            except Exception as exc:  # noqa: BLE001
+                trace("rehumanize.post_delivery_grade_gate_failed", project_id=project_id, error=str(exc))
+            # Re-format after successful content repair so delivery DOCX matches repaired prose.
+            try:
+                self.run_formatting(project_id)
+                bundle = self.store.require_bundle(project_id)
+                formatted = bundle.project.artifacts.get("formatted_document")
+            except Exception:  # noqa: BLE001
+                pass
+
+        project = self.store.require_project(project_id)
+        project.artifacts["assignment_spec"] = spec.to_dict()
+        project.artifacts["rubric_coverage"] = gate.rubric_coverage.to_dict()
+        project.artifacts["grade_gate"] = {
+            "iterations": gate.iterations,
+            "repair_log": gate.repair_log,
+            "overall_predicted_grade": gate.rubric_coverage.overall_predicted_grade,
+            "per_criterion_coverage": {
+                c.label: c.coverage_percent for c in gate.rubric_coverage.criteria
+            },
+            "passed": gate.passed,
+            "export_blocked": gate.export_blocked,
+        }
+        if not gate.passed:
+            # Soft-export: keep packaging available so the student can download.
+            # Blocking issues are stored for review; do not strand the UI on "ready" with no ZIP.
+            project.artifacts["validation_report"] = {
+                **(project.artifacts.get("validation_report") or {}),
+                "passed": False,
+                "export_blocked": False,
+                "soft_export": True,
+                "blocking_issues": gate.blocking_issues,
+                "spec_validation": gate.spec_validation.to_dict(),
+                "rubric_coverage": gate.rubric_coverage.to_dict(),
+            }
+            project.artifacts["grade_gate"]["export_blocked"] = False
+            project.artifacts["grade_gate"]["soft_export"] = True
+            self.store.save_project(project)
+            trace(
+                "delivery.soft_export",
+                project_id=project_id,
+                blocking_issues=gate.blocking_issues[:8],
+            )
+        else:
+            self.store.save_project(project)
+
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
         try:
@@ -1372,7 +1811,13 @@ class ProjectService:
         )
 
         self._ensure_pipeline_project(project_id)
-        self.pipeline.start_stage(project_id, PipelineStage.DELIVERY)
+        self.pipeline.start_stage(project_id, PipelineStage.DELIVERY, force=True)
+        formatted_path = None
+        if isinstance(formatted, dict) and formatted.get("path"):
+            candidate = Path(str(formatted["path"]))
+            if candidate.is_file():
+                formatted_path = str(candidate)
+
         package = self.delivery.prepare_package(
             final_draft=final_draft,
             requirement_json=bundle.requirement.to_dict(),
@@ -1384,6 +1829,7 @@ class ProjectService:
             revision_attempts=revision_history.revision_attempts,
             humanization_attempts=humanization_attempts,
             completion_time=completion_time,
+            formatted_document_path=formatted_path,
         )
 
         project = self.store.require_project(project_id)
@@ -1445,32 +1891,55 @@ class ProjectService:
                 return self.delivery.store.save(package)
         raise KeyError(f"Delivery package not found: {package_id}")
 
-    def _complete_placeholder_stages_before_humanization(self, project_id: str) -> None:
-        for stage in (
-            PipelineStage.STYLE_REVIEW,
-            PipelineStage.CITATION_GENERATION,
-            PipelineStage.REQUIREMENT_VALIDATION,
-            PipelineStage.REVISION,
-        ):
-            pipeline_project = self.pipeline.get_project(project_id)
-            record = pipeline_project.stage_state(stage)
-            if record.status != StageStatus.COMPLETED:
-                self.pipeline.complete_stage(
-                    project_id,
-                    stage,
-                    StageResult(output={"skipped": True, "reason": "awaiting_humanization"}),
-                )
+    STAGE_ARTIFACT_KEYS: dict[PipelineStage, tuple[str, ...]] = {
+        PipelineStage.STYLE_REVIEW: ("review_report", "review_report_id", "last_review_issues_found"),
+        PipelineStage.REVISION: ("revision_result", "last_revision_id", "last_issues_fixed"),
+        PipelineStage.CITATION_GENERATION: ("citation_pack",),
+        PipelineStage.HUMANIZATION: (
+            "humanizer_session",
+            "humanizer_session_id",
+            "humanized_draft",
+            "humanized_draft_id",
+        ),
+        PipelineStage.FORMATTING: ("formatted_document",),
+        PipelineStage.REQUIREMENT_VALIDATION: ("validation_report",),
+        PipelineStage.AI_DETECTION: (
+            "detection_session",
+            "detection_session_id",
+            "detection_report",
+            "detection_report_id",
+        ),
+        PipelineStage.DELIVERY: ("delivery_package", "delivery_package_id"),
+    }
 
-    def _complete_placeholder_stages_before_revision(self, project_id: str) -> None:
-        for stage in (PipelineStage.CITATION_GENERATION, PipelineStage.REQUIREMENT_VALIDATION):
-            pipeline_project = self.pipeline.get_project(project_id)
-            record = pipeline_project.stage_state(stage)
-            if record.status != StageStatus.COMPLETED:
-                self.pipeline.complete_stage(
-                    project_id,
-                    stage,
-                    StageResult(output={"skipped": True, "reason": "awaiting_revision"}),
-                )
+    def retry_stage(self, project_id: str, stage: PipelineStage | str):
+        """Clear one stage's artifacts and re-run only that stage."""
+        if not isinstance(stage, PipelineStage):
+            stage = PipelineStage(str(stage))
+        self._ensure_pipeline_project(project_id)
+        project = self.store.require_project(project_id)
+        for key in self.STAGE_ARTIFACT_KEYS.get(stage, ()):
+            project.artifacts.pop(key, None)
+        self.store.save_project(project)
+        self.pipeline.reset_stage(project_id, stage)
+
+        runners = {
+            PipelineStage.STYLE_REVIEW: self.run_academic_review,
+            PipelineStage.REVISION: self.run_revision,
+            PipelineStage.CITATION_GENERATION: self.run_citation_generation,
+            PipelineStage.FORMATTING: self.run_formatting,
+            PipelineStage.REQUIREMENT_VALIDATION: self.run_requirement_validation,
+            PipelineStage.DELIVERY: self.run_delivery,
+        }
+        if stage == PipelineStage.HUMANIZATION:
+            self.start_humanizer(project_id)
+            return self.get_humanizer_session(project_id)
+        if stage == PipelineStage.AI_DETECTION:
+            return self.start_ai_detection(project_id)
+        runner = runners.get(stage)
+        if runner is None:
+            raise ValueError(f"Stage retry is not supported for: {stage.value}")
+        return runner(project_id)
 
     def _add_file_record(self, project_id: str, entry: dict[str, Any]) -> ProjectFile:
         file_type_raw = entry.get("file_type") or entry.get("source") or ""
@@ -1495,12 +1964,17 @@ class ProjectService:
         return self.store.save_file(file_record)
 
     def _apply_requirement_to_project(self, project: Project, requirement: RequirementJSON) -> None:
+        from services.assignment_spec import build_assignment_spec
+
         project.assignment_type = requirement.assignment_type
         project.title = requirement.title or project.title
         project.estimated_word_count = requirement.word_count
         project.citation_style = requirement.citation_style
         if requirement.deadline and project.deadline is None:
             project.deadline = _parse_deadline(requirement.deadline)
+        # Canonical requirement contract for all downstream stages.
+        spec = build_assignment_spec(requirement.to_dict(), project_id=project.id)
+        project.artifacts["assignment_spec"] = spec.to_dict()
         project.status = ProjectStatus.ACTIVE
         project.updated_at = utc_now()
         self.store.save_project(project)

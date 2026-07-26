@@ -1,4 +1,4 @@
-"""Humanizer Engine service — one paragraph at a time."""
+"""Humanizer Engine service — large batches (up to ~5000 words), not per-section parts."""
 
 from __future__ import annotations
 
@@ -169,6 +169,48 @@ class HumanizerEngineService:
 
         return paragraph.humanized_text
 
+    def rehumanize_full_draft(
+        self,
+        *,
+        content: str,
+        requirement_json: dict[str, Any],
+        blueprint: dict[str, Any],
+        project_id: str | None = None,
+        title: str | None = None,
+        source_draft_id: str = "",
+        source_draft_version: int = 1,
+    ) -> HumanizedDraft:
+        """Run StealthWriter/ZeroGPT over the full document again (post-revision safety net)."""
+        from services.humanizer_engine.heading_utils import normalize_markdown_headings
+
+        tone = str(
+            requirement_json.get("writing_tone")
+            or blueprint.get("academic_tone")
+            or "Formal academic prose"
+        )
+        normalized = normalize_markdown_headings(content or "")
+        if not normalized.strip():
+            raise ValueError("No content to re-humanize")
+
+        humanized_text = self.humanizer.humanize(normalized, academic_tone=tone)
+        humanized_text = normalize_markdown_headings(humanized_text)
+        now = utc_now()
+        draft = HumanizedDraft(
+            id=str(uuid.uuid4()),
+            project_id=project_id,
+            session_id="",
+            source_draft_id=source_draft_id,
+            source_version=source_draft_version,
+            title=title or "Humanized Assignment Draft",
+            content=humanized_text,
+            total_words=count_words(humanized_text),
+            version=source_draft_version + 1,
+            paragraphs_processed=1,
+            average_ai_reduction=0.0,
+            created_at=now,
+        )
+        return self.drafts.save(draft)
+
     def refresh_revised_sections(
         self,
         session_id: str,
@@ -262,10 +304,9 @@ class HumanizerEngineService:
 
 
 def _should_passthrough_humanization(text: str) -> bool:
+    """Skip only empty / tiny fragments — never skip prose because of markdown headings."""
     stripped = (text or "").strip()
     if not stripped:
-        return True
-    if stripped.startswith("## "):
         return True
     return len(stripped) < MIN_HUMANIZE_CHARS
 

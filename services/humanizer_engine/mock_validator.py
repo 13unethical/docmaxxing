@@ -32,7 +32,9 @@ class ZeroGPTParagraphValidator:
         attempt: int,
     ) -> ParagraphValidation:
         _ = (section, attempt)
-        if original_text.strip().startswith("## "):
+        from services.humanizer_engine.heading_utils import is_heading_only
+
+        if is_heading_only(original_text):
             return ParagraphValidation(passed=True)
         if not humanized_text.strip():
             return ParagraphValidation(
@@ -52,7 +54,9 @@ class MockParagraphValidator:
         section: str,
         attempt: int,
     ) -> ParagraphValidation:
-        if original_text.strip().startswith("## "):
+        from services.humanizer_engine.heading_utils import is_heading_only
+
+        if is_heading_only(original_text):
             return ParagraphValidation(passed=True)
 
         issues: list[str] = []
@@ -104,8 +108,15 @@ def _citations_preserved(original: str, humanized: str) -> bool:
 
 
 def _formatting_preserved(original: str, humanized: str) -> bool:
-    if original.strip().startswith("## "):
+    from services.humanizer_engine.heading_utils import is_heading_only
+
+    if is_heading_only(original):
         return humanized.strip().startswith("## ")
+    # Batched drafts keep markdown headings inside the body — require same count.
+    orig_headings = len(re.findall(r"(?m)^##\s+", original))
+    hum_headings = len(re.findall(r"(?m)^##\s+", humanized))
+    if orig_headings and hum_headings < orig_headings:
+        return False
     bullet_original = original.count("\n- ") + original.count("\n* ")
     bullet_humanized = humanized.count("\n- ") + humanized.count("\n* ")
     return bullet_humanized >= bullet_original

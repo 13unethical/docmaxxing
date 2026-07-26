@@ -28,9 +28,9 @@ Concluding Paragraph
 MERGED_TEXT = (
     "Introduction Artificial intelligence has become one of the fastest growing technologies "
     "in education during the past decade. Universities around the world have started integrating "
-    "AI-powered tools into classrooms. Body Paragraph 1 one of the main arguments presented in "
-    "the article is that AI improves learning outcomes. Body Paragraph 2 another important issue "
-    "is academic integrity. Conclusion therefore educational institutions should encourage "
+    "AI-powered tools into classrooms. Body Paragraph 1 One of the main arguments presented in "
+    "the article is that AI improves learning outcomes. Body Paragraph 2 Another important issue "
+    "is academic integrity. Conclusion Educational institutions should encourage "
     "students to proofread formatting carefully. References Smith, J. (2024). Artificial "
     "Intelligence in Education. Journal of Learning."
 )
@@ -57,11 +57,26 @@ def test_split_introduction_at_paragraph_start():
 def test_split_conclusion_mid_paragraph():
     labels = extract_format_section_labels(BRIEF)
     segments = split_paragraph_by_requirement_headings(
+        "Some text about integrity. Conclusion Educational institutions should act.",
+        labels,
+    )
+    headings = [h for h, _ in segments if h]
+    assert any(
+        h.lower() == "conclusion"
+        or h.lower().startswith("concluding")
+        or "conclusion" in h.lower()
+        for h in headings
+    )
+
+
+def test_no_split_when_conclusion_continues_same_sentence():
+    labels = extract_format_section_labels(BRIEF)
+    segments = split_paragraph_by_requirement_headings(
         "Some text about integrity. Conclusion therefore institutions should act.",
         labels,
     )
     headings = [h for h, _ in segments if h]
-    assert any(h.lower().startswith("conclusion") for h in headings)
+    assert not headings
 
 
 def test_split_references_before_citation():
@@ -124,11 +139,18 @@ def test_split_references_before_citations_mid_paragraph():
     assert ref_body.startswith("Smith, J.")
 
 
-def test_split_discussion_with_lowercase_follow_when_in_brief():
+def test_split_discussion_with_capital_follow_when_in_brief():
+    labels = extract_format_section_labels(BRIEF) + ["Discussion", "Methodology", "Results"]
+    text = "Some prior text. Discussion These findings suggest that structure matters."
+    segments = split_paragraph_by_requirement_headings(text, labels)
+    assert any(h and h.lower() == "discussion" for h, _ in segments)
+
+
+def test_no_split_discussion_lowercase_continuation():
     labels = extract_format_section_labels(BRIEF) + ["Discussion", "Methodology", "Results"]
     text = "Some prior text. Discussion these findings suggest that structure matters."
     segments = split_paragraph_by_requirement_headings(text, labels)
-    assert any(h and h.lower() == "discussion" for h, _ in segments)
+    assert not any(h and h.lower() == "discussion" for h, _ in segments)
 
 
 def test_collapse_double_spaces_in_expand():

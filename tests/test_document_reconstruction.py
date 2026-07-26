@@ -60,8 +60,8 @@ def test_full_pipeline_with_requirements():
     brief = "Introduction\nBody paragraph 1:\nConclusion\nReferences"
     labels = extract_format_section_labels(brief)
     merged = (
-        "Introduction AI is growing in education. Body Paragraph 1 the main argument is "
-        "that AI helps students. Conclusion institutions must adapt. References "
+        "Introduction AI is growing in education. Body Paragraph 1 The main argument is "
+        "that AI helps students. Conclusion Institutions must adapt. References "
         "Smith, J. (2024). AI in Education. Oxford."
     )
     doc = Document()

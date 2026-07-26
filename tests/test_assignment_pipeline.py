@@ -10,8 +10,8 @@ from services.assignment_pipeline.service import AssignmentPipelineService, comp
 from services.assignment_pipeline.stages import PIPELINE_STAGE_SPECS, PIPELINE_STAGES, stage_after
 
 
-def test_pipeline_has_fifteen_ordered_stages():
-    assert len(PIPELINE_STAGES) == 15
+def test_pipeline_has_sixteen_ordered_stages():
+    assert len(PIPELINE_STAGES) == 16
     assert PIPELINE_STAGES[0] == PipelineStage.UPLOAD
     assert PIPELINE_STAGES[-1] == PipelineStage.DELIVERY
     assert stage_after(PipelineStage.UPLOAD) == PipelineStage.REQUIREMENT_ANALYSIS
@@ -24,9 +24,12 @@ def test_stage_specs_map_providers_for_future_integrations():
     assert providers[PipelineStage.BLUEPRINT] == StageProvider.CLAUDE
     assert providers[PipelineStage.WRITING] == StageProvider.CLAUDE
     assert providers[PipelineStage.HUMANIZATION] == StageProvider.HUMANIZER
-    assert providers[PipelineStage.AI_DETECTION] == StageProvider.TURNITIN
-    assert providers[PipelineStage.REQUIREMENT_VALIDATION] == StageProvider.CHECK_PIPELINE
+    assert providers[PipelineStage.AI_DETECTION] == StageProvider.ZEROGPT
+    assert providers[PipelineStage.REQUIREMENT_VALIDATION] == StageProvider.GEMINI
     assert providers[PipelineStage.CITATION_GENERATION] == StageProvider.CITATION_ENGINE
+    assert providers[PipelineStage.FORMATTING] == StageProvider.FORMAT_ENGINE
+    assert providers[PipelineStage.STYLE_REVIEW] == StageProvider.GEMINI
+    assert providers[PipelineStage.REVISION] == StageProvider.GEMINI
 
 
 def test_create_project_marks_upload_complete_and_advances():
@@ -122,7 +125,7 @@ def test_project_to_dict_is_json_ready():
     payload = project.to_dict()
     assert payload["id"] == project.id
     assert payload["current_stage"] == PipelineStage.REQUIREMENT_ANALYSIS.value
-    assert len(payload["stages"]) == 15
+    assert len(payload["stages"]) == 16
     assert payload["upload_manifest"]["note"] == "test"
 
 

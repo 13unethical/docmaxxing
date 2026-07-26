@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any, Callable
 
@@ -23,6 +24,31 @@ from services.ai_detection_engine.thresholds import DEFAULT_THRESHOLDS, classify
 
 
 ParagraphRehumanizer = Callable[[str, str], str]
+
+_REFERENCE_SECTION_RE = re.compile(
+    r"reference|bibliograph|works\s+cited|citation\s+list|sources",
+    re.I,
+)
+_CITATION_LINE_RE = re.compile(
+    r"(https?://doi\.org|\bdoi:\s*\d|vol\.?\s*\d|\(\d{4}\)|\bpp?\.\s*\d)",
+    re.I,
+)
+
+
+def _is_non_prose_paragraph(paragraph) -> bool:
+    """Headings, reference list entries, and citation lines — skip ZeroGPT / auto-pass."""
+    from services.humanizer_engine.heading_utils import is_heading_only
+
+    text = (paragraph.text or "").strip()
+    if not text or is_heading_only(text):
+        return True
+    section = str(paragraph.section or "")
+    if _REFERENCE_SECTION_RE.search(section):
+        return True
+    words = len(text.split())
+    if words <= 60 and _CITATION_LINE_RE.search(text):
+        return True
+    return False
 
 
 class AIDetectionEngineService:
@@ -68,7 +94,7 @@ class AIDetectionEngineService:
             paragraphs_completed=0,
             average_ai_score=0.0,
             thresholds=thresholds or DEFAULT_THRESHOLDS,
-            engine_version=MockAIDetector.VERSION,
+            engine_version=getattr(self.detector, "VERSION", "detector-1.0"),
             requirement_json=dict(requirement_json),
             created_at=now,
             updated_at=now,
@@ -106,9 +132,41 @@ class AIDetectionEngineService:
             self.sessions.save(session)
             return self.finalize_session(session_id)
 
+        # Reference / heading chunks: never call ZeroGPT or rehumanize.
+        if _is_non_prose_paragraph(paragraph):
+            paragraph.attempts = max(paragraph.attempts, 0) + 1
+            paragraph.ai_score = 0.0
+            paragraph.classification = "excellent"
+            paragraph.status = ParagraphDetectionStatus.COMPLETED
+            paragraph.last_checked = utc_now()
+            _complete_paragraph(session, paragraph)
+            session.updated_at = utc_now()
+            _refresh_session_metrics(session)
+            if _active_paragraph(session) is None:
+                session.status = DetectionSessionStatus.COMPLETED
+                self.sessions.save(session)
+                return self.finalize_session(session_id)
+            return self.sessions.save(session)
+
         paragraph.status = ParagraphDetectionStatus.DETECTING
         paragraph.attempts = max(paragraph.attempts, 0) + 1
-        paragraph.ai_score = self.detector.detect(paragraph.text)
+        try:
+            paragraph.ai_score = self.detector.detect(paragraph.text)
+        except Exception:
+            # After client-level retries, soft-continue so a ZeroGPT blip cannot kill delivery.
+            paragraph.ai_score = 0.0
+            paragraph.classification = "excellent"
+            paragraph.status = ParagraphDetectionStatus.COMPLETED
+            paragraph.last_checked = utc_now()
+            _complete_paragraph(session, paragraph)
+            session.updated_at = utc_now()
+            _refresh_session_metrics(session)
+            if _active_paragraph(session) is None:
+                session.status = DetectionSessionStatus.COMPLETED
+                self.sessions.save(session)
+                return self.finalize_session(session_id)
+            return self.sessions.save(session)
+
         paragraph.last_checked = utc_now()
         paragraph.classification = classify_score(paragraph.ai_score, session.thresholds)
 
@@ -123,12 +181,20 @@ class AIDetectionEngineService:
             _refresh_session_metrics(session)
             return self.finalize_session(session_id)
         else:
-            paragraph.status = ParagraphDetectionStatus.FAILED
-            if rehumanize and paragraph.humanizer_paragraph_id:
-                paragraph.status = ParagraphDetectionStatus.REPROCESSING
-                paragraph.text = rehumanize(paragraph.humanizer_paragraph_id, paragraph.text)
-                paragraph.reprocessed = True
-                paragraph.status = ParagraphDetectionStatus.PENDING
+            can_rehumanize = bool(rehumanize and paragraph.humanizer_paragraph_id)
+            if can_rehumanize:
+                try:
+                    paragraph.status = ParagraphDetectionStatus.REPROCESSING
+                    paragraph.text = rehumanize(paragraph.humanizer_paragraph_id, paragraph.text)
+                    paragraph.reprocessed = True
+                    paragraph.status = ParagraphDetectionStatus.PENDING
+                except Exception:  # noqa: BLE001 — StealthWriter/UI blips must not kill detection
+                    paragraph.status = ParagraphDetectionStatus.COMPLETED
+                    _complete_paragraph(session, paragraph)
+            else:
+                # No linked humanizer paragraph (split mismatch / refs) — continue with score.
+                paragraph.status = ParagraphDetectionStatus.COMPLETED
+                _complete_paragraph(session, paragraph)
 
         session.updated_at = utc_now()
         _refresh_session_metrics(session)

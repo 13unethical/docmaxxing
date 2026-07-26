@@ -1,0 +1,48 @@
+{% extends "info/base.html" %}
+{% set info_active = "delivery" %}
+{% set page_title = "Delivery Policy" %}
+{% set page_lede = "How digital outputs are delivered after you run a DocMaxxing feature." %}
+{% block info_body %}
+<h2>1. Instant digital delivery</h2>
+<p>
+  DocMaxxing delivers digital products inside the product UI — not by post. When an action completes,
+  your file or report is available to download immediately from the relevant page.
+</p>
+
+<h2>2. What gets delivered</h2>
+<ul>
+  <li><strong>Format</strong> — formatted DOCX download after processing.</li>
+  <li><strong>Humanizer / Workspace</strong> — rewritten text in the editor or session output.</li>
+  <li><strong>Turnitin</strong> — similarity / AI / highlights reports when generated successfully.</li>
+  <li><strong>Assignment</strong> — a delivery ZIP (formatted document + supporting package files) via
+    <em>Download assignment</em> once packaging finishes.</li>
+  <li><strong>Check</strong> — on-screen analysis results.</li>
+</ul>
+
+<h2>3. Assignment packaging</h2>
+<p>
+  The Assignment pipeline packages only after prior stages complete (including humanize, format,
+  review/detection as configured). If packaging was interrupted, use Download again — the app can
+  rebuild the ZIP. Soft-export may allow download even when some soft validation warnings remain;
+  always open and review the DOCX before submitting to your university.
+</p>
+
+<h2>4. Delivery time</h2>
+<ul>
+  <li>Most Format / Check jobs: seconds to a few minutes.</li>
+  <li>Humanizer batches: depends on StealthWriter queue and document length.</li>
+  <li>Full Assignment runs: typically several minutes depending on section count, LLM calls, and detection.</li>
+</ul>
+
+<h2>5. Failed delivery</h2>
+<p>
+  If a paid action fails before you receive usable output, credits for that action are refunded when
+  possible. For Assignment ZIP issues, contact support with your project id from the URL.
+</p>
+
+<h2>6. Retention</h2>
+<p>
+  Project files are stored so you can reopen and re-download while the project remains on the account.
+  Do not rely on DocMaxxing as the only backup — keep your own copies of final submissions.
+</p>
+{% endblock %}

@@ -8,12 +8,14 @@ from services.reviewer_engine.models import (
     ReviewReport,
 )
 from services.reviewer_engine.mock_reviewer import AcademicReviewer, MockAcademicReviewer
+from services.reviewer_engine.gemini_reviewer import GeminiAcademicReviewer
 from services.reviewer_engine.service import ReviewerEngineService
 from services.reviewer_engine.store import ReviewReportStore
 
 __all__ = [
     "AcademicReviewer",
     "ChecklistItem",
+    "GeminiAcademicReviewer",
     "MockAcademicReviewer",
     "QualityScores",
     "ReviewEngineInput",

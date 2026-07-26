@@ -185,6 +185,7 @@ h3 a:visited {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
+  flex: 1 0 auto;
 }
 
 /* Nothing inside the column may grow past the container (incl. Layout + Advanced row) */
@@ -338,6 +339,123 @@ h3 a:visited {
 .site-footer.shell {
   padding-top: var(--content-gap);
   padding-bottom: clamp(1.25rem, 3vw, 2rem);
+}
+
+.site-footer {
+  margin-top: auto;
+  width: 100%;
+  align-self: stretch;
+  background: #121417;
+  color: #c8cdd3;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.site-footer-inner {
+  width: min(1100px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 1.75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+  text-align: center;
+}
+
+.site-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.35rem 0.95rem;
+  font-size: 0.82rem;
+}
+
+.site-footer-links a {
+  color: #c8cdd3;
+  text-decoration: none;
+}
+
+.site-footer-links a:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.site-footer-links--secondary {
+  opacity: 0.9;
+}
+
+.site-footer-support {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  color: #9aa3ad;
+  line-height: 1.5;
+}
+
+.site-footer-support a {
+  color: #d5dae0;
+  text-decoration: none;
+}
+
+.site-footer-support a:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.site-footer-sep {
+  margin: 0 0.35rem;
+  opacity: 0.55;
+}
+
+.site-footer-social {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
+}
+
+.site-footer-social-link {
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #d5dae0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.site-footer-social-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+
+.site-footer-social-link svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.site-footer-copy {
+  margin: 0.35rem 0 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  color: #8b949e;
+}
+
+.site-footer-mark {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: #c8cdd3;
+}
+
+[data-theme="dark"] .site-footer {
+  background: #0b0d10;
 }
 
 .shell {
@@ -797,10 +915,33 @@ h3 a:visited {
   color: var(--muted);
   font-size: 0.95rem;
   transition: transform 0.2s ease;
+  flex-shrink: 0;
 }
 
 .settings-accordion[open] .settings-summary::after {
   transform: rotate(180deg);
+}
+
+.settings-summary-main {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-summary-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+.settings-summary-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
 }
 
 .settings-summary-title {
@@ -3864,6 +4005,12 @@ body.support-chat-open {
   color: var(--text-muted);
 }
 
+.coin-pill-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
 .nav-user-menu {
   position: relative;
 }
@@ -4343,6 +4490,150 @@ body.support-chat-open {
 
 .legal-section a {
   color: var(--text);
+}
+
+/* ------------------------------------------------------------------- info pages */
+.info-hero {
+  margin-bottom: 1.25rem;
+}
+
+.info-page {
+  display: grid;
+  grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr);
+  gap: 2rem 2.5rem;
+  align-items: start;
+  max-width: 56rem;
+  margin: 0 auto 3.5rem;
+}
+
+.info-toc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  position: sticky;
+  top: 5.5rem;
+  padding: 0.25rem 0;
+}
+
+.info-toc-link {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  font-weight: 550;
+  text-decoration: none;
+  line-height: 1.35;
+  padding: 0.28rem 0;
+  border-left: 2px solid transparent;
+  padding-left: 0.7rem;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.info-toc-link:hover {
+  color: var(--text);
+}
+
+.info-toc-link.is-active {
+  color: var(--text);
+  border-left-color: var(--text);
+  font-weight: 650;
+}
+
+.info-article {
+  min-width: 0;
+  padding-top: 0.15rem;
+}
+
+.info-article h2 {
+  margin: 1.75rem 0 0.75rem;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+.info-article h2:first-child {
+  margin-top: 0;
+}
+
+.info-article p,
+.info-article li {
+  color: var(--text-muted);
+  line-height: 1.65;
+  font-size: 0.95rem;
+}
+
+.info-article p {
+  margin: 0 0 0.85rem;
+}
+
+.info-article ul {
+  margin: 0 0 1rem;
+  padding-left: 1.2rem;
+}
+
+.info-article li {
+  margin: 0 0 0.45rem;
+}
+
+.info-article a {
+  color: var(--text);
+}
+
+.info-article strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+.info-article code {
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+  background: color-mix(in srgb, var(--border-muted) 55%, transparent);
+}
+
+.info-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0.35rem 0.65rem 1rem 0;
+  padding: 0.55rem 1rem;
+  border-radius: 0.55rem;
+  background: var(--text);
+  color: var(--on-primary, var(--bg-light)) !important;
+  font-weight: 650;
+  font-size: 0.9rem;
+  text-decoration: none !important;
+}
+
+.info-cta--ghost {
+  background: transparent;
+  color: var(--text) !important;
+  border: 1px solid color-mix(in srgb, var(--text) 35%, transparent);
+}
+
+@media (max-width: 860px) {
+  .info-page {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .info-toc {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.5rem 0.85rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--border-muted) 80%, transparent);
+  }
+
+  .info-toc-link {
+    border-left: none;
+    padding-left: 0;
+    border-bottom: 1px solid transparent;
+    padding-bottom: 0.1rem;
+  }
+
+  .info-toc-link.is-active {
+    border-left-color: transparent;
+    border-bottom-color: var(--text);
+  }
 }
 
 @media (max-width: 720px) {

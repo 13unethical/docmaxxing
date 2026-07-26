@@ -45,6 +45,7 @@ Return ONE JSON object only (no markdown) with these keys:
   - paragraph_indices: array of 1-based integers referring to the ORIGINAL numbered paragraphs included in this section (every body paragraph exactly once)
   - insert_heading: boolean — true if a Word heading line should be inserted before this section (false for Title when the title is already the first paragraph)
 - paragraph_splits: optional array for merged paragraphs — each { "index": 1-based paragraph number, "segments": ["...", "..."] } when one original paragraph clearly contains multiple ideas that should be separate paragraphs
+- NEVER use paragraph_splits to break a single sentence. NEVER create a segment that is only a function word (are, the, as, of, in, …). Preserve sentence integrity.
 
 Rules:
 - Every original paragraph index must appear in exactly one section (except when paragraph_splits replaces an index with multiple segments).
@@ -134,6 +135,13 @@ def _apply_splits_with_mapping(
         if index is None or index < 1 or index > len(paragraphs) or not isinstance(segments, list):
             continue
         cleaned = [str(s).strip() for s in segments if str(s).strip()]
+        # Reject splits that invent mid-sentence orphan tokens (are / the / …).
+        from services.heading_detector import DEFAULT_HEADING_DETECTOR
+
+        if any(DEFAULT_HEADING_DETECTOR.is_forbidden_heading(seg) for seg in cleaned):
+            continue
+        if any(len(seg.split()) == 1 and seg[:1].islower() for seg in cleaned):
+            continue
         if len(cleaned) >= 2:
             split_by_index[index] = cleaned
 

@@ -405,8 +405,8 @@
   .assignment-grid {
     grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
     gap: 1.75rem;
-    /* Equal-height columns so upload + summary CTAs can share a baseline */
-    align-items: stretch;
+    /* start — keep Project Summary from stretching/jumping with left column height */
+    align-items: start;
   }
 
   .assignment-grid--wizard-only {
@@ -1980,6 +1980,9 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  position: sticky;
+  top: 5.5rem;
+  align-self: start;
 }
 
 /* Flex column cards: CTA sticky-footer alignment */
@@ -1995,10 +1998,11 @@
     flex: 1 1 auto;
   }
 
-  /* Keep summary at content height so sticky still has room to travel */
+  /* Fixed content height — do not stretch with the main column */
   [data-assignment-page] [data-asg-summary-card] {
     flex: 0 0 auto;
     width: 100%;
+    position: static; /* column is sticky; card itself stays put */
   }
 }
 
@@ -2055,12 +2059,14 @@
 
 .asg-production {
   margin-top: 0.25rem;
-  padding: 2.25rem 2rem 2.5rem;
+  padding: 2.25rem 1.5rem 2.5rem;
+  width: 100%;
 }
 
 .asg-production-inner {
-  max-width: 32rem;
-  margin: 0 auto;
+  max-width: none;
+  width: 100%;
+  margin: 0;
   text-align: center;
 }
 
@@ -2078,6 +2084,7 @@
   background: var(--bg);
   overflow: hidden;
   margin-bottom: 1.1rem;
+  width: 100%;
 }
 
 .asg-production-bar-fill {

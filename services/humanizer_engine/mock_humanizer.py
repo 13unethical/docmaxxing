@@ -6,6 +6,8 @@ import hashlib
 import re
 from typing import Protocol
 
+from services.humanizer_engine.constants import MIN_HUMANIZE_CHARS
+
 
 class TextHumanizer(Protocol):
     def humanize(self, text: str, *, academic_tone: str = "formal") -> str:
@@ -18,7 +20,7 @@ class MockTextHumanizer:
     def humanize(self, text: str, *, academic_tone: str = "formal") -> str:
         if not text.strip():
             return text
-        if text.strip().startswith("## "):
+        if len(text.strip()) < MIN_HUMANIZE_CHARS:
             return text.strip()
 
         output = text.strip()
@@ -40,9 +42,11 @@ class MockTextHumanizer:
         return output
 
     def estimate_ai_score(self, text: str) -> int:
+        from services.humanizer_engine.heading_utils import is_heading_only
+
         if not text.strip():
             return 0
-        if text.strip().startswith("## "):
+        if is_heading_only(text):
             return 12
         digest = hashlib.md5(text.encode("utf-8")).hexdigest()
         base = 52 + (int(digest[:2], 16) % 33)

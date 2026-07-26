@@ -114,3 +114,10 @@ class SessionStore:
             self._applied.discard(name)
         except Exception:  # noqa: BLE001
             pass
+
+    def mark_unapplied(self, name: str) -> None:
+        """Allow apply_to_page to run again after a tab/browser recovery."""
+        self._applied.discard(name)
+
+    def clear_applied(self) -> None:
+        self._applied.clear()

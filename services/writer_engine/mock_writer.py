@@ -33,15 +33,27 @@ class MockSectionWriter:
         topic = _topic(payload)
         prefix = "[REVISED] " if revision else ""
         bullets = "\n".join(f"- {point}" for point in key_points) or "- Core argument development"
-        return (
-            f"{prefix}## {section.title}\n\n"
-            f"Section objective: {section.objective}\n"
-            f"Topic context: {topic}\n\n"
-            f"Planned coverage ({section.estimated_words} words target):\n"
-            f"{bullets}\n\n"
-            f"[Mock section output — generated in isolation for {section.title} only. "
-            f"Claude Opus will replace this stub with full prose.]"
+        target = max(40, int(section.estimated_words or 80))
+        filler = (
+            f"This mock paragraph develops the academic argument for {section.title} "
+            f"within the assignment topic of {topic}. "
         )
+        body_parts = [
+            f"Section objective: {section.objective}",
+            f"Topic context: {topic}",
+            f"Planned coverage ({target} words target):",
+            bullets,
+            filler * max(1, target // 20),
+        ]
+        body = "\n\n".join(body_parts)
+        words = body.split()
+        if len(words) < target:
+            pad = "Additional analytical detail supports the required word budget. "
+            while len(body.split()) < target:
+                body = body + " " + pad
+        elif len(words) > int(target * 1.1) + 5:
+            body = " ".join(words[: max(target, int(target * 1.1))])
+        return f"{prefix}{body.strip()}"
 
 
 def _topic(payload: WriterEngineInput) -> str:

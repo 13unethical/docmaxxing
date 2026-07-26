@@ -13,13 +13,21 @@ STAGE_RESEARCH = "research"
 STAGE_BLUEPRINT = "blueprint"
 STAGE_SECTION_REVIEW = "section_review"
 STAGE_WRITER = "writer"
+STAGE_ACADEMIC_REVIEW = "style_review"
+STAGE_REVISION = "revision"
+STAGE_CITATION_EXTRACT = "citation_generation"
+STAGE_REQUIREMENT_VALIDATION = "requirement_validation"
 
-# Planning / analysis stages use Gemini when GOOGLE_API_KEY is set.
+# Planning / analysis / review stages use Gemini when GOOGLE_API_KEY is set.
 _GEMINI_STAGES = frozenset({
     STAGE_REQUIREMENT_ANALYSIS,
     STAGE_RESEARCH,
     STAGE_BLUEPRINT,
     STAGE_SECTION_REVIEW,
+    STAGE_ACADEMIC_REVIEW,
+    STAGE_REVISION,
+    STAGE_CITATION_EXTRACT,
+    STAGE_REQUIREMENT_VALIDATION,
 })
 
 

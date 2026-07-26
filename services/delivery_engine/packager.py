@@ -53,8 +53,27 @@ class RealDeliveryPackager:
         staged_files: list[tuple[DeliveryFile, bytes]] = []
 
         docx_name = f"{title}.docx"
-        docx_bytes = _build_docx_bytes(str(draft.get("title") or title), str(draft.get("content") or ""))
-        files.append(_file("Final Assignment", docx_name, "final_assignment_docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", root / docx_name, len(docx_bytes)))
+        formatted_path = (payload.formatted_document_path or "").strip()
+        docx_bytes: bytes | None = None
+        docx_label = "Final Assignment"
+        if formatted_path:
+            src = Path(formatted_path)
+            if src.is_file():
+                docx_bytes = src.read_bytes()
+                docx_label = "Formatted Assignment"
+        if docx_bytes is None:
+            # Fallback only when Format Engine output is missing.
+            docx_bytes = _build_docx_bytes(str(draft.get("title") or title), str(draft.get("content") or ""))
+        files.append(
+            _file(
+                docx_label,
+                docx_name,
+                "final_assignment_docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                root / docx_name,
+                len(docx_bytes),
+            )
+        )
         staged_files.append((files[-1], docx_bytes))
 
         pdf_name = f"{title}.pdf"

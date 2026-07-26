@@ -5,8 +5,10 @@ from __future__ import annotations
 import os
 
 MAX_WORDS_PER_INPUT = int(os.environ.get("ZEROGPT_MAX_WORDS_PER_INPUT") or "5000")
-TRANSFORM_CHUNK_WORDS = int(os.environ.get("ZEROGPT_TRANSFORM_CHUNK_WORDS") or "4000")
+# Humanize in large batches (up to provider max). Do NOT humanize tiny per-paragraph parts.
+TRANSFORM_CHUNK_WORDS = int(os.environ.get("ZEROGPT_TRANSFORM_CHUNK_WORDS") or str(MAX_WORDS_PER_INPUT))
 MIN_HUMANIZE_CHARS = 50
+HUMANIZE_BATCH_WORDS = int(os.environ.get("HUMANIZE_BATCH_WORDS") or str(MAX_WORDS_PER_INPUT))
 
 ZEROGPT_HUMANIZER_MODES = frozenset({"humanize", "paraphrase", "advanced_paraphrase"})
 DEFAULT_HUMANIZER_MODE = (

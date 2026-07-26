@@ -111,10 +111,21 @@
           if (r.status === 401 || (r.data && r.data.error === "AUTH_REQUIRED")) {
             btn.disabled = false;
             btn.textContent = original;
-            setStatus("Please sign in to buy credits.", true);
-            setTimeout(function () {
-              window.location.href = "/login?next=/pricing";
-            }, 900);
+            setStatus("Create a free account to buy credits.", true);
+            function goAuth() {
+              window.location.href = "/register?next=/pricing";
+            }
+            if (window.DMAuth && typeof window.DMAuth.require === "function") {
+              window.DMAuth.require({
+                reason: "Create a free account to buy credits.",
+              })
+                .then(function () {
+                  btn.click();
+                })
+                .catch(goAuth);
+              return;
+            }
+            setTimeout(goAuth, 700);
             return;
           }
 

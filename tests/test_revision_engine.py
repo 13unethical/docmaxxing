@@ -181,7 +181,8 @@ def test_revision_resolves_nonstandard_section_titles():
     result = MockSectionReviser().revise(RevisionEngineInput(project_id="proj-1", **payload))
 
     assert result.sections_revised
-    assert "comparison" in result.draft["content"].lower() or "[Revision:" in result.draft["content"]
+    assert "comparison" in result.draft["content"].lower()
+    assert "[Revision:" not in result.draft["content"]
 
 
 def test_revision_rejects_passed_review():

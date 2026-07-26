@@ -2,10 +2,38 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 
 from services.assignment_pipeline.models import utc_now
 from services.writer_engine.models import Draft, WriterSession, count_words
+
+_HEADING_LINE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
+
+
+def _section_block(title: str, body: str) -> str:
+    """Ensure each section contributes a structural ``## Title`` heading + body.
+
+    The LLM writer returns body prose only. Mock writer may already include the
+    heading. Either way, mandatory section titles from the blueprint/requirements
+    must survive into the merged draft as explicit headings.
+    """
+    text = (body or "").strip()
+    title = (title or "").strip() or "Section"
+    if not text:
+        return f"## {title}"
+
+    match = _HEADING_LINE.match(text.split("\n", 1)[0].strip())
+    if match:
+        existing = match.group(1).strip()
+        # Keep an existing heading when it already matches this section.
+        if existing.lower() == title.lower():
+            return text
+        # Wrong/invented heading on this section — replace with the required title.
+        rest = text.split("\n", 1)[1].lstrip() if "\n" in text else ""
+        return f"## {title}\n\n{rest}".strip()
+
+    return f"## {title}\n\n{text}"
 
 
 def merge_session_to_draft(session: WriterSession, *, title: str | None = None) -> Draft:
@@ -16,7 +44,8 @@ def merge_session_to_draft(session: WriterSession, *, title: str | None = None) 
     for section in session.sections:
         if section.status.value != "completed" or not section.generated_text.strip():
             continue
-        parts.append(section.generated_text.strip())
+        block = _section_block(section.title, section.generated_text)
+        parts.append(block)
         sections_payload.append(
             {
                 "title": section.title,

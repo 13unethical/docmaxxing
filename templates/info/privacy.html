@@ -1,0 +1,56 @@
+{% extends "info/base.html" %}
+{% set info_active = "privacy" %}
+{% set page_title = "Privacy Policy" %}
+{% set page_lede = "How DocMaxxing collects, uses, and protects your data. Last updated: 26 July 2026." %}
+{% block info_body %}
+<h2>1. What we collect</h2>
+<ul>
+  <li><strong>Account data</strong> — email, display name, password hash, and account identifiers.</li>
+  <li><strong>Usage data</strong> — feature actions, credit balance changes, project metadata, job logs needed to run the product.</li>
+  <li><strong>Content you submit</strong> — briefs, drafts, uploads (PDF/DOCX/TXT/images), and generated outputs stored for your projects.</li>
+  <li><strong>Payment metadata</strong> — processed by Paddle (we do not store full card numbers on DocMaxxing servers).</li>
+  <li><strong>Support messages</strong> — what you send through the in-app support chat or WhatsApp / email.</li>
+</ul>
+
+<h2>2. How we use data</h2>
+<ul>
+  <li>Deliver Format, Humanizer, Turnitin, Assignment, Check, and Workspace features.</li>
+  <li>Authenticate you, protect accounts, prevent abuse, and refund failed paid actions.</li>
+  <li>Improve reliability (for example diagnosing failed packaging or humanizer sessions).</li>
+  <li>Communicate about account, billing, and support requests.</li>
+</ul>
+
+<h2>3. Processors &amp; third parties</h2>
+<p>
+  Depending on the feature, content may be processed by LLM / humanizer / detection providers
+  (for example Claude, Gemini, StealthWriter, ZeroGPT) solely to complete the action you requested.
+  Payments go through <strong>Paddle</strong>.
+</p>
+
+<h2>4. Retention</h2>
+<p>
+  We keep operational records as needed for security, fraud prevention, support, and legal compliance.
+  You may request access or deletion of account data; some records may be retained where law or payment
+  rules require it.
+</p>
+
+<h2>5. Your choices</h2>
+<ul>
+  <li>Update profile details from <a href="{{ url_for('account') }}">Account</a> (signed-in users).</li>
+  <li>Request data access or deletion via <a href="{{ url_for('contact') }}">Contact</a>.</li>
+  <li>Stop using the service and close your account by contacting support.</li>
+</ul>
+
+<h2>6. Security</h2>
+<p>
+  We use industry-standard protections for accounts and storage. No method of transmission or storage
+  is 100% secure; please use a strong unique password.
+</p>
+
+<h2>7. Contact</h2>
+<p>
+  Privacy questions:
+  <a href="mailto:support@docmaxxing.com">support@docmaxxing.com</a>
+  · <a href="https://wa.me/998990779909" target="_blank" rel="noopener noreferrer">WhatsApp +998 99 077 99 09</a>
+</p>
+{% endblock %}

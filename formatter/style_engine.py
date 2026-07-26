@@ -201,15 +201,86 @@ def _apply_margin_preset(profile: FormattingProfile, preset: str) -> FormattingP
 
 
 def resolve_active_profile(job) -> FormattingProfile:
+    """Resolve style profile, then overlay explicit FormatJob / AssignmentSpec rules.
+
+    Citation style (harvard/apa/mla) selects the base profile, but brief formatting
+    (font, size, spacing, alignment) must always win — otherwise Learning Journal
+    left-align + double-space requirements are silently replaced by style defaults.
+    """
     style = normalize_style_id(job.format_style)
     if style == "custom" or job.format_style == "custom":
         profile = build_custom_profile(job)
     else:
         profile = load_profile(style)
+        profile = _overlay_job_formatting(profile, job)
     profile = _apply_margin_preset(profile, job.margin_preset)
     if job.page_number_position != profile.page.page_number_position:
         profile = replace(profile, page=replace(profile.page, page_number_position=job.page_number_position))
     return profile
+
+
+def _overlay_job_formatting(profile: FormattingProfile, job) -> FormattingProfile:
+    align = job.alignment if job.alignment in {"left", "justify"} else profile.body.paragraph.alignment
+    indent = 0.5 if job.first_line_indent else None
+    body_para = replace(
+        profile.body.paragraph,
+        font=replace(
+            profile.body.paragraph.font,
+            family=job.font_family or profile.body.paragraph.font.family,
+            size_pt=job.font_size_pt or profile.body.paragraph.font.size_pt,
+            bold=False,
+        ),
+        alignment=align,
+        line_spacing=job.line_spacing,
+        line_spacing_rule="double" if job.line_spacing >= 1.99 else "multiple",
+        first_line_indent_inches=indent,
+    )
+    body_ctx = replace(
+        profile.body.contextual,
+        body_space_before_pt=job.space_before_pt,
+        body_space_after_pt=job.space_after_pt,
+    )
+    heading_font = replace(
+        profile.heading2.font,
+        family=job.font_family or profile.heading2.font.family,
+        size_pt=job.heading_size_pt or profile.heading2.font.size_pt,
+        bold=True,
+    )
+
+    def _heading(spec: ParagraphFormatSpec) -> ParagraphFormatSpec:
+        return replace(
+            spec,
+            font=heading_font,
+            line_spacing=1.0,
+            line_spacing_rule="single",
+            keep_with_next=True,
+        )
+
+    ref_entry = replace(
+        profile.references.entry,
+        font=replace(
+            profile.references.entry.font,
+            family=job.font_family or profile.references.entry.font.family,
+            size_pt=job.font_size_pt or profile.references.entry.font.size_pt,
+            bold=False,
+        ),
+        alignment="justify" if job.auto_justify_refs else align,
+        line_spacing=job.line_spacing,
+    )
+    return replace(
+        profile,
+        title=_heading(replace(profile.title, alignment="center")),
+        heading1=_heading(profile.heading1),
+        heading2=_heading(profile.heading2),
+        heading3=_heading(profile.heading3),
+        body=replace(profile.body, paragraph=body_para, contextual=body_ctx),
+        references=replace(
+            profile.references,
+            heading=_heading(profile.references.heading),
+            entry=ref_entry,
+            contextual=replace(profile.references.contextual, body_space_after_pt=job.space_after_pt),
+        ),
+    )
 
 
 def apply_page_style(document: Document, page: PageSpec) -> None:

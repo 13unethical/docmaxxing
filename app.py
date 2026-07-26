@@ -63,13 +63,14 @@ from services.research_engine import ResearchEngineService
 from services.research_engine.models import ParsedDocument
 from services.blueprint_engine import BlueprintEngineService
 from services.writer_engine import WriterEngineService
-from services.reviewer_engine import ReviewerEngineService
-from services.revision_engine import RevisionEngineService
+from services.reviewer_engine import GeminiAcademicReviewer, ReviewerEngineService
+from services.revision_engine import GeminiSectionReviser, RevisionEngineService
 from services.humanizer_engine import HumanizerEngineService
 from services.humanizer_engine.mock_validator import ZeroGPTParagraphValidator
 from services.humanizer_engine.stealthwriter_humanizer import StealthWriterTextHumanizer
 from services.humanizer_engine.zerogpt_humanizer import count_words
 from services.ai_detection_engine import AIDetectionEngineService
+from services.ai_detection_engine.zerogpt_detector import ZeroGPTAIDetector
 from services.delivery_engine import DeliveryEngineService
 from services.llm_errors import llm_error_http_status, user_friendly_llm_error
 from services.zerogpt_business import (
@@ -234,11 +235,14 @@ assignment_pipeline = AssignmentPipelineService()
 research_engine = ResearchEngineService()
 blueprint_engine = BlueprintEngineService()
 writer_engine = WriterEngineService()
-reviewer_engine = ReviewerEngineService()
-revision_engine = RevisionEngineService(draft_store=writer_engine.drafts)
-ai_detection_engine = AIDetectionEngineService()
-delivery_engine = DeliveryEngineService()
+reviewer_engine = ReviewerEngineService(reviewer=GeminiAcademicReviewer())
+revision_engine = RevisionEngineService(
+    draft_store=writer_engine.drafts,
+    reviser=GeminiSectionReviser(),
+)
 zerogpt_client = ZeroGPTClient()
+ai_detection_engine = AIDetectionEngineService(detector=ZeroGPTAIDetector(client=zerogpt_client))
+delivery_engine = DeliveryEngineService()
 citation_service = CitationService(CrossrefProvider())
 
 
@@ -578,39 +582,89 @@ def account():
     )
 
 
-def _render_legal(focus: str | None = None):
-    titles = {
-        "terms": "Terms of service",
-        "privacy": "Privacy policy",
-        "refund": "Refund policy",
-    }
-    page_title = titles.get(focus or "", "Legal")
-    return render_template(
-        "legal.html",
-        nav_active=None,
-        focus=focus,
-        page_title=page_title if focus else "Legal",
-    )
+def _render_info(template: str, *, info_active: str | None = None):
+    return render_template(template, nav_active=None, info_active=info_active)
 
 
+@app.get("/account-info")
+def account_info():
+    return _render_info("info/account.html", info_active="account")
+
+
+@app.get("/credits")
+def credits():
+    return _render_info("info/credits.html", info_active="credits")
+
+
+@app.get("/about")
+def about():
+    return _render_info("info/about.html", info_active="about")
+
+
+@app.get("/privacy")
+def privacy():
+    return _render_info("info/privacy.html", info_active="privacy")
+
+
+@app.get("/terms")
+def terms():
+    return _render_info("info/terms.html", info_active="terms")
+
+
+@app.get("/disclaimer")
+def disclaimer():
+    return _render_info("info/disclaimer.html", info_active="disclaimer")
+
+
+@app.get("/payment-policy")
+def payment_policy():
+    return _render_info("info/payment.html", info_active="payment")
+
+
+@app.get("/delivery-policy")
+def delivery_policy():
+    return _render_info("info/delivery.html", info_active="delivery")
+
+
+@app.get("/refund-policy")
+def refund_policy():
+    return _render_info("info/refund.html", info_active="refund")
+
+
+@app.get("/contact")
+def contact():
+    return _render_info("info/contact.html", info_active="contact")
+
+
+@app.get("/faq")
+def faq():
+    return _render_info("info/faq.html", info_active="faq")
+
+
+@app.get("/changelog")
+def changelog():
+    return _render_info("info/changelog.html", info_active="changelog")
+
+
+# Legacy /legal/* URLs → dedicated pages
 @app.get("/legal")
 def legal():
-    return _render_legal()
+    return redirect(url_for("about"), code=301)
 
 
 @app.get("/legal/terms")
 def legal_terms():
-    return _render_legal("terms")
+    return redirect(url_for("terms"), code=301)
 
 
 @app.get("/legal/privacy")
 def legal_privacy():
-    return _render_legal("privacy")
+    return redirect(url_for("privacy"), code=301)
 
 
 @app.get("/legal/refund")
 def legal_refund():
-    return _render_legal("refund")
+    return redirect(url_for("refund_policy"), code=301)
 
 
 # ---------------------------------------------------------------- admin
@@ -2878,7 +2932,8 @@ def api_assignment_project_revision(project_id: str):
         return jsonify({"error": str(exc)}), 404
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    return jsonify({"revision_result": result.to_dict()})
+    payload_out = result.to_dict() if hasattr(result, "to_dict") else result
+    return jsonify({"revision_result": payload_out})
 
 
 @app.get("/api/assignment/projects/<project_id>/revision-history")
@@ -3221,7 +3276,7 @@ def api_assignment_ai_detection_advance(project_id: str):
             error=str(exc),
             error_type=type(exc).__name__,
         )
-        return jsonify({"error": "Detection step failed. Please try again."}), 502
+        return jsonify({"error": str(exc) or "Detection step failed. Please try again."}), 502
     return jsonify(session.to_dict())
 
 
@@ -3314,6 +3369,62 @@ def api_delivery_package_prepare():
     return jsonify(package.to_dict())
 
 
+@app.post("/api/assignment/projects/<project_id>/citations/generate")
+def api_assignment_citations_generate(project_id: str):
+    try:
+        pack = project_service.run_citation_generation(project_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 502
+    return jsonify({"citation_pack": pack.to_dict()})
+
+
+@app.post("/api/assignment/projects/<project_id>/format")
+def api_assignment_format(project_id: str):
+    try:
+        formatted = project_service.run_formatting(project_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({"formatted_document": formatted})
+
+
+@app.post("/api/assignment/projects/<project_id>/validate-requirements")
+def api_assignment_validate_requirements(project_id: str):
+    try:
+        report = project_service.run_requirement_validation(project_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+    # Always 200: passed/failed is business data in validation_report, not HTTP conflict.
+    return jsonify({"validation_report": report})
+
+
+@app.post("/api/assignment/projects/<project_id>/stages/<stage_name>/retry")
+def api_assignment_stage_retry(project_id: str, stage_name: str):
+    stage = _parse_pipeline_stage(stage_name)
+    if stage is None:
+        return jsonify({"error": f"Unknown stage: {stage_name}"}), 400
+    try:
+        result = project_service.retry_stage(project_id, stage)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 500
+    if hasattr(result, "to_dict"):
+        payload = result.to_dict()
+    elif isinstance(result, dict):
+        payload = result
+    else:
+        payload = {"ok": True}
+    return jsonify({"stage": stage.value, "result": payload})
+
+
 @app.post("/api/assignment/projects/<project_id>/delivery")
 def api_assignment_delivery_prepare(project_id: str):
     try:
@@ -3340,6 +3451,55 @@ def api_assignment_delivery_package_get(project_id: str):
     except KeyError:
         return jsonify({"error": "Delivery package not found"}), 404
     return jsonify(package.to_dict())
+
+
+@app.get("/api/assignment/projects/<project_id>/download")
+def api_assignment_project_download(project_id: str):
+    """Download the delivery ZIP for a project (rebuild package if needed)."""
+    try:
+        package = project_service.get_delivery_package(project_id)
+    except KeyError:
+        try:
+            package = project_service.run_delivery(project_id)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except KeyError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except Exception as exc:  # noqa: BLE001
+            trace(
+                "api.assignment_download.error",
+                project_id=project_id,
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
+            return jsonify({"error": f"Delivery packaging failed: {exc}"}), 500
+
+    project_dir = PROJECT_STORAGE_ROOT / str(package.project_id or project_id) / "delivery"
+    expected = f"{_safe_download_name(package)}-delivery-package.zip"
+    zip_path = project_dir / expected
+    if not zip_path.exists():
+        matches = sorted(project_dir.glob("*-delivery-package.zip"))
+        if matches:
+            zip_path = matches[0]
+    if not zip_path.exists():
+        # Package metadata exists but ZIP missing — rebuild once.
+        try:
+            package = project_service.run_delivery(project_id)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"Package archive is not available: {exc}"}), 404
+        zip_path = project_dir / f"{_safe_download_name(package)}-delivery-package.zip"
+        if not zip_path.exists():
+            matches = sorted(project_dir.glob("*-delivery-package.zip"))
+            if matches:
+                zip_path = matches[0]
+    if not zip_path.exists():
+        return jsonify({"error": "Package archive is not available"}), 404
+    return send_file(
+        zip_path,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=zip_path.name,
+    )
 
 
 @app.get("/api/delivery/packages/<package_id>/download")
@@ -4716,8 +4876,15 @@ def _browser_submit(fn, timeout=None):
     return browser_worker.submit(fn, timeout)
 
 
+def _install_browser_submitter() -> None:
+    from services.browser.thread_affinity import set_browser_submitter
+
+    set_browser_submitter(lambda fn, timeout=None: _browser_submit(fn, timeout=timeout))
+
+
 # Providers are known as soon as the app module loads, even before Chrome starts.
 _register_browser_providers()
+_install_browser_submitter()
 
 
 if __name__ == "__main__":

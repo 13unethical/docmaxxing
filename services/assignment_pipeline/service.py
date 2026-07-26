@@ -76,14 +76,35 @@ class AssignmentPipelineService:
     def get_project(self, project_id: str) -> AssignmentProject:
         return self.store.require(project_id)
 
-    def start_stage(self, project_id: str, stage: PipelineStage) -> AssignmentProject:
+    def start_stage(
+        self,
+        project_id: str,
+        stage: PipelineStage,
+        *,
+        force: bool = False,
+    ) -> AssignmentProject:
         project = self.store.require(project_id)
         record = project.stage_state(stage)
-        if record.status == StageStatus.COMPLETED:
+        if record.status == StageStatus.COMPLETED and not force:
             return project
+        if force and record.status in {StageStatus.COMPLETED, StageStatus.FAILED}:
+            record.output = {}
+            record.completed_at = None
         record.status = StageStatus.RUNNING
         record.started_at = utc_now()
         record.error = None
+        _touch(project)
+        return self.store.save(project)
+
+    def reset_stage(self, project_id: str, stage: PipelineStage) -> AssignmentProject:
+        """Clear one stage so it can be retried without touching earlier stages."""
+        project = self.store.require(project_id)
+        record = project.stage_state(stage)
+        record.status = StageStatus.PENDING
+        record.started_at = None
+        record.completed_at = None
+        record.error = None
+        record.output = {}
         _touch(project)
         return self.store.save(project)
 

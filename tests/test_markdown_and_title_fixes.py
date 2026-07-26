@@ -15,9 +15,10 @@ def test_strip_orphan_hash_lines():
     assert strip_markdown_text("  ###  ") is None
 
 
-def test_strip_markdown_heading_prefix():
-    assert strip_markdown_text("## Introduction") == "Introduction"
-    assert strip_markdown_text("### References") == "References"
+def test_strip_multiline_markdown_heading_prefix():
+    assert strip_markdown_text("## References\nSmith, J. (2024). Example.") == (
+        "References\nSmith, J. (2024). Example."
+    )
 
 
 def test_strip_italic_markers():

@@ -60,10 +60,6 @@ class MockSectionReviser:
                 issue=issue,
                 suggested_fix=suggested_fix,
             )
-            if revised_body == original_body and suggested_fix:
-                revised_body = original_body.strip() + f"\n\n[Revision: {suggested_fix}]"
-                change_description = f"Applied fix in {sections[index]['title']}"
-
             if revised_body == original_body:
                 continue
 
@@ -78,25 +74,6 @@ class MockSectionReviser:
             )
             changes.append(change_description)
             issues_addressed.append(issue_id)
-
-        if not sections_revised:
-            fallback_index = _fallback_section_index(sections)
-            if fallback_index is not None and issues:
-                issue = issues[0]
-                suggested_fix = str(issue.get("suggested_fix") or issue.get("description") or "Address review feedback.")
-                sections[fallback_index]["body"] = (
-                    sections[fallback_index]["body"].strip() + f"\n\n[Revision: {suggested_fix}]"
-                )
-                sections_revised.append(
-                    SectionRevision(
-                        issue_id=str(issue.get("issue_id") or ""),
-                        section=sections[fallback_index]["title"],
-                        category=str(issue.get("category") or ""),
-                        change_description=f"Applied fallback fix in {sections[fallback_index]['title']}",
-                    )
-                )
-                changes.append(sections_revised[-1].change_description)
-                issues_addressed.append(str(issue.get("issue_id") or ""))
 
         if not sections_revised:
             raise ValueError("No affected sections could be located for revision")
@@ -170,9 +147,8 @@ def _apply_targeted_fix(
         if "resolves" not in body.lower():
             return body.strip() + addition, f"Improved conclusion in {section_title}"
 
-    if suggested_fix:
-        return body.strip() + f"\n\n[Revision: {suggested_fix}]", f"Applied fix in {section_title}"
-
+    # Never inject instructional [Revision: ...] meta into academic prose.
+    # Without a concrete structural fix, leave the section unchanged.
     return body, ""
 
 
@@ -191,16 +167,3 @@ def _resolve_issue_section_index(
         if index is not None:
             return index
     return find_section_index(sections, category)
-
-
-def _fallback_section_index(sections: list[dict[str, str]]) -> int | None:
-    best_index: int | None = None
-    best_words = 0
-    for index, section in enumerate(sections):
-        words = len(section.get("body", "").split())
-        if words > best_words:
-            best_words = words
-            best_index = index
-    if best_index is not None:
-        return best_index
-    return 0 if sections else None

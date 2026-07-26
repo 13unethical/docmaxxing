@@ -17,9 +17,11 @@ class MockAIDetector:
     VERSION = "mock-1.0"
 
     def detect(self, text: str) -> float:
+        from services.humanizer_engine.heading_utils import is_heading_only
+
         if not text or not text.strip():
             return 0.0
-        if text.strip().startswith("## "):
+        if is_heading_only(text):
             return 2.0
 
         digest = hashlib.md5(text.encode("utf-8")).hexdigest()

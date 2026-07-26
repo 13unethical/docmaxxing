@@ -83,3 +83,46 @@ def test_stealthwriter_humanizer_raises_on_failure():
         raised = True
         assert "LOGIN_REQUIRED" in str(exc)
     assert raised
+
+
+def test_stealthwriter_humanizer_retries_then_raises_on_no_change():
+    calls = {"n": 0}
+
+    def fake_humanize(text: str, *, model: str | None = None):
+        calls["n"] += 1
+        return {
+            "success": False,
+            "error": "NO_CHANGE",
+            "message": "daily humanization limit is likely reached",
+        }
+
+    humanizer = StealthWriterTextHumanizer(humanize_fn=fake_humanize)
+    sample = (
+        "This paragraph is long enough to trigger StealthWriter humanization "
+        "because it exceeds the minimum character threshold used by the engine."
+    )
+    try:
+        humanizer.humanize(sample)
+        raised = False
+    except ValueError as exc:
+        raised = True
+        assert "limit" in str(exc).lower() or "NO_CHANGE" in str(exc)
+    assert raised
+    assert calls["n"] == 3
+
+
+def test_stealthwriter_humanizer_rejects_identical_output():
+    def fake_humanize(text: str, *, model: str | None = None):
+        return {"success": True, "humanized_text": text}
+
+    humanizer = StealthWriterTextHumanizer(humanize_fn=fake_humanize)
+    sample = (
+        "This paragraph is long enough to trigger StealthWriter humanization "
+        "because it exceeds the minimum character threshold used by the engine."
+    )
+    try:
+        humanizer.humanize(sample)
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised

@@ -1,0 +1,48 @@
+{% extends "info/base.html" %}
+{% set info_active = "refund" %}
+{% set page_title = "Refund Policy" %}
+{% set page_lede = "When credits and purchases can be refunded. Last updated: 26 July 2026." %}
+{% block info_body %}
+<h2>1. Digital goods</h2>
+<p>
+  Credits and Assignment payments are digital goods. Once credits are consumed by successful paid
+  actions, those spent credits are generally non-refundable as cash.
+</p>
+
+<h2>2. Automatic credit refunds</h2>
+<p>
+  If a paid action fails on our side (provider error, crash after debit, failed packaging with no usable
+  output), we refund the charged credits to your DocMaxxing balance whenever automatic recovery runs.
+</p>
+
+<h2>3. Unused credit purchases</h2>
+<p>
+  Unused credit package purchases may be eligible for a refund within <strong>14 days</strong> of
+  purchase if credits have not been substantially consumed. Contact support with:
+</p>
+<ul>
+  <li>Account email</li>
+  <li>Approximate purchase time</li>
+  <li>Paddle transaction id</li>
+</ul>
+
+<h2>4. Assignment project payments</h2>
+<p>
+  Assignment pricing is shown before you confirm. If the pipeline never starts because of a billing
+  failure, you should not be charged. If you were charged and received no usable delivery after
+  reasonable retries, contact support for review.
+</p>
+
+<h2>5. Chargebacks</h2>
+<p>
+  Please contact us before filing a chargeback. Unjustified chargebacks may result in account
+  suspension and loss of remaining credits.
+</p>
+
+<h2>6. How to request a refund</h2>
+<p>
+  Email <a href="mailto:support@docmaxxing.com">support@docmaxxing.com</a>
+  or WhatsApp <a href="https://wa.me/998990779909" target="_blank" rel="noopener noreferrer">+998 99 077 99 09</a>
+  (Monday–Friday, 9:00 AM–6:00 PM GMT+5).
+</p>
+{% endblock %}

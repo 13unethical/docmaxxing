@@ -172,6 +172,9 @@ class DeliveryEngineInput:
     revision_attempts: int = 0
     humanization_attempts: int = 0
     completion_time: str = "—"
+    # Absolute path to Format Engine DOCX. When set, delivery must ship this file
+    # instead of rebuilding an unformatted document from markdown.
+    formatted_document_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -185,4 +188,5 @@ class DeliveryEngineInput:
             "revision_attempts": self.revision_attempts,
             "humanization_attempts": self.humanization_attempts,
             "completion_time": self.completion_time,
+            "formatted_document_path": self.formatted_document_path,
         }

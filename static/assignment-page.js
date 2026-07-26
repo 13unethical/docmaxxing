@@ -24,21 +24,29 @@
     "research",
     "blueprint",
     "writer",
+    "citations",
     "humanizer",
+    "format",
     "review",
+    "revision",
+    "validation",
     "detection",
     "delivery",
   ];
 
   var STAGE_PROGRESS = {
-    upload: 10,
-    price: 10,
-    requirement: 10,
-    research: 20,
-    blueprint: 35,
-    writer: 60,
-    humanizer: 80,
-    review: 90,
+    upload: 8,
+    price: 8,
+    requirement: 8,
+    research: 16,
+    blueprint: 24,
+    writer: 40,
+    citations: 48,
+    humanizer: 60,
+    format: 70,
+    review: 78,
+    revision: 84,
+    validation: 90,
     detection: 96,
     delivery: 100,
   };
@@ -69,17 +77,23 @@
     reviewPass: 1,
     detectionAttempt: 1,
     reviewMeta: null,
+    citationPack: null,
+    formattedDocument: null,
+    validationReport: null,
     busy: false,
     autoRunning: false,
     retryAction: null,
     forceContinue: false,
+    productionPeakPct: 0,
   };
 
   function $(sel) { return root.querySelector(sel); }
 
   function isStaleProjectError(err) {
-    var msg = String((err && err.message) || "").toLowerCase();
-    return msg.indexOf("project not found") >= 0 || msg.indexOf("http 404") >= 0;
+    var msg = String((err && err.message) || "").trim().toLowerCase();
+    // Only treat an explicit missing-project response as an expired session.
+    // Generic HTTP 404 (e.g. a missing stage route before server restart) must NOT wipe progress.
+    return msg === "project not found" || msg.indexOf("project not found:") === 0;
   }
 
   function show(el, on) {
@@ -147,6 +161,9 @@
     state.detectionSession = null;
     state.detectionReport = null;
     state.deliveryPackage = null;
+    state.citationPack = null;
+    state.formattedDocument = null;
+    state.validationReport = null;
     state.humanizerPass = 1;
     state.reviewPass = 1;
     state.detectionAttempt = 1;
@@ -155,6 +172,7 @@
     state.retryAction = null;
     state.forceContinue = false;
     state.stage = "upload";
+    state.productionPeakPct = 0;
   }
 
   function staleSessionMessage() {
@@ -171,7 +189,7 @@
   var LLM_REQUEST_TIMEOUT_MS = 600000;
 
   function isLongRunningStageUrl(url) {
-    return /\/(research|blueprint|writer|humanizer|review|revision|ai-detection|delivery)\b/.test(url || "");
+    return /\/(research|blueprint|writer|citations|humanizer|format|validate-requirements|review|revision|ai-detection|delivery)\b/.test(url || "");
   }
 
   function apiLlm(url, options) {
@@ -211,6 +229,12 @@
         resetProjectState();
       }
       var msg = payload.error || "";
+      if (res.status === 404 && !responseMeansProjectMissing(res, payload)) {
+        throw new Error(
+          msg ||
+          ("This step is unavailable (HTTP 404). Restart the server if you just updated the app, then click Retry.")
+        );
+      }
       if (res.status === 504) {
         throw new Error(msg || "This AI step can take a few minutes. Please wait and click Retry.");
       }
@@ -277,7 +301,9 @@
   }
 
   function updateProductionProgress(stage) {
-    var pct = productionPercent(stage || state.stage);
+    var raw = productionPercent(stage || state.stage);
+    var pct = Math.max(Number(state.productionPeakPct) || 0, Math.max(0, Math.min(100, raw)));
+    state.productionPeakPct = pct;
     var fill = $("[data-asg-production-fill]");
     var label = $("[data-asg-production-pct]");
     if (fill) fill.style.width = pct + "%";
@@ -294,6 +320,10 @@
   }
 
   function showCompleteUI() {
+    // Never claim "ready" until a real delivery package exists.
+    if (!state.deliveryPackage || !state.deliveryPackage.id) {
+      return;
+    }
     show($("[data-asg-upload-card]"), true);
     show($("[data-asg-summary-card]"), true);
     show($("[data-asg-wizard]"), false);
@@ -514,7 +544,9 @@
 
   function renderDeliveryStage() {
     renderProgress();
-    showCompleteUI();
+    if (state.deliveryPackage && state.deliveryPackage.id) {
+      showCompleteUI();
+    }
   }
 
   function updateChrome() {
@@ -672,17 +704,20 @@
       state.humanizerPass = data.project.artifacts.revision_attempts
         ? data.project.artifacts.revision_attempts + 1
         : state.humanizerPass;
-    }
-    if (state.review && !humanizerDone()) {
-      state.review = null;
+      state.citationPack = data.project.artifacts.citation_pack || state.citationPack;
+      state.formattedDocument = data.project.artifacts.formatted_document || state.formattedDocument;
+      state.validationReport = data.project.artifacts.validation_report || state.validationReport;
     }
   }
 
   function inferStageFromArtifacts() {
     if (state.deliveryPackage) return "delivery";
     if (state.detectionReport || (state.detectionSession && state.detectionSession.status === "completed")) return "detection";
+    if (state.validationReport && state.validationReport.passed) return "validation";
     if (state.review) return "review";
-    if (state.humanizerSession) return "humanizer";
+    if (state.formattedDocument) return "format";
+    if (state.humanizerSession && humanizerDone()) return "humanizer";
+    if (state.citationPack) return "citations";
     if (state.writerSession) return "writer";
     if (state.blueprint) return "blueprint";
     if (state.research) return "research";
@@ -899,21 +934,31 @@
 
   async function advanceDetection() {
     await ensureDetection();
-    try {
-      state.detectionSession = await apiLlm(projectUrl("/ai-detection/advance"), {
-        method: "POST",
-        ...detectionSessionBody(),
-      });
-    } catch (err) {
-      var msg = String(err.message || "").toLowerCase();
-      if (msg.indexOf("not found") >= 0) {
-        state.detectionSession = null;
-        await ensureDetection();
+    var attempts = 0;
+    while (true) {
+      attempts += 1;
+      try {
         state.detectionSession = await apiLlm(projectUrl("/ai-detection/advance"), {
           method: "POST",
           ...detectionSessionBody(),
         });
-      } else {
+        break;
+      } catch (err) {
+        var msg = String(err.message || "").toLowerCase();
+        if (msg.indexOf("not found") >= 0) {
+          state.detectionSession = null;
+          await ensureDetection();
+          state.detectionSession = await apiLlm(projectUrl("/ai-detection/advance"), {
+            method: "POST",
+            ...detectionSessionBody(),
+          });
+          break;
+        }
+        // Soft retry for transient ZeroGPT / network blips.
+        if (attempts < 3 && (msg.indexOf("try again") >= 0 || msg.indexOf("zerogpt") >= 0 || msg.indexOf("timed out") >= 0 || msg.indexOf("502") >= 0 || msg.indexOf("detection step failed") >= 0)) {
+          await new Promise(function (resolve) { setTimeout(resolve, 800 * attempts); });
+          continue;
+        }
         throw err;
       }
     }
@@ -955,8 +1000,33 @@
   }
 
   async function runDelivery() {
+    setStatus("Packaging your assignment…");
     state.deliveryPackage = await api(projectUrl("/delivery"), { method: "POST" });
     setStage("delivery");
+    setStatus("");
+  }
+
+  async function downloadDelivery() {
+    try {
+      if (!state.deliveryPackage || !state.deliveryPackage.id) {
+        setBusy(true);
+        setStatus("Packaging your assignment…");
+        await runDelivery();
+      }
+      var id = state.deliveryPackage && state.deliveryPackage.id;
+      if (!id) {
+        throw new Error("Delivery package is not ready yet. Please try again.");
+      }
+      // Prefer project-scoped download so a missing in-memory package can be rebuilt from disk.
+      window.location.href = "/api/assignment/projects/" + encodeURIComponent(state.projectId) + "/download";
+    } catch (err) {
+      fail(err, downloadDelivery);
+    } finally {
+      setBusy(false);
+      setStatus("");
+      updateActions();
+      updateChrome();
+    }
   }
 
   async function runReview() {
@@ -978,12 +1048,44 @@
       body: JSON.stringify({ review_report: state.review || null }),
     });
     state.reviewMeta = state.reviewMeta || {};
-    state.reviewMeta.issues_fixed = (payload.revision_result && payload.revision_result.issues_addressed)
-      ? payload.revision_result.issues_addressed.length
+    var result = payload.revision_result || payload;
+    state.reviewMeta.issues_fixed = (result && result.issues_addressed)
+      ? result.issues_addressed.length
       : state.reviewMeta.issues_fixed;
-    state.humanizerPass += 1;
-    state.review = null;
-    return payload.revision_result || null;
+    renderProgress();
+    return result || null;
+  }
+
+  async function runCitations() {
+    setStage("citations");
+    var payload = await apiLlm(projectUrl("/citations/generate"), { method: "POST" });
+    state.citationPack = payload.citation_pack || null;
+    renderProgress();
+    return state.citationPack;
+  }
+
+  async function runFormatting() {
+    setStage("format");
+    var payload = await apiLlm(projectUrl("/format"), { method: "POST" });
+    state.formattedDocument = payload.formatted_document || null;
+    renderProgress();
+    return state.formattedDocument;
+  }
+
+  async function runValidation() {
+    setStage("validation");
+    var payload = await apiLlm(projectUrl("/validate-requirements"), { method: "POST" });
+    state.validationReport = payload.validation_report || null;
+    renderProgress();
+    // Soft-continue: failed validation is stored for the summary, but does not stop delivery.
+    if (state.validationReport && state.validationReport.passed === false) {
+      var issues = (state.validationReport.blocking_issues || []).join("; ")
+        || (state.validationReport.missing_requirements || []).join("; ")
+        || "Requirement checks flagged issues";
+      console.warn("Requirement validation soft-fail:", issues);
+      // Never surface soft-fail text via throw/showError — pipeline continues.
+    }
+    return state.validationReport;
   }
 
   async function ensureHumanizer() {
@@ -1046,12 +1148,11 @@
   async function runSilentImprovements() {
     try {
       await runRevision();
-      await runHumanizerFull();
       state.review = null;
       setStage("review");
       await runReview();
     } catch (err) {
-      /* Revision is best-effort — never block delivery. */
+      /* Revision is best-effort before citations — never block the pipeline here. */
     }
   }
 
@@ -1059,9 +1160,14 @@
     setStage("review");
     if (!state.review) await runReview();
     var score = state.review ? Number(state.review.overall_score) : 0;
-    if (score >= 75) return true;
-    if (score >= 60 && score < 75 && state.review && !state.review.passed) {
+    if (score >= 75) {
+      await runRevision(); // no-op / no_issues path when passed
+      return true;
+    }
+    if (score >= 60 && state.review && !state.review.passed) {
       await runSilentImprovements();
+    } else if (state.review && !state.review.passed) {
+      await runRevision();
     }
     return true;
   }
@@ -1116,21 +1222,31 @@
     if (!writerDone()) {
       await runWriterFull();
     }
+    if (!state.citationPack) {
+      await runCitations();
+    }
     if (!humanizerDone()) {
       state.humanizerPass = 1;
       await runHumanizerFull();
     } else if (state.humanizerSession && state.humanizerSession.status !== "merged") {
       await mergeHumanizer();
     }
+    if (!state.formattedDocument) {
+      await runFormatting();
+    }
     if (!state.review || Number(state.review.overall_score) < 75) {
       state.reviewPass = state.reviewPass || 1;
       await runReviewLoop();
+    } else if (!state.reviewMeta) {
+      await runRevision();
+    }
+    if (!state.validationReport) {
+      await runValidation();
     }
     if (!state.detectionReport) {
       await runDetectionLoop();
     }
     if (!state.deliveryPackage) {
-      setStage("delivery");
       await runDelivery();
     }
     state.forceContinue = false;
@@ -1138,6 +1254,7 @@
   }
 
   async function beginProduction() {
+    state.productionPeakPct = 0;
     setStage("research");
     enterProductionLayout();
     updateProductionProgress("research");
@@ -1245,7 +1362,7 @@
       }
       return;
     }
-    if (state.stage === "delivery" && state.deliveryPackage && state.deliveryPackage.id) {
+    if (state.stage === "delivery") {
       downloadDelivery();
       return;
     }
@@ -1306,12 +1423,6 @@
       });
     }
     return resumePromise;
-  }
-
-  function downloadDelivery() {
-    if (state.deliveryPackage && state.deliveryPackage.id) {
-      window.location.href = "/api/delivery/packages/" + state.deliveryPackage.id + "/download";
-    }
   }
 
   function wire() {

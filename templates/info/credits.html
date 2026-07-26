@@ -1,0 +1,54 @@
+{% extends "info/base.html" %}
+{% set info_active = "credits" %}
+{% set page_title = "Credits" %}
+{% set page_lede = "Credits power paid DocMaxxing tools. Buy once, spend only when you use a feature." %}
+{% block info_body %}
+<h2>How credits work</h2>
+<p>
+  Your balance sits on your account. Format does not spend credits.
+  Academic Check (20), Humanize, AI detect, citations, Turnitin, and Assignment projects do.
+  Failed jobs that never run are refunded where the economy ledger supports it.
+</p>
+<p>
+  New accounts receive a <strong>welcome bonus</strong> (default 50 credits) so you can try Workspace
+  actions before purchasing.
+</p>
+
+<h2>What each action costs</h2>
+<ul>
+  <li><strong>Academic Check</strong> — 20 credits</li>
+  <li><strong>Humanize</strong> — 10 credits</li>
+  <li><strong>AI detect</strong> — 10 credits</li>
+  <li><strong>Citation search</strong> — 2 credits</li>
+  <li><strong>Turnitin check</strong> — 300 credits</li>
+  <li><strong>Assignment projects</strong> — priced per brief (word count, priority, extras) before you pay</li>
+</ul>
+
+<h2>Packages</h2>
+<ul>
+  <li><strong>Starter</strong> — 1,000 credits for $9</li>
+  <li><strong>Pro</strong> — 2,500 credits for $20 (most popular)</li>
+  <li><strong>Custom / teams</strong> — contact sales via WhatsApp or support email</li>
+</ul>
+<p>
+  Checkout is handled by <strong>Paddle</strong> (merchant of record). You need a DocMaxxing account
+  before buying; guests who click Buy are asked to register first.
+</p>
+<p>
+  <a class="info-cta" href="{{ url_for('pricing') }}">Buy credits</a>
+</p>
+
+<h2>Seeing your balance</h2>
+<p>
+  The Credits pill in the top navigation shows your current balance when you are signed in.
+  Transaction history appears in Paddle receipts and support can look up ledger entries if something
+  looks wrong.
+</p>
+
+<h2>Related policies</h2>
+<ul>
+  <li><a href="{{ url_for('payment_policy') }}">Payment Policy</a></li>
+  <li><a href="{{ url_for('refund_policy') }}">Refund Policy</a></li>
+  <li><a href="{{ url_for('faq') }}">FAQ</a></li>
+</ul>
+{% endblock %}

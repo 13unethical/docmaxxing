@@ -29,9 +29,22 @@ def strip_markdown_text(text: str) -> str | None:
     if _MD_ONLY_HASHES.match(stripped):
         return None
 
-    m = _MD_HEADING_LINE.match(stripped)
-    if m:
-        stripped = m.group(1).strip()
+    # Multi-line paragraphs: "## References\\nCitation…" — strip hashes on the first line.
+    lines = stripped.split("\n")
+    first_md = _MD_HEADING_LINE.match(lines[0].strip())
+    if first_md:
+        heading_text = first_md.group(1).strip()
+        # Markdown leftover like "## Document" is not an academic section.
+        if heading_text.lower() == "document" and len(lines) == 1:
+            return None
+        lines[0] = heading_text
+        stripped = "\n".join(lines).strip()
+        if not stripped:
+            return None
+    else:
+        m = _MD_HEADING_LINE.match(stripped)
+        if m:
+            stripped = m.group(1).strip()
 
     stripped = _MD_BOLD.sub(r"\1", stripped)
     stripped = _MD_ITALIC.sub(r"\1", stripped)

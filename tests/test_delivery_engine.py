@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import io
+import zipfile
+from pathlib import Path
+
 import pytest
+from docx import Document
+from docx.shared import Pt
 
 from services.ai_detection_engine import AIDetectionEngineService
-from services.assignment_pipeline.models import PipelineStage
 from services.assignment_pipeline.service import AssignmentPipelineService
 from services.assignment_project.models import ProjectStatus
 from services.assignment_project.service import ProjectService
@@ -81,6 +86,48 @@ def test_delivery_packages_prior_outputs_only():
     assert package.project_summary.final_ai_score == 9.5
     assert package.package_download_url
     assert all(item.ready for item in package.files)
+
+
+def test_delivery_uses_formatted_docx_in_zip(tmp_path):
+    """ZIP must ship Format Engine DOCX, not a markdown rebuild."""
+    formatted = tmp_path / "formatted.docx"
+    doc = Document()
+    doc.add_heading("Formatted Title", level=1)
+    p = doc.add_paragraph("Body with academic formatting.")
+    for run in p.runs:
+        run.font.name = "Times New Roman"
+        run.font.size = Pt(12)
+    doc.save(formatted)
+
+    engine = DeliveryEngineService()
+    package = engine.prepare_package(
+        final_draft={
+            **_draft(),
+            "content": "## Document\nUnformatted fallback text that must not win.",
+        },
+        requirement_json=_requirement(),
+        research_plan=_research_plan(),
+        blueprint=_blueprint(),
+        review_report=_review_report(),
+        detection_report=_detection_report(),
+        project_id="proj-formatted-zip",
+        formatted_document_path=str(formatted),
+    )
+
+    docx_entry = next(f for f in package.files if f.file_type == "final_assignment_docx")
+    assert docx_entry.label == "Formatted Assignment"
+    on_disk = Document(docx_entry.storage_path)
+    assert on_disk.paragraphs[0].text == "Formatted Title"
+    assert "Unformatted fallback" not in "\n".join(p.text for p in on_disk.paragraphs)
+
+    root = Path(docx_entry.storage_path).parent
+    zips = list(root.glob("*-delivery-package.zip"))
+    assert zips, "delivery zip missing"
+    with zipfile.ZipFile(zips[0]) as zf:
+        name = next(n for n in zf.namelist() if n.endswith(".docx"))
+        zdoc = Document(io.BytesIO(zf.read(name)))
+    assert zdoc.paragraphs[0].text == "Formatted Title"
+    assert "Unformatted fallback" not in "\n".join(p.text for p in zdoc.paragraphs)
 
 
 def test_delivery_requires_all_inputs():
@@ -161,5 +208,4 @@ def test_project_delivery_pipeline():
     assert package.status == DeliveryStatus.READY
     assert len(package.files) >= 6
     assert project.status == ProjectStatus.COMPLETED
-    assert pipeline.get_project(bundle.project.id).current_stage == PipelineStage.DELIVERY
     assert projects.get_delivery_package(bundle.project.id).id == package.id

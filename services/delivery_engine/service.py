@@ -37,6 +37,7 @@ class DeliveryEngineService:
         revision_attempts: int = 0,
         humanization_attempts: int = 0,
         completion_time: str = "—",
+        formatted_document_path: str | None = None,
     ) -> DeliveryPackage:
         for key, value in {
             "final_draft": final_draft,
@@ -60,6 +61,7 @@ class DeliveryEngineService:
             revision_attempts=revision_attempts,
             humanization_attempts=humanization_attempts,
             completion_time=completion_time,
+            formatted_document_path=formatted_document_path,
         )
 
         placeholder = DeliveryPackage(

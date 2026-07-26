@@ -1,0 +1,23 @@
+{% set info_pages = [
+  ("account", "Account", "account_info"),
+  ("credits", "Credits", "credits"),
+  ("about", "About Us", "about"),
+  ("privacy", "Privacy Policy", "privacy"),
+  ("terms", "Terms and Conditions", "terms"),
+  ("disclaimer", "Disclaimer", "disclaimer"),
+  ("payment", "Payment Policy", "payment_policy"),
+  ("delivery", "Delivery Policy", "delivery_policy"),
+  ("refund", "Refund Policy", "refund_policy"),
+  ("contact", "Contact", "contact"),
+  ("faq", "FAQ", "faq"),
+  ("changelog", "Changelog", "changelog"),
+] %}
+<nav class="info-toc" aria-label="Site information">
+  {% for key, label, endpoint in info_pages %}
+  <a
+    href="{{ url_for(endpoint) }}"
+    class="info-toc-link{% if info_active == key %} is-active{% endif %}"
+    {% if info_active == key %}aria-current="page"{% endif %}
+  >{{ label }}</a>
+  {% endfor %}
+</nav>

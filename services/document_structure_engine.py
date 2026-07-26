@@ -112,6 +112,9 @@ def _short_line_heading_like(line: str) -> bool:
         return False
     if {w.lower() for w in words} & _BODY_STOPWORDS:
         return False
+    # Single unknown tokens (e.g. markdown leftover "Document") are not headings.
+    if len(words) == 1:
+        return normalize_paragraph_text(line) in COMMON_HEADINGS | REFS_HEADINGS
     return True
 
 
@@ -233,34 +236,12 @@ def split_embedded_heading_paragraph(text: str) -> tuple[str, str | None]:
     """
     When a paragraph combines a heading with body text, return (heading, body).
 
-    Handles newline-separated lines and humanizer space-merged paragraphs.
+    Delegates to :class:`HeadingDetector` — identify the heading first, never
+    absorb the first sentence into the heading title.
     """
-    stripped = text.strip()
-    if not stripped:
-        return stripped, None
+    from services.heading_detector import split_heading_from_paragraph
 
-    if "\n" in stripped:
-        first_line, rest = stripped.split("\n", 1)
-        first_line = first_line.strip()
-        rest = rest.strip()
-        if first_line and rest and (
-            is_heading_like(first_line)
-            or _JOURNAL_ENTRY_HEADING_RE.match(first_line)
-            or _BODY_PARAGRAPH_HEADING_RE.match(first_line)
-        ):
-            return first_line, rest
-
-    for splitter in (
-        lambda s: _split_labeled_heading_merged(s, _JOURNAL_ENTRY_PREFIX_RE),
-        lambda s: _split_labeled_heading_merged(s, _BODY_PARAGRAPH_PREFIX_RE),
-        _split_references_merged,
-        _split_common_section_merged,
-    ):
-        heading, body = splitter(stripped)
-        if body is not None:
-            return heading, body
-
-    return stripped, None
+    return split_heading_from_paragraph(text)
 
 
 def is_references_heading(text: str) -> bool:
@@ -272,6 +253,10 @@ def is_heading_like(text: str) -> bool:
     """Heuristic: short standalone line that looks like a section heading."""
     t = text.strip()
     if not t:
+        return False
+    from services.heading_detector import DEFAULT_HEADING_DETECTOR
+
+    if DEFAULT_HEADING_DETECTOR.is_forbidden_heading(t):
         return False
     if (
         _JOURNAL_ENTRY_HEADING_RE.match(t)
@@ -308,13 +293,24 @@ def detect_heading_level(
     if not auto_detect:
         return 0
 
+    from services.heading_detector import DEFAULT_HEADING_DETECTOR
+
     stripped = text.strip()
     if not stripped:
         return 0
+    if DEFAULT_HEADING_DETECTOR.is_forbidden_heading(stripped):
+        return 0
+
+    # Embedded heading+body → level of the heading portion only.
+    split = DEFAULT_HEADING_DETECTOR.split_embedded(stripped)
+    if split is not None and split.body:
+        return split.level
 
     first_line = stripped.split("\n", 1)[0].strip()
     has_embedded_body = "\n" in stripped and bool(stripped.split("\n", 1)[1].strip())
     check = first_line if has_embedded_body else stripped
+    if DEFAULT_HEADING_DETECTOR.is_forbidden_heading(check):
+        return 0
 
     if _JOURNAL_ENTRY_HEADING_RE.match(check) or _SECTION_LABEL_HEADING_RE.match(check):
         return 2
@@ -848,14 +844,26 @@ def _infer_document_type(paragraphs: list[str], hint: str | None) -> tuple[str, 
 def _looks_like_title(paragraph: str) -> bool:
     text = paragraph.strip().rstrip(".")
     words = text.split()
-    if not 3 <= len(words) <= 22:
+    if not 2 <= len(words) <= 40:
+        return False
+    if re.match(
+        r"^(?:Journal\s+Entry|Body\s+Paragraph|Introduction|Conclusion|Discussion|"
+        r"References|Reflection|Abstract|Methodology|Methods|Results)\b",
+        text,
+        re.I,
+    ):
         return False
     if len(_IN_TEXT_CITATION.findall(paragraph)) >= 2:
         return False
-    if _word_count(text) > 30:
+    # Multi-sentence body prose is not a title.
+    if ". " in text:
         return False
     if words[0] and words[0][0].islower():
         return False
+    # Ignore quoted spans when judging Title Case (article titles inside quotes).
+    unquoted = re.sub(r'["“”].*?["“”]', " ", text)
+    unquoted = re.sub(r"['‘’].*?['‘’]", " ", unquoted)
+    check_words = [w for w in unquoted.split() if w] or words
     title_stop_words = {
         "a",
         "an",
@@ -871,13 +879,21 @@ def _looks_like_title(paragraph: str) -> bool:
         "the",
         "to",
         "with",
+        "into",
+        "than",
+        "they",
+        "can",
+        "more",
     }
     lowercase_content = sum(
         1
-        for w in words[1:]
-        if w and w[0].islower() and w.lower() not in title_stop_words
+        for w in check_words[1:]
+        if w and w[0].islower() and w.lower().strip(".,;:\"'“”‘’") not in title_stop_words
     )
-    if lowercase_content >= 2:
+    # Short titles: mostly Title Case. Longer titles may include a descriptive phrase.
+    if len(check_words) <= 8 and lowercase_content >= 2:
+        return False
+    if len(check_words) > 8 and lowercase_content > max(3, len(check_words) // 2):
         return False
     return True
 

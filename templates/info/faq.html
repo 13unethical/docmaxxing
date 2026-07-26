@@ -1,0 +1,31 @@
+{% extends "info/base.html" %}
+{% set info_active = "faq" %}
+{% set page_title = "FAQ" %}
+{% set page_lede = "Common questions about DocMaxxing tools, credits, and Assignment delivery." %}
+{% block info_body %}
+<h2>Getting started</h2>
+<p><strong>Do I need an account?</strong> You can try Format as a guest for many flows, but buying credits, saving Assignment progress, and paid Workspace actions require Sign up.</p>
+<p><strong>Where do I buy credits?</strong> Read the <a href="{{ url_for('credits') }}">Credits</a> guide, then open <a href="{{ url_for('pricing') }}">Buy credits</a>. Guests are asked to register before checkout.</p>
+<p><strong>What are welcome credits?</strong> New accounts receive a welcome bonus so you can try paid Workspace actions before purchasing.</p>
+
+<h2>Format</h2>
+<p><strong>What files can I upload?</strong> Briefs and text as paste or DOC/PDF/TXT/images (as shown on the Format page).</p>
+<p><strong>Which styles are supported?</strong> Harvard, APA, MLA presets plus custom font, size, spacing, margins, cover page, references, and citations.</p>
+
+<h2>Humanizer</h2>
+<p><strong>How does humanizing run?</strong> Assignment humanizing uses StealthWriter Legacy 5.1 in large batches (up to ~5,000 words), not tiny paragraph-by-paragraph API spam.</p>
+<p><strong>Why is AI score still high?</strong> Later revision / repair steps can rewrite prose. The pipeline re-humanizes after those steps; always re-check the final DOCX on your detector of choice.</p>
+
+<h2>Assignment</h2>
+<p><strong>What is the pipeline?</strong> Upload brief → price → pay → research → blueprint → write sections → citations → humanize → format → review/revision → validation → AI detection → delivery ZIP.</p>
+<p><strong>Word count rules?</strong> Targets use a ±10% band (example: 1200 → 1080–1320). Overages are trimmed (including Gemini smart-trim when needed).</p>
+<p><strong>Download says ready but nothing downloads?</strong> Use Download again — packaging rebuilds the ZIP. Hard-refresh if the UI was stale.</p>
+
+<h2>Turnitin &amp; detection</h2>
+<p><strong>Is this official Turnitin?</strong> We provide Turnitin-style report workflows through configured providers. Institutional Turnitin portals can still differ.</p>
+<p><strong>Cost?</strong> Similarity check is priced in credits (see Credits page; typically 300 credits per check).</p>
+
+<h2>Billing</h2>
+<p><strong>Who charges my card?</strong> Paddle is the payment processor / merchant of record.</p>
+<p><strong>Refunds?</strong> See <a href="{{ url_for('refund_policy') }}">Refund Policy</a>.</p>
+{% endblock %}

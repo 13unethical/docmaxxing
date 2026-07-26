@@ -53,27 +53,39 @@ class LLMSectionWriter(SectionWriter):
         prompt = _build_section_prompt(section=section, payload=payload, revision=revision)
         result = _generate_with_claude(prompt=prompt, claude_key=claude_key)
         target = int(section.estimated_words or result.get("target_words") or 0)
-        if _needs_expansion(str(result.get("draft") or ""), target):
+        # Hard word budget: expand until within ±10% (or max attempts).
+        from services.assignment_spec import needs_expansion, section_bounds
+
+        max_expand_passes = 3
+        for _ in range(max_expand_passes):
+            draft_text = str(result.get("draft") or "")
+            if not needs_expansion(_draft_word_count(draft_text), target):
+                break
             expand_prompt = _build_expansion_prompt(
                 section=section,
                 payload=payload,
-                short_draft=str(result.get("draft") or ""),
+                short_draft=draft_text,
             )
             expanded = _generate_with_claude(prompt=expand_prompt, claude_key=claude_key)
             warnings = list(expanded.get("warnings") or [])
             warnings.append(
-                f"Expanded short draft from {_draft_word_count(str(result.get('draft') or ''))} "
-                f"toward {target} words"
+                f"Expanded short draft from {_draft_word_count(draft_text)} "
+                f"toward {target} words (min {section_bounds(target)[0]})"
             )
             expanded["warnings"] = warnings
-            if _draft_word_count(str(expanded.get("draft") or "")) >= _draft_word_count(
-                str(result.get("draft") or "")
-            ):
+            if _draft_word_count(str(expanded.get("draft") or "")) > _draft_word_count(draft_text):
                 result = expanded
             else:
                 result["warnings"] = list(result.get("warnings") or []) + [
-                    "Expansion pass did not increase length; kept original draft"
+                    "Expansion pass did not increase length; kept previous draft"
                 ]
+                break
+        final_words = _draft_word_count(str(result.get("draft") or ""))
+        if needs_expansion(final_words, target):
+            result["warnings"] = list(result.get("warnings") or []) + [
+                f"HARD_WORD_BUDGET_FAIL: section has {final_words} words; "
+                f"required min {section_bounds(target)[0]} of target {target}"
+            ]
         return result
 
 
@@ -147,7 +159,37 @@ def _generate_with_claude(*, prompt: str, claude_key: str) -> dict[str, Any]:
 
 
 def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput, revision: bool) -> str:
+    from services.assignment_spec import build_assignment_spec
+
     blueprint_section = _blueprint_section(payload.blueprint, section.id)
+    try:
+        spec = build_assignment_spec(payload.requirement_json, project_id=payload.project_id)
+        grade_contract = {
+            "optimize_for": "maximum predicted grade against uploaded rubric",
+            "learning_outcomes": spec.learning_outcomes,
+            "rubric_criteria": [c.to_dict() for c in spec.rubric_criteria],
+            "assessment_weights": spec.assessment_weights,
+            "mandatory_content_rules": spec.mandatory_content_rules,
+            "required_lecture_seminar_refs": spec.required_lecture_seminar_refs,
+            "required_evidence": spec.required_evidence,
+            "citation_requirements": spec.citation_requirements,
+            "mandatory_comparisons": spec.mandatory_comparisons,
+            "mandatory_reflections": spec.mandatory_reflections,
+            "forbidden_content": spec.forbidden_content,
+            "section_linked_criteria": (
+                spec.section_by_title(section.title).linked_criteria
+                if spec.section_by_title(section.title)
+                else []
+            ),
+            "min_rubric_coverage": spec.min_rubric_coverage,
+        }
+    except Exception:  # noqa: BLE001
+        grade_contract = {
+            "optimize_for": "maximum predicted grade against uploaded rubric",
+            "rubric": payload.requirement_json.get("rubric") or [],
+            "learning_outcomes": payload.requirement_json.get("learning_outcomes") or [],
+        }
+
     blueprint_guard = {
         "section_id": section.id,
         "title": section.title,
@@ -156,26 +198,36 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "blueprint_section": blueprint_section,
         "research_plan": payload.research_plan,
         "requirement_json": payload.requirement_json,
+        "assignment_spec_grade_contract": grade_contract,
         "revision": revision,
     }
     global_word_count = payload.requirement_json.get("word_count") or payload.blueprint.get("total_target_words")
     return (
-        "You are an academic section writer.\n"
+        "You are an academic section writer optimizing for the UPLOADED GRADING RUBRIC.\n"
         "STRICT RULES:\n"
         "1) Use ONLY the provided blueprint section structure and purpose.\n"
         "2) Do not invent new document structure.\n"
-        "3) Write only this one section draft.\n"
-        "4) Return ONE strict JSON object only. No markdown. No code fences. No commentary.\n"
-        "5) Required keys: title, purpose, target_words, draft, citations_used, warnings, generation_time, model_used.\n"
-        "6) The draft field must be a single JSON string with escaped quotes (\\\") and \\n for line breaks.\n"
-        f"7) Hard word budget: this section must be about {section.estimated_words} words "
+        "3) Write only this one section draft — body prose only.\n"
+        "4) Do NOT invent other document sections. Do NOT write a full essay.\n"
+        "5) Do NOT include markdown headings in the draft field "
+        "(no '#', no '## Introduction', etc.). The pipeline adds the section heading.\n"
+        "6) Return ONE strict JSON object only. No markdown. No code fences. No commentary.\n"
+        "7) Required keys: title, purpose, target_words, draft, citations_used, warnings, generation_time, model_used.\n"
+        "8) The draft field must be a single JSON string with escaped quotes (\\\") and \\n for line breaks.\n"
+        f"9) Hard word budget: this section must be about {section.estimated_words} words "
         f"(stay between {max(40, int(section.estimated_words * 0.9))} and "
-        f"{int(section.estimated_words * 1.1) + 5} words), "
+        f"{max(int(section.estimated_words * 0.9), int(round(section.estimated_words * 1.1)))} words), "
         f"and the full assignment target is {global_word_count or 'the provided blueprint total'} words. "
-        "Do not write a short stub — meet the minimum.\n"
-        "8) citations_used must be a list of citation placeholders like [Author, Year] used in the draft.\n"
-        "9) warnings should flag any requirement conflict or missing input.\n"
-        "10) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n\n"
+        "Do not write a short stub — meet the minimum. Do not exceed the maximum.\n"
+        "10) citations_used must be a list of citation placeholders like [Author, Year] used in the draft.\n"
+        "11) GRADE-DRIVEN WRITING: explicitly satisfy linked rubric criteria and learning outcomes "
+        "in assignment_spec_grade_contract. Aim for top-band descriptors. "
+        "If lecture/seminar references are required, include at least one concrete lecture or seminar reference. "
+        "If this is a reflection section, connect materials to personal major choice / decision-making. "
+        "If comparison is mandatory for this section, compare two concepts across fields.\n"
+        "12) Never include forbidden content listed in the grade contract.\n"
+        "13) warnings should flag any requirement/rubric conflict or missing input.\n"
+        "14) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n\n"
         f"INPUT:\n{json.dumps(blueprint_guard, ensure_ascii=False)}"
     )
 
@@ -325,14 +377,17 @@ def _normalize_section_result(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _limit_draft_words(draft: str, target_words: int) -> tuple[str, str | None]:
+    """Clamp section length to AssignmentSpec ±10% band (hard upper bound)."""
     if target_words <= 0:
         return draft, None
+    from services.assignment_spec import section_bounds
+
+    _lo, hi = section_bounds(target_words)
     words = draft.split()
-    max_words = max(target_words, int(target_words * 1.1) + 5)
-    if len(words) <= max_words:
+    if len(words) <= hi:
         return draft, None
-    trimmed_words = words[:max_words]
+    trimmed_words = words[:hi]
     trimmed = " ".join(trimmed_words).rstrip(" ,;:")
     if trimmed and trimmed[-1] not in ".!?":
         trimmed += "."
-    return trimmed, f"Trimmed section from {len(words)} to {len(trimmed_words)} words to respect assignment limit"
+    return trimmed, f"Trimmed section from {len(words)} to {len(trimmed_words)} words to respect ±10% budget"
