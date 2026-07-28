@@ -109,6 +109,14 @@ from services.economy.paddle_gateway import (
     paddle_environment,
     verify_paddle_signature,
 )
+from services.economy.cryptomus_gateway import (
+    CryptomusGatewayError,
+    CryptomusSignatureError,
+    create_invoice as cryptomus_create_invoice,
+    cryptomus_configured,
+    handle_webhook as cryptomus_handle_webhook,
+    parse_webhook_payload as cryptomus_parse_webhook_payload,
+)
 from services.economy.pricing import USD_TO_COINS
 from services.economy.usage import (
     FEATURE_ASSIGNMENT,
@@ -952,6 +960,10 @@ def api_economy_packages():
             "paddle_configured": paddle_configured(),
             "paddle_environment": paddle_environment(),
             "client_token": paddle_client_token() or None,
+            "cryptomus_configured": cryptomus_configured(),
+            "payment_provider": "cryptomus" if cryptomus_configured() else (
+                "paddle" if paddle_configured() else None
+            ),
         }
     )
 
@@ -1011,6 +1023,79 @@ def api_paddle_webhook():
         # 500 so Paddle retries; idempotency protects double-credit on success path.
         return jsonify({"error": str(exc)}), 500
 
+    return jsonify({"ok": True, **result}), 200
+
+
+@app.post("/api/payments/create")
+@economy_auth.login_required
+def api_payments_create():
+    """Create a Cryptomus invoice for a credit package. Returns payment_url.
+
+    Only ``package`` (id) is accepted from the client. Amount and credits are
+    resolved exclusively from the server-side TOPUP catalog.
+    """
+    user = economy_auth.current_user()
+    payload = request.get_json(silent=True) or {}
+    # Ignore any client-supplied amount/credits/usd — never trusted.
+    package_id = str(payload.get("package") or payload.get("package_id") or "").strip()
+    if not package_id:
+        return jsonify({"error": "package is required"}), 400
+    if economy_package(package_id) is None:
+        return jsonify({"error": "Unknown package"}), 400
+    if not cryptomus_configured():
+        return (
+            jsonify(
+                {
+                    "error": "CRYPTOMUS_NOT_CONFIGURED",
+                    "message": "Cryptomus payments are not available right now.",
+                }
+            ),
+            503,
+        )
+    try:
+        invoice = cryptomus_create_invoice(
+            user_id=int(user["id"]),
+            package_id=package_id,
+        )
+    except CryptomusGatewayError as exc:
+        app.logger.warning("cryptomus create invoice failed: %s", exc)
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"success": True, **invoice})
+
+
+@app.post("/api/payments/cryptomus/webhook")
+def api_cryptomus_webhook():
+    """Cryptomus payment webhook — signature verified, fulfillment idempotent.
+
+    Reads raw body first (official PHP: file_get_contents('php://input')).
+    """
+    raw = request.get_data(cache=True, as_text=False)
+    try:
+        payload = cryptomus_parse_webhook_payload(raw)
+    except CryptomusGatewayError:
+        return jsonify({"error": "invalid_json"}), 400
+
+    # Prefer original client IP behind nginx (docs IP allowlist).
+    remote = (
+        (request.headers.get("X-Real-IP") or "").strip()
+        or (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        or request.remote_addr
+    )
+
+    try:
+        result = cryptomus_handle_webhook(payload, remote_addr=remote)
+    except CryptomusSignatureError as exc:
+        app.logger.warning("cryptomus webhook rejected: %s", exc)
+        return jsonify({"error": "invalid_signature"}), 400
+    except CryptomusGatewayError as exc:
+        app.logger.exception("cryptomus webhook fulfill failed: %s", exc)
+        msg = str(exc)
+        if "Unknown order_id" in msg:
+            # Signed but unknown — acknowledge so Cryptomus stops retrying forever.
+            return jsonify({"error": msg}), 200
+        return jsonify({"error": msg}), 500
+
+    # Cryptomus expects HTTP 200 on successful receipt.
     return jsonify({"ok": True, **result}), 200
 
 

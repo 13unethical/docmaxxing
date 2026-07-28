@@ -150,7 +150,8 @@ body {
   color: var(--text);
   background: var(--bg-dark);
   line-height: 1.55;
-  overflow-x: hidden;
+  /* clip avoids creating a scroll container that breaks position:sticky sidebars */
+  overflow-x: clip;
 }
 
 /* Headings follow theme text — not hardcoded black */

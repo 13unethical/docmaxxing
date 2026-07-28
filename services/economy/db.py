@@ -81,6 +81,27 @@ CREATE INDEX IF NOT EXISTS idx_paddle_purchases_user
 CREATE INDEX IF NOT EXISTS idx_paddle_purchases_status
     ON paddle_purchases(status);
 
+CREATE TABLE IF NOT EXISTS cryptomus_payments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    order_id        TEXT NOT NULL UNIQUE,
+    cryptomus_uuid  TEXT,
+    amount          REAL NOT NULL,
+    currency        TEXT NOT NULL DEFAULT 'USD',
+    credits         INTEGER NOT NULL,
+    package_id      TEXT,
+    status          TEXT NOT NULL DEFAULT 'Pending',
+    txid            TEXT,
+    paid_at         TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_cryptomus_payments_user
+    ON cryptomus_payments(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_cryptomus_payments_status
+    ON cryptomus_payments(status);
+
 CREATE TABLE IF NOT EXISTS usage_events (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -166,6 +187,37 @@ def _migrate_paddle_purchases(conn: sqlite3.Connection) -> None:
             pass
 
 
+def _migrate_cryptomus_payments(conn: sqlite3.Connection) -> None:
+    """Ensure cryptomus_payments exists on older DBs (CREATE IF NOT EXISTS in schema)."""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cryptomus_payments'"
+    ).fetchone()
+    if exists:
+        return
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS cryptomus_payments (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            order_id        TEXT NOT NULL UNIQUE,
+            cryptomus_uuid  TEXT,
+            amount          REAL NOT NULL,
+            currency        TEXT NOT NULL DEFAULT 'USD',
+            credits         INTEGER NOT NULL,
+            package_id      TEXT,
+            status          TEXT NOT NULL DEFAULT 'Pending',
+            txid            TEXT,
+            paid_at         TEXT,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_cryptomus_payments_user
+            ON cryptomus_payments(user_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_cryptomus_payments_status
+            ON cryptomus_payments(status);
+        """
+    )
+
+
 def init_db() -> None:
     """Create tables/indexes if they do not exist. Safe to call repeatedly."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -183,6 +235,7 @@ def init_db() -> None:
         # 2) Add new ledger columns to existing DBs BEFORE indexes that need them.
         _migrate_transactions(conn)
         _migrate_paddle_purchases(conn)
+        _migrate_cryptomus_payments(conn)
         # 3) Indexes that depend on migrated columns.
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tx_user_type ON transactions(user_id, type)"
@@ -190,6 +243,13 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_paddle_purchases_country "
             "ON paddle_purchases(country)"
+        )
+        # Defense in depth: one Cryptomus ledger credit per order_id.
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_cryptomus_topup_ref "
+            "ON transactions(ref_id) "
+            "WHERE reference_type = 'Cryptomus' AND feature = 'topup' "
+            "AND ref_id IS NOT NULL"
         )
         conn.commit()
     finally:

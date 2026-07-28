@@ -765,8 +765,15 @@
 }
 
 .dash-card--sticky {
-  position: sticky;
-  top: 5.5rem;
+  /* Sticky handled by .assignment-side-col on desktop */
+  position: relative;
+  top: auto;
+}
+
+@media (max-width: 959px) {
+  .dash-card--sticky {
+    position: static;
+  }
 }
 
 .dash-card-title {
@@ -1980,12 +1987,11 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  position: sticky;
-  top: 5.5rem;
   align-self: start;
+  height: fit-content;
 }
 
-/* Flex column cards: CTA sticky-footer alignment */
+/* Flex column cards */
 [data-assignment-page] [data-asg-upload-card],
 [data-assignment-page] [data-asg-summary-card] {
   display: flex;
@@ -1993,22 +1999,42 @@
 }
 
 @media (min-width: 960px) {
-  /* Absorb extra column height when the summary card is taller */
-  [data-assignment-page] [data-asg-upload-card] {
-    flex: 1 1 auto;
+  .assignment-main-col {
+    grid-column: 1;
+    grid-row: 1;
   }
 
-  /* Fixed content height — do not stretch with the main column */
+  /* Pin Project Summary to the top of the viewport while the left column grows/scrolls */
+  .assignment-side-col {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    top: 5.5rem;
+    align-self: start;
+    height: fit-content;
+    max-height: calc(100vh - 6.5rem);
+    overflow-y: auto;
+    z-index: 15;
+  }
+
+  [data-assignment-page] [data-asg-upload-card],
   [data-assignment-page] [data-asg-summary-card] {
     flex: 0 0 auto;
     width: 100%;
-    position: static; /* column is sticky; card itself stays put */
+    margin-top: 0;
+  }
+
+  [data-assignment-page] [data-asg-summary-card] {
+    position: relative;
   }
 }
 
-[data-assignment-page] .assignment-card-cta,
+[data-assignment-page] .assignment-card-cta {
+  margin-top: 0.85rem;
+}
+
 [data-assignment-page] [data-asg-summary-card] > .assignment-pay-btn {
-  margin-top: auto;
+  margin-top: 0.85rem;
 }
 
 [data-assignment-page] .asg-analysis-status {
