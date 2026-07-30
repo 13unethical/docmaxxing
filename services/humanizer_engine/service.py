@@ -181,7 +181,11 @@ class HumanizerEngineService:
         source_draft_version: int = 1,
     ) -> HumanizedDraft:
         """Run StealthWriter/ZeroGPT over the full document again (post-revision safety net)."""
-        from services.humanizer_engine.heading_utils import normalize_markdown_headings
+        from services.humanizer_engine.heading_utils import (
+            join_body_and_references,
+            normalize_markdown_headings,
+            split_off_references,
+        )
 
         tone = str(
             requirement_json.get("writing_tone")
@@ -192,8 +196,21 @@ class HumanizerEngineService:
         if not normalized.strip():
             raise ValueError("No content to re-humanize")
 
-        humanized_text = self.humanizer.humanize(normalized, academic_tone=tone)
-        humanized_text = normalize_markdown_headings(humanized_text)
+        # Never send References/Bibliography through StealthWriter.
+        body, refs = split_off_references(normalized)
+        if body.strip():
+            humanized_body = self.humanizer.humanize(body, academic_tone=tone)
+            humanized_body = normalize_markdown_headings(humanized_body)
+        else:
+            humanized_body = ""
+        humanized_text = join_body_and_references(humanized_body, refs)
+        # Prefer body word count for brief limits (References excluded).
+        try:
+            from services.assignment_spec.validate import count_body_words
+
+            word_total = count_body_words(humanized_text)
+        except Exception:  # noqa: BLE001
+            word_total = count_words(humanized_text)
         now = utc_now()
         draft = HumanizedDraft(
             id=str(uuid.uuid4()),
@@ -203,7 +220,7 @@ class HumanizerEngineService:
             source_version=source_draft_version,
             title=title or "Humanized Assignment Draft",
             content=humanized_text,
-            total_words=count_words(humanized_text),
+            total_words=word_total,
             version=source_draft_version + 1,
             paragraphs_processed=1,
             average_ai_reduction=0.0,
@@ -265,7 +282,7 @@ class HumanizerEngineService:
         if paragraph.ai_score_before is None:
             paragraph.ai_score_before = self._quick_ai_score(source)
 
-        if _should_passthrough_humanization(source):
+        if _should_passthrough_humanization(source, section=paragraph.section):
             paragraph.humanized_text = source
             paragraph.ai_score_after = paragraph.ai_score_before
             paragraph.status = HumanizerParagraphStatus.VALIDATING
@@ -303,11 +320,22 @@ class HumanizerEngineService:
         return paragraph
 
 
-def _should_passthrough_humanization(text: str) -> bool:
-    """Skip only empty / tiny fragments — never skip prose because of markdown headings."""
+def _should_passthrough_humanization(text: str, *, section: str | None = None) -> bool:
+    """Skip empty fragments and entire References/Bibliography sections."""
+    from services.humanizer_engine.heading_utils import is_heading_only, is_references_section_title
+
+    if section and is_references_section_title(section):
+        return True
     stripped = (text or "").strip()
     if not stripped:
         return True
+    if is_heading_only(stripped) and is_references_section_title(stripped[3:].strip()):
+        return True
+    # Whole-batch references (heading + body) — never rewrite citation lines.
+    if stripped.lstrip().startswith("## "):
+        first_line = stripped.split("\n", 1)[0][3:].strip()
+        if is_references_section_title(first_line):
+            return True
     return len(stripped) < MIN_HUMANIZE_CHARS
 
 

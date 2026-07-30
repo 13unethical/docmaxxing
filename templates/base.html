@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}DocMaxxing{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260727-sticky-summary" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='tour.css') }}?v=20260730-tutorial1" />
     <script>
       (function () {
         try {
@@ -402,6 +403,8 @@
     <script src="{{ url_for('static', filename='common.js') }}"></script>
     <script src="{{ url_for('static', filename='auth-modal.js') }}"></script>
     <script src="{{ url_for('static', filename='support-chat.js') }}"></script>
+    <script src="{{ url_for('static', filename='tour-catalog.js') }}?v=20260730-tutorial1"></script>
+    <script src="{{ url_for('static', filename='tour.js') }}?v=20260730-tutorial1"></script>
     {% block scripts %}{% endblock %}
   </body>
 </html>

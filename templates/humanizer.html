@@ -10,17 +10,21 @@
 />
 <link rel="stylesheet" href="{{ url_for('static', filename='humanizer.css') }}" />
 
-<div class="hz" data-humanizer-page>
+<div class="hz" data-humanizer-page data-dm-tour-page="humanizer" data-tour="hz-page">
+  <div class="dm-tool-head">
+    <h1 class="hz-card-title" style="margin:0">Humanizer</h1>
+    {% include "_tutorial_btn.html" %}
+  </div>
   <div class="hz-workspace">
     <!-- ============================ INPUT ============================ -->
-    <section class="hz-card hz-card--input">
+    <section class="hz-card hz-card--input" data-tour="hz-input">
       <div class="hz-card-head">
         <div>
-          <h2 class="hz-card-title">Humanizer</h2>
+          <h2 class="hz-card-title">Your text</h2>
         </div>
       </div>
 
-      <div class="hz-source-row">
+      <div class="hz-source-row" data-tour="hz-source">
         <div class="hz-segment" role="tablist" data-hz-segment>
           <span class="hz-segment-thumb" aria-hidden="true"></span>
           <button
@@ -72,7 +76,7 @@
     </section>
 
     <!-- ============================ ACTION ============================ -->
-    <div class="hz-action">
+    <div class="hz-action" data-tour="hz-run">
       <button type="button" class="hz-run" data-hz-run>
         <svg class="hz-run-icon" data-hz-run-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
         <svg class="hz-run-spinner" data-hz-run-spinner viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden>
@@ -93,7 +97,7 @@
         </div>
       </div>
 
-      <section class="hz-card hz-card--result" data-hz-result hidden>
+      <section class="hz-card hz-card--result" data-hz-result data-tour="hz-result" hidden>
         <div class="hz-card-head">
           <div class="hz-result-title-row">
             <svg class="hz-result-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>

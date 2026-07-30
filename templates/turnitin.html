@@ -2,13 +2,17 @@
 {% set tools_active = 'turnitin' %}
 {% block title %}Turnitin Similarity Check — DocMaxxing{% endblock %}
 {% block tools_content %}
-<div class="tt-page" data-turnitin-page>
-  <section class="tt-card tt-reports-card" aria-label="My Reports">
+<div class="tt-page" data-turnitin-page data-dm-tour-page="turnitin" data-tour="tt-page">
+  <div class="dm-tool-head">
+    <h1 class="tt-page-title" style="margin:0;font-size:1.15rem;font-weight:700">Turnitin</h1>
+    {% include "_tutorial_btn.html" %}
+  </div>
+  <section class="tt-card tt-reports-card" aria-label="My Reports" data-tour="tt-reports">
     <div class="tt-reports-top">
       <div class="tt-reports-head">
         <div class="tt-submit-panel" aria-label="Submit document">
           <div class="tt-submit-toolbar">
-            <div class="tt-options-row">
+            <div class="tt-options-row" data-tour="tt-options">
               <div class="tt-option tt-option--inline">
                 <div class="tt-option-text">
                   <span class="tt-option-label">Exclude Bibliography</span>
@@ -31,7 +35,7 @@
               </div>
             </div>
 
-            <div class="tt-submit-actions">
+            <div class="tt-submit-actions" data-tour="tt-submit">
               <input
                 type="file"
                 class="tt-file-input"
@@ -60,7 +64,7 @@
             </div>
           </div>
 
-          <p class="tt-submit-status" data-tt-submit-status role="status" aria-live="polite"></p>
+          <p class="tt-submit-status" data-tt-submit-status data-tour="tt-status" role="status" aria-live="polite"></p>
         </div>
       </div>
     </div>

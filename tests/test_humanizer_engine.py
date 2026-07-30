@@ -87,7 +87,56 @@ def test_group_paragraphs_into_batches_merges_across_sections():
     assert len(batches) == 1
     assert "## Introduction" in batches[0].original_text
     assert "Short line." in batches[0].original_text
-    assert "## Body" in batches[0].original_text
+
+
+def test_references_section_is_batched_separately_and_passthrough():
+    from services.humanizer_engine.paragraph_parser import group_paragraphs_into_batches, split_draft_into_paragraphs
+    from services.humanizer_engine.service import _should_passthrough_humanization
+
+    content = (
+        "## Introduction\n\n"
+        + " ".join(["body"] * 80)
+        + "\n\n## References\n\nSmith, J. (2020). Title. Journal.\n\nJones, A. (2021). Other. Book."
+    )
+    batches = split_draft_into_paragraphs(content)
+    assert len(batches) >= 2
+    ref_batches = [b for b in batches if "References" in (b.section or "") or "References" in b.original_text]
+    assert ref_batches
+    for batch in ref_batches:
+        assert _should_passthrough_humanization(batch.original_text, section=batch.section)
+
+
+def test_fit_content_to_word_budget_clamps_without_raising(monkeypatch):
+    from services.assignment_spec import build_assignment_spec
+    from services.assignment_spec.validate import count_body_words
+    from services.writer_engine.gemini_trim import fit_content_to_word_budget
+
+    spec = build_assignment_spec(
+        {
+            "title": "Essay",
+            "word_count": 200,
+            "required_sections": ["Introduction", "Body", "References"],
+            "section_word_budgets": {"Introduction": 50, "Body": 150},
+        }
+    )
+    monkeypatch.setattr(
+        "services.assignment_llm.assignment_llm_configured",
+        lambda stage=None: False,
+    )
+    bloated = (
+        "## Introduction\n\n"
+        + " ".join(["intro"] * 80)
+        + "\n\n## Body\n\n"
+        + " ".join(["body"] * 220)
+        + "\n\n## References\n\n"
+        + " ".join(["Smith", "2020", "Journal"] * 40)
+    )
+    assert count_body_words(bloated) > spec.max_total_words
+    fitted, meta = fit_content_to_word_budget(bloated, spec=spec)
+    assert meta.get("trimmed") is True
+    assert count_body_words(fitted) <= spec.max_total_words
+    assert "## References" in fitted
+    assert "Smith" in fitted
 
 
 def test_humanizer_does_not_skip_batched_draft_starting_with_heading():

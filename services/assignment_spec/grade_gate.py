@@ -10,6 +10,7 @@ from services.assignment_spec.models import AssignmentSpec
 from services.assignment_spec.rubric_coverage import RubricCoverageReport, analyze_rubric_coverage
 from services.assignment_spec.validate import (
     SpecValidationResult,
+    count_body_words,
     count_words,
     parse_markdown_sections,
     render_structured_markdown,
@@ -276,7 +277,7 @@ def apply_repairs(
                 changed = True
 
     # Content-adding repairs can push totals over band — clamp sections last.
-    if count_words(render_structured_markdown(sections) if sections else content) > spec.max_total_words:
+    if count_body_words(render_structured_markdown(sections) if sections else content) > spec.max_total_words:
         for section_spec in spec.writable_sections:
             section = by_title.get(section_spec.title.lower())
             if not section or not section_spec.target_words:

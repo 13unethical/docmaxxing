@@ -1282,6 +1282,10 @@ class ProjectService:
         title = bundle.project.title or bundle.requirement.title or "Humanized Assignment Draft"
         humanized = self.humanizer.merge_humanized_draft(session.id, title=title)
 
+        # If StealthWriter inflated length, trim body only (keep References intact).
+        # Soft: never fail the pipeline — always continue with best-effort budget fit.
+        humanized = self._fit_humanized_word_budget(project_id, humanized)
+
         self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.HUMANIZATION, force=True)
         self._persist_humanizer_session(project_id, session)
@@ -1296,12 +1300,50 @@ class ProjectService:
                     "version": saved.version,
                     "paragraphs_processed": saved.paragraphs_processed,
                     "average_ai_reduction": saved.average_ai_reduction,
+                    "total_words": saved.total_words,
                 },
                 artifacts={"humanized_draft": saved.to_dict()},
             ),
         )
         self._sync_pipeline_state(project_id)
         return saved
+
+    def _fit_humanized_word_budget(self, project_id: str, humanized: HumanizedDraft) -> HumanizedDraft:
+        """Post-humanize body trim — preserve grade first; never raises / never blocks delivery."""
+        try:
+            from services.assignment_spec import build_assignment_spec
+            from services.assignment_spec.validate import count_body_words
+            from services.writer_engine.gemini_trim import fit_content_to_word_budget
+
+            bundle = self.store.require_bundle(project_id)
+            req = bundle.requirement.to_dict()
+            spec = build_assignment_spec(req, project_id=project_id)
+            before = count_body_words(humanized.content or "")
+            fitted, meta = fit_content_to_word_budget(humanized.content or "", spec=spec)
+            if not meta.get("trimmed"):
+                humanized.total_words = before
+                return humanized
+            humanized.content = fitted
+            humanized.total_words = int(meta.get("body_words") or count_body_words(fitted))
+            trace(
+                "humanizer.word_budget_trim",
+                project_id=project_id,
+                method=meta.get("method"),
+                before_body_words=before,
+                after_body_words=humanized.total_words,
+                target=spec.total_word_target,
+                max_words=spec.max_total_words,
+            )
+        except Exception as exc:  # noqa: BLE001
+            try:
+                trace(
+                    "humanizer.word_budget_trim_skipped",
+                    project_id=project_id,
+                    error=str(exc),
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        return humanized
 
     def get_humanizer_session(self, project_id: str):
         return self._load_humanizer_session(project_id)
@@ -1527,6 +1569,7 @@ class ProjectService:
             source_draft_id=source_id,
             source_draft_version=source_ver,
         )
+        fresh = self._fit_humanized_word_budget(project_id, fresh)
         saved = self._persist_humanized_draft(project_id, fresh)
         project = self.store.require_project(project_id)
         formatted = project.artifacts.get("formatted_document")

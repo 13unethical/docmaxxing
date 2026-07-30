@@ -13,6 +13,7 @@ from services.assignment_llm import (
     assignment_llm_configured,
 )
 from services.assignment_pipeline.models import utc_now
+from services.assignment_spec.validate import count_body_words
 from services.citation_service import CitationService, CrossrefProvider
 from services.writer_engine.models import count_words
 
@@ -123,7 +124,9 @@ class AssignmentCitationEngine:
         )
         updated_draft = dict(draft)
         updated_draft["content"] = _apply_references_section(content, references, style=style)
-        updated_draft["total_words"] = count_words(str(updated_draft["content"]))
+        # Brief word limits exclude bibliography; keep total_words as body count.
+        updated_draft["total_words"] = count_body_words(str(updated_draft["content"]))
+        updated_draft["document_words"] = count_words(str(updated_draft["content"]))
         updated_draft["version"] = int(draft.get("version") or 1) + 1
         updated_draft["id"] = str(uuid.uuid4())
         updated_draft["created_at"] = utc_now().isoformat()

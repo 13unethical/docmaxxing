@@ -1,8 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Check — DocMaxxing{% endblock %}
 {% block content %}
+      <div class="check-page" data-dm-tour-page="check" data-tour="check-page">
+      <div class="dm-tool-head">
+        <h1 class="card-title" style="margin:0">Academic Check</h1>
+        {% include "_tutorial_btn.html" %}
+      </div>
       <div class="check-input-grid">
-        <section class="card check-card" aria-labelledby="check-req-label">
+        <section class="card check-card" aria-labelledby="check-req-label" data-tour="check-brief">
           <h2 class="card-title" id="check-req-label">1. Requirements</h2>
           <label class="field">
             <span class="label">Assignment brief / rubric</span>
@@ -22,7 +27,7 @@
           </label>
         </section>
 
-        <section class="card check-card" aria-labelledby="check-doc-label">
+        <section class="card check-card" aria-labelledby="check-doc-label" data-tour="check-doc">
           <h2 class="card-title" id="check-doc-label">2. Document Input</h2>
           <label class="field">
             <span class="label">Document type</span>
@@ -55,7 +60,7 @@
               accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
             />
           </label>
-          <button type="button" class="btn-check" id="check_document_btn">Check document</button>
+          <button type="button" class="btn-check" id="check_document_btn" data-tour="check-run">Check document</button>
           <div id="check_status" class="req-status" role="status"></div>
         </section>
       </div>
@@ -215,6 +220,7 @@
           <ol id="check_fix_first" class="check-next-list"></ol>
         </div>
       </section>
+      </div>
 {% endblock %}
 {% block scripts %}
     <script src="{{ url_for('static', filename='check.js') }}"></script>

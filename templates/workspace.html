@@ -17,7 +17,10 @@
       </div>
       <div class="ws-landing-actions">
         <span class="ws-coins-pill"><span data-ws-coins-landing>0</span> coins</span>
-        <button type="button" class="ws-btn ws-btn-ghost" data-ws-tutorial>Tutorial</button>
+        <button type="button" class="dm-tutorial-btn" data-ws-tutorial aria-label="Start tutorial">
+          <span class="dm-tutorial-btn-icon" aria-hidden="true">?</span>
+          <span>Tutorial</span>
+        </button>
         <a href="{{ url_for('index') }}" class="ws-btn ws-btn-ghost">← Dashboard</a>
       </div>
     </div>

@@ -8,8 +8,10 @@ from typing import Any, Callable
 from services.browser.providers.stealthwriter import DEFAULT_STEALTHWRITER_MODEL
 from services.humanizer_engine.constants import MIN_HUMANIZE_CHARS
 from services.humanizer_engine.heading_utils import (
+    join_body_and_references,
     protect_markdown_headings,
     restore_markdown_headings,
+    split_off_references,
 )
 from services.humanizer_engine.mock_humanizer import MockTextHumanizer
 from services.humanizer_engine.zerogpt_humanizer import split_text_by_word_limit
@@ -43,13 +45,19 @@ class StealthWriterTextHumanizer:
             return text.strip()
 
         # All prose goes through StealthWriter. Headings are temporarily protected
-        # so structure survives, then restored after humanization.
-        protected, headings = protect_markdown_headings(text)
+        # so structure survives, then restored after humanization. References never
+        # enter the provider — bibliography must stay verbatim.
+        body, refs = split_off_references(text)
+        if not body.strip():
+            return join_body_and_references(body, refs)
+
+        protected, headings = protect_markdown_headings(body)
         chunks = split_text_by_word_limit(protected, max_words=self.max_words)
         outputs: list[str] = []
         for chunk in chunks:
             outputs.append(self._humanize_chunk(chunk))
-        return restore_markdown_headings("\n\n".join(outputs), headings)
+        humanized_body = restore_markdown_headings("\n\n".join(outputs), headings)
+        return join_body_and_references(humanized_body, refs)
 
     def _humanize_chunk(self, chunk: str) -> str:
         fn = self._humanize_fn

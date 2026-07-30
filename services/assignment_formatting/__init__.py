@@ -13,7 +13,7 @@ from docx import Document
 from formatter.format_job import FormatJob
 from formatter.pipeline import format_document_full
 from services.assignment_pipeline.models import utc_now
-from services.writer_engine.models import count_words
+from services.assignment_spec.validate import count_body_words, count_words
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -237,7 +237,9 @@ class AssignmentFormatEngine:
             "path": str(path),
             "filename": filename,
             "style_id": job.format_style,
-            "word_count": int(draft.get("total_words") or count_words(content)),
+            "word_count": int(draft.get("total_words") or count_body_words(content)),
+            "body_word_count": int(draft.get("total_words") or count_body_words(content)),
+            "document_word_count": count_words(content),
             "profile_summary": {
                 "font_family": job.font_family,
                 "font_size_pt": job.font_size_pt,

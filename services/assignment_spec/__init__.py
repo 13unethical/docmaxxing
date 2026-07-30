@@ -23,6 +23,7 @@ from services.assignment_spec.rubric_coverage import (
 )
 from services.assignment_spec.validate import (
     SpecValidationResult,
+    count_body_words,
     count_words,
     needs_expansion,
     render_structured_markdown,
@@ -47,6 +48,7 @@ __all__ = [
     "analyze_rubric_coverage",
     "apply_repairs",
     "build_assignment_spec",
+    "count_body_words",
     "count_words",
     "needs_expansion",
     "render_structured_markdown",

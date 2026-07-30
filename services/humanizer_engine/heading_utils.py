@@ -79,3 +79,49 @@ def normalize_markdown_headings(text: str) -> str:
     normalized = re.sub(r"(?m)^(##\s+.+)\n(?!\n)", r"\1\n\n", normalized)
     normalized = re.sub(r"\n{3,}", "\n\n", normalized)
     return normalized.strip()
+
+
+def is_references_section_title(title: str) -> bool:
+    t = (title or "").strip().lower()
+    return t in {"references", "reference list", "bibliography", "works cited"} or t.startswith(
+        "reference"
+    )
+
+
+def split_off_references(content: str) -> tuple[str, str]:
+    """Split markdown into (body_without_refs, references_block). Refs stay untouched by humanize."""
+    text = (content or "").strip()
+    if not text:
+        return "", ""
+    pattern = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return text, ""
+
+    body_parts: list[str] = []
+    ref_parts: list[str] = []
+    if matches[0].start() > 0:
+        preamble = text[: matches[0].start()].strip()
+        if preamble:
+            body_parts.append(preamble)
+
+    for index, match in enumerate(matches):
+        title = match.group(1).strip()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        block = text[match.start() : end].strip()
+        if is_references_section_title(title):
+            if block:
+                ref_parts.append(block)
+        else:
+            if block:
+                body_parts.append(block)
+
+    body = normalize_markdown_headings("\n\n".join(body_parts))
+    refs = normalize_markdown_headings("\n\n".join(ref_parts))
+    return body, refs
+
+
+def join_body_and_references(body: str, references: str) -> str:
+    parts = [p for p in [(body or "").strip(), (references or "").strip()] if p]
+    return normalize_markdown_headings("\n\n".join(parts))

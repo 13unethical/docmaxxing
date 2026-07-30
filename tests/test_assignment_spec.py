@@ -75,6 +75,42 @@ def test_validate_rejects_short_total_and_missing_sections():
     assert any("too short" in b.lower() or "outside" in b.lower() for b in result.blocking_issues)
 
 
+def test_validate_excludes_references_from_word_budget():
+    """Brief '2000 words' means essay body — bibliography must not inflate the gate."""
+    from services.assignment_spec.validate import count_body_words, count_words
+
+    spec = build_assignment_spec(
+        {
+            "title": "Essay",
+            "assignment_type": "Essay",
+            "word_count": 2000,
+            "required_sections": ["Introduction", "Body", "Conclusion", "References"],
+            "section_word_budgets": {
+                "Introduction": 300,
+                "Body": 1400,
+                "Conclusion": 300,
+            },
+        }
+    )
+    # ~2000 body words + a fat references block that would push a naive total to ~2500.
+    intro = " ".join(["intro"] * 300)
+    body = " ".join(["body"] * 1400)
+    conclusion = " ".join(["end"] * 300)
+    refs = " ".join(["Smith", "2020", "Journal", "Article", "Title", "Extra", "Words"] * 80)
+    content = (
+        f"## Introduction\n\n{intro}\n\n"
+        f"## Body\n\n{body}\n\n"
+        f"## Conclusion\n\n{conclusion}\n\n"
+        f"## References\n\n{refs}\n"
+    )
+    assert count_words(content) > 2200
+    assert 1800 <= count_body_words(content) <= 2200
+    result = validate_draft_against_spec(content=content, spec=spec)
+    assert result.total_passed is True
+    assert result.reference_words > 0
+    assert result.total_words == count_body_words(content)
+
+
 def test_docx_from_markdown_peels_heading_from_body():
     """## Title\\nBody must not become one Heading 2 paragraph (bold leakage)."""
     doc = _docx_from_markdown(

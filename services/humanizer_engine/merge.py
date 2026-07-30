@@ -43,6 +43,12 @@ def merge_session_to_humanized_draft(session: HumanizerSession, *, title: str | 
     content = normalize_markdown_headings("\n\n".join(parts))
     draft_title = title or "Humanized Assignment Draft"
     source_version = session.source_draft_version
+    try:
+        from services.assignment_spec.validate import count_body_words
+
+        words = count_body_words(content)
+    except Exception:  # noqa: BLE001
+        words = count_words(content)
     return HumanizedDraft(
         id=str(uuid.uuid4()),
         project_id=session.project_id,
@@ -51,7 +57,7 @@ def merge_session_to_humanized_draft(session: HumanizerSession, *, title: str | 
         source_version=source_version,
         title=draft_title,
         content=content,
-        total_words=count_words(content),
+        total_words=words,
         version=source_version + 1,
         paragraphs_processed=session.paragraphs_processed,
         average_ai_reduction=session.average_ai_reduction,

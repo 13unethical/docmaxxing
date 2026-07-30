@@ -2,10 +2,14 @@
 {% set tools_active = 'assignment' %}
 {% block title %}Assignment — DocMaxxing{% endblock %}
 {% block tools_content %}
-<div class="assignment-grid" data-assignment-page>
+<div class="assignment-grid" data-assignment-page data-dm-tour-page="assignment" data-tour="asg-page">
   <section class="assignment-main-col">
+    <div class="dm-tool-head">
+      <h1 class="dash-card-title" style="margin:0">Assignment</h1>
+      {% include "_tutorial_btn.html" %}
+    </div>
     <div class="dash-card dash-card--premium" data-asg-upload-card>
-      <div class="assignment-upload-grid">
+      <div class="assignment-upload-grid" data-tour="asg-brief">
         <label class="assignment-drop">
           <input type="file" accept=".pdf,.docx" hidden data-asg-brief />
           <span class="assignment-drop-icon" aria-hidden="true">
@@ -43,6 +47,7 @@
         <ul class="assignment-files-list" data-asg-files></ul>
       </section>
 
+      <div data-tour="asg-deadline">
       <div class="assignment-field-row two">
         <label class="assignment-field">
           <span class="assignment-field-label">Deadline date</span>
@@ -64,8 +69,9 @@
           ></textarea>
         </label>
       </div>
+      </div>
 
-      <div class="assignment-card-cta">
+      <div class="assignment-card-cta" data-tour="asg-analyze">
         <div class="assignment-submit-row">
           <button type="button" class="assignment-submit-btn" data-asg-analyze disabled>Analyze &amp; get price</button>
         </div>
@@ -107,7 +113,7 @@
   </section>
 
   <aside class="assignment-side-col">
-    <div class="dash-card dash-card--sticky dash-card--premium" data-asg-summary-card>
+    <div class="dash-card dash-card--sticky dash-card--premium" data-asg-summary-card data-tour="asg-summary">
       <h2 class="dash-card-title">Project Summary</h2>
       <dl class="order-summary-list asg-project-summary-list">
         <div><dt>Words</dt><dd data-asg-summary-words>—</dd></div>
@@ -119,7 +125,7 @@
       <div class="asg-price-breakdown" data-asg-price-breakdown hidden></div>
       <p class="order-total"><span>Total</span><strong data-asg-summary-total>—</strong></p>
       <p class="asg-price-coins" data-asg-summary-coins hidden></p>
-      <button type="button" class="assignment-pay-btn" data-asg-continue disabled>Start Writing</button>
+      <button type="button" class="assignment-pay-btn" data-asg-continue data-tour="asg-start" disabled>Start Writing</button>
     </div>
   </aside>
 

@@ -1,11 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Academic Document Studio{% endblock %}
 {% block content %}
-      <div class="home-layout">
+      <div class="home-layout" data-dm-tour-page="format" data-tour="format-page">
+      <div class="dm-tool-head home-tool-head">
+        <h1 class="dm-visually-hidden">Format</h1>
+        {% include "_tutorial_btn.html" %}
+      </div>
       <div class="home-upload-zones" aria-label="Upload areas">
         <div class="home-doc-brief-row">
           <div class="home-column home-brief-column">
-            <section class="card home-zone-card home-brief-card home-input-card" aria-labelledby="brief-label">
+            <section class="card home-zone-card home-brief-card home-input-card" aria-labelledby="brief-label" data-tour="format-brief">
               <div class="home-unified-top" data-home-brief-card>
                 <div class="home-zone-head">
                   <h2 class="card-title" id="brief-label">Requirements</h2>
@@ -64,7 +68,7 @@
               </div>
             </section>
 
-            <details class="card settings-section settings-accordion home-accordion-card text-settings-card" aria-labelledby="text-settings">
+            <details class="card settings-section settings-accordion home-accordion-card text-settings-card" aria-labelledby="text-settings" data-tour="format-text">
               <summary class="settings-summary" id="text-settings">
                 <span class="settings-summary-main">
                   <svg class="settings-summary-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 5.5h10M9 5.5v13M15 5.5v13M8 18.5h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -256,7 +260,7 @@
           </div>
 
           <div class="home-column home-document-column">
-            <section class="card home-zone-card home-document-card home-input-card" aria-labelledby="document-label" data-home-doc-card>
+            <section class="card home-zone-card home-document-card home-input-card" aria-labelledby="document-label" data-home-doc-card data-tour="format-doc">
               <div class="home-unified-top">
                 <div class="home-zone-head">
                   <h2 class="card-title" id="document-label">Text</h2>
@@ -310,7 +314,7 @@
               </div>
             </section>
 
-            <details class="card settings-section settings-accordion home-accordion-card home-cover-card" aria-labelledby="cover-settings">
+            <details class="card settings-section settings-accordion home-accordion-card home-cover-card" aria-labelledby="cover-settings" data-tour="format-advanced">
               <summary class="settings-summary" id="cover-settings">
                 <span class="settings-summary-main">
                   <svg class="settings-summary-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 4.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5.5 19V6A1.5 1.5 0 0 1 7 4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 4.5V9h4.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.5 13h7M8.5 16h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -461,7 +465,7 @@
       </div>
 
       <div class="grid-main home-format-grid">
-        <div class="settings-stack home-format-actions">
+        <div class="settings-stack home-format-actions" data-tour="format-run">
           <button type="button" class="cta" id="format_btn">Format document</button>
           <p id="format_status" class="format-status status" role="status" aria-live="polite"></p>
           <div id="home_workspace_cta" class="home-workspace-cta is-hidden" aria-live="polite">

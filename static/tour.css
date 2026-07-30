@@ -1,0 +1,249 @@
+/* Shared Tutorial badge + guided tour (PlagDetect-style) */
+
+.dm-visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.dm-tutorial-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.28rem 0.7rem 0.28rem 0.45rem;
+  border: 1.5px solid #2563eb;
+  border-radius: 999px;
+  background: #fff;
+  color: #2563eb;
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dm-tutorial-btn:hover {
+  background: color-mix(in srgb, #2563eb 8%, #fff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, #2563eb 16%, transparent);
+}
+
+.dm-tutorial-btn:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.dm-tutorial-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 750;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.dm-tool-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  flex-wrap: wrap;
+  margin: 0 0 1rem;
+}
+
+.home-tool-head {
+  justify-content: flex-end;
+}
+
+.dm-tool-head .card-title,
+.dm-tool-head .hz-card-title,
+.dm-tool-head .dash-card-title,
+.dm-tool-head .tt-page-title {
+  margin: 0;
+}
+
+.dm-tour {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+
+.dm-tour[hidden] {
+  display: none !important;
+}
+
+.dm-tour-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  animation: dm-tour-fade 180ms ease;
+}
+
+.dm-tour-spot {
+  position: absolute;
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 3px #f59e0b,
+    0 0 0 9999px rgba(15, 23, 42, 0.5);
+  transition: all 240ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.dm-tour-spot[hidden] {
+  display: none !important;
+}
+
+.dm-tour-card {
+  position: absolute;
+  z-index: 2;
+  width: min(22rem, calc(100vw - 1.5rem));
+  background: #fff;
+  color: #0f172a;
+  border-radius: 14px;
+  padding: 1.05rem 1.15rem 0.95rem;
+  box-shadow: 0 22px 55px rgba(15, 23, 42, 0.32);
+  animation: dm-tour-pop 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: top 240ms ease, left 240ms ease;
+}
+
+.dm-tour-card.is-warn {
+  border-top: 3px solid #f59e0b;
+}
+
+.dm-tour-close {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.65rem;
+  border: none;
+  background: transparent;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0.15rem;
+}
+
+.dm-tour-close:hover {
+  color: #475569;
+}
+
+.dm-tour-title {
+  margin: 0 1.35rem 0.45rem 0;
+  font-size: 1.02rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.dm-tour-body {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+.dm-tour-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.dm-tour-progress {
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.dm-tour-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.dm-tour-btn {
+  appearance: none;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  border-radius: 0.55rem;
+  padding: 0.42rem 0.8rem;
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.dm-tour-btn:hover {
+  background: #f8fafc;
+}
+
+.dm-tour-btn--primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.dm-tour-btn--primary:hover {
+  background: #1d4ed8;
+}
+
+.dm-tour-btn[hidden] {
+  display: none !important;
+}
+
+@keyframes dm-tour-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dm-tour-pop {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+[data-theme="dark"] .dm-tutorial-btn {
+  background: transparent;
+}
+
+[data-theme="dark"] .dm-tour-card {
+  background: #0f172a;
+  color: #e2e8f0;
+  box-shadow: 0 22px 55px rgba(0, 0, 0, 0.55);
+}
+
+[data-theme="dark"] .dm-tour-title {
+  color: #f8fafc;
+}
+
+[data-theme="dark"] .dm-tour-body {
+  color: #94a3b8;
+}
+
+[data-theme="dark"] .dm-tour-btn {
+  background: #1e293b;
+  border-color: #334155;
+  color: #cbd5e1;
+}
+
+[data-theme="dark"] .dm-tour-btn--primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}

@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from services.humanizer_engine.constants import HUMANIZE_BATCH_WORDS, MIN_HUMANIZE_CHARS
+from services.humanizer_engine.heading_utils import is_references_section_title
 from services.humanizer_engine.models import HumanizerParagraph
 
 
@@ -26,6 +27,8 @@ def group_paragraphs_into_batches(
 
     Writing remains section-based. Humanizing must NOT call the provider once per
     short paragraph/section — pack content until the ~5000-word provider limit.
+
+    References / Bibliography are never mixed into body batches (pass-through later).
     """
     if not paragraphs:
         return []
@@ -34,14 +37,17 @@ def group_paragraphs_into_batches(
     buffer_parts: list[str] = []
     buffer_section = "Document"
     buffer_words = 0
+    buffer_is_refs = False
 
     def flush_buffer() -> None:
-        nonlocal buffer_parts, buffer_section, buffer_words
+        nonlocal buffer_parts, buffer_section, buffer_words, buffer_is_refs
         if not buffer_parts:
             return
         combined = "\n\n".join(buffer_parts).strip()
         buffer_parts = []
         buffer_words = 0
+        was_refs = buffer_is_refs
+        buffer_is_refs = False
         if not combined:
             return
         # Heading-only leftovers stay as pass-through units.
@@ -54,7 +60,13 @@ def group_paragraphs_into_batches(
                 )
             )
             return
-        if len(combined) < min_chars and batches and not batches[-1].original_text.strip().startswith("## "):
+        if (
+            not was_refs
+            and len(combined) < min_chars
+            and batches
+            and not batches[-1].original_text.strip().startswith("## ")
+            and not is_references_section_title(batches[-1].section or "")
+        ):
             previous = batches[-1]
             previous.original_text = f"{previous.original_text.rstrip()}\n\n{combined}"
             return
@@ -71,8 +83,16 @@ def group_paragraphs_into_batches(
         if not text:
             continue
 
+        section_name = paragraph.section or buffer_section
+        if text.startswith("## "):
+            section_name = text[3:].strip() or section_name
+        is_refs = is_references_section_title(section_name)
+
+        # Never pack References into the same StealthWriter call as essay body.
+        if buffer_parts and is_refs != buffer_is_refs:
+            flush_buffer()
+
         word_count = max(1, len(text.split()))
-        # If this single block alone exceeds the limit, flush then emit chunked pieces.
         if word_count > max_words:
             flush_buffer()
             words = text.split()
@@ -81,20 +101,23 @@ def group_paragraphs_into_batches(
                 batches.append(
                     HumanizerParagraph(
                         paragraph_id=_next_id(batches),
-                        section=paragraph.section or buffer_section,
+                        section=section_name,
                         original_text=chunk,
                     )
                 )
-            buffer_section = paragraph.section or buffer_section
+            buffer_section = section_name
+            buffer_is_refs = is_refs
             continue
 
         if buffer_parts and buffer_words + word_count > max_words:
             flush_buffer()
 
-        if text.startswith("## "):
-            buffer_section = text[3:].strip() or buffer_section
-        elif not buffer_parts:
-            buffer_section = paragraph.section or buffer_section
+        if not buffer_parts:
+            buffer_section = section_name
+            buffer_is_refs = is_refs
+        elif text.startswith("## "):
+            buffer_section = section_name
+            buffer_is_refs = is_refs
 
         buffer_parts.append(text)
         buffer_words += word_count

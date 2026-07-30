@@ -30,11 +30,17 @@ class SpecValidationResult:
     formatting_issues: list[str] = field(default_factory=list)
     blocking_issues: list[str] = field(default_factory=list)
     repairs: list[str] = field(default_factory=list)
+    reference_words: int = 0
+    document_words: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "passed": self.passed,
+            # Budget-relevant count (body only — References/Bibliography excluded).
             "total_words": self.total_words,
+            "body_words": self.total_words,
+            "reference_words": self.reference_words,
+            "document_words": self.document_words or (self.total_words + self.reference_words),
             "total_target": self.total_target,
             "total_passed": self.total_passed,
             "missing_sections": list(self.missing_sections),
@@ -57,6 +63,42 @@ class SpecValidationResult:
 
 def count_words(text: str) -> int:
     return len(re.findall(r"\b[\w']+\b", text or ""))
+
+
+def is_references_section_title(title: str) -> bool:
+    t = (title or "").strip().lower()
+    return t in {"references", "reference list", "bibliography", "works cited"} or t.startswith(
+        "reference"
+    )
+
+
+def count_body_words(content: str) -> int:
+    """Word count for assignment length limits — excludes References/Bibliography."""
+    sections = parse_markdown_sections(content or "")
+    if not sections:
+        return count_words(content or "")
+    body_parts: list[str] = []
+    for section in sections:
+        if is_references_section_title(section.get("title") or ""):
+            continue
+        title = (section.get("title") or "").strip()
+        body = (section.get("body") or "").strip()
+        if title and title not in {"Preamble", "Document"}:
+            body_parts.append(title)
+        if body:
+            body_parts.append(body)
+    if body_parts:
+        return count_words("\n\n".join(body_parts))
+    return count_words(content or "")
+
+
+def count_reference_words(content: str) -> int:
+    sections = parse_markdown_sections(content or "")
+    return sum(
+        count_words(s.get("body") or "")
+        for s in sections
+        if is_references_section_title(s.get("title") or "")
+    )
 
 
 def section_bounds(target: int, *, tolerance: float = WORD_TOLERANCE) -> tuple[int, int]:
@@ -113,7 +155,10 @@ def validate_draft_against_spec(
     """Deterministic pre-delivery validation. No LLM guessing."""
     sections = parse_markdown_sections(content or "")
     by_title = {s["title"].strip().lower(): s for s in sections}
-    total = count_words(content or "")
+    document_words = count_words(content or "")
+    reference_words = count_reference_words(content or "")
+    # Brief limits (e.g. "2000 words") apply to essay body, not the bibliography.
+    total = count_body_words(content or "")
     total_passed = words_within_tolerance(total, spec.total_word_target, tolerance=spec.word_tolerance)
 
     missing: list[str] = []
@@ -162,8 +207,9 @@ def validate_draft_against_spec(
 
     if not total_passed and spec.total_word_target > 0:
         blocking.append(
-            f"Total word count {total} outside ±{int(spec.word_tolerance * 100)}% of "
-            f"{spec.total_word_target} (allowed {spec.min_total_words}-{spec.max_total_words})"
+            f"Body word count {total} outside ±{int(spec.word_tolerance * 100)}% of "
+            f"{spec.total_word_target} (allowed {spec.min_total_words}-{spec.max_total_words}; "
+            f"References excluded, {reference_words} ref words)"
         )
         if total < spec.min_total_words:
             repairs.append("expand_total")
@@ -184,6 +230,8 @@ def validate_draft_against_spec(
         formatting_issues=formatting_issues,
         blocking_issues=blocking,
         repairs=repairs,
+        reference_words=reference_words,
+        document_words=document_words,
     )
 
 
@@ -213,8 +261,7 @@ def _is_cover(title: str) -> bool:
 
 
 def _is_references(title: str) -> bool:
-    t = title.strip().lower()
-    return t in {"references", "reference list", "bibliography", "works cited"} or t.startswith("reference")
+    return is_references_section_title(title)
 
 
 def render_structured_markdown(sections: list[dict[str, str]]) -> str:

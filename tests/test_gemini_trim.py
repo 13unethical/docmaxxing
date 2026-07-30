@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from services.assignment_spec import build_assignment_spec
-from services.assignment_spec.validate import count_words, render_structured_markdown
+from services.assignment_spec.validate import count_body_words, count_words, render_structured_markdown
 from services.writer_engine.gemini_trim import gemini_trim_markdown_to_budget
 
 
@@ -74,7 +74,7 @@ def test_gemini_trim_reduces_over_budget_draft(monkeypatch):
 
     trimmed = gemini_trim_markdown_to_budget(content, spec=spec)
     assert trimmed is not None
-    words = count_words(trimmed)
+    words = count_body_words(trimmed)
     assert words <= spec.max_total_words
     assert words >= spec.min_total_words
     assert "lecture" in trimmed.lower()
