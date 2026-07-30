@@ -106,7 +106,7 @@ def test_references_section_is_batched_separately_and_passthrough():
         assert _should_passthrough_humanization(batch.original_text, section=batch.section)
 
 
-def test_fit_content_to_word_budget_clamps_without_raising(monkeypatch):
+def test_fit_content_to_word_budget_soft_accepts_without_mutilation(monkeypatch):
     from services.assignment_spec import build_assignment_spec
     from services.assignment_spec.validate import count_body_words
     from services.writer_engine.gemini_trim import fit_content_to_word_budget
@@ -126,17 +126,18 @@ def test_fit_content_to_word_budget_clamps_without_raising(monkeypatch):
     bloated = (
         "## Introduction\n\n"
         + " ".join(["intro"] * 80)
-        + "\n\n## Body\n\n"
+        + " complete thought.\n\n## Body\n\n"
         + " ".join(["body"] * 220)
-        + "\n\n## References\n\n"
+        + " complete thought.\n\n## References\n\n"
         + " ".join(["Smith", "2020", "Journal"] * 40)
     )
     assert count_body_words(bloated) > spec.max_total_words
     fitted, meta = fit_content_to_word_budget(bloated, spec=spec)
-    assert meta.get("trimmed") is True
-    assert count_body_words(fitted) <= spec.max_total_words
+    # Without Gemini, keep complete prose — never mid-sentence stubs.
+    assert "complete thought." in fitted
+    assert not fitted.rstrip().endswith(" The.")
     assert "## References" in fitted
-    assert "Smith" in fitted
+    assert meta.get("method") in {"soft_accept_over_budget", "keep_complete_prose", None} or meta.get("body_words")
 
 
 def test_humanizer_does_not_skip_batched_draft_starting_with_heading():

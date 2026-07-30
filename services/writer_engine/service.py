@@ -207,7 +207,6 @@ class WriterEngineService:
         from services.assignment_spec import (
             build_assignment_spec,
             needs_expansion,
-            section_bounds,
             validate_draft_against_spec,
         )
 
@@ -216,7 +215,8 @@ class WriterEngineService:
         if incomplete:
             raise ValueError("All sections must be completed before merge")
 
-        # Auto-clamp each section into its ±10% band before merge (trim overages; flag shorts).
+        # Soft-check section lengths. NEVER hard-slice mid-sentence here —
+        # unfinished clauses destroy Structure / Clarity grades.
         short = []
         for section in session.sections:
             target = int(section.estimated_words or 0)
@@ -225,17 +225,6 @@ class WriterEngineService:
             actual = count_words(section.generated_text)
             if needs_expansion(actual, target):
                 short.append(f"{section.title}: {actual}/{target}")
-                continue
-            _lo, hi = section_bounds(target)
-            if actual > hi:
-                words = section.generated_text.split()
-                trimmed = " ".join(words[:hi]).rstrip(" ,;:")
-                if trimmed and trimmed[-1] not in ".!?":
-                    trimmed += "."
-                section.generated_text = trimmed
-                section.warnings = list(section.warnings) + [
-                    f"Auto-trimmed from {actual} to {count_words(trimmed)} words for ±10% budget"
-                ]
         if short:
             raise ValueError(
                 "Cannot merge: sections below hard word budget — "
@@ -249,51 +238,32 @@ class WriterEngineService:
             if session_target > 0:
                 spec.total_word_target = session_target
             result = validate_draft_against_spec(content=draft.content, spec=spec)
-            if spec.total_word_target and not result.total_passed:
-                # Final proportional trim across writable sections, then re-merge.
-                if result.total_words > spec.max_total_words:
-                    # Reserve words consumed by markdown ## headings in the merged draft.
-                    heading_overhead = sum(
-                        count_words(s.title) for s in session.sections if int(s.estimated_words or 0) > 0
-                    )
-                    # Small safety margin so rounding / tokenizer drift does not leave us 1–20 over.
-                    body_cap = max(1, spec.max_total_words - heading_overhead - 8)
-                    _clamp_session_to_total(session, body_cap)
+            if spec.total_word_target and not result.total_passed and result.total_words > spec.max_total_words:
+                # Gemini rewrite-condense first — never hard-slice mid-sentence.
+                from services.writer_engine.gemini_trim import (
+                    apply_trimmed_markdown_to_session,
+                    fit_content_to_word_budget,
+                    soft_max_body_words,
+                )
+
+                fitted, meta = fit_content_to_word_budget(draft.content, spec=spec)
+                if meta.get("trimmed") and apply_trimmed_markdown_to_session(session, fitted):
                     draft = merge_session_to_draft(session, title=title)
                     result = validate_draft_against_spec(content=draft.content, spec=spec)
+                elif meta.get("method") == "soft_accept_over_budget":
+                    # Accept slightly over rather than mutilate prose.
+                    result = validate_draft_against_spec(content=fitted, spec=spec)
+                    draft.content = fitted
+                    draft.total_words = int(meta.get("body_words") or result.total_words)
 
-                # If still over: Gemini deletes the minimum safe excess (logic/rubric-preserving).
-                if result.total_words > spec.max_total_words:
-                    from services.writer_engine.gemini_trim import (
-                        apply_trimmed_markdown_to_session,
-                        gemini_trim_markdown_to_budget,
-                    )
-
-                    trimmed = gemini_trim_markdown_to_budget(
-                        draft.content,
-                        spec=spec,
-                        current_words=result.total_words,
-                    )
-                    if trimmed and apply_trimmed_markdown_to_session(session, trimmed):
-                        draft = merge_session_to_draft(session, title=title)
-                        result = validate_draft_against_spec(content=draft.content, spec=spec)
-                        # One more hard clamp if Gemini landed just slightly over max.
-                        if result.total_words > spec.max_total_words:
-                            heading_overhead = sum(
-                                count_words(s.title)
-                                for s in session.sections
-                                if int(s.estimated_words or 0) > 0
-                            )
-                            body_cap = max(1, spec.max_total_words - heading_overhead - 4)
-                            _clamp_session_to_total(session, body_cap)
-                            draft = merge_session_to_draft(session, title=title)
-                            result = validate_draft_against_spec(content=draft.content, spec=spec)
-
-                if not result.total_passed:
+                if not result.total_passed and result.total_words > soft_max_body_words(spec):
+                    # Still far over and no safe condense — keep complete prose; do not raise.
+                    # Delivery / soft validation will flag; unfinished sentences are worse.
+                    pass
+                elif not result.total_passed and result.total_words < spec.min_total_words:
                     raise ValueError(
-                        f"Cannot merge: total words {result.total_words} outside "
-                        f"{spec.min_total_words}-{spec.max_total_words} "
-                        f"(target {spec.total_word_target})"
+                        f"Cannot merge: total words {result.total_words} below "
+                        f"{spec.min_total_words} (target {spec.total_word_target})"
                     )
         except ValueError:
             raise
@@ -406,31 +376,3 @@ def _estimate_remaining(sections: list[WriterSection]) -> str:
     minutes = max(5, sum(max(section.estimated_words, 120) for section in sections) // 45)
     return f"{minutes} minutes"
 
-
-def _clamp_session_to_total(session: WriterSession, max_total: int) -> None:
-    """Proportionally trim writable sections so merged body fits max_total words."""
-    writable = [s for s in session.sections if int(s.estimated_words or 0) > 0 and s.generated_text.strip()]
-    if not writable or max_total <= 0:
-        return
-    current = sum(count_words(s.generated_text) for s in writable)
-    if current <= max_total:
-        return
-    # Allocate by section targets, then trim each to its share.
-    target_sum = sum(int(s.estimated_words or 0) for s in writable) or current
-    remaining_budget = max_total
-    for index, section in enumerate(writable):
-        share = int(round(max_total * (int(section.estimated_words or 0) / target_sum)))
-        if index == len(writable) - 1:
-            share = remaining_budget
-        share = max(1, share)
-        remaining_budget = max(0, remaining_budget - share)
-        words = section.generated_text.split()
-        if len(words) <= share:
-            continue
-        trimmed = " ".join(words[:share]).rstrip(" ,;:")
-        if trimmed and trimmed[-1] not in ".!?":
-            trimmed += "."
-        section.generated_text = trimmed
-        section.warnings = list(section.warnings) + [
-            f"Auto-trimmed to fit total word budget (cap {max_total})"
-        ]

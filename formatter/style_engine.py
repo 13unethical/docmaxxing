@@ -162,7 +162,15 @@ def build_custom_profile(job) -> FormattingProfile:
         font=replace(base.references.entry.font, family=job.font_family, size_pt=job.font_size_pt),
         alignment="justify" if job.auto_justify_refs else align,
         line_spacing=job.line_spacing,
+        hanging_indent_inches=(
+            job.references_hanging_indent_inches
+            if getattr(job, "references_hanging_indent_inches", None) is not None
+            else base.references.entry.hanging_indent_inches
+        ),
     )
+    ref_heading = _heading(base.references.heading)
+    if getattr(job, "references_on_new_page", True):
+        ref_heading = replace(ref_heading, page_break_before=True)
 
     return replace(
         base,
@@ -175,7 +183,7 @@ def build_custom_profile(job) -> FormattingProfile:
         body=replace(base.body, paragraph=body_para, contextual=body_ctx),
         references=replace(
             base.references,
-            heading=_heading(base.references.heading),
+            heading=ref_heading,
             entry=ref_entry,
             contextual=replace(base.references.contextual, body_space_after_pt=job.space_after_pt),
         ),
@@ -266,7 +274,15 @@ def _overlay_job_formatting(profile: FormattingProfile, job) -> FormattingProfil
         ),
         alignment="justify" if job.auto_justify_refs else align,
         line_spacing=job.line_spacing,
+        hanging_indent_inches=(
+            job.references_hanging_indent_inches
+            if getattr(job, "references_hanging_indent_inches", None) is not None
+            else profile.references.entry.hanging_indent_inches
+        ),
     )
+    ref_heading = _heading(profile.references.heading)
+    if getattr(job, "references_on_new_page", True):
+        ref_heading = replace(ref_heading, page_break_before=True)
     return replace(
         profile,
         title=_heading(replace(profile.title, alignment="center")),
@@ -276,7 +292,7 @@ def _overlay_job_formatting(profile: FormattingProfile, job) -> FormattingProfil
         body=replace(profile.body, paragraph=body_para, contextual=body_ctx),
         references=replace(
             profile.references,
-            heading=_heading(profile.references.heading),
+            heading=ref_heading,
             entry=ref_entry,
             contextual=replace(profile.references.contextual, body_space_after_pt=job.space_after_pt),
         ),

@@ -1309,17 +1309,17 @@ class ProjectService:
         return saved
 
     def _fit_humanized_word_budget(self, project_id: str, humanized: HumanizedDraft) -> HumanizedDraft:
-        """Post-humanize body trim — preserve grade first; never raises / never blocks delivery."""
+        """Post-humanize: delete complete coherent sentences only — never Gemini-rewrite SW prose."""
         try:
             from services.assignment_spec import build_assignment_spec
             from services.assignment_spec.validate import count_body_words
-            from services.writer_engine.gemini_trim import fit_content_to_word_budget
+            from services.writer_engine.gemini_trim import fit_humanized_content_to_budget
 
             bundle = self.store.require_bundle(project_id)
             req = bundle.requirement.to_dict()
             spec = build_assignment_spec(req, project_id=project_id)
             before = count_body_words(humanized.content or "")
-            fitted, meta = fit_content_to_word_budget(humanized.content or "", spec=spec)
+            fitted, meta = fit_humanized_content_to_budget(humanized.content or "", spec=spec)
             if not meta.get("trimmed"):
                 humanized.total_words = before
                 return humanized
@@ -1331,6 +1331,7 @@ class ProjectService:
                 method=meta.get("method"),
                 before_body_words=before,
                 after_body_words=humanized.total_words,
+                dropped_ids=meta.get("dropped_ids"),
                 target=spec.total_word_target,
                 max_words=spec.max_total_words,
             )

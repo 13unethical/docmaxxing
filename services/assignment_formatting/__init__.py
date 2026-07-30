@@ -124,10 +124,20 @@ def _job_from_requirement(requirement_json: dict[str, Any]) -> FormatJob:
         page_number_position=str(fmt.get("page_number_position") or "bottom_center"),
         auto_headings=bool(fmt.get("auto_headings", True)),
         heading_all_caps=bool(fmt.get("heading_all_caps", False)),
-        auto_justify_refs=bool(fmt.get("auto_justify_refs", False)),
+        auto_justify_refs=bool(fmt.get("auto_justify_refs", True)),
         format_style=style_id,
         requirement_headings=bool(fmt.get("requirement_headings", True)),
         heading_size_pt=_parse_int(fmt.get("heading_size_pt") or fmt_spec.get("heading_size_pt"), default=14),
+        references_hanging_indent_inches=float(
+            fmt_spec.get("references_hanging_indent_inches")
+            if fmt_spec.get("references_hanging_indent_inches") is not None
+            else fmt.get("references_hanging_indent_inches", 0.5)
+        ),
+        references_on_new_page=bool(
+            fmt_spec.get("references_on_new_page")
+            if fmt_spec.get("references_on_new_page") is not None
+            else fmt.get("references_on_new_page", True)
+        ),
     )
 
 
@@ -142,14 +152,23 @@ def _docx_from_markdown(title: str, content: str) -> Document:
     """
     import re
 
+    from docx.enum.text import WD_BREAK
+
     doc = Document()
     if title.strip():
         doc.add_heading(title.strip(), level=1)
 
-    blocks = re.split(r"\n\s*\n", content or "")
+    text = re.sub(r"<!--\s*pagebreak\s*-->", "\n\n[[PAGEBREAK]]\n\n", content or "", flags=re.I)
+    blocks = re.split(r"\n\s*\n", text)
     for block in blocks:
         raw = (block or "").strip()
         if not raw:
+            continue
+        if raw == "[[PAGEBREAK]]":
+            # Insert page break as a dedicated paragraph so refs start on a new page.
+            p = doc.add_paragraph()
+            run = p.add_run()
+            run.add_break(WD_BREAK.PAGE)
             continue
         lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
         if not lines:
@@ -178,8 +197,8 @@ def _docx_from_markdown(title: str, content: str) -> Document:
             continue
 
         # Soft-wrapped prose → one Normal paragraph.
-        text = " ".join(lines)
-        doc.add_paragraph(text)
+        para_text = " ".join(lines)
+        doc.add_paragraph(para_text)
     return doc
 
 

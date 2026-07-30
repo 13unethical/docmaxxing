@@ -22,6 +22,8 @@ class FormatSpec:
     heading_size_pt: int = 14
     references_on_new_page: bool = True
     cover_page_required: bool = False
+    references_hanging_indent_inches: float = 0.5
+    references_heading: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -34,6 +36,8 @@ class FormatSpec:
             "heading_size_pt": self.heading_size_pt,
             "references_on_new_page": self.references_on_new_page,
             "cover_page_required": self.cover_page_required,
+            "references_hanging_indent_inches": self.references_hanging_indent_inches,
+            "references_heading": self.references_heading,
             "font_size": self.font_size_pt,
             "margins": f"{self.margins_inches} inch",
             "margin_preset": _margin_preset(self.margins_inches),
@@ -52,6 +56,12 @@ class FormatSpec:
             heading_size_pt=int(data.get("heading_size_pt") or 14),
             references_on_new_page=bool(data.get("references_on_new_page", True)),
             cover_page_required=bool(data.get("cover_page_required", False)),
+            references_hanging_indent_inches=float(
+                data.get("references_hanging_indent_inches")
+                if data.get("references_hanging_indent_inches") is not None
+                else 0.5
+            ),
+            references_heading=(str(data["references_heading"]) if data.get("references_heading") else None),
         )
 
 

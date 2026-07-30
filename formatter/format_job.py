@@ -24,3 +24,5 @@ class FormatJob:
     format_style: str = "harvard"
     requirement_headings: bool = False
     heading_size_pt: int = 16
+    references_hanging_indent_inches: float | None = 0.5
+    references_on_new_page: bool = True
