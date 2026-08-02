@@ -2,14 +2,21 @@
 {% block title %}Academic Document Studio{% endblock %}
 {% block content %}
       <div class="home-layout" data-dm-tour-page="format" data-tour="format-page">
-      <div class="dm-tool-head home-tool-head">
-        <h1 class="dm-visually-hidden">Format</h1>
-        {% include "_tutorial_btn.html" %}
-      </div>
       <div class="home-upload-zones" aria-label="Upload areas">
         <div class="home-doc-brief-row">
           <div class="home-column home-brief-column">
-            <section class="card home-zone-card home-brief-card home-input-card" aria-labelledby="brief-label" data-tour="format-brief">
+            <section
+              class="card home-zone-card home-brief-card home-input-card home-drop-zone"
+              aria-labelledby="brief-label"
+              data-tour="format-brief"
+              data-home-drop-zone="requirements"
+            >
+              <div class="home-zone-drop-overlay" data-home-zone-overlay hidden>
+                <div class="home-zone-drop-overlay-inner">
+                  <p class="home-zone-drop-title">Drop file to insert</p>
+                  <p class="home-zone-drop-lede">Brief / rubric — PDF, DOCX, TXT, JPG, PNG</p>
+                </div>
+              </div>
               <div class="home-unified-top" data-home-brief-card>
                 <div class="home-zone-head">
                   <h2 class="card-title" id="brief-label">Requirements</h2>
@@ -260,7 +267,19 @@
           </div>
 
           <div class="home-column home-document-column">
-            <section class="card home-zone-card home-document-card home-input-card" aria-labelledby="document-label" data-home-doc-card data-tour="format-doc">
+            <section
+              class="card home-zone-card home-document-card home-input-card home-drop-zone"
+              aria-labelledby="document-label"
+              data-home-doc-card
+              data-tour="format-doc"
+              data-home-drop-zone="text"
+            >
+              <div class="home-zone-drop-overlay" data-home-zone-overlay hidden>
+                <div class="home-zone-drop-overlay-inner">
+                  <p class="home-zone-drop-title">Drop file to insert</p>
+                  <p class="home-zone-drop-lede">Document text — DOCX, PDF, or TXT</p>
+                </div>
+              </div>
               <div class="home-unified-top">
                 <div class="home-zone-head">
                   <h2 class="card-title" id="document-label">Text</h2>
@@ -314,7 +333,18 @@
               </div>
             </section>
 
-            <details class="card settings-section settings-accordion home-accordion-card home-cover-card" aria-labelledby="cover-settings" data-tour="format-advanced">
+            <details
+              class="card settings-section settings-accordion home-accordion-card home-cover-card home-drop-zone"
+              aria-labelledby="cover-settings"
+              data-tour="format-advanced"
+              data-home-drop-zone="cover"
+            >
+              <div class="home-zone-drop-overlay" data-home-zone-overlay hidden>
+                <div class="home-zone-drop-overlay-inner">
+                  <p class="home-zone-drop-title">Drop cover page</p>
+                  <p class="home-zone-drop-lede">Ready cover — DOCX or PDF</p>
+                </div>
+              </div>
               <summary class="settings-summary" id="cover-settings">
                 <span class="settings-summary-main">
                   <svg class="settings-summary-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7 4.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5.5 19V6A1.5 1.5 0 0 1 7 4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 4.5V9h4.5" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.5 13h7M8.5 16h5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
@@ -329,6 +359,16 @@
                   <input type="checkbox" id="include_cover_page" />
                   <span>Include title page in formatted document</span>
                 </label>
+                <label class="field">
+                  <span class="label">Upload ready cover page (optional)</span>
+                  <input
+                    type="file"
+                    id="cover_file"
+                    accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  />
+                  <span class="field-hint">DOCX or PDF — used as the cover page instead of the fields below</span>
+                </label>
+                <p id="cover_file_status" class="req-status" role="status" aria-live="polite"></p>
                 <label class="field">
                   <span class="label">Assignment Title</span>
                   <input type="text" id="cover_assignment_title" placeholder="Essay title or assignment name" />
@@ -484,5 +524,5 @@
     <script src="{{ url_for('static', filename='workspace.js') }}"></script>
     <script src="{{ url_for('static', filename='assignment-templates.js') }}"></script>
     <script src="{{ url_for('static', filename='preview.js') }}"></script>
-    <script src="{{ url_for('static', filename='home.js') }}"></script>
+    <script src="{{ url_for('static', filename='home.js') }}?v=20260802-fmt-zone-drop"></script>
 {% endblock %}

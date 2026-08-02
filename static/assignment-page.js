@@ -56,6 +56,7 @@
   var FILE_KIND_LABELS = {
     brief: "Requirements",
     extra: "Additional file",
+    file: "File",
   };
 
   var state = {
@@ -80,11 +81,15 @@
     citationPack: null,
     formattedDocument: null,
     validationReport: null,
+    /** Accumulated composer attachments (chat +). */
+    pendingFiles: [],
+    extraFiles: [],
     busy: false,
     autoRunning: false,
     retryAction: null,
     forceContinue: false,
     productionPeakPct: 0,
+    composerMode: "brief", /* brief | revision */
   };
 
   function $(sel) { return root.querySelector(sel); }
@@ -164,6 +169,9 @@
     state.citationPack = null;
     state.formattedDocument = null;
     state.validationReport = null;
+    state.extraFiles = [];
+    state.pendingFiles = [];
+    state.composerMode = "brief";
     state.humanizerPass = 1;
     state.reviewPass = 1;
     state.detectionAttempt = 1;
@@ -176,7 +184,7 @@
   }
 
   function staleSessionMessage() {
-    return "Previous session expired. Upload your requirements and click Analyze & get price.";
+    return "Previous session expired. Attach your files and send again.";
   }
 
   function responseMeansProjectMissing(res, payload) {
@@ -300,7 +308,445 @@
     return base;
   }
 
+  function threadEl() {
+    return $("[data-asg-thread]");
+  }
+
+  function scrollThread() {
+    var sc = $("[data-asg-chat-scroll]");
+    if (sc) sc.scrollTop = sc.scrollHeight;
+  }
+
+  function hideEmptyState() {
+    show($("[data-asg-empty]"), false);
+  }
+
+  function showEmptyStateIfNeeded() {
+    var thread = threadEl();
+    var empty = !thread || !thread.children.length;
+    show($("[data-asg-empty]"), empty && !state.requirement && !state.deliveryPackage);
+  }
+
+  function appendBubble(role, htmlInner, attrs) {
+    hideEmptyState();
+    var thread = threadEl();
+    if (!thread) return null;
+    var div = document.createElement("div");
+    div.className = "asg-bubble asg-bubble--" + role;
+    if (attrs && attrs.id) div.id = attrs.id;
+    if (attrs && attrs["data-kind"]) div.setAttribute("data-kind", attrs["data-kind"]);
+    var cardKinds = { price: 1, production: 1, complete: 1 };
+    if (attrs && attrs["data-kind"] && cardKinds[attrs["data-kind"]]) {
+      div.classList.add("asg-bubble--card");
+    }
+    div.innerHTML = htmlInner;
+    thread.appendChild(div);
+    scrollThread();
+    schedulePersistChat();
+    return div;
+  }
+
+  function upsertBubble(kind, role, htmlInner) {
+    var thread = threadEl();
+    if (!thread) return null;
+    var existing = thread.querySelector('[data-kind="' + kind + '"]');
+    var cardKinds = { price: 1, production: 1, complete: 1 };
+    if (existing) {
+      existing.innerHTML = htmlInner;
+      if (cardKinds[kind]) existing.classList.add("asg-bubble--card");
+      scrollThread();
+      schedulePersistChat();
+      return existing;
+    }
+    var el = appendBubble(role, htmlInner, { "data-kind": kind });
+    if (el && cardKinds[kind]) el.classList.add("asg-bubble--card");
+    return el;
+  }
+
+  function removeBubble(kind) {
+    var thread = threadEl();
+    if (!thread) return;
+    thread.querySelectorAll('[data-kind="' + kind + '"]').forEach(function (n) {
+      n.remove();
+    });
+    schedulePersistChat();
+  }
+
+  function serializeChatTranscript() {
+    var thread = threadEl();
+    if (!thread) return [];
+    var out = [];
+    Array.prototype.forEach.call(thread.children, function (node) {
+      if (!node || !node.classList || !node.classList.contains("asg-bubble")) return;
+      var kind = node.getAttribute("data-kind") || "";
+      if (kind === "status") return;
+      var role = node.classList.contains("asg-bubble--user") ? "user" : "assistant";
+      out.push({
+        role: role,
+        kind: kind,
+        html: node.innerHTML,
+      });
+    });
+    return out;
+  }
+
+  var _restoringChat = false;
+  var _persistChatTimer = null;
+  function schedulePersistChat() {
+    if (!pid() || _restoringChat) return;
+    if (_persistChatTimer) clearTimeout(_persistChatTimer);
+    _persistChatTimer = setTimeout(function () {
+      _persistChatTimer = null;
+      persistChatTranscript();
+    }, 450);
+  }
+
+  async function persistChatTranscript() {
+    if (!pid() || _restoringChat) return;
+    var messages = serializeChatTranscript();
+    try {
+      await fetch(projectUrl("/chat-transcript"), {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ messages: messages }),
+      });
+    } catch (err) {
+      /* best-effort */
+    }
+  }
+
+  function restoreChatTranscript(messages) {
+    var thread = threadEl();
+    if (!thread || !messages || !messages.length) return false;
+    _restoringChat = true;
+    clearThread();
+    hideEmptyState();
+    var cardKinds = { price: 1, production: 1, complete: 1 };
+    messages.forEach(function (m) {
+      if (!m || !m.html) return;
+      if (m.kind === "status") return;
+      if (m.kind === "production" && state.deliveryPackage) return;
+      var role = m.role === "user" ? "user" : "assistant";
+      var div = document.createElement("div");
+      div.className = "asg-bubble asg-bubble--" + role;
+      if (m.kind) div.setAttribute("data-kind", m.kind);
+      if (m.kind && cardKinds[m.kind]) div.classList.add("asg-bubble--card");
+      div.innerHTML = m.html;
+      thread.appendChild(div);
+    });
+    if (state.deliveryPackage && state.deliveryPackage.id) {
+      thread.querySelectorAll('[data-kind="production"]').forEach(function (n) {
+        n.remove();
+      });
+      if (!thread.querySelector('[data-kind="complete"]')) {
+        var completeHtml =
+          '<div class="asg-complete-card">' +
+          "<h3>Your assignment is ready</h3>" +
+          "<p>Download the file, or describe changes below for a free revision.</p>" +
+          '<button type="button" class="asg-btn asg-btn--primary" data-asg-thread-download>Download</button>' +
+          "</div>";
+        var cdiv = document.createElement("div");
+        cdiv.className = "asg-bubble asg-bubble--assistant asg-bubble--card";
+        cdiv.setAttribute("data-kind", "complete");
+        cdiv.innerHTML = completeHtml;
+        thread.appendChild(cdiv);
+      }
+    }
+    scrollThread();
+    showEmptyStateIfNeeded();
+    _restoringChat = false;
+    return thread.children.length > 0;
+  }
+
+  function reconstructChatFromState() {
+    clearThread();
+    hideEmptyState();
+    var files = state._uploadedFileNames || [];
+    if (files.length) {
+      appendBubble(
+        "user",
+        '<ul class="asg-attach-list">' +
+          files
+            .map(function (n) {
+              return "<li>" + esc(n) + "</li>";
+            })
+            .join("") +
+          "</ul>"
+      );
+    }
+    if (state.requirement && state.price != null) {
+      renderSummary();
+    }
+    if (state.deliveryPackage && state.deliveryPackage.id) {
+      removeBubble("production");
+      showCompleteUI();
+    } else if (state.paymentConfirmed && !state.deliveryPackage) {
+      enterProductionLayout();
+    }
+    showEmptyStateIfNeeded();
+  }
+
+  async function restoreChatForOpenProject(serverTranscript) {
+    var restored = restoreChatTranscript(serverTranscript);
+    if (restored) {
+      syncComposerMode();
+      schedulePersistChat();
+      return;
+    }
+    reconstructChatFromState();
+    // Also pull revision messages into the thread for older projects.
+    try {
+      await loadRevisionChat();
+    } catch (e) {}
+    schedulePersistChat();
+  }
+
+  function clearThread() {
+    var thread = threadEl();
+    if (thread) thread.innerHTML = "";
+    showEmptyStateIfNeeded();
+  }
+
+  function syncComposerMode() {
+    var input = $("[data-asg-note]");
+    var attach = $("[data-asg-attach]");
+    var hint = document.querySelector(".asg-chat-hint");
+    if (state.deliveryPackage && state.composerMode !== "brief") {
+      state.composerMode = "revision";
+      if (input) {
+        input.placeholder = "Describe changes for a free revision…";
+        input.removeAttribute("disabled");
+      }
+      // Keep + visible — attaching files starts a new assignment.
+      if (attach) {
+        attach.hidden = false;
+        attach.removeAttribute("hidden");
+      }
+      if (hint) {
+        hint.textContent =
+          "Revision chat — up to 5 free rounds. Or attach files to start a new assignment.";
+      }
+      syncSendEnabled();
+      return;
+    }
+    state.composerMode = "brief";
+    if (input) input.placeholder = "Add a note (optional)…";
+    if (attach) {
+      attach.hidden = false;
+      attach.removeAttribute("hidden");
+    }
+    if (hint) {
+      hint.textContent =
+        "Upload requirements and materials — Gemini reads them and prices the work.";
+    }
+    syncSendEnabled();
+  }
+
+  function syncSendEnabled() {
+    var send = $("[data-asg-send]");
+    if (!send) return;
+    if (state.composerMode === "revision") {
+      var note = $("[data-asg-note]");
+      send.disabled = state.busy || !(note && note.value.trim());
+      return;
+    }
+    var noteEl = $("[data-asg-note]");
+    var hasNote = !!(noteEl && noteEl.value.trim());
+    send.disabled =
+      state.busy || (!(state.pendingFiles && state.pendingFiles.length) && !hasNote);
+  }
+
+  function beginNewBriefSession() {
+    resetProjectState();
+    state.composerMode = "brief";
+    state.pendingFiles = [];
+    clearThread();
+    clearError();
+    show($("[data-asg-complete]"), false);
+    show($("[data-asg-production]"), false);
+    show($("[data-asg-wizard]"), false);
+    show($("[data-asg-empty]"), true);
+    renderChips();
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.delete("project");
+      url.searchParams.delete("new");
+      window.history.replaceState({}, "", url.pathname + (url.search || ""));
+    } catch (e) {}
+    setStage("upload", { skipSave: true });
+    syncComposerMode();
+    syncSendEnabled();
+    showEmptyStateIfNeeded();
+    if (typeof window.DM_refreshAssignmentHistory === "function") {
+      window.DM_refreshAssignmentHistory();
+    }
+    var note = $("[data-asg-note]");
+    if (note) {
+      note.value = "";
+      note.focus();
+    }
+  }
+
+  window.DM_startNewAssignment = beginNewBriefSession;
+
+  /** Attach / drop files — if a finished project is open, start a new brief. */
+  function addFilesFromUser(fileList) {
+    if (!fileList || !fileList.length) return;
+    if (state.deliveryPackage || state.composerMode === "revision") {
+      beginNewBriefSession();
+    }
+    mergePendingFiles(fileList);
+    renderChips();
+    syncSendEnabled();
+  }
+
+  function fileTypeLabel(file) {
+    var name = String((file && file.name) || "").toLowerCase();
+    if (/\.(png|jpe?g|gif|webp|svg)$/.test(name)) return "Image";
+    if (/\.pdf$/.test(name)) return "PDF";
+    if (/\.zip$/.test(name)) return "Archive";
+    if (/\.(docx?|rtf|txt)$/.test(name)) return "Document";
+    return "File";
+  }
+
+  function truncateName(name, max) {
+    max = max || 28;
+    var s = String(name || "file");
+    if (s.length <= max) return s;
+    var dot = s.lastIndexOf(".");
+    var ext = dot > 0 ? s.slice(dot) : "";
+    var base = dot > 0 ? s.slice(0, dot) : s;
+    var keep = Math.max(6, max - ext.length - 1);
+    return base.slice(0, keep) + "…" + ext;
+  }
+
+  function renderChips() {
+    var wrap = $("[data-asg-chips]");
+    if (!wrap) return;
+    if (!state.pendingFiles.length) {
+      wrap.innerHTML = "";
+      wrap.hidden = true;
+      return;
+    }
+    wrap.hidden = false;
+    wrap.removeAttribute("hidden");
+    wrap.innerHTML = state.pendingFiles
+      .map(function (f, i) {
+        return (
+          '<div class="asg-file-pill" title="' +
+          esc(f.name) +
+          '">' +
+          '<span class="asg-file-pill-icon" aria-hidden="true">' +
+          '<svg width="18" height="18" viewBox="0 0 24 24" fill="none">' +
+          '<path d="M7 3.75h6.5L19 8.75V20a1.25 1.25 0 0 1-1.25 1.25H7.25A1.25 1.25 0 0 1 6 20V5A1.25 1.25 0 0 1 7.25 3.75Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>' +
+          '<path d="M13.5 3.75V8.75H18.5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>' +
+          "</svg></span>" +
+          '<span class="asg-file-pill-meta">' +
+          '<span class="asg-file-pill-name">' +
+          esc(truncateName(f.name)) +
+          "</span>" +
+          '<span class="asg-file-pill-type">' +
+          esc(fileTypeLabel(f)) +
+          "</span></span>" +
+          '<button type="button" class="asg-file-pill-remove" data-asg-chip-remove="' +
+          i +
+          '" aria-label="Remove file">×</button>' +
+          "</div>"
+        );
+      })
+      .join("");
+    wrap.querySelectorAll("[data-asg-chip-remove]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var idx = parseInt(btn.getAttribute("data-asg-chip-remove"), 10);
+        if (!isNaN(idx)) {
+          state.pendingFiles.splice(idx, 1);
+          renderChips();
+          syncSendEnabled();
+        }
+      });
+    });
+  }
+
+  function setDropOverlay(on) {
+    var overlay = $("[data-asg-drop-overlay]");
+    if (!overlay) return;
+    if (on) {
+      overlay.hidden = false;
+      overlay.removeAttribute("hidden");
+    } else {
+      overlay.hidden = true;
+    }
+    root.classList.toggle("is-dragging-files", !!on);
+  }
+
+  function setupDragDrop() {
+    var dragDepth = 0;
+
+    function hasFiles(e) {
+      var dt = e.dataTransfer;
+      if (!dt) return false;
+      try {
+        var types = dt.types ? Array.prototype.slice.call(dt.types) : [];
+        if (types.indexOf("Files") !== -1) return true;
+        if (types.indexOf("application/x-moz-file") !== -1) return true;
+      } catch (err) {}
+      return !!(dt.files && dt.files.length);
+    }
+
+    function onDragEnter(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth += 1;
+      setDropOverlay(true);
+    }
+
+    function onDragOver(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      setDropOverlay(true);
+    }
+
+    function onDragLeave(e) {
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDropOverlay(false);
+    }
+
+    function onDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth = 0;
+      setDropOverlay(false);
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      addFilesFromUser(files);
+    }
+
+    // Listen on the chat root and the main column so drops work over the whole page area.
+    var targets = [root];
+    var main = document.querySelector(".app-shell-main");
+    if (main) targets.push(main);
+    targets.forEach(function (el) {
+      el.addEventListener("dragenter", onDragEnter);
+      el.addEventListener("dragover", onDragOver);
+      el.addEventListener("dragleave", onDragLeave);
+      el.addEventListener("drop", onDrop);
+    });
+    window.addEventListener("dragend", function () {
+      dragDepth = 0;
+      setDropOverlay(false);
+    });
+  }
+
   function updateProductionProgress(stage) {
+    if (state.deliveryPackage) {
+      removeBubble("production");
+      return;
+    }
     var raw = productionPercent(stage || state.stage);
     var pct = Math.max(Number(state.productionPeakPct) || 0, Math.max(0, Math.min(100, raw)));
     state.productionPeakPct = pct;
@@ -308,27 +754,67 @@
     var label = $("[data-asg-production-pct]");
     if (fill) fill.style.width = pct + "%";
     if (label) label.textContent = pct + "%";
+    upsertBubble(
+      "production",
+      "assistant",
+      '<div class="asg-prod-card">' +
+        "<h3>Generating your assignment</h3>" +
+        '<div class="asg-production-bar" aria-hidden="true"><div class="asg-production-bar-fill" style="width:' +
+        pct +
+        '%"></div></div>' +
+        '<p class="asg-production-pct">' +
+        pct +
+        "%</p>" +
+        '<p class="asg-production-eta">Estimated time: 3–5 minutes</p>' +
+        "</div>"
+    );
   }
 
   function enterProductionLayout() {
-    show($("[data-asg-upload-card]"), true);
-    show($("[data-asg-summary-card]"), true);
-    show($("[data-asg-wizard]"), false);
-    show($("[data-asg-complete]"), false);
     show($("[data-asg-production]"), true);
+    show($("[data-asg-complete]"), false);
+    removeBubble("complete");
     updateProductionProgress(state.stage);
+    var form = $("[data-asg-composer-form]");
+    if (form) {
+      form.querySelectorAll("[data-asg-attach],[data-asg-send],[data-asg-note],[data-asg-files]").forEach(function (el) {
+        el.disabled = true;
+      });
+    }
   }
 
   function showCompleteUI() {
-    // Never claim "ready" until a real delivery package exists.
     if (!state.deliveryPackage || !state.deliveryPackage.id) {
       return;
     }
-    show($("[data-asg-upload-card]"), true);
-    show($("[data-asg-summary-card]"), true);
-    show($("[data-asg-wizard]"), false);
+    state.productionPeakPct = 100;
     show($("[data-asg-production]"), false);
     show($("[data-asg-complete]"), true);
+    // Progress card must not linger next to the ready card.
+    removeBubble("production");
+    upsertBubble(
+      "complete",
+      "assistant",
+      '<div class="asg-complete-card">' +
+        "<h3>Your assignment is ready</h3>" +
+        "<p>Download the file, or describe changes below for a free revision.</p>" +
+        '<button type="button" class="asg-btn asg-btn--primary" data-asg-thread-download>Download</button>' +
+        "</div>"
+    );
+    loadRevisionChat();
+    syncComposerMode();
+    var form = $("[data-asg-composer-form]");
+    if (form) {
+      form.querySelectorAll("[data-asg-send],[data-asg-note]").forEach(function (el) {
+        el.disabled = false;
+      });
+    }
+    syncSendEnabled();
+    var note = $("[data-asg-note]");
+    if (note) note.focus();
+    if (typeof window.DM_refreshAssignmentHistory === "function") {
+      window.DM_refreshAssignmentHistory();
+    }
   }
 
   function exitProductionLayout() {
@@ -375,6 +861,7 @@
     if (back) back.disabled = on;
     if (analyze) analyze.disabled = on || collectUploadFiles().length === 0;
     if (pay) pay.disabled = on || state.autoRunning || state.price == null || state.paymentConfirmed;
+    syncSendEnabled();
   }
 
   function hideWizardActions(on) {
@@ -401,10 +888,9 @@
     }
     root.classList.remove("asg-page--production");
     show($("[data-asg-production]"), false);
-    show($("[data-asg-upload-card]"), true);
-    show($("[data-asg-summary-card]"), true);
     show($("[data-asg-wizard]"), false);
     showError(message);
+    upsertBubble("error", "assistant", "<p>" + esc(message) + "</p>");
     var primary = $("[data-asg-wizard-primary]");
     if (primary) {
       primary.textContent = retryFn ? "Retry" : primary.dataset.defaultLabel || "Continue";
@@ -413,6 +899,13 @@
     }
     hideWizardActions(false);
     setBusy(false);
+    var form = $("[data-asg-composer-form]");
+    if (form) {
+      form.querySelectorAll("[data-asg-attach],[data-asg-send],[data-asg-note],[data-asg-files]").forEach(function (el) {
+        el.disabled = false;
+      });
+    }
+    syncComposerMode();
   }
 
   async function handleProductionResult(result) {
@@ -514,6 +1007,75 @@
     }
 
     updateSummaryPayButton();
+
+    if (!state.requirement || state.price == null) return;
+    if (state.paymentConfirmed || state.deliveryPackage) return;
+
+    var rows = [];
+    rows.push(["Words", na(req.word_count)]);
+    rows.push(["Type", titleCase(req.assignment_type) || "—"]);
+    if (stars != null) rows.push(["Complexity", difficultyText(stars)]);
+    if (p.estimated_minutes) rows.push(["Est. time", formatMinutes(p.estimated_minutes)]);
+    if (req.deadline) rows.push(["Deadline", na(req.deadline)]);
+
+    var breakdown = "";
+    if (p.amount_usd != null) {
+      breakdown +=
+        '<div class="asg-price-row"><span>Base · ' +
+        (p.word_count || 0).toLocaleString() +
+        " words</span><span>" +
+        fmtMoney(p.base_usd) +
+        "</span></div>";
+      if (p.difficulty_multiplier && Math.abs(p.difficulty_multiplier - 1) > 0.001) {
+        breakdown +=
+          '<div class="asg-price-row"><span>Difficulty ' +
+          (p.difficulty_stars || "") +
+          "/10</span><span>×" +
+          p.difficulty_multiplier +
+          "</span></div>";
+      }
+    }
+
+    var coinsLine = p.amount_coins
+      ? '<p class="asg-price-coins">≈ ' + p.amount_coins.toLocaleString() + " coins</p>"
+      : "";
+
+    upsertBubble(
+      "price",
+      "assistant",
+      '<div class="asg-price-card">' +
+        "<h3>Project summary</h3>" +
+        '<dl class="asg-price-dl">' +
+        rows
+          .map(function (r) {
+            return "<div><dt>" + esc(r[0]) + "</dt><dd>" + esc(String(r[1])) + "</dd></div>";
+          })
+          .join("") +
+        "</dl>" +
+        (breakdown ? '<div class="asg-price-breakdown">' + breakdown + "</div>" : "") +
+        '<p class="order-total"><span>Total</span><strong>' +
+        fmtMoney(state.price) +
+        "</strong></p>" +
+        coinsLine +
+        '<button type="button" class="assignment-pay-btn" data-asg-thread-pay>Start Writing</button>' +
+        "</div>"
+    );
+
+    var payBtn = document.querySelector("[data-asg-thread-pay]");
+    if (payBtn && !payBtn._bound) {
+      payBtn._bound = true;
+      payBtn.addEventListener("click", function () {
+        if (!state.paymentConfirmed) {
+          runAutoProduction().catch(function (err) {
+            fail(err, runAutoProduction);
+          });
+        } else {
+          continueAutoProduction().catch(function (err) {
+            fail(err, continueAutoProduction);
+          });
+        }
+      });
+    }
   }
 
   function updateSummaryPayButton() {
@@ -562,19 +1124,14 @@
     if (inProduction) {
       enterProductionLayout();
     } else {
-      show($("[data-asg-upload-card]"), true);
-      show($("[data-asg-summary-card]"), true);
       show($("[data-asg-wizard]"), false);
       show($("[data-asg-production]"), false);
       show($("[data-asg-complete]"), false);
     }
 
-    var analyze = $("[data-asg-analyze]");
-    if (analyze) {
-      analyze.textContent = hasReq ? "Update & re-price" : "Analyze & get price";
-      analyze.disabled = state.busy || collectUploadFiles().length === 0;
-    }
     if (hasReq) renderSummary();
+    syncComposerMode();
+    showEmptyStateIfNeeded();
   }
 
   function updateActions() {
@@ -637,21 +1194,42 @@
   }
 
   function parseDeadline() {
-    var d = $("[data-asg-deadline-date]");
-    var t = $("[data-asg-deadline-time]");
-    if (!d || !d.value) return null;
-    return d.value + "T" + (t && t.value ? t.value : "12:00") + ":00";
+    return null;
+  }
+
+  function fileKey(file) {
+    return [file.name, file.size, file.lastModified || 0].join("::");
+  }
+
+  function mergePendingFiles(fileList) {
+    if (!fileList || !fileList.length) return;
+    var seen = {};
+    state.pendingFiles.forEach(function (f) {
+      seen[fileKey(f)] = true;
+    });
+    Array.prototype.forEach.call(fileList, function (f) {
+      var key = fileKey(f);
+      if (seen[key]) return;
+      seen[key] = true;
+      state.pendingFiles.push(f);
+    });
+  }
+
+  function mergeExtraFiles(fileList) {
+    mergePendingFiles(fileList);
+  }
+
+  function removeExtraFile(index) {
+    if (index < 0 || index >= state.pendingFiles.length) return;
+    state.pendingFiles.splice(index, 1);
+    renderChips();
+    syncSendEnabled();
   }
 
   function collectUploadFiles() {
-    var files = [];
-    var brief = $("[data-asg-brief]");
-    var extra = $("[data-asg-extra]");
-    if (brief && brief.files && brief.files[0]) files.push({ kind: "brief", file: brief.files[0] });
-    if (extra && extra.files) {
-      Array.prototype.forEach.call(extra.files, function (f) { files.push({ kind: "extra", file: f }); });
-    }
-    return files;
+    return (state.pendingFiles || []).map(function (f) {
+      return { kind: "file", file: f };
+    });
   }
 
   function getPriority() {
@@ -660,24 +1238,7 @@
   }
 
   function renderFiles(entries) {
-    var section = $("[data-asg-files-section]");
-    var list = $("[data-asg-files]");
-    if (!list) return;
-    list.innerHTML = "";
-    if (!entries.length) {
-      show(section, false);
-      return;
-    }
-    show(section, true);
-    entries.forEach(function (entry) {
-      var li = document.createElement("li");
-      var kind = entry.kind || "extra";
-      var label = FILE_KIND_LABELS[kind] || kind;
-      var file = entry.file;
-      li.innerHTML = "<strong>" + esc(label) + "</strong> · " + esc(file.name) +
-        " <span class=\"assignment-file-size\">(" + Math.max(1, Math.round((file.size || 0) / 1024)) + " KB)</span>";
-      list.appendChild(li);
-    });
+    renderChips();
   }
 
   async function hydrateFromServer() {
@@ -698,6 +1259,17 @@
     state.detectionSession = data.detection_session || null;
     state.detectionReport = data.detection_report || null;
     state.deliveryPackage = data.delivery_package || null;
+    state.chatTranscript = Array.isArray(data.chat_transcript) ? data.chat_transcript : [];
+    var uploadedNames = [];
+    var fileLists = [data.files, data.uploaded_files];
+    fileLists.forEach(function (list) {
+      if (!Array.isArray(list)) return;
+      list.forEach(function (f) {
+        var name = (f && (f.original_filename || f.filename || f.name)) || "";
+        if (name && uploadedNames.indexOf(name) < 0) uploadedNames.push(name);
+      });
+    });
+    state._uploadedFileNames = uploadedNames;
     if (data.project && data.project.artifacts) {
       state.reviewPass = data.project.artifacts.review_pass_number || state.reviewPass;
       state.detectionAttempt = data.project.artifacts.detection_attempt_number || state.detectionAttempt;
@@ -730,15 +1302,15 @@
     var form = new FormData();
     var files = collectUploadFiles();
     var noteEl = $("[data-asg-note]");
-    var note = noteEl ? noteEl.value : "";
-    files.forEach(function (entry) {
-      if (entry.kind === "brief") form.append("assignment_brief", entry.file, entry.file.name);
-      else form.append("additional_files", entry.file, entry.file.name);
+    var note = noteEl ? noteEl.value.trim() : "";
+    // Prefer legacy field names so the server always stores an assignment_brief.
+    files.forEach(function (entry, idx) {
+      var f = entry.file;
+      if (idx === 0) form.append("assignment_brief", f, f.name);
+      else form.append("additional_files", f, f.name);
     });
-    if (!files.length) throw new Error("Please upload at least your requirements.");
+    if (!files.length && !note) throw new Error("Attach at least one file or add a note.");
     if (note) form.append("note", note);
-    var deadline = parseDeadline();
-    if (deadline) form.append("deadline", deadline);
     form.append("priority", getPriority());
     var payload = await api("/api/assignment/projects/upload", { method: "POST", body: form });
     state.projectId = payload.project && payload.project.id;
@@ -747,6 +1319,7 @@
     }
     state.requirement = payload.requirement || null;
     saveWizard();
+    loadAssignmentHistory();
   }
 
   async function analyzeRequirements() {
@@ -769,21 +1342,58 @@
   async function runPrePayment() {
     setBusy(true);
     clearError();
-    var files = collectUploadFiles();
-    if (files.length > 0) {
-      resetProjectState();
-      set("[data-asg-analysis-status]", "Uploading files…");
-      await uploadProject();
-    } else if (!pid()) {
-      throw new Error("Please upload at least your requirements.");
+    var filesSnapshot = collectUploadFiles().map(function (e) {
+      return e.file;
+    });
+    var noteEl = $("[data-asg-note]");
+    var noteSnapshot = noteEl ? noteEl.value.trim() : "";
+    if (!filesSnapshot.length && !noteSnapshot && !pid()) {
+      setBusy(false);
+      throw new Error("Attach at least one file or add a note.");
     }
-    set("[data-asg-analysis-status]", "Analyzing your requirements…");
-    await analyzeRequirements();
-    set("[data-asg-analysis-status]", "Calculating price…");
-    await calculatePrice();
-    set("[data-asg-analysis-status]", "Analysis complete.");
-    setBusy(false);
-    setStage("price");
+    try {
+      if (filesSnapshot.length > 0 || noteSnapshot) {
+        var names = filesSnapshot.map(function (f) {
+          return esc(f.name);
+        });
+        appendBubble(
+          "user",
+          (names.length
+            ? '<ul class="asg-attach-list">' +
+              names
+                .map(function (n) {
+                  return "<li>" + n + "</li>";
+                })
+                .join("") +
+              "</ul>"
+            : "") + (noteSnapshot ? "<p>" + esc(noteSnapshot) + "</p>" : "")
+        );
+        resetProjectState();
+        state.pendingFiles = filesSnapshot.slice();
+        if (noteEl) noteEl.value = noteSnapshot;
+        upsertBubble("status", "assistant", "<p>Uploading and analyzing…</p>");
+        await uploadProject();
+        // Keep chips until price is ready; clear after success path below.
+      }
+      upsertBubble("status", "assistant", "<p>Analyzing your requirements…</p>");
+      await analyzeRequirements();
+      upsertBubble("status", "assistant", "<p>Calculating price…</p>");
+      await calculatePrice();
+      var statusBubble = document.querySelector('[data-kind="status"]');
+      if (statusBubble) statusBubble.remove();
+      state.pendingFiles = [];
+      renderChips();
+      if (noteEl) noteEl.value = "";
+      setBusy(false);
+      setStage("price");
+    } catch (err) {
+      // Restore attachments so the user can retry without re-picking files.
+      state.pendingFiles = filesSnapshot.slice();
+      renderChips();
+      if (noteEl && noteSnapshot) noteEl.value = noteSnapshot;
+      setBusy(false);
+      throw err;
+    }
   }
 
   async function ensurePaymentConfirmed() {
@@ -1004,6 +1614,7 @@
     state.deliveryPackage = await api(projectUrl("/delivery"), { method: "POST" });
     setStage("delivery");
     setStatus("");
+    loadAssignmentHistory();
   }
 
   async function downloadDelivery() {
@@ -1019,6 +1630,7 @@
       }
       // Prefer project-scoped download so a missing in-memory package can be rebuilt from disk.
       window.location.href = "/api/assignment/projects/" + encodeURIComponent(state.projectId) + "/download";
+      loadRevisionChat();
     } catch (err) {
       fail(err, downloadDelivery);
     } finally {
@@ -1026,6 +1638,107 @@
       setStatus("");
       updateActions();
       updateChrome();
+    }
+  }
+
+  function renderRevisionChat(payload) {
+    var messages = (payload && payload.messages) || [];
+    var used = (payload && payload.rounds_used) || 0;
+    var max = (payload && payload.max_rounds) || 5;
+    var meta = $("[data-asg-revchat-meta]");
+    if (meta) meta.textContent = used + " / " + max + " free revision rounds used";
+
+    // Mirror into the main chat thread (skip duplicates by rewriting revision block).
+    var thread = threadEl();
+    if (thread) {
+      thread.querySelectorAll('[data-kind="rev-msg"]').forEach(function (n) {
+        n.remove();
+      });
+      messages.forEach(function (m) {
+        var role = m.role === "assistant" ? "assistant" : "user";
+        appendBubble(
+          role,
+          "<p>" + esc(m.content || "") + "</p>",
+          { "data-kind": "rev-msg" }
+        );
+      });
+      if (messages.length) {
+        upsertBubble(
+          "rev-meta",
+          "assistant",
+          "<p class=\"asg-rev-meta\">" + used + " / " + max + " free revision rounds used</p>"
+        );
+      }
+    }
+
+    var hiddenThread = $("[data-asg-revchat-thread]");
+    if (hiddenThread) {
+      hiddenThread.innerHTML = messages
+        .map(function (m) {
+          var role = m.role === "assistant" ? "assistant" : "user";
+          return (
+            '<div class="asg-revchat-msg asg-revchat-msg--' +
+            role +
+            '"><p>' +
+            esc(m.content || "") +
+            "</p></div>"
+          );
+        })
+        .join("");
+    }
+  }
+
+  async function loadRevisionChat() {
+    if (!state.projectId) return;
+    try {
+      var payload = await api(projectUrl("/revision-chat"));
+      renderRevisionChat(payload);
+    } catch (err) {
+      // Guest / not ready — ignore.
+    }
+  }
+
+  async function sendRevisionChat(event) {
+    if (event) event.preventDefault();
+    var input = $("[data-asg-note]") || $("[data-asg-revchat-input]");
+    var message = input && input.value ? input.value.trim() : "";
+    if (!message) return;
+    setBusy(true);
+    setStatus("Applying your revisions…");
+    try {
+      var payload = await apiLlm(projectUrl("/revision-chat"), {
+        method: "POST",
+        body: JSON.stringify({ message: message }),
+      });
+      if (input) input.value = "";
+      if (payload.delivery_package) state.deliveryPackage = payload.delivery_package;
+      renderRevisionChat(payload);
+      setStatus("Revision applied. Download the updated file.");
+      loadAssignmentHistory();
+      upsertBubble(
+        "complete",
+        "assistant",
+        '<div class="asg-complete-card">' +
+          "<h3>Revision applied</h3>" +
+          "<p>Download the updated file, or request another change.</p>" +
+          '<button type="button" class="asg-btn asg-btn--primary" data-asg-thread-download>Download</button>' +
+          "</div>"
+      );
+      var dl = document.querySelector("[data-asg-thread-download]");
+      if (dl) {
+        dl._bound = false;
+        dl.addEventListener("click", downloadDelivery);
+        dl._bound = true;
+      }
+    } catch (err) {
+      fail(err, function () {
+        return sendRevisionChat();
+      });
+    } finally {
+      setBusy(false);
+      updateActions();
+      updateChrome();
+      syncSendEnabled();
     }
   }
 
@@ -1369,25 +2082,43 @@
   }
 
   async function resume() {
-    var raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      setStage("upload");
+    var params = new URLSearchParams(window.location.search || "");
+    if (params.get("new") === "1") {
+      beginNewBriefSession();
       return;
     }
+    var fromUrl = (params.get("project") || "").trim();
+    var raw = localStorage.getItem(STORAGE_KEY);
     try {
-      var saved = JSON.parse(raw);
-      state.projectId = saved.projectId || null;
+      if (fromUrl) {
+        state.projectId = fromUrl;
+        saveWizard();
+      } else if (raw) {
+        var saved = JSON.parse(raw);
+        state.projectId = saved.projectId || null;
+      } else {
+        setStage("upload");
+        return;
+      }
       if (!state.projectId) {
         setStage("upload");
         return;
       }
       await hydrateFromServer();
+      await restoreChatForOpenProject(state.chatTranscript);
       if (state.deliveryPackage) {
         setStage("delivery", { skipSave: true });
         saveWizard();
+        syncComposerMode();
         return;
       }
-      var stage = saved.stage && STAGE_ORDER.indexOf(saved.stage) >= 0 ? saved.stage : inferStageFromArtifacts();
+      var stage = "price";
+      if (raw && !fromUrl) {
+        try {
+          var savedStage = JSON.parse(raw);
+          if (savedStage.stage && STAGE_ORDER.indexOf(savedStage.stage) >= 0) stage = savedStage.stage;
+        } catch (e) {}
+      }
       if (!state.paymentConfirmed) {
         stage = "price";
       } else if (state.paymentConfirmed && !state.deliveryPackage) {
@@ -1395,11 +2126,12 @@
         if (stage === "price" || stage === "upload") stage = "research";
         setStage(stage, { skipSave: true });
         saveWizard();
-        updateChrome();
+        syncComposerMode();
         return;
       }
       setStage(stage, { skipSave: true });
       saveWizard();
+      syncComposerMode();
     } catch (err) {
       if (isStaleProjectError(err)) {
         resetProjectState();
@@ -1426,48 +2158,51 @@
   }
 
   function wire() {
-    var inputs = [$("[data-asg-brief]"), $("[data-asg-extra]")].filter(Boolean);
-    inputs.forEach(function (input) {
-      input.addEventListener("change", function () {
-        renderFiles(collectUploadFiles());
-        var analyze = $("[data-asg-analyze]");
-        if (analyze) analyze.disabled = collectUploadFiles().length === 0;
-      });
-    });
+    var fileInput = $("[data-asg-files]");
+    var attachBtn = $("[data-asg-attach]");
+    var form = $("[data-asg-composer-form]");
+    var note = $("[data-asg-note]");
 
-    var analyze = $("[data-asg-analyze]");
-    if (analyze) {
-      analyze.addEventListener("click", function () {
+    if (attachBtn && fileInput) {
+      attachBtn.addEventListener("click", function () {
+        fileInput.click();
+      });
+    }
+    if (fileInput) {
+      fileInput.addEventListener("change", function () {
+        addFilesFromUser(fileInput.files);
+        fileInput.value = "";
+      });
+    }
+    if (note) {
+      note.addEventListener("input", syncSendEnabled);
+      note.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) {
+          e.preventDefault();
+          if (form) form.requestSubmit();
+        }
+      });
+    }
+    if (form) {
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (state.composerMode === "revision") {
+          sendRevisionChat(e);
+          return;
+        }
         runPrePayment().catch(function (err) {
           if (err && err.code === "REGISTER_REQUIRED" && window.DMAuth) {
             setBusy(false);
-            set("[data-asg-analysis-status]", "");
             window.DMAuth.require({
               reason: err.message || "Create a free account to analyze and price your assignment.",
-            }).then(function () {
-              analyze.click();
-            }).catch(function () {});
+            })
+              .then(function () {
+                form.requestSubmit();
+              })
+              .catch(function () {});
             return;
           }
-          var status = isStaleProjectError(err)
-            ? staleSessionMessage()
-            : (err.message || "Failed");
-          set("[data-asg-analysis-status]", status);
-          if (isStaleProjectError(err)) {
-            resetProjectState();
-            setStage("upload");
-            clearError();
-          } else if (state.requirement) {
-            renderSummary();
-            updateChrome();
-            fail(err, runPrePayment);
-            return;
-          } else {
-            fail(err, runPrePayment);
-            return;
-          }
-          renderSummary();
-          updateChrome();
+          fail(err, runPrePayment);
         });
       });
     }
@@ -1492,8 +2227,99 @@
 
     var completeDownload = $("[data-asg-complete-download]");
     if (completeDownload) completeDownload.addEventListener("click", downloadDelivery);
+    var completeDownload2 = $("[data-asg-complete-download-secondary]");
+    if (completeDownload2) completeDownload2.addEventListener("click", downloadDelivery);
 
+    var revForm = $("[data-asg-revchat-form]");
+    if (revForm) revForm.addEventListener("submit", sendRevisionChat);
+
+    syncComposerMode();
+    setupDragDrop();
+    loadAssignmentHistory();
     startResume();
+
+    root.addEventListener("click", function (e) {
+      if (e.target.closest("[data-asg-thread-download]")) {
+        e.preventDefault();
+        downloadDelivery();
+        return;
+      }
+      if (e.target.closest("[data-asg-thread-pay]")) {
+        e.preventDefault();
+        if (!state.paymentConfirmed) {
+          runAutoProduction().catch(function (err) {
+            fail(err, runAutoProduction);
+          });
+        } else {
+          continueAutoProduction().catch(function (err) {
+            fail(err, continueAutoProduction);
+          });
+        }
+      }
+    });
+  }
+
+  function escHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function fmtHistoryDate(iso) {
+    if (!iso) return "—";
+    try {
+      return new Date(iso).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    } catch (e) {
+      return iso;
+    }
+  }
+
+  async function openHistoryProject(projectId) {
+    if (!projectId) return;
+    state.projectId = projectId;
+    saveWizard();
+    var url = new URL(window.location.href);
+    url.searchParams.set("project", projectId);
+    window.history.replaceState({}, "", url.toString());
+    setBusy(true);
+    setStatus("Opening assignment…");
+    clearThread();
+    try {
+      await hydrateFromServer();
+      await restoreChatForOpenProject(state.chatTranscript);
+      if (state.deliveryPackage) {
+        setStage("delivery", { skipSave: true });
+        saveWizard();
+      } else if (!state.paymentConfirmed) {
+        setStage("price", { skipSave: true });
+      } else {
+        var stage = inferStageFromArtifacts();
+        if (stage === "price" || stage === "upload") stage = "research";
+        setStage(stage, { skipSave: true });
+      }
+      saveWizard();
+      syncComposerMode();
+      setStatus("");
+    } catch (err) {
+      fail(err, function () {
+        return openHistoryProject(projectId);
+      });
+    } finally {
+      setBusy(false);
+      syncComposerMode();
+    }
+  }
+
+  async function loadAssignmentHistory() {
+    if (typeof window.DM_refreshAssignmentHistory === "function") {
+      window.DM_refreshAssignmentHistory();
+    }
   }
 
   wire();

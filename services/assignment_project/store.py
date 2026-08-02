@@ -149,6 +149,25 @@ class ProjectStore:
                         ids.add(child.name)
             return list(ids)
 
+    def list_projects_for_user(self, user_id: str) -> list[Project]:
+        """Load projects owned by user_id, newest first."""
+        uid = str(user_id or "").strip()
+        if not uid:
+            return []
+        projects: list[Project] = []
+        for project_id in self.list_project_ids():
+            try:
+                project = self.get_project(project_id)
+            except Exception:  # noqa: BLE001
+                continue
+            if project is None:
+                continue
+            if str(project.user_id or "") != uid:
+                continue
+            projects.append(project)
+        projects.sort(key=lambda p: p.updated_at or p.created_at, reverse=True)
+        return projects
+
     def save_file(self, file_record: ProjectFile) -> ProjectFile:
         with self._lock:
             bucket = self._files.setdefault(file_record.project_id, [])

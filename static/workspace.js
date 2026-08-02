@@ -49,6 +49,22 @@
     }
   }
 
+  function pushWorkspaceHistory(payload, stickyId) {
+    if (!window.DMToolHistory || !payload) return;
+    var text = payload.text || "";
+    if (!String(text).trim()) return;
+    var id = stickyId || payload.historyId;
+    window.DMToolHistory.push("workspace", {
+      id: id || undefined,
+      title: window.DMToolHistory.titleFromText(payload.title || text, "Workspace draft"),
+      payload: {
+        text: text,
+        title: payload.title || "Untitled draft",
+      },
+    });
+    if (window.DM_refreshToolHistory) window.DM_refreshToolHistory();
+  }
+
   function saveDraftFromEditor(editor, titleEl, statusEl) {
     var text = editor.innerText || "";
     var payload = {
@@ -62,6 +78,17 @@
     } catch (e) {
       /* quota */
     }
+    // Keep one sticky "current draft" history row instead of flooding on every keystroke.
+    var stickyId = null;
+    try {
+      stickyId = localStorage.getItem("dm_workspace_history_active");
+      if (!stickyId) {
+        stickyId =
+          Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+        localStorage.setItem("dm_workspace_history_active", stickyId);
+      }
+    } catch (e2) {}
+    pushWorkspaceHistory(payload, stickyId);
     if (statusEl) {
       statusEl.textContent = "Draft saved locally";
     }
@@ -108,13 +135,28 @@
     }
 
     var draft = loadDraft();
+    var histId = window.DMToolHistory && window.DMToolHistory.historyParam();
+    if (histId && window.DMToolHistory) {
+      var histItem = window.DMToolHistory.get("workspace", histId);
+      if (histItem && histItem.payload) {
+        draft = {
+          text: histItem.payload.text || "",
+          title: histItem.payload.title || "Workspace draft",
+          updatedAt: histItem.updatedAt || Date.now(),
+        };
+        try {
+          sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+          localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+        } catch (e) {}
+      }
+    }
     if (draft && draft.text && editor) {
       editor.textContent = draft.text;
       if (titleEl && draft.title) {
         titleEl.textContent = draft.title;
       }
       if (statusEl) {
-        statusEl.textContent = "Loaded from Format · saved locally";
+        statusEl.textContent = histId ? "Restored from history" : "Loaded from Format · saved locally";
       }
     }
 
@@ -164,6 +206,7 @@
       } catch (e) {
         /* ignore */
       }
+      pushWorkspaceHistory(payload);
     },
   };
 })();

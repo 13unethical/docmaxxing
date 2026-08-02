@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -216,6 +217,10 @@ class AssignmentFormatEngine:
         del citation_pack  # references already embedded in draft content when available
         title = str(draft.get("title") or requirement_json.get("title") or "Assignment")
         content = str(draft.get("content") or "")
+        body_words = int(draft.get("total_words") or count_body_words(content))
+        # Brief often requires stating word count on the front of the assessment.
+        if body_words > 0 and not re.search(r"(?im)^\s*word\s*count\s*:", content):
+            content = f"Word count: {body_words}\n\n{content.lstrip()}"
         job = _job_from_requirement(requirement_json)
         document = _docx_from_markdown(title, content)
         from formatter.document_reconstruction import reconstruct_document_before_format

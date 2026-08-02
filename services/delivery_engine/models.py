@@ -117,6 +117,8 @@ class DeliveryPackage:
     engine_version: str = "mock-1.0"
     prepared_at: datetime | None = None
     ready_at: datetime | None = None
+    client_format: str = "docx"
+    client_filename: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -131,6 +133,8 @@ class DeliveryPackage:
             "engine_version": self.engine_version,
             "prepared_at": self.prepared_at.isoformat() if self.prepared_at else None,
             "ready_at": self.ready_at.isoformat() if self.ready_at else None,
+            "client_format": self.client_format,
+            "client_filename": self.client_filename,
         }
 
     @classmethod
@@ -157,6 +161,8 @@ class DeliveryPackage:
             engine_version=str(data.get("engine_version") or "mock-1.0"),
             prepared_at=prepared_at,
             ready_at=ready_at,
+            client_format=str(data.get("client_format") or "docx"),
+            client_filename=data.get("client_filename"),
         )
 
 

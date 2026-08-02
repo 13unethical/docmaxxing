@@ -623,6 +623,20 @@ def fulfill_paid_webhook(payload: dict[str, Any]) -> dict[str, Any]:
         cryptomus_uuid,
         status,
     )
+    try:
+        from .referral import on_successful_deposit
+
+        on_successful_deposit(
+            user_id,
+            float(amount),
+            payment_ref=f"cryptomus:{order_id}",
+        )
+    except Exception:
+        logger.exception(
+            "referral on_successful_deposit failed user_id=%s order_id=%s",
+            user_id,
+            order_id,
+        )
     return {
         "handled": True,
         "already_credited": False,

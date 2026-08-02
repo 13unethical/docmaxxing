@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Earn & Share — DocMaxxing{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='earn.css') }}?v=20260803-earn-refs" />
+{% endblock %}
+{% block content %}
+<div class="earn-page" data-earn-page>
+  <header class="earn-header">
+    <h1 class="earn-title">Earn &amp; Share</h1>
+    <p class="earn-lede">Invite friends, earn 40% cashback, and unlock premium tools.</p>
+  </header>
+
+  <p class="earn-status" data-earn-status role="status" aria-live="polite"></p>
+
+  <div class="earn-layout">
+    <div class="earn-col earn-col--left">
+      <section class="earn-card" data-earn-link-card>
+        <h2 class="earn-card-title">Your Link</h2>
+        <p class="earn-card-sub">Give 100 credits, get 40% cashback on their deposits.</p>
+        <div class="earn-link-row">
+          <input
+            type="text"
+            class="earn-link-input"
+            data-earn-link
+            readonly
+            value="Loading…"
+            aria-label="Referral link"
+          />
+          <button type="button" class="earn-btn earn-btn--copy" data-earn-copy>Copy</button>
+        </div>
+        <div class="earn-tags">
+          <span class="earn-tag">Code: <code data-earn-code>—</code></span>
+          <span class="earn-tag">Total Referred: <strong data-earn-total-refs>0</strong></span>
+        </div>
+      </section>
+
+      <section class="earn-card" data-earn-finance-card>
+        <h2 class="earn-card-title">Wallet Balance</h2>
+        <p class="earn-balance" data-earn-balance>$0.00</p>
+        <p class="earn-card-sub earn-card-sub--tight">Convert to credits at a 1.2× bonus rate.</p>
+        <p class="earn-pro" data-earn-pro-badge hidden>Pro active — 10% off platform checks</p>
+        <div class="earn-finance-actions">
+          <button type="button" class="earn-btn earn-btn--primary" data-earn-convert>
+            Convert to Credits (1.2×)
+          </button>
+          <button
+            type="button"
+            class="earn-btn earn-btn--secondary"
+            data-earn-withdraw
+            disabled
+            title="Minimum $50"
+          >
+            Withdraw Funds
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div class="earn-col earn-col--right">
+      <section class="earn-card earn-card--milestones" data-earn-milestones-card>
+        <div class="earn-milestones-head">
+          <div>
+            <h2 class="earn-card-title">Milestones &amp; Rewards</h2>
+            <p class="earn-card-sub earn-card-sub--tight">
+              A friend counts only after they deposit $10+.
+              <span class="earn-tip" title="Qualifying referrals: friends who deposited at least $10 once.">ⓘ</span>
+            </p>
+          </div>
+          <span class="earn-badge-free">
+            Free Turnitin reports: <strong data-earn-free-tt>0</strong>
+          </span>
+        </div>
+
+        <div class="earn-track" data-earn-progress>
+          <div class="earn-track-line" aria-hidden="true">
+            <div class="earn-track-fill" data-earn-progress-fill style="width:0%"></div>
+          </div>
+          <div class="earn-nodes" data-earn-steps></div>
+        </div>
+
+        <div class="earn-progress-foot">
+          <div class="earn-progress-bar" aria-hidden="true">
+            <div class="earn-progress-bar-fill" data-earn-progress-bar style="width:0%"></div>
+          </div>
+          <p class="earn-progress-label">
+            Progress: <strong data-earn-qualifying>0</strong> / 10 qualifying friends
+          </p>
+        </div>
+      </section>
+
+      <section class="earn-card earn-card--referrals" data-earn-referrals-card>
+        <div class="earn-milestones-head">
+          <div>
+            <h2 class="earn-card-title">Your referrals</h2>
+            <p class="earn-card-sub earn-card-sub--tight">
+              IDs only — no emails. Expand a row to see deposit history.
+            </p>
+          </div>
+          <span class="earn-tag">Showing <strong data-earn-refs-count>0</strong></span>
+        </div>
+        <div class="earn-refs" data-earn-refs></div>
+        <p class="earn-refs-empty" data-earn-refs-empty>No referrals yet. Share your link to get started.</p>
+      </section>
+    </div>
+  </div>
+
+  <div class="earn-modal" data-earn-withdraw-modal hidden>
+    <div class="earn-modal-backdrop" data-earn-withdraw-close></div>
+    <div class="earn-modal-panel" role="dialog" aria-modal="true" aria-labelledby="earn_withdraw_title">
+      <header class="earn-modal-head">
+        <h2 id="earn_withdraw_title">Withdraw funds</h2>
+        <button type="button" class="earn-modal-x" data-earn-withdraw-close aria-label="Close">&times;</button>
+      </header>
+      <form class="earn-form" data-earn-withdraw-form>
+        <label class="earn-field">
+          <span>Amount (USD)</span>
+          <input type="number" min="50" step="0.01" name="amount_usd" data-earn-withdraw-amount required />
+        </label>
+        <label class="earn-field">
+          <span>Wallet ID / payment details</span>
+          <textarea
+            name="wallet_details"
+            rows="3"
+            data-earn-withdraw-wallet
+            required
+            placeholder="USDT TRC20 address, PayPal email, etc."
+          ></textarea>
+        </label>
+        <p class="earn-modal-note">Funds are reserved immediately. Minimum withdrawal: $50.</p>
+        <button type="submit" class="earn-btn earn-btn--primary earn-btn--block">Submit request</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='earn-page.js') }}?v=20260803-earn-refs"></script>
+{% endblock %}

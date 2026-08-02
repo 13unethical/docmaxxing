@@ -115,7 +115,6 @@
     refreshCounts();
     refreshAiHighlights();
     refreshPending();
-    if (!localStorage.getItem(TOUR_KEY)) startTour();
   }
   function showLanding() {
     if (editorView) editorView.hidden = true;
@@ -1076,13 +1075,11 @@
     // Top bar placeholders + real actions
     on("[data-ws-export]", exportDoc);
     on("[data-ws-back]", showLanding);
-    on("[data-ws-help]", startTour);
     on("[data-ws-history-btn]", function () { showToast("Version history — coming soon."); });
     on("[data-ws-share]", function () { showToast("Live collaboration — coming soon."); });
     on("[data-ws-topup]", function () { window.location.href = "/pricing"; });
 
     // Landing
-    on("[data-ws-tutorial]", startTour);
     on("[data-ws-new-blank]", function () { openEditor({ title: "Untitled document", html: "<h1>Untitled document</h1><p></p>" }); });
     on("[data-ws-open-sample]", function () { openEditor({ title: Mock.SAMPLE_TITLE || "Sample document", html: Mock.SAMPLE_HTML || "<p></p>" }); });
     on("[data-ws-open-turnitin]", function () { showToast("Turnitin reports — coming soon."); });

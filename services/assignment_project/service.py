@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -52,6 +53,8 @@ from services.assignment_formatting import AssignmentFormatEngine
 from services.requirement_validation import GeminiRequirementValidator
 from services.assignment_pipeline.stages import PIPELINE_STAGES
 from services.requirement_validation import GeminiRequirementValidator
+
+MAX_CLIENT_REVISION_ROUNDS = 5
 
 
 def _parse_deadline(value: str | None) -> datetime | None:
@@ -1806,22 +1809,36 @@ class ProjectService:
         if not gate.passed:
             # Soft-export: keep packaging available so the student can download.
             # Blocking issues are stored for review; do not strand the UI on "ready" with no ZIP.
+            warnings: list[str] = []
+            cite_pack = project.artifacts.get("citation_pack")
+            if isinstance(cite_pack, dict):
+                settings = cite_pack.get("settings") if isinstance(cite_pack.get("settings"), dict) else {}
+                used = int(settings.get("used_sources") or len(cite_pack.get("references") or []))
+                minimum = int(settings.get("minimum_sources") or bundle.requirement.minimum_sources or 0)
+                if minimum and used < minimum:
+                    warnings.append(
+                        f"Used {used} verified cited sources (brief asked for {minimum}). "
+                        "Sources were not padded with unused or invented references."
+                    )
             project.artifacts["validation_report"] = {
                 **(project.artifacts.get("validation_report") or {}),
                 "passed": False,
                 "export_blocked": False,
                 "soft_export": True,
                 "blocking_issues": gate.blocking_issues,
+                "warnings": warnings,
                 "spec_validation": gate.spec_validation.to_dict(),
                 "rubric_coverage": gate.rubric_coverage.to_dict(),
             }
             project.artifacts["grade_gate"]["export_blocked"] = False
             project.artifacts["grade_gate"]["soft_export"] = True
+            project.artifacts["grade_gate"]["warnings"] = warnings
             self.store.save_project(project)
             trace(
                 "delivery.soft_export",
                 project_id=project_id,
                 blocking_issues=gate.blocking_issues[:8],
+                warnings=warnings[:4],
             )
         else:
             self.store.save_project(project)
@@ -2051,6 +2068,208 @@ class ProjectService:
 
     def get_resume_stage(self, project_id: str) -> str:
         return self.project_engine.resume_stage(project_id)
+
+    def list_projects_for_user(self, user_id: str) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for project in self.store.list_projects_for_user(str(user_id)):
+            item = project.to_dict()
+            has_delivery = bool(
+                isinstance(project.artifacts.get("delivery_package"), dict)
+                and project.artifacts.get("delivery_package")
+            )
+            item["has_delivery"] = has_delivery
+            item["can_download"] = has_delivery or project.status.value == "completed"
+            chat = project.artifacts.get("revision_chat") if isinstance(project.artifacts.get("revision_chat"), dict) else {}
+            item["revision_rounds_used"] = int(chat.get("rounds_used") or 0)
+            out.append(item)
+        return out
+
+    def get_revision_chat(self, project_id: str) -> dict[str, Any]:
+        project = self.store.require_project(project_id)
+        chat = project.artifacts.get("revision_chat")
+        if not isinstance(chat, dict):
+            return {"messages": [], "rounds_used": 0, "max_rounds": MAX_CLIENT_REVISION_ROUNDS}
+        return {
+            "messages": list(chat.get("messages") or []),
+            "rounds_used": int(chat.get("rounds_used") or 0),
+            "max_rounds": MAX_CLIENT_REVISION_ROUNDS,
+        }
+
+    def get_chat_transcript(self, project_id: str) -> list[dict[str, Any]]:
+        project = self.store.require_project(project_id)
+        raw = project.artifacts.get("chat_transcript")
+        if not isinstance(raw, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for item in raw[:120]:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "assistant")
+            if role not in ("user", "assistant"):
+                role = "assistant"
+            kind = str(item.get("kind") or "")[:64]
+            html = str(item.get("html") or "")
+            if len(html) > 80000:
+                html = html[:80000]
+            if not html.strip():
+                continue
+            out.append({"role": role, "kind": kind, "html": html})
+        return out
+
+    def save_chat_transcript(self, project_id: str, messages: list[Any]) -> list[dict[str, Any]]:
+        project = self.store.require_project(project_id)
+        cleaned: list[dict[str, Any]] = []
+        if not isinstance(messages, list):
+            messages = []
+        for item in messages[:120]:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "assistant")
+            if role not in ("user", "assistant"):
+                role = "assistant"
+            kind = str(item.get("kind") or "")[:64]
+            # Skip ephemeral analyzing status lines
+            if kind == "status":
+                continue
+            html = str(item.get("html") or "")
+            if len(html) > 80000:
+                html = html[:80000]
+            if not html.strip():
+                continue
+            cleaned.append({"role": role, "kind": kind, "html": html})
+        project.artifacts["chat_transcript"] = cleaned
+        self.store.save_project(project)
+        return cleaned
+
+    def apply_client_revision(self, project_id: str, message: str) -> dict[str, Any]:
+        """Apply a free-form client revision request (max 5 rounds), then reformat + repackage."""
+        from services.assignment_llm import (
+            STAGE_REVISION,
+            assignment_generate_json,
+            assignment_llm_configured,
+        )
+        from services.assignment_project.paths import assignment_storage_root
+
+        text = (message or "").strip()
+        if not text:
+            raise ValueError("Revision message is required")
+        if len(text) > 4000:
+            raise ValueError("Revision message is too long")
+
+        project = self.store.require_project(project_id)
+        chat = project.artifacts.get("revision_chat") if isinstance(project.artifacts.get("revision_chat"), dict) else {}
+        rounds_used = int(chat.get("rounds_used") or 0)
+        if rounds_used >= MAX_CLIENT_REVISION_ROUNDS:
+            raise ValueError(
+                f"Revision limit reached ({MAX_CLIENT_REVISION_ROUNDS} free rounds for this assignment)."
+            )
+
+        try:
+            humanized = self._load_humanized_draft(project_id)
+            content = humanized.content or ""
+            title = humanized.title or project.title
+        except KeyError:
+            draft = self._load_draft(project_id)
+            content = draft.content or ""
+            title = draft.title or project.title
+
+        if not assignment_llm_configured(STAGE_REVISION):
+            raise ValueError("Revision AI is not configured")
+
+        system = (
+            "You edit an academic assignment draft based on the student's revision request. "
+            "Return ONLY JSON: {"
+            "\"scope\": \"small|medium|large\", "
+            "\"content\": \"full markdown WITH ## headings\", "
+            "\"assistant_reply\": \"short confirmation of what you changed and the scope applied\", "
+            "\"notes\": []"
+            "}. "
+            "Scale the edit to the request: "
+            "small = wording/typos/local fixes only; "
+            "medium = expand/shorten a section or adjust structure within reason; "
+            "large = multi-section rewrite when the user clearly asks for it. "
+            "Do not over-edit for small requests. Do not invent bibliographic sources. "
+            "Keep required section headings. Preserve complete sentences. "
+            "If a References section exists, keep it unless the user asks to fix it; "
+            "you may fix formatting of existing refs only."
+        )
+        data, _ = assignment_generate_json(
+            system_prompt=system,
+            user_prompt=json.dumps(
+                {
+                    "revision_request": text,
+                    "title": title,
+                    "draft": content[:28000],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            temperature=0.2,
+            max_retries=1,
+            stage=STAGE_REVISION,
+        )
+        if not isinstance(data, dict):
+            raise ValueError("Revision model returned an invalid response")
+        updated = str(data.get("content") or "").strip()
+        if not updated or len(updated) < max(80, int(len(content) * 0.45)):
+            raise ValueError("Revision did not produce usable content")
+        if content.count("## ") >= 2 and updated.count("## ") < 2:
+            raise ValueError("Revision dropped required section headings")
+
+        reply = str(data.get("assistant_reply") or data.get("notes") or "Updated your assignment.").strip()
+        if isinstance(data.get("notes"), list) and not str(data.get("assistant_reply") or "").strip():
+            reply = "; ".join(str(n) for n in data["notes"][:4]) or reply
+        scope = str(data.get("scope") or "").strip().lower()
+        if scope in {"small", "medium", "large"} and scope not in reply.lower():
+            reply = f"[{scope} edit] {reply}"
+
+        self._persist_repaired_draft_content(project_id, updated)
+        try:
+            self._rehumanize_current_prose(project_id, reason="client_revision_chat")
+        except Exception as exc:  # noqa: BLE001
+            trace("revision_chat.rehumanize_skipped", project_id=project_id, error=str(exc))
+
+        try:
+            self.run_formatting(project_id)
+        except Exception as exc:  # noqa: BLE001
+            trace("revision_chat.format_failed", project_id=project_id, error=str(exc))
+
+        package = None
+        try:
+            package = self.run_delivery(project_id)
+        except Exception as exc:  # noqa: BLE001
+            trace("revision_chat.delivery_failed", project_id=project_id, error=str(exc))
+
+        now = utc_now().isoformat()
+        messages = list(chat.get("messages") or [])
+        messages.append({"role": "user", "content": text, "at": now})
+        messages.append({"role": "assistant", "content": reply, "at": now})
+        rounds_used += 1
+        project = self.store.require_project(project_id)
+        project.artifacts["revision_chat"] = {
+            "messages": messages[-40:],
+            "rounds_used": rounds_used,
+            "max_rounds": MAX_CLIENT_REVISION_ROUNDS,
+            "updated_at": now,
+        }
+        project.updated_at = utc_now()
+        self.store.save_project(project)
+
+        # Persist a copy on disk for support.
+        chat_path = assignment_storage_root() / project_id / "revision_chat.json"
+        chat_path.parent.mkdir(parents=True, exist_ok=True)
+        chat_path.write_text(
+            json.dumps(project.artifacts["revision_chat"], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        return {
+            "assistant_reply": reply,
+            "rounds_used": rounds_used,
+            "max_rounds": MAX_CLIENT_REVISION_ROUNDS,
+            "messages": messages[-40:],
+            "delivery_package": package.to_dict() if package is not None else None,
+        }
 
 
 def _files_from_manifest(manifest_files: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -1,7 +1,7 @@
 {% extends "info/base.html" %}
 {% set info_active = "delivery" %}
 {% set page_title = "Delivery Policy" %}
-{% set page_lede = "How digital outputs are delivered after you run a DocMaxxing feature." %}
+{% set page_lede = "How digital outputs are delivered after you run a DocMaxxing feature. Last updated: 3 August 2026." %}
 {% block info_body %}
 <h2>1. Instant digital delivery</h2>
 <p>
@@ -12,12 +12,15 @@
 <h2>2. What gets delivered</h2>
 <ul>
   <li><strong>Format</strong> — formatted DOCX download after processing.</li>
-  <li><strong>Humanizer / Workspace</strong> — rewritten text in the editor or session output.</li>
+  <li><strong>Humanizer</strong> — rewritten text in the editor / session output.</li>
   <li><strong>Turnitin</strong> — similarity / AI / highlights reports when generated successfully.</li>
   <li><strong>Assignment</strong> — a delivery ZIP (formatted document + supporting package files) via
     <em>Download assignment</em> once packaging finishes.</li>
-  <li><strong>Check</strong> — on-screen analysis results.</li>
+  <li><strong>Earn &amp; Share</strong> — referral rewards appear as credits, free Turnitin reports, Pro status, or pending withdrawal requests (not file downloads).</li>
 </ul>
+<p>
+  Academic Check, Workspace, and Presentation are currently Soon and do not deliver outputs yet.
+</p>
 
 <h2>3. Assignment packaging</h2>
 <p>
@@ -29,9 +32,11 @@
 
 <h2>4. Delivery time</h2>
 <ul>
-  <li>Most Format / Check jobs: seconds to a few minutes.</li>
+  <li>Most Format jobs: seconds to a few minutes.</li>
   <li>Humanizer batches: depends on StealthWriter queue and document length.</li>
+  <li>Turnitin reports: depends on provider queue.</li>
   <li>Full Assignment runs: typically several minutes depending on section count, LLM calls, and detection.</li>
+  <li>Referral withdrawals: manual review — timing depends on support hours and payment rails.</li>
 </ul>
 
 <h2>5. Failed delivery</h2>

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import io
-import zipfile
 from pathlib import Path
 
 import pytest
@@ -16,6 +14,7 @@ from services.assignment_project.models import ProjectStatus
 from services.assignment_project.service import ProjectService
 from services.blueprint_engine import BlueprintEngineService
 from services.delivery_engine import DeliveryEngineService, DeliveryStatus
+from services.delivery_engine.packager import resolve_client_format
 from services.humanizer_engine import HumanizerEngineService
 from services.research_engine import ResearchEngineService
 from services.reviewer_engine import ReviewerEngineService
@@ -60,7 +59,13 @@ def _detection_report() -> dict:
     return {"overall_ai_score": 9.5, "final_status": "passed"}
 
 
-def test_delivery_packages_prior_outputs_only():
+def test_resolve_client_format_defaults_to_docx():
+    assert resolve_client_format({}) == "docx"
+    assert resolve_client_format({"submission_format": "Word-processed"}) == "docx"
+    assert resolve_client_format({"submission_format": "PDF"}) == "pdf"
+
+
+def test_delivery_packages_client_file_only():
     engine = DeliveryEngineService()
     package = engine.prepare_package(
         final_draft=_draft(),
@@ -76,8 +81,9 @@ def test_delivery_packages_prior_outputs_only():
     )
 
     assert package.status == DeliveryStatus.READY
-    assert len(package.files) >= 6
-    assert any(f.filename.endswith(".docx") for f in package.files)
+    assert len(package.files) == 1
+    assert package.files[0].filename.endswith(".docx")
+    assert package.client_format == "docx"
     assert package.project_summary.project_name == "Climate-Policy-Essay"
     assert package.project_summary.word_count == 1200
     assert package.project_summary.total_revisions == 1
@@ -87,9 +93,14 @@ def test_delivery_packages_prior_outputs_only():
     assert package.package_download_url
     assert all(item.ready for item in package.files)
 
+    root = Path(package.files[0].storage_path).parent
+    assert (root / "debug" / "requirement.json").is_file()
+    # Client-facing list must not include JSON artifacts.
+    assert all(not f.filename.endswith(".json") for f in package.files)
 
-def test_delivery_uses_formatted_docx_in_zip(tmp_path):
-    """ZIP must ship Format Engine DOCX, not a markdown rebuild."""
+
+def test_delivery_uses_formatted_docx(tmp_path):
+    """Client download must ship Format Engine DOCX, not a markdown rebuild."""
     formatted = tmp_path / "formatted.docx"
     doc = Document()
     doc.add_heading("Formatted Title", level=1)
@@ -120,14 +131,21 @@ def test_delivery_uses_formatted_docx_in_zip(tmp_path):
     assert on_disk.paragraphs[0].text == "Formatted Title"
     assert "Unformatted fallback" not in "\n".join(p.text for p in on_disk.paragraphs)
 
-    root = Path(docx_entry.storage_path).parent
-    zips = list(root.glob("*-delivery-package.zip"))
-    assert zips, "delivery zip missing"
-    with zipfile.ZipFile(zips[0]) as zf:
-        name = next(n for n in zf.namelist() if n.endswith(".docx"))
-        zdoc = Document(io.BytesIO(zf.read(name)))
-    assert zdoc.paragraphs[0].text == "Formatted Title"
-    assert "Unformatted fallback" not in "\n".join(p.text for p in zdoc.paragraphs)
+
+def test_delivery_pdf_when_brief_asks(tmp_path):
+    engine = DeliveryEngineService()
+    package = engine.prepare_package(
+        final_draft=_draft(),
+        requirement_json={**_requirement(), "submission_format": "PDF"},
+        research_plan=_research_plan(),
+        blueprint=_blueprint(),
+        review_report=_review_report(),
+        detection_report=_detection_report(),
+        project_id="proj-pdf",
+    )
+    assert package.client_format == "pdf"
+    assert len(package.files) == 1
+    assert package.files[0].filename.endswith(".pdf")
 
 
 def test_delivery_requires_all_inputs():
@@ -206,6 +224,7 @@ def test_project_delivery_pipeline():
     project = projects.get_project(bundle.project.id).project
 
     assert package.status == DeliveryStatus.READY
-    assert len(package.files) >= 6
+    assert len(package.files) == 1
+    assert package.files[0].file_type in {"final_assignment_docx", "final_assignment_pdf"}
     assert project.status == ProjectStatus.COMPLETED
     assert projects.get_delivery_package(bundle.project.id).id == package.id

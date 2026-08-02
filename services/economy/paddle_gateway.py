@@ -471,6 +471,22 @@ def apply_paid_purchase_atomic(
             "SELECT * FROM paddle_purchases WHERE id = ?", (purchase_id,)
         ).fetchone()
 
+    try:
+        from .referral import on_successful_deposit
+
+        on_successful_deposit(
+            user_id,
+            float(amount),
+            payment_ref=f"paddle:{paddle_transaction_id}",
+        )
+    except Exception:
+        # Never fail the purchase if referral accounting errors.
+        import logging
+
+        logging.getLogger(__name__).exception(
+            "referral on_successful_deposit failed user_id=%s", user_id
+        )
+
     return {
         "already_credited": False,
         "purchase": _row_to_purchase(row),

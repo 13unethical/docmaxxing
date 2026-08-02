@@ -95,7 +95,7 @@
   }
 
   function buildLoggedInHeader(user, balance) {
-    var account = q(".nav-account");
+    var account = q(".app-topbar-account") || q(".nav-account");
     if (!account) return;
     var email = (user && user.email) || "";
     var name = (user && (user.name || email.split("@")[0])) || "Account";
@@ -107,57 +107,56 @@
       '<path d="M12 8.5v7M9.75 10.25h3.5a1.5 1.5 0 0 1 0 3h-2.5a1.5 1.5 0 0 0 0 3h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />' +
       '</svg><span data-coin-balance>' +
       (typeof balance === "number" ? balance : 0) +
-      '</span><span class="coin-pill-label">Credits</span></a>' +
-      '<div class="nav-user-menu" data-user-menu>' +
-      '<button type="button" class="nav-user-trigger" data-user-menu-toggle aria-label="' +
-      escapeHtml(name) +
-      '" aria-expanded="false" aria-haspopup="true">' +
-      '<span class="nav-user-avatar" aria-hidden="true">' +
-      escapeHtml(initial) +
-      "</span>" +
-      '<svg class="nav-user-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
-      "</svg></button>" +
-      '<div class="nav-user-dropdown" data-user-menu-panel hidden>' +
-      '<div class="nav-user-dropdown-head">' +
-      '<span class="nav-user-avatar nav-user-avatar--lg" aria-hidden="true">' +
-      escapeHtml(initial) +
-      "</span>" +
-      '<div class="nav-user-dropdown-meta"><span class="nav-user-dropdown-name">' +
-      escapeHtml(name) +
-      '</span><span class="nav-user-dropdown-email">' +
-      escapeHtml(email) +
-      "</span></div></div>" +
-      '<div class="nav-theme-switch" role="group" aria-label="Color theme">' +
-      '<button type="button" class="nav-theme-option" data-theme-set="light" aria-pressed="true" aria-label="Light mode">' +
-      '<svg class="theme-toggle-icon theme-toggle-icon--sun" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<circle cx="12" cy="12" r="3.75" stroke="currentColor" stroke-width="1.6" />' +
-      '<path d="M12 2.75v2.1M12 19.15v2.1M2.75 12h2.1M19.15 12h2.1M5.22 5.22l1.48 1.48M17.3 17.3l1.48 1.48M5.22 18.78l1.48-1.48M17.3 6.7l1.48-1.48" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' +
-      "</svg></button>" +
-      '<button type="button" class="nav-theme-option" data-theme-set="dark" aria-pressed="false" aria-label="Dark mode">' +
-      '<svg class="theme-toggle-icon theme-toggle-icon--moon" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<path d="M20.5 14.2A8.2 8.2 0 1 1 9.8 3.5 6.7 6.7 0 0 0 20.5 14.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' +
-      "</svg></button></div>" +
-      '<div class="nav-user-dropdown-links">' +
-      '<a href="/account" class="nav-user-dropdown-link">' +
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<circle cx="12" cy="8" r="3.25" stroke="currentColor" stroke-width="1.6"/>' +
-      '<path d="M5.5 19c1.6-3 4-4.5 6.5-4.5S16.9 16 18.5 19" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' +
-      "</svg>Account</a>" +
-      '<a href="/pricing" class="nav-user-dropdown-link">' +
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<rect x="3.5" y="6.5" width="17" height="11" rx="2" stroke="currentColor" stroke-width="1.6"/>' +
-      '<path d="M3.5 10.5h17" stroke="currentColor" stroke-width="1.6"/>' +
-      "</svg>Billing</a>" +
-      '<form method="post" action="/logout" class="nav-user-dropdown-form">' +
-      '<button type="submit" class="nav-user-dropdown-link nav-user-dropdown-link--btn">' +
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<path d="M10 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' +
-      '<path d="M14 16l4-4-4-4M18 12H10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' +
-      "</svg>Log out</button></form>" +
-      "</div></div></div>";
+      '</span><span class="coin-pill-label">Credits</span></a>';
+
+    var footer = q(".app-sidebar-footer");
+    if (footer) {
+      footer.innerHTML =
+        '<div class="nav-user-menu app-sidebar-user" data-user-menu>' +
+        '<button type="button" class="nav-user-trigger app-sidebar-user-trigger" data-user-menu-toggle aria-label="' +
+        escapeHtml(name) +
+        '" aria-expanded="false" aria-haspopup="true">' +
+        '<span class="nav-user-avatar" aria-hidden="true">' +
+        escapeHtml(initial) +
+        "</span>" +
+        '<span class="app-sidebar-user-meta"><span class="app-sidebar-user-name">' +
+        escapeHtml(name) +
+        '</span><span class="app-sidebar-user-sub">Account</span></span>' +
+        '<svg class="nav-user-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+        '<path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+        "</svg></button>" +
+        '<div class="nav-user-dropdown app-sidebar-dropdown" data-user-menu-panel hidden>' +
+        '<div class="nav-user-dropdown-head">' +
+        '<span class="nav-user-avatar nav-user-avatar--lg" aria-hidden="true">' +
+        escapeHtml(initial) +
+        "</span>" +
+        '<div class="nav-user-dropdown-meta"><span class="nav-user-dropdown-name">' +
+        escapeHtml(name) +
+        '</span><span class="nav-user-dropdown-email">' +
+        escapeHtml(email) +
+        "</span></div></div>" +
+        '<div class="nav-theme-switch" role="group" aria-label="Color theme">' +
+        '<button type="button" class="nav-theme-option" data-theme-set="light" aria-pressed="true" aria-label="Light mode">' +
+        '<svg class="theme-toggle-icon theme-toggle-icon--sun" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+        '<circle cx="12" cy="12" r="3.75" stroke="currentColor" stroke-width="1.6" />' +
+        '<path d="M12 2.75v2.1M12 19.15v2.1M2.75 12h2.1M19.15 12h2.1M5.22 5.22l1.48 1.48M17.3 17.3l1.48 1.48M5.22 18.78l1.48-1.48M17.3 6.7l1.48-1.48" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' +
+        "</svg></button>" +
+        '<button type="button" class="nav-theme-option" data-theme-set="dark" aria-pressed="false" aria-label="Dark mode">' +
+        '<svg class="theme-toggle-icon theme-toggle-icon--moon" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+        '<path d="M20.5 14.2A8.2 8.2 0 1 1 9.8 3.5 6.7 6.7 0 0 0 20.5 14.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>' +
+        "</svg></button></div>" +
+        '<div class="nav-user-dropdown-links">' +
+        '<a href="/account" class="nav-user-dropdown-link">Account</a>' +
+        '<a href="/pricing" class="nav-user-dropdown-link">Billing</a>' +
+        '<form method="post" action="/logout" class="nav-user-dropdown-form">' +
+        '<button type="submit" class="nav-user-dropdown-link nav-user-dropdown-link--btn">Log out</button></form>' +
+        "</div></div></div>";
+    }
     if (typeof global.DMThemeApply === "function") {
       global.DMThemeApply();
+    }
+    if (typeof global.DM_refreshAssignmentHistory === "function") {
+      global.DM_refreshAssignmentHistory();
     }
   }
 
@@ -186,6 +185,17 @@
     qa("input", form).forEach(function (inp) {
       if (inp.name) body[inp.name] = inp.value;
     });
+    if (kind === "register") {
+      try {
+        var params = new URLSearchParams(window.location.search);
+        var ref = params.get("ref") || params.get("referral_code") || "";
+        if (ref) body.referral_code = ref;
+        else if (!body.referral_code) {
+          var stored = sessionStorage.getItem("dm_pending_ref");
+          if (stored) body.referral_code = stored;
+        }
+      } catch (e) {}
+    }
     var btn = q(".dm-auth-submit", form);
     var label = btn ? btn.textContent : "";
     if (btn) { btn.disabled = true; btn.textContent = "Please wait…"; }
@@ -253,4 +263,10 @@
     open: function (reason) { openModal(reason); },
     close: function () { closeModal(true); },
   };
+
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var ref = params.get("ref") || params.get("referral_code");
+    if (ref) sessionStorage.setItem("dm_pending_ref", ref);
+  } catch (e) {}
 })(typeof window !== "undefined" ? window : this);

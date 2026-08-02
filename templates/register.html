@@ -13,6 +13,7 @@
           {% endif %}
 
           <form method="post" action="{{ url_for('register') }}" class="auth-form">
+            <input type="hidden" name="referral_code" value="{{ referral_code or '' }}" />
             <label class="auth-field">
               <span class="auth-label">Name <span class="auth-optional">(optional)</span></span>
               <input type="text" name="name" autocomplete="name"

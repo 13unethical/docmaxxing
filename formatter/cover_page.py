@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.oxml.ns import qn
 from docx.shared import Pt
 
 
@@ -44,6 +46,28 @@ def _display_date(raw: str) -> str:
         return parsed.strftime("%d %B %Y")
     except ValueError:
         return text
+
+
+def prepend_cover_document(document: Document, cover_document: Document) -> None:
+    """Insert another document's body as a title page, then a page break."""
+    if cover_document is None:
+        return
+
+    body = document.element.body
+    existing = list(body)
+    for element in existing:
+        body.remove(element)
+
+    for child in list(cover_document.element.body):
+        if child.tag == qn("w:sectPr"):
+            continue
+        body.append(deepcopy(child))
+
+    break_paragraph = document.add_paragraph()
+    break_paragraph.add_run().add_break(WD_BREAK.PAGE)
+
+    for element in existing:
+        body.append(element)
 
 
 def prepend_cover_page(document: Document, cover: CoverPageData, *, font_family: str = "Times New Roman") -> None:

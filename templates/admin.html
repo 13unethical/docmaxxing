@@ -90,6 +90,33 @@
     </div>
   </section>
 
+  <section class="adm-card adm-withdrawals" aria-labelledby="adm-withdrawals-title" data-adm-withdrawals>
+    <div class="adm-analytics-head">
+      <div>
+        <h2 class="adm-section-title" id="adm-withdrawals-title">Withdrawal requests</h2>
+        <p class="adm-analytics-lede">Pending referral cashouts. Approve after you send funds; reject to refund the user’s balance.</p>
+      </div>
+      <button type="button" class="adm-btn adm-btn--ghost" data-adm-withdrawals-refresh>Refresh</button>
+    </div>
+    <p class="adm-status" data-adm-withdrawals-status role="status" aria-live="polite"></p>
+    <div class="adm-table-wrap">
+      <table class="adm-table">
+        <thead>
+          <tr>
+            <th scope="col">ID</th>
+            <th scope="col">User</th>
+            <th scope="col">Amount</th>
+            <th scope="col">Wallet / payment details</th>
+            <th scope="col">Requested</th>
+            <th scope="col">Actions</th>
+          </tr>
+        </thead>
+        <tbody data-adm-withdrawals-body></tbody>
+      </table>
+      <p class="adm-empty" data-adm-withdrawals-empty hidden>No pending withdrawals.</p>
+    </div>
+  </section>
+
   <section class="adm-card">
     <div class="adm-toolbar">
       <div class="adm-search-wrap">

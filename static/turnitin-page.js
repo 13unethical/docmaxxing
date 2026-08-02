@@ -646,6 +646,81 @@
     });
   }
 
+  (function setupDragDrop() {
+    var overlay = root.querySelector("[data-tt-drop-overlay]");
+    var dragDepth = 0;
+
+    function setDropOverlay(on) {
+      if (overlay) {
+        if (on) {
+          overlay.hidden = false;
+          overlay.removeAttribute("hidden");
+        } else {
+          overlay.hidden = true;
+        }
+      }
+      root.classList.toggle("is-dragging-files", !!on);
+    }
+
+    function hasFiles(e) {
+      var dt = e.dataTransfer;
+      if (!dt) return false;
+      try {
+        var types = dt.types ? Array.prototype.slice.call(dt.types) : [];
+        if (types.indexOf("Files") !== -1) return true;
+        if (types.indexOf("application/x-moz-file") !== -1) return true;
+      } catch (err) {}
+      return !!(dt.files && dt.files.length);
+    }
+
+    function onDragEnter(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth += 1;
+      setDropOverlay(true);
+    }
+
+    function onDragOver(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      setDropOverlay(true);
+    }
+
+    function onDragLeave(e) {
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDropOverlay(false);
+    }
+
+    function onDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth = 0;
+      setDropOverlay(false);
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      setFiles(files);
+      submitCheck();
+    }
+
+    var targets = [root];
+    var main = document.querySelector(".app-shell-main");
+    if (main) targets.push(main);
+    targets.forEach(function (el) {
+      el.addEventListener("dragenter", onDragEnter);
+      el.addEventListener("dragover", onDragOver);
+      el.addEventListener("dragleave", onDragLeave);
+      el.addEventListener("drop", onDrop);
+    });
+    window.addEventListener("dragend", function () {
+      dragDepth = 0;
+      setDropOverlay(false);
+    });
+  })();
+
   if (els.search) {
     els.search.addEventListener("input", function () {
       state.searchQuery = els.search.value;

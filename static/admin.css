@@ -416,6 +416,35 @@
   filter: brightness(1.08);
 }
 
+.adm-btn--approve {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.adm-btn--approve:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.adm-btn--reject {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  margin-left: 0.35rem;
+}
+
+.adm-btn--reject:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.adm-cell-wallet {
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+
 .adm-feature {
   display: inline-flex;
   padding: 0.15rem 0.45rem;

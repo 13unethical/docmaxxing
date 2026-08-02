@@ -282,7 +282,14 @@
         fd.append(id, el.value || "");
       }
     });
-    appendCheckboxToFormData(fd, "include_cover_page", "include_cover_page");
+    var coverFile = document.getElementById("cover_file");
+    var hasCoverFile = !!(coverFile && coverFile.files && coverFile.files[0]);
+    if (hasCoverFile) {
+      fd.append("cover_file", coverFile.files[0]);
+      fd.append("include_cover_page", "on");
+    } else {
+      appendCheckboxToFormData(fd, "include_cover_page", "include_cover_page");
+    }
   }
 
   function isSupportedDocumentFile(file) {

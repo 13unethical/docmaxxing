@@ -1,4 +1,4 @@
-"""Real delivery packager: writes files and ZIP archive."""
+"""Real delivery packager: client gets only the final assignment file (docx/pdf)."""
 
 from __future__ import annotations
 
@@ -6,14 +6,12 @@ import io
 import json
 import re
 import uuid
-import zipfile
 from pathlib import Path
 from typing import Any, Protocol
 
 from docx import Document
 
 from services.assignment_pipeline.models import utc_now
-from services.assignment_project.paths import assignment_storage_root
 from services.delivery_engine.models import (
     DeliveryEngineInput,
     DeliveryFile,
@@ -23,12 +21,22 @@ from services.delivery_engine.models import (
 )
 
 
+def _storage_root() -> Path:
+    # Inline to avoid circular import via services.assignment_project.__init__.
+    import os
+
+    override = (os.environ.get("PROJECT_STORAGE_DIR") or "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    return (Path(__file__).resolve().parents[2] / "data" / "projects").resolve()
+
+
 class DeliveryPackager(Protocol):
     def package(self, payload: DeliveryEngineInput) -> DeliveryPackage: ...
 
 
 class RealDeliveryPackager:
-    VERSION = "real-1.0"
+    VERSION = "real-2.0"
 
     def package(self, payload: DeliveryEngineInput) -> DeliveryPackage:
         project_id = payload.project_id or "local"
@@ -42,70 +50,73 @@ class RealDeliveryPackager:
         title = _safe_filename(
             str(draft.get("title") or requirement.get("title") or requirement.get("assignment_type") or "Assignment")
         )
-        root = assignment_storage_root() / project_id / "delivery"
+        root = _storage_root() / project_id / "delivery"
         root.mkdir(parents=True, exist_ok=True)
+        debug_root = root / "debug"
+        debug_root.mkdir(parents=True, exist_ok=True)
 
         summary = _build_summary(payload, title, review, detection)
         now = utc_now()
         package_id = str(uuid.uuid4())
+        client_format = resolve_client_format(requirement)
 
-        files: list[DeliveryFile] = []
-        staged_files: list[tuple[DeliveryFile, bytes]] = []
-
-        docx_name = f"{title}.docx"
+        # Always materialize formatted DOCX bytes (source of truth when Format Engine ran).
         formatted_path = (payload.formatted_document_path or "").strip()
         docx_bytes: bytes | None = None
-        docx_label = "Final Assignment"
         if formatted_path:
             src = Path(formatted_path)
             if src.is_file():
                 docx_bytes = src.read_bytes()
-                docx_label = "Formatted Assignment"
         if docx_bytes is None:
-            # Fallback only when Format Engine output is missing.
             docx_bytes = _build_docx_bytes(str(draft.get("title") or title), str(draft.get("content") or ""))
-        files.append(
-            _file(
-                docx_label,
-                docx_name,
-                "final_assignment_docx",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                root / docx_name,
-                len(docx_bytes),
+
+        docx_path = root / f"{title}.docx"
+        docx_path.write_bytes(docx_bytes)
+
+        files: list[DeliveryFile] = []
+        if client_format == "pdf":
+            pdf_bytes = _build_pdf_bytes(str(draft.get("title") or title), str(draft.get("content") or ""))
+            pdf_name = f"{title}.pdf"
+            pdf_path = root / pdf_name
+            pdf_path.write_bytes(pdf_bytes)
+            files.append(
+                _file(
+                    "Final Assignment",
+                    pdf_name,
+                    "final_assignment_pdf",
+                    "application/pdf",
+                    pdf_path,
+                    len(pdf_bytes),
+                    package_id=package_id,
+                )
             )
-        )
-        staged_files.append((files[-1], docx_bytes))
+            primary_path = pdf_path
+        else:
+            files.append(
+                _file(
+                    "Formatted Assignment" if formatted_path else "Final Assignment",
+                    f"{title}.docx",
+                    "final_assignment_docx",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    docx_path,
+                    len(docx_bytes),
+                    package_id=package_id,
+                )
+            )
+            primary_path = docx_path
 
-        pdf_name = f"{title}.pdf"
-        pdf_bytes = _build_pdf_bytes(str(draft.get("title") or title), str(draft.get("content") or ""))
-        files.append(_file("Final Assignment", pdf_name, "final_assignment_pdf", "application/pdf", root / pdf_name, len(pdf_bytes)))
-        staged_files.append((files[-1], pdf_bytes))
-
-        json_specs = [
-            ("Requirement JSON", "requirement.json", "requirement_json", requirement),
-            ("Research JSON", "research.json", "research_json", research),
-            ("Blueprint JSON", "blueprint.json", "blueprint_json", blueprint),
-            ("Review JSON", "review.json", "review_json", review),
-            ("AI Detection JSON", "ai_detection.json", "ai_detection_json", detection),
-            ("Project Summary JSON", "project_summary.json", "project_summary_json", summary.to_dict()),
+        # Server-side debug artifacts — never included in client download.
+        debug_specs = [
+            ("requirement.json", requirement),
+            ("research.json", research),
+            ("blueprint.json", blueprint),
+            ("review.json", review),
+            ("ai_detection.json", detection),
+            ("project_summary.json", summary.to_dict()),
         ]
-        for label, filename, file_type, payload_obj in json_specs:
+        for filename, payload_obj in debug_specs:
             blob = json.dumps(payload_obj, ensure_ascii=False, indent=2).encode("utf-8")
-            files.append(_file(label, filename, file_type, "application/json", root / filename, len(blob)))
-            staged_files.append((files[-1], blob))
-
-        for entry, blob in staged_files:
-            out_path = Path(entry.storage_path)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_bytes(blob)
-
-        zip_name = f"{title}-delivery-package.zip"
-        zip_path = root / zip_name
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for entry, _ in staged_files:
-                zf.write(entry.storage_path, arcname=entry.filename)
-
-        package_size = zip_path.stat().st_size
+            (debug_root / filename).write_bytes(blob)
 
         package = DeliveryPackage(
             id=package_id,
@@ -113,14 +124,35 @@ class RealDeliveryPackager:
             status=DeliveryStatus.READY,
             files=files,
             project_summary=summary,
-            package_download_url=f"/api/delivery/packages/{package_id}/download",
-            package_size_bytes=package_size,
+            package_download_url=f"/api/assignment/projects/{project_id}/download",
+            package_size_bytes=primary_path.stat().st_size,
             final_draft_id=str(draft.get("id") or ""),
             engine_version=self.VERSION,
             prepared_at=now,
             ready_at=now,
+            client_format=client_format,
+            client_filename=primary_path.name,
         )
         return package
+
+
+def resolve_client_format(requirement: dict[str, Any] | None) -> str:
+    """Prefer PDF only when the brief clearly asks for PDF; otherwise DOCX."""
+    req = requirement or {}
+    parts = [
+        str(req.get("submission_format") or ""),
+        str(req.get("submission_medium") or ""),
+        str(req.get("assignment_medium") or ""),
+        str(req.get("format") or ""),
+    ]
+    blob = " ".join(parts).lower()
+    if re.search(r"\bpdf\b", blob) and not re.search(r"\b(word|docx|doc)\b", blob):
+        return "pdf"
+    if re.search(r"\bpdf\b", blob) and "word-processed" not in blob and "word processed" not in blob:
+        # e.g. "PDF preferred" without Word — still pdf
+        if "word" not in blob and "docx" not in blob:
+            return "pdf"
+    return "docx"
 
 
 def _build_docx_bytes(title: str, content: str) -> bytes:
@@ -140,7 +172,6 @@ def _build_pdf_bytes(title: str, content: str) -> bytes:
         from reportlab.lib.pagesizes import A4
         from reportlab.pdfgen import canvas
     except Exception:
-        # Keep delivery working even if reportlab is unavailable on the host.
         return _build_docx_bytes(title, content)
 
     buf = io.BytesIO()
@@ -203,6 +234,8 @@ def _file(
     mime_type: str,
     path: Path,
     size: int,
+    *,
+    package_id: str = "",
 ) -> DeliveryFile:
     file_id = str(uuid.uuid4())
     return DeliveryFile(

@@ -119,6 +119,23 @@ CREATE INDEX IF NOT EXISTS idx_usage_user_created
 
 CREATE INDEX IF NOT EXISTS idx_usage_feature
     ON usage_events(feature);
+
+CREATE TABLE IF NOT EXISTS withdrawal_requests (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount_usd      REAL NOT NULL,
+    wallet_details  TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    admin_note      TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_withdrawal_status
+    ON withdrawal_requests(status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_withdrawal_user
+    ON withdrawal_requests(user_id, created_at DESC);
 """
 
 
@@ -218,6 +235,80 @@ def _migrate_cryptomus_payments(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_referral_columns(conn: sqlite3.Connection) -> None:
+    """Add referral/cashback columns + backfill referral_code for existing users."""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    if not exists:
+        return
+    cols = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    alters = [
+        ("referral_code", "ALTER TABLE users ADD COLUMN referral_code TEXT"),
+        ("referrer_id", "ALTER TABLE users ADD COLUMN referrer_id INTEGER"),
+        (
+            "referral_balance_usd",
+            "ALTER TABLE users ADD COLUMN referral_balance_usd REAL NOT NULL DEFAULT 0",
+        ),
+        (
+            "qualifying_referrals_count",
+            "ALTER TABLE users ADD COLUMN qualifying_referrals_count INTEGER NOT NULL DEFAULT 0",
+        ),
+        ("is_pro", "ALTER TABLE users ADD COLUMN is_pro INTEGER NOT NULL DEFAULT 0"),
+        (
+            "free_turnitin_reports",
+            "ALTER TABLE users ADD COLUMN free_turnitin_reports INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "has_qualified_deposit",
+            "ALTER TABLE users ADD COLUMN has_qualified_deposit INTEGER NOT NULL DEFAULT 0",
+        ),
+        (
+            "milestones_claimed",
+            "ALTER TABLE users ADD COLUMN milestones_claimed TEXT NOT NULL DEFAULT '[]'",
+        ),
+    ]
+    for name, sql in alters:
+        if name not in cols:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass
+
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_referral_code "
+        "ON users(referral_code) WHERE referral_code IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_users_referrer "
+        "ON users(referrer_id) WHERE referrer_id IS NOT NULL"
+    )
+
+    # Backfill missing referral codes for existing users.
+    import secrets
+    import string
+
+    alphabet = string.ascii_uppercase + string.digits
+    rows = conn.execute(
+        "SELECT id FROM users WHERE referral_code IS NULL OR referral_code = ''"
+    ).fetchall()
+    for row in rows:
+        for _ in range(20):
+            code = "DM" + "".join(secrets.choice(alphabet) for _ in range(8))
+            taken = conn.execute(
+                "SELECT 1 FROM users WHERE referral_code = ?", (code,)
+            ).fetchone()
+            if not taken:
+                conn.execute(
+                    "UPDATE users SET referral_code = ? WHERE id = ?",
+                    (code, int(row["id"])),
+                )
+                break
+
+
 def init_db() -> None:
     """Create tables/indexes if they do not exist. Safe to call repeatedly."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -236,6 +327,7 @@ def init_db() -> None:
         _migrate_transactions(conn)
         _migrate_paddle_purchases(conn)
         _migrate_cryptomus_payments(conn)
+        _migrate_referral_columns(conn)
         # 3) Indexes that depend on migrated columns.
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tx_user_type ON transactions(user_id, type)"

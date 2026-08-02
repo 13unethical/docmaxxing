@@ -1,7 +1,7 @@
 {% extends "info/base.html" %}
 {% set info_active = "payment" %}
 {% set page_title = "Payment Policy" %}
-{% set page_lede = "How credit purchases and Assignment payments work on DocMaxxing." %}
+{% set page_lede = "How credit purchases and Assignment payments work on DocMaxxing. Last updated: 3 August 2026." %}
 {% block info_body %}
 <h2>1. Who can pay</h2>
 <p>
@@ -11,46 +11,62 @@
 
 <h2>2. What you pay for</h2>
 <ul>
-  <li><strong>Credit packages</strong> — prepaid balance for Humanize, AI detect, citations, Turnitin, and similar paid actions.</li>
-  <li><strong>Assignment projects</strong> — priced per project after brief analysis (shown before you confirm payment).</li>
-  <li><strong>Free tools</strong> — Home Format and Academic Check do not require credits.</li>
+  <li><strong>Credit packages</strong> — prepaid balance for Humanize, Turnitin, Assignment, and other live metered actions.</li>
+  <li><strong>Assignment projects</strong> — priced per project after brief analysis (shown before you confirm payment from your credit balance).</li>
+  <li><strong>Free tools</strong> — Format does not require credits.</li>
+  <li><strong>Not billable yet</strong> — Academic Check, Workspace, and Presentation are Soon and cannot be charged until they launch.</li>
 </ul>
 
-<h2>3. Processor</h2>
+<h2>3. Processors</h2>
 <p>
-  Card and wallet payments are processed by <strong>Paddle</strong>. DocMaxxing does not store full
-  payment card numbers. Paddle may appear on your bank statement as the merchant of record.
+  DocMaxxing supports two checkout paths:
+</p>
+<ul>
+  <li><strong>Cryptomus</strong> — crypto payments (preferred when configured).</li>
+  <li><strong>Paddle</strong> — card and wallet payments; Paddle acts as merchant of record and may appear on your bank statement.</li>
+</ul>
+<p>
+  DocMaxxing does not store full payment card numbers. Crypto wallet details you submit for
+  Earn &amp; Share withdrawals are used only to process payout requests.
 </p>
 
 <h2>4. Prices &amp; currency</h2>
 <p>
-  Package prices are shown on the Credits page (for example Starter and Pro). Custom / volume deals
-  are arranged via sales on WhatsApp. Taxes or local fees may apply depending on your region and Paddle rules.
+  Package prices are shown on the Credits page (for example Starter $9 / 1,000 credits and Pro $20 / 2,500 credits).
+  Exchange rate for metering is typically <strong>$1 = 100 credits</strong>. Custom / volume deals
+  are arranged via sales on WhatsApp. Taxes or local fees may apply depending on your region and processor rules.
 </p>
 
 <h2>5. When credits appear</h2>
 <p>
-  After a successful Paddle checkout confirmation, credits are added to your account balance.
+  After a successful Cryptomus or Paddle payment confirmation, credits are added to your account balance.
   If payment succeeds but balance does not update within a short time, contact support with your
-  account email and Paddle transaction id.
+  account email and the Cryptomus order id or Paddle transaction id.
 </p>
 
-<h2>6. Failed paid actions</h2>
+<h2>6. Referral cashback (not a purchase)</h2>
+<p>
+  Referral balances earned via Earn &amp; Share are separate from purchased credits. You may convert
+  referral USD to credits (1.2× bonus) or request a withdrawal (minimum $50). Withdrawals are reviewed manually.
+</p>
+
+<h2>7. Failed paid actions</h2>
 <p>
   If a paid feature fails on our side after credits were charged, we refund those credits to your
   balance whenever automatic recovery is possible.
 </p>
 
-<h2>7. Chargebacks</h2>
+<h2>8. Chargebacks</h2>
 <p>
   Unjustified chargebacks may lead to account suspension and forfeiture of remaining credits.
   Contact us first so we can resolve billing issues quickly.
 </p>
 
-<h2>8. Related policies</h2>
+<h2>9. Related policies</h2>
 <p>
   <a href="{{ url_for('refund_policy') }}">Refund Policy</a>
   · <a href="{{ url_for('delivery_policy') }}">Delivery Policy</a>
   · <a href="{{ url_for('terms') }}">Terms and Conditions</a>
+  · <a href="{{ url_for('credits') }}">Credits guide</a>
 </p>
 {% endblock %}

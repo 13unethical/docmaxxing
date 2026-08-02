@@ -8,12 +8,14 @@
   href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="{{ url_for('static', filename='humanizer.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='humanizer.css') }}?v=20260802-hz-drop" />
 
 <div class="hz" data-humanizer-page data-dm-tour-page="humanizer" data-tour="hz-page">
-  <div class="dm-tool-head">
-    <h1 class="hz-card-title" style="margin:0">Humanizer</h1>
-    {% include "_tutorial_btn.html" %}
+  <div class="hz-drop-overlay" data-hz-drop-overlay hidden>
+    <div class="hz-drop-overlay-inner">
+      <p class="hz-drop-overlay-title">Drop file to insert</p>
+      <p class="hz-drop-overlay-lede">DOC, DOCX, PDF, or TXT — text will appear in the editor</p>
+    </div>
   </div>
   <div class="hz-workspace">
     <!-- ============================ INPUT ============================ -->
@@ -164,5 +166,5 @@
 </div>
 {% endblock %}
 {% block tools_scripts %}
-<script src="{{ url_for('static', filename='humanizer-page.js') }}"></script>
+<script src="{{ url_for('static', filename='humanizer-page.js') }}?v=20260802-hz-drop"></script>
 {% endblock %}

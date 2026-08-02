@@ -1,45 +1,148 @@
 {% extends "info/base.html" %}
 {% set info_active = "account" %}
-{% set page_title = "Account" %}
-{% set page_lede = "Manage your DocMaxxing profile, password, and access to paid features." %}
+{% set page_title = "Account Information" %}
+{% set page_lede = "Manage your DocMaxxing profile, password, and access to paid tools." %}
+
+{% block info_header_actions %}
+{% if current_user %}
+<a class="info-btn" href="{{ url_for('account') }}">Go to account settings</a>
+{% else %}
+<a class="info-btn" href="{{ url_for('register') }}">Create a free account</a>
+{% endif %}
+{% endblock %}
+
 {% block info_body %}
 {% if current_user %}
-<p>
-  You are signed in as <strong>{{ current_user.email }}</strong>.
-  Open your profile settings to edit your display name or password.
-</p>
-<p>
-  <a class="info-cta" href="{{ url_for('account') }}">Go to account settings</a>
+<p class="info-lead">
+  You are signed in as <strong class="info-emphasis">{{ current_user.email }}</strong>.
+  Open account settings to edit your display name or password. Buy credits from
+  <a href="{{ url_for('pricing') }}">Pricing</a>, and invite friends from
+  <a href="{{ url_for('earn_share') }}">Earn &amp; Share</a>.
 </p>
 {% else %}
-<p>
-  An account lets you buy credits, run paid Humanizer / Turnitin / Workspace actions, and keep
-  Assignment projects across sessions.
+<p class="info-lead">
+  An account lets you buy credits, run paid Humanizer / Turnitin / Assignment actions, keep
+  Assignment projects across sessions, and join the Earn &amp; Share referral program.
 </p>
-<ul>
-  <li>Email + password registration</li>
-  <li>Welcome credits on signup</li>
-  <li>Credit balance and billing history via Credits / Paddle</li>
-  <li>Project artifacts stored under your user</li>
+<ul class="info-plain-list">
+  <li>Email + password registration (optional display name)</li>
+  <li>50 welcome credits on signup</li>
+  <li>+100 bonus credits if you join with a friend’s referral link</li>
+  <li>Credit balance in the header; crypto (Cryptomus) or card (Paddle) checkout</li>
+  <li>Project files stored under your user for re-download</li>
 </ul>
-<p>
-  <a class="info-cta" href="{{ url_for('register') }}">Create a free account</a>
-  <a class="info-cta info-cta--ghost" href="{{ url_for('login') }}">Sign in</a>
+<p class="info-actions">
+  <a class="info-btn info-btn--ghost" href="{{ url_for('login') }}">Sign in</a>
 </p>
 {% endif %}
 
-<h2>What your account unlocks</h2>
-<ul>
-  <li><strong>Credits purchases</strong> on the Credits page (Paddle checkout)</li>
-  <li><strong>Assignment pipeline</strong> progress and delivery downloads</li>
-  <li><strong>Workspace</strong> paid tools (humanize selection, AI detect, citations)</li>
-  <li><strong>Turnitin</strong> credit-based report runs</li>
-</ul>
+<section class="info-section" aria-labelledby="account-unlocks-title">
+  <h2 class="info-section-title" id="account-unlocks-title">What your account unlocks</h2>
+  <ul class="info-feature-list">
+    <li>
+      <span class="info-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+          <circle cx="10" cy="10" r="9" fill="currentColor" opacity="0.12"/>
+          <path d="M6.2 10.2 8.7 12.7 13.8 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="info-feature-text">
+        <strong class="info-emphasis">Credits purchases</strong>
+        <span class="info-feature-desc"> via Cryptomus (crypto) or Paddle (cards)</span>
+      </span>
+    </li>
+    <li>
+      <span class="info-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+          <circle cx="10" cy="10" r="9" fill="currentColor" opacity="0.12"/>
+          <path d="M6.2 10.2 8.7 12.7 13.8 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="info-feature-text">
+        <strong class="info-emphasis">Assignment pipeline</strong>
+        <span class="info-feature-desc"> saved progress and delivery ZIP downloads</span>
+      </span>
+    </li>
+    <li>
+      <span class="info-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+          <circle cx="10" cy="10" r="9" fill="currentColor" opacity="0.12"/>
+          <path d="M6.2 10.2 8.7 12.7 13.8 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="info-feature-text">
+        <strong class="info-emphasis">Humanizer &amp; Turnitin</strong>
+        <span class="info-feature-desc"> credit-based paid runs</span>
+      </span>
+    </li>
+    <li>
+      <span class="info-feature-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+          <circle cx="10" cy="10" r="9" fill="currentColor" opacity="0.12"/>
+          <path d="M6.2 10.2 8.7 12.7 13.8 7.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      <span class="info-feature-text">
+        <strong class="info-emphasis">Earn &amp; Share</strong>
+        <span class="info-feature-desc"> referral cashback, milestones, and withdrawals</span>
+      </span>
+    </li>
+  </ul>
+</section>
 
-<h2>Security tips</h2>
-<ul>
-  <li>Use a unique password</li>
-  <li>Do not share login links or session cookies</li>
-  <li>Log out on shared computers</li>
-</ul>
+<hr class="info-divider" />
+
+<section class="info-section" aria-labelledby="account-settings-title">
+  <h2 class="info-section-title" id="account-settings-title">What you can change in settings</h2>
+  <ul class="info-plain-list">
+    <li>Display name</li>
+    <li>Password (current + new password)</li>
+  </ul>
+  <p class="info-lead">
+    Billing history lives with your payment provider receipts. Referral balance and milestones live on
+    <a href="{{ url_for('earn_share') }}">Earn &amp; Share</a>.
+  </p>
+</section>
+
+<hr class="info-divider" />
+
+<section class="info-section" aria-labelledby="account-security-title">
+  <h2 class="info-section-title info-section-title--icon" id="account-security-title">
+    <svg class="info-section-icon" viewBox="0 0 24 24" fill="none" width="18" height="18" aria-hidden="true">
+      <path d="M7.5 10.5V8.25a4.5 4.5 0 0 1 9 0V10.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      <rect x="5.75" y="10.5" width="12.5" height="9.75" rx="2" stroke="currentColor" stroke-width="1.6"/>
+      <circle cx="12" cy="15.25" r="1.15" fill="currentColor"/>
+    </svg>
+    Security tips
+  </h2>
+  <ul class="info-tip-list">
+    <li>
+      <span class="info-tip-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M10 2.75 15.5 5v4.4c0 3.55-2.35 6.7-5.5 7.85C6.85 16.1 4.5 12.95 4.5 9.4V5L10 2.75Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M7.75 10.1 9.4 11.7 12.4 8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      Use a unique password (at least 6 characters)
+    </li>
+    <li>
+      <span class="info-tip-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M10 2.75 15.5 5v4.4c0 3.55-2.35 6.7-5.5 7.85C6.85 16.1 4.5 12.95 4.5 9.4V5L10 2.75Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M7.75 10.1 9.4 11.7 12.4 8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      Do not share login links or session cookies
+    </li>
+    <li>
+      <span class="info-tip-icon" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+          <path d="M10 2.75 15.5 5v4.4c0 3.55-2.35 6.7-5.5 7.85C6.85 16.1 4.5 12.95 4.5 9.4V5L10 2.75Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <path d="M7.75 10.1 9.4 11.7 12.4 8.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </span>
+      Log out on shared computers
+    </li>
+  </ul>
+</section>
 {% endblock %}

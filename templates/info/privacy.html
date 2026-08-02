@@ -1,21 +1,23 @@
 {% extends "info/base.html" %}
 {% set info_active = "privacy" %}
 {% set page_title = "Privacy Policy" %}
-{% set page_lede = "How DocMaxxing collects, uses, and protects your data. Last updated: 26 July 2026." %}
+{% set page_lede = "How DocMaxxing collects, uses, and protects your data. Last updated: 3 August 2026." %}
 {% block info_body %}
 <h2>1. What we collect</h2>
 <ul>
-  <li><strong>Account data</strong> — email, display name, password hash, and account identifiers.</li>
+  <li><strong>Account data</strong> — email, display name, password hash, account identifiers, and referral fields (referral code, referrer link, referral balance, milestone flags).</li>
   <li><strong>Usage data</strong> — feature actions, credit balance changes, project metadata, job logs needed to run the product.</li>
   <li><strong>Content you submit</strong> — briefs, drafts, uploads (PDF/DOCX/TXT/images), and generated outputs stored for your projects.</li>
-  <li><strong>Payment metadata</strong> — processed by Paddle (we do not store full card numbers on DocMaxxing servers).</li>
+  <li><strong>Payment metadata</strong> — processed by Cryptomus and/or Paddle (we do not store full card numbers on DocMaxxing servers).</li>
+  <li><strong>Withdrawal details</strong> — wallet / payment details you submit for Earn &amp; Share cashouts, plus request status.</li>
   <li><strong>Support messages</strong> — what you send through the in-app support chat or WhatsApp / email.</li>
 </ul>
 
 <h2>2. How we use data</h2>
 <ul>
-  <li>Deliver Format, Humanizer, Turnitin, Assignment, Check, and Workspace features.</li>
+  <li>Deliver Format, Humanizer, Turnitin, Assignment, and Earn &amp; Share features (and future tools when they leave Soon).</li>
   <li>Authenticate you, protect accounts, prevent abuse, and refund failed paid actions.</li>
+  <li>Attribute referrals, calculate cashback, and process withdrawal requests.</li>
   <li>Improve reliability (for example diagnosing failed packaging or humanizer sessions).</li>
   <li>Communicate about account, billing, and support requests.</li>
 </ul>
@@ -24,7 +26,7 @@
 <p>
   Depending on the feature, content may be processed by LLM / humanizer / detection providers
   (for example Claude, Gemini, StealthWriter, ZeroGPT) solely to complete the action you requested.
-  Payments go through <strong>Paddle</strong>.
+  Payments go through <strong>Cryptomus</strong> and/or <strong>Paddle</strong>.
 </p>
 
 <h2>4. Retention</h2>
@@ -37,6 +39,7 @@
 <h2>5. Your choices</h2>
 <ul>
   <li>Update profile details from <a href="{{ url_for('account') }}">Account</a> (signed-in users).</li>
+  <li>Manage referral activity from <a href="{{ url_for('earn_share') }}">Earn &amp; Share</a>.</li>
   <li>Request data access or deletion via <a href="{{ url_for('contact') }}">Contact</a>.</li>
   <li>Stop using the service and close your account by contacting support.</li>
 </ul>

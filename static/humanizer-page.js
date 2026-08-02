@@ -181,6 +181,16 @@
         setStage("result");
         setOutputEnabled(true);
         revealOutput();
+        if (window.DMToolHistory) {
+          window.DMToolHistory.push("humanizer", {
+            title: window.DMToolHistory.titleFromText(source, "Humanizer"),
+            payload: {
+              source: source,
+              result: plainText(editorOut),
+            },
+          });
+          if (window.DM_refreshToolHistory) window.DM_refreshToolHistory();
+        }
       })
       .catch(function (err) {
         var code = err && err.code;
@@ -289,32 +299,109 @@
       });
   }
 
+  function ingestFile(file) {
+    if (!file) return;
+    extractUploadedText(file)
+      .then(function (result) {
+        if (!result || !result.ok) {
+          showError((result && result.error) || "Could not read the uploaded file.");
+          return;
+        }
+        var text = String(result.text || "").trim();
+        if (!text) {
+          showError("No readable text found in that file.");
+          return;
+        }
+        applyUploadedText(text);
+      })
+      .catch(function (err) {
+        showError(err && err.message ? err.message : "Could not read the uploaded file.");
+      });
+  }
+
   if (fileInput) {
     fileInput.addEventListener("change", function () {
       var file = fileInput.files && fileInput.files[0];
       if (!file) return;
-
-      extractUploadedText(file)
-        .then(function (result) {
-          if (!result || !result.ok) {
-            showError((result && result.error) || "Could not read the uploaded file.");
-            return;
-          }
-          var text = String(result.text || "").trim();
-          if (!text) {
-            showError("No readable text found in that file.");
-            return;
-          }
-          applyUploadedText(text);
-        })
-        .catch(function (err) {
-          showError(err && err.message ? err.message : "Could not read the uploaded file.");
-        })
-        .finally(function () {
-          fileInput.value = "";
-        });
+      ingestFile(file);
+      fileInput.value = "";
     });
   }
+
+  /* ----------------------------------------------------------- drag & drop */
+  function setDropOverlay(on) {
+    var overlay = $("[data-hz-drop-overlay]", root);
+    if (overlay) {
+      if (on) {
+        overlay.hidden = false;
+        overlay.removeAttribute("hidden");
+      } else {
+        overlay.hidden = true;
+      }
+    }
+    root.classList.toggle("is-dragging-files", !!on);
+  }
+
+  (function setupDragDrop() {
+    var dragDepth = 0;
+
+    function hasFiles(e) {
+      var dt = e.dataTransfer;
+      if (!dt) return false;
+      try {
+        var types = dt.types ? Array.prototype.slice.call(dt.types) : [];
+        if (types.indexOf("Files") !== -1) return true;
+        if (types.indexOf("application/x-moz-file") !== -1) return true;
+      } catch (err) {}
+      return !!(dt.files && dt.files.length);
+    }
+
+    function onDragEnter(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth += 1;
+      setDropOverlay(true);
+    }
+
+    function onDragOver(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      setDropOverlay(true);
+    }
+
+    function onDragLeave(e) {
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDropOverlay(false);
+    }
+
+    function onDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth = 0;
+      setDropOverlay(false);
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      ingestFile(files[0]);
+    }
+
+    var targets = [root];
+    var main = document.querySelector(".app-shell-main");
+    if (main) targets.push(main);
+    targets.forEach(function (el) {
+      el.addEventListener("dragenter", onDragEnter);
+      el.addEventListener("dragover", onDragOver);
+      el.addEventListener("dragleave", onDragLeave);
+      el.addEventListener("drop", onDrop);
+    });
+    window.addEventListener("dragend", function () {
+      dragDepth = 0;
+      setDropOverlay(false);
+    });
+  })();
 
   /* -------------------------------------------------------------- inputs */
   if (editorIn) {
@@ -390,4 +477,23 @@
   setStage("idle");
   setOutputEnabled(false);
   refreshOutputCount();
+
+  (function restoreFromHistory() {
+    if (!window.DMToolHistory) return;
+    var hid = window.DMToolHistory.historyParam();
+    if (!hid) return;
+    var item = window.DMToolHistory.get("humanizer", hid);
+    if (!item || !item.payload) return;
+    var source = item.payload.source || "";
+    var result = item.payload.result || "";
+    if (editorIn) editorIn.textContent = source;
+    refreshInputCount();
+    if (result && editorOut) {
+      editorOut.textContent = result;
+      refreshOutputCount();
+      setStage("result");
+      setOutputEnabled(true);
+      revealOutput();
+    }
+  })();
 })();

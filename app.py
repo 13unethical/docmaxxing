@@ -28,7 +28,7 @@ from flask import Flask, jsonify, redirect, render_template, request, send_file,
 
 from formatter import FormatJob, format_document_full
 from formatter.document_reconstruction import reconstruct_document_before_format
-from formatter.cover_page import CoverPageData, prepend_cover_page
+from formatter.cover_page import CoverPageData, prepend_cover_document, prepend_cover_page
 from formatter.heading_plan import ParagraphHeadingAssignment
 from formatter.preview_html import build_formatted_preview_html
 from formatter.references_section import append_references_section
@@ -183,6 +183,8 @@ def _charge_current_user(feature: str, cost: int, *, ref_id: str | None = None, 
             return charged  # error Response
         user_id, _tx = charged
     """
+    from services.economy.referral import apply_pro_discount, consume_free_turnitin_report
+
     user = economy_auth.current_user()
     if user is None:
         resp = jsonify(
@@ -190,21 +192,48 @@ def _charge_current_user(feature: str, cost: int, *, ref_id: str | None = None, 
         )
         resp.status_code = 401
         return resp
-    try:
-        tx = wallet.debit(user["id"], int(cost), feature, ref_id=ref_id, meta=meta)
-    except InsufficientCoins as exc:
-        resp = jsonify(
-            {
-                "success": False,
-                "error": "INSUFFICIENT_COINS",
-                "message": f"Not enough coins. This costs {exc.required}; you have {exc.balance}.",
-                "required": exc.required,
-                "balance": exc.balance,
-            }
-        )
-        resp.status_code = 402
-        return resp
-    return (user["id"], tx)
+
+    effective = int(cost)
+    used_free_turnitin = False
+    if feature == "turnitin" and int(user.get("free_turnitin_reports") or 0) > 0:
+        if consume_free_turnitin_report(int(user["id"])):
+            used_free_turnitin = True
+            effective = 0
+            # Bust cached user so free report count refreshes
+            try:
+                from flask import g
+
+                g._economy_user = None
+            except RuntimeError:
+                pass
+
+    if effective > 0:
+        effective = apply_pro_discount(user, effective)
+        try:
+            tx = wallet.debit(user["id"], effective, feature, ref_id=ref_id, meta=meta)
+        except InsufficientCoins as exc:
+            resp = jsonify(
+                {
+                    "success": False,
+                    "error": "INSUFFICIENT_COINS",
+                    "message": f"Not enough coins. This costs {exc.required}; you have {exc.balance}.",
+                    "required": exc.required,
+                    "balance": exc.balance,
+                }
+            )
+            resp.status_code = 402
+            return resp
+        return (user["id"], tx)
+
+    return (
+        user["id"],
+        {
+            "amount": 0,
+            "free_turnitin": used_free_turnitin,
+            "feature": feature,
+            "ref_id": ref_id,
+        },
+    )
 
 
 def _refund_safe(user_id: int, cost: int, feature: str, *, ref_id: str | None = None) -> None:
@@ -364,6 +393,10 @@ def _project_api_payload(bundle, *, include_pipeline: bool = True) -> dict[str, 
     _safe("detection_session", lambda: project_service.get_detection_session(bundle.project.id))
     _safe("detection_report", lambda: project_service.get_detection_report(bundle.project.id))
     _safe("delivery_package", lambda: project_service.get_delivery_package(bundle.project.id))
+    try:
+        payload["chat_transcript"] = project_service.get_chat_transcript(bundle.project.id)
+    except Exception:  # noqa: BLE001
+        payload["chat_transcript"] = []
     return payload
 
 
@@ -484,20 +517,35 @@ def inject_account():
 def register():
     if economy_auth.current_user():
         return redirect(url_for("index"))
+    ref_code = (request.values.get("ref") or request.values.get("referral_code") or "").strip()
     if request.method == "GET":
-        return render_template("register.html", nav_active=None)
+        if ref_code:
+            session["pending_referral_code"] = ref_code
+        return render_template(
+            "register.html",
+            nav_active=None,
+            referral_code=ref_code or session.get("pending_referral_code") or "",
+        )
 
     email = (request.form.get("email") or "").strip()
     name = (request.form.get("name") or "").strip()
     password = request.form.get("password") or ""
+    referral_code = (
+        (request.form.get("referral_code") or request.form.get("ref") or "").strip()
+        or session.get("pending_referral_code")
+        or ""
+    )
     try:
-        user = economy_auth.create_user(email, password, name=name)
+        user = economy_auth.create_user(
+            email, password, name=name, referral_code=referral_code or None
+        )
     except economy_auth.DuplicateEmail:
         return render_template(
             "register.html",
             nav_active=None,
             error="An account with this email already exists. Try signing in.",
             form={"email": email, "name": name},
+            referral_code=referral_code,
         ), 409
     except economy_auth.AuthError as exc:
         return render_template(
@@ -505,8 +553,10 @@ def register():
             nav_active=None,
             error=str(exc),
             form={"email": email, "name": name},
+            referral_code=referral_code,
         ), 400
 
+    session.pop("pending_referral_code", None)
     economy_auth.login_user(user["id"])
     return redirect(url_for("index"))
 
@@ -872,12 +922,18 @@ def api_auth_register():
     email = str(payload.get("email") or "").strip()
     name = str(payload.get("name") or "").strip()
     password = str(payload.get("password") or "")
+    referral_code = str(
+        payload.get("referral_code") or payload.get("ref") or session.get("pending_referral_code") or ""
+    ).strip()
     try:
-        user = economy_auth.create_user(email, password, name=name)
+        user = economy_auth.create_user(
+            email, password, name=name, referral_code=referral_code or None
+        )
     except economy_auth.DuplicateEmail as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
     except economy_auth.AuthError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
+    session.pop("pending_referral_code", None)
     economy_auth.login_user(user["id"])
     return jsonify(_auth_success_payload(user))
 
@@ -1155,7 +1211,12 @@ def index():
 
 @app.route("/check")
 def check():
-    return render_template("check.html", nav_active="check")
+    """Academic Check UI is temporarily gated — keep templates/static intact for later."""
+    return render_template(
+        "soon.html",
+        nav_active="check",
+        feature="Academic Check",
+    )
 
 
 @app.route("/templates")
@@ -1177,6 +1238,133 @@ def workspace():
         feature="Workspace",
     )
 
+
+@app.route("/presentation")
+def presentation():
+    """Presentation UI is temporarily gated."""
+    return render_template(
+        "soon.html",
+        nav_active="presentation",
+        feature="Presentation",
+    )
+
+
+@app.route("/earn")
+@economy_auth.login_required
+def earn_share():
+    return render_template("earn.html", nav_active="earn")
+
+
+@app.get("/api/referral/me")
+@economy_auth.login_required
+def api_referral_me():
+    from services.economy.referral import ReferralError, get_referral_profile
+
+    user_id = economy_auth.current_user_id()
+    try:
+        profile = get_referral_profile(int(user_id))
+    except ReferralError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    link = url_for("register", ref=profile["referral_code"], _external=True)
+    profile["referral_link"] = link
+    return jsonify({"success": True, **profile})
+
+
+@app.post("/api/referral/convert")
+@economy_auth.login_required
+def api_referral_convert():
+    from services.economy.referral import ReferralError, convert_balance_to_credits
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        amount = float(payload.get("amount_usd") or payload.get("amount") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "amount_usd must be a number."}), 400
+    try:
+        result = convert_balance_to_credits(int(economy_auth.current_user_id()), amount)
+    except ReferralError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, **result})
+
+
+@app.post("/api/referral/withdraw")
+@economy_auth.login_required
+def api_referral_withdraw():
+    from services.economy.referral import ReferralError, create_withdrawal
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        amount = float(payload.get("amount_usd") or payload.get("amount") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "amount_usd must be a number."}), 400
+    wallet_details = str(payload.get("wallet_details") or payload.get("wallet") or "")
+    try:
+        result = create_withdrawal(
+            int(economy_auth.current_user_id()),
+            amount_usd=amount,
+            wallet_details=wallet_details,
+        )
+    except ReferralError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, **result})
+
+
+@app.get("/api/admin/withdrawals")
+@economy_auth.admin_required
+def api_admin_withdrawals():
+    from services.economy.referral import list_withdrawals
+
+    status = (request.args.get("status") or "pending").strip() or None
+    if status == "all":
+        status = None
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except ValueError:
+        limit = 100
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+    payload = list_withdrawals(status=status, limit=limit, offset=offset)
+    return jsonify({"success": True, **payload})
+
+
+@app.post("/api/admin/withdrawals/<int:request_id>/approve")
+@economy_auth.admin_required
+def api_admin_withdrawal_approve(request_id: int):
+    from services.economy.referral import ReferralError, resolve_withdrawal
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = resolve_withdrawal(
+            request_id,
+            approve=True,
+            admin_id=economy_auth.current_user_id(),
+            note=payload.get("note"),
+        )
+    except ReferralError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, **result})
+
+
+@app.post("/api/admin/withdrawals/<int:request_id>/reject")
+@economy_auth.admin_required
+def api_admin_withdrawal_reject(request_id: int):
+    from services.economy.referral import ReferralError, resolve_withdrawal
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        result = resolve_withdrawal(
+            request_id,
+            approve=False,
+            admin_id=economy_auth.current_user_id(),
+            note=payload.get("note"),
+        )
+    except ReferralError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, **result})
+
+
 @app.route("/editor")
 def editor():
     """Legacy URL → workspace."""
@@ -1197,6 +1385,12 @@ def assignment():
     return render_template("assignment.html", nav_active="assignment")
 
 
+@app.route("/assignments")
+def assignments_history():
+    """Legacy URL — history lives on the Assignment page panel."""
+    return redirect(url_for("assignment"))
+
+
 def _parse_pipeline_stage(value: str) -> PipelineStage | None:
     try:
         return PipelineStage(value.strip().lower())
@@ -1210,6 +1404,14 @@ def api_assignment_pipeline_stages():
     return jsonify({"stages": [spec.to_dict() for spec in PIPELINE_STAGE_SPECS]})
 
 
+@app.get("/api/assignment/projects")
+@economy_auth.login_required
+def api_assignment_projects_list():
+    user_id = economy_auth.current_user_id()
+    projects = project_service.list_projects_for_user(str(user_id))
+    return jsonify({"projects": projects})
+
+
 @app.post("/api/assignment/projects")
 def api_assignment_project_create():
     """Create an assignment project with files, requirement shell, and pipeline."""
@@ -1221,9 +1423,12 @@ def api_assignment_project_create():
     if files is not None and not isinstance(files, list):
         return jsonify({"error": "files must be an array"}), 400
 
+    session_uid = economy_auth.current_user_id()
+    user_id = str(session_uid) if session_uid is not None else (payload.get("user_id") and str(payload.get("user_id")))
+
     try:
         bundle = project_service.create_project(
-            user_id=payload.get("user_id"),
+            user_id=user_id,
             title=payload.get("title"),
             university=payload.get("university"),
             deadline=payload.get("deadline"),
@@ -1286,11 +1491,11 @@ def api_assignment_project_upload():
 
     has_upload = any(
         upload and upload.filename
-        for field in ("assignment_brief", "rubric", "additional_files", "lecture_notes")
+        for field in ("assignment_brief", "rubric", "additional_files", "lecture_notes", "files")
         for upload in request.files.getlist(field)
     )
-    if not has_upload:
-        return jsonify({"error": "Upload at least an assignment brief file."}), 400
+    if not has_upload and not note:
+        return jsonify({"error": "Upload at least one file or add a note."}), 400
 
     trace(
         "api.upload.received",
@@ -1298,7 +1503,9 @@ def api_assignment_project_upload():
         store_root=str(project_service.store.storage_root),
     )
     try:
+        session_uid = economy_auth.current_user_id()
         bundle = project_service.create_project(
+            user_id=str(session_uid) if session_uid is not None else None,
             title=title,
             deadline=deadline,
             note=note or None,
@@ -1434,6 +1641,10 @@ def api_assignment_project_confirm_payment(project_id: str):
 
     charged_here = False
     if not already_paid and coins > 0:
+        from services.economy.referral import apply_pro_discount
+
+        user = economy_auth.current_user()
+        coins = apply_pro_discount(user, coins)
         try:
             wallet.debit(user_id, coins, "assignment", ref_id=project_id)
             charged_here = True
@@ -2667,7 +2878,12 @@ def _write_project_binary_file(project_id: str, filename: str, raw: bytes) -> st
 
 
 def _attach_multipart_uploads(project_id: str) -> list[dict[str, Any]]:
-    """Persist uploaded brief/rubric/materials for a project."""
+    """Persist uploaded brief/rubric/materials for a project.
+
+    Chat UX may send undifferentiated files via the ``files`` field; the first
+    document becomes ``assignment_brief`` and the rest ``additional_file``.
+    Legacy field names remain supported.
+    """
     field_to_type = {
         "assignment_brief": "assignment_brief",
         "rubric": "rubric",
@@ -2693,6 +2909,28 @@ def _attach_multipart_uploads(project_id: str) -> list[dict[str, Any]]:
                 parsed=False,
             )
             saved.append(record.to_dict())
+
+    # Chat composer: single ``files`` pool (Gemini classifies content later).
+    generic = [u for u in request.files.getlist("files") if u and u.filename]
+    for idx, upload in enumerate(generic):
+        raw = upload.read()
+        if not raw:
+            raise ValueError(f"{upload.filename} is empty")
+        file_type = "assignment_brief" if idx == 0 and not saved else "additional_file"
+        # If a legacy brief already exists, treat every generic file as material.
+        if any(r.get("file_type") == "assignment_brief" for r in saved):
+            file_type = "additional_file"
+        elif idx == 0:
+            file_type = "assignment_brief"
+        storage_path = _write_project_binary_file(project_id, upload.filename, raw)
+        record = project_service.add_file(
+            project_id,
+            file_type=file_type,
+            original_filename=upload.filename,
+            storage_path=storage_path,
+            parsed=False,
+        )
+        saved.append(record.to_dict())
     return saved
 
 
@@ -3538,9 +3776,71 @@ def api_assignment_delivery_package_get(project_id: str):
     return jsonify(package.to_dict())
 
 
+@app.get("/api/assignment/projects/<project_id>/revision-chat")
+@economy_auth.login_required
+def api_assignment_revision_chat_get(project_id: str):
+    try:
+        bundle = project_service.get_project(project_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    user_id = economy_auth.current_user_id()
+    if bundle.project.user_id and str(bundle.project.user_id) != str(user_id):
+        return jsonify({"error": "Forbidden"}), 403
+    return jsonify(project_service.get_revision_chat(project_id))
+
+
+@app.put("/api/assignment/projects/<project_id>/chat-transcript")
+@economy_auth.login_required
+def api_assignment_chat_transcript_put(project_id: str):
+    """Persist the Assignment chat thread so history reloads on open."""
+    try:
+        bundle = project_service.get_project(project_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    user_id = economy_auth.current_user_id()
+    if bundle.project.user_id and str(bundle.project.user_id) != str(user_id):
+        return jsonify({"error": "Forbidden"}), 403
+    payload = request.get_json(silent=True) or {}
+    messages = payload.get("messages")
+    if messages is None:
+        messages = []
+    try:
+        saved = project_service.save_chat_transcript(project_id, messages)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "messages": saved, "count": len(saved)})
+
+
+@app.post("/api/assignment/projects/<project_id>/revision-chat")
+@economy_auth.login_required
+def api_assignment_revision_chat_post(project_id: str):
+    try:
+        bundle = project_service.get_project(project_id)
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    user_id = economy_auth.current_user_id()
+    if bundle.project.user_id and str(bundle.project.user_id) != str(user_id):
+        return jsonify({"error": "Forbidden"}), 403
+    payload = request.get_json(silent=True) or {}
+    message = str(payload.get("message") or "").strip()
+    try:
+        result = project_service.apply_client_revision(project_id, message)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.revision_chat.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return jsonify({"error": f"Revision failed: {exc}"}), 500
+    return jsonify(result)
+
+
 @app.get("/api/assignment/projects/<project_id>/download")
 def api_assignment_project_download(project_id: str):
-    """Download the delivery ZIP for a project (rebuild package if needed)."""
+    """Download the client deliverable (docx or pdf only — no JSON package)."""
     try:
         package = project_service.get_delivery_package(project_id)
     except KeyError:
@@ -3559,31 +3859,20 @@ def api_assignment_project_download(project_id: str):
             )
             return jsonify({"error": f"Delivery packaging failed: {exc}"}), 500
 
-    project_dir = PROJECT_STORAGE_ROOT / str(package.project_id or project_id) / "delivery"
-    expected = f"{_safe_download_name(package)}-delivery-package.zip"
-    zip_path = project_dir / expected
-    if not zip_path.exists():
-        matches = sorted(project_dir.glob("*-delivery-package.zip"))
-        if matches:
-            zip_path = matches[0]
-    if not zip_path.exists():
-        # Package metadata exists but ZIP missing — rebuild once.
+    file_path, mime, download_name = _resolve_client_deliverable(package, project_id)
+    if file_path is None or not file_path.exists():
         try:
             package = project_service.run_delivery(project_id)
         except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": f"Package archive is not available: {exc}"}), 404
-        zip_path = project_dir / f"{_safe_download_name(package)}-delivery-package.zip"
-        if not zip_path.exists():
-            matches = sorted(project_dir.glob("*-delivery-package.zip"))
-            if matches:
-                zip_path = matches[0]
-    if not zip_path.exists():
-        return jsonify({"error": "Package archive is not available"}), 404
+            return jsonify({"error": f"Deliverable is not available: {exc}"}), 404
+        file_path, mime, download_name = _resolve_client_deliverable(package, project_id)
+    if file_path is None or not file_path.exists():
+        return jsonify({"error": "Deliverable is not available"}), 404
     return send_file(
-        zip_path,
-        mimetype="application/zip",
+        file_path,
+        mimetype=mime or "application/octet-stream",
         as_attachment=True,
-        download_name=zip_path.name,
+        download_name=download_name or file_path.name,
     )
 
 
@@ -3593,20 +3882,16 @@ def api_delivery_package_download(package_id: str):
         package = project_service.find_delivery_package(package_id)
     except KeyError:
         return jsonify({"error": "Package not found"}), 404
-    project_dir = PROJECT_STORAGE_ROOT / str(package.project_id or "local") / "delivery"
-    expected = f"{_safe_download_name(package)}-delivery-package.zip"
-    zip_path = project_dir / expected
-    if not zip_path.exists():
-        matches = sorted(project_dir.glob("*-delivery-package.zip"))
-        if matches:
-            zip_path = matches[0]
-    if not zip_path.exists():
-        return jsonify({"error": "Package archive is not available"}), 404
+    file_path, mime, download_name = _resolve_client_deliverable(
+        package, str(package.project_id or "local")
+    )
+    if file_path is None or not file_path.exists():
+        return jsonify({"error": "Deliverable is not available"}), 404
     return send_file(
-        zip_path,
-        mimetype="application/zip",
+        file_path,
+        mimetype=mime or "application/octet-stream",
         as_attachment=True,
-        download_name=zip_path.name,
+        download_name=download_name or file_path.name,
     )
 
 
@@ -3625,6 +3910,38 @@ def api_delivery_file_download(file_id: str):
         as_attachment=True,
         download_name=file_record.filename,
     )
+
+
+def _resolve_client_deliverable(package, project_id: str):
+    """Return (path, mime, download_name) for the single client-facing file."""
+    project_dir = PROJECT_STORAGE_ROOT / str(getattr(package, "project_id", None) or project_id) / "delivery"
+    client_name = getattr(package, "client_filename", None)
+    if client_name:
+        candidate = project_dir / str(client_name)
+        if candidate.is_file():
+            mime = "application/pdf" if candidate.suffix.lower() == ".pdf" else (
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+            return candidate, mime, candidate.name
+
+    for entry in getattr(package, "files", None) or []:
+        ftype = str(getattr(entry, "file_type", "") or "")
+        if ftype not in {"final_assignment_docx", "final_assignment_pdf"}:
+            continue
+        path = Path(getattr(entry, "storage_path", "") or "")
+        if path.is_file():
+            return path, getattr(entry, "mime_type", None), getattr(entry, "filename", None) or path.name
+
+    # Fallbacks for older packages (prefer docx over zip/json).
+    for pattern in ("*.docx", "*.pdf"):
+        matches = sorted(p for p in project_dir.glob(pattern) if p.is_file())
+        if matches:
+            path = matches[0]
+            mime = "application/pdf" if path.suffix.lower() == ".pdf" else (
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
+            return path, mime, path.name
+    return None, None, None
 
 
 def _safe_download_name(package) -> str:
@@ -4756,8 +5073,47 @@ def format_document():
             ai_powered = recon.ai_powered
 
         before_cover_paragraph_count = len(doc.paragraphs)
-        cover = parse_cover_page(request.form, fallback_paragraphs=fallback_paragraphs)
-        if cover:
+        cover_storage = request.files.get("cover_file")
+        cover_doc = None
+        if cover_storage and cover_storage.filename:
+            if not is_supported_document_upload(cover_storage.filename, cover_storage.mimetype):
+                return (
+                    jsonify(
+                        {
+                            "error": "Cover page must be a .docx or .pdf file.",
+                        }
+                    ),
+                    400,
+                )
+            cover_raw = cover_storage.read()
+            if not cover_raw:
+                return jsonify({"error": "The uploaded cover page file is empty."}), 400
+            try:
+                cover_doc = build_document_from_upload(
+                    cover_raw,
+                    cover_storage.filename,
+                    mimetype=cover_storage.mimetype,
+                    cleaning_spaces=False,
+                    cleaning_breaks=False,
+                )
+            except ValueError as e:
+                return jsonify({"error": f"Cover page: {e}"}), 400
+            except RuntimeError as e:
+                app.logger.warning("format cover: %s", e)
+                return jsonify({"error": str(e)}), 503
+
+        cover = None if cover_doc is not None else parse_cover_page(
+            request.form, fallback_paragraphs=fallback_paragraphs
+        )
+        if cover_doc is not None:
+            prepend_cover_document(doc, cover_doc)
+            if paragraph_assignments:
+                inserted = len(doc.paragraphs) - before_cover_paragraph_count
+                if inserted > 0:
+                    paragraph_assignments = (
+                        [ParagraphHeadingAssignment()] * inserted + paragraph_assignments
+                    )
+        elif cover:
             prepend_cover_page(doc, cover, font_family=job.font_family)
             if paragraph_assignments:
                 inserted = len(doc.paragraphs) - before_cover_paragraph_count

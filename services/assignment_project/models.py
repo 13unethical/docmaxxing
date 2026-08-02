@@ -98,6 +98,7 @@ class RequirementJSON:
     learning_outcomes: list[str] = field(default_factory=list)
     minimum_sources: int | None = None
     formatting: RequirementFormatting = field(default_factory=RequirementFormatting)
+    submission_format: str | None = None
     deadline: str | None = None
     difficulty: str | None = None
     academic_level: str | None = None
@@ -119,6 +120,7 @@ class RequirementJSON:
             "learning_outcomes": list(self.learning_outcomes),
             "minimum_sources": self.minimum_sources,
             "formatting": self.formatting.to_dict(),
+            "submission_format": self.submission_format,
             "deadline": self.deadline,
             "difficulty": self.difficulty,
             "academic_level": self.academic_level,
@@ -150,6 +152,7 @@ class RequirementJSON:
             learning_outcomes=list(data.get("learning_outcomes") or []),
             minimum_sources=data.get("minimum_sources"),
             formatting=RequirementFormatting.from_dict(data.get("formatting")),
+            submission_format=data.get("submission_format") or data.get("submission_medium"),
             deadline=data.get("deadline"),
             difficulty=data.get("difficulty"),
             academic_level=data.get("academic_level"),

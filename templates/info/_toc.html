@@ -12,12 +12,14 @@
   ("faq", "FAQ", "faq"),
   ("changelog", "Changelog", "changelog"),
 ] %}
-<nav class="info-toc" aria-label="Site information">
-  {% for key, label, endpoint in info_pages %}
-  <a
-    href="{{ url_for(endpoint) }}"
-    class="info-toc-link{% if info_active == key %} is-active{% endif %}"
-    {% if info_active == key %}aria-current="page"{% endif %}
-  >{{ label }}</a>
-  {% endfor %}
-</nav>
+<aside class="info-hub-nav" aria-label="Site information">
+  <nav class="info-toc" aria-label="Information pages">
+    {% for key, label, endpoint in info_pages %}
+    <a
+      href="{{ url_for(endpoint) }}"
+      class="info-toc-link{% if info_active == key %} is-active{% endif %}"
+      {% if info_active == key %}aria-current="page"{% endif %}
+    >{{ label }}</a>
+    {% endfor %}
+  </nav>
+</aside>

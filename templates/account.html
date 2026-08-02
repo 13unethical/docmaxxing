@@ -70,32 +70,6 @@
         <button type="submit" class="acct-btn">Update password</button>
       </form>
     </section>
-
-    <section class="acct-card acct-card--wide">
-      <h2 class="acct-card-title">Legal</h2>
-      <p class="acct-legal-intro">
-        Policy pages for checkout (Paddle). Paste these URLs into Terms / Privacy / Refund fields:
-      </p>
-      <ul class="acct-legal-links">
-        <li>
-          <span>Terms of service</span>
-          <a href="{{ url_for('terms', _external=True) }}">{{ url_for('terms', _external=True) }}</a>
-        </li>
-        <li>
-          <span>Privacy policy</span>
-          <a href="{{ url_for('privacy', _external=True) }}">{{ url_for('privacy', _external=True) }}</a>
-        </li>
-        <li>
-          <span>Refund policy</span>
-          <a href="{{ url_for('refund_policy', _external=True) }}">{{ url_for('refund_policy', _external=True) }}</a>
-        </li>
-      </ul>
-      <p class="acct-legal-note">
-        Full policy list:
-        <a href="{{ url_for('about') }}">{{ url_for('about', _external=True) }}</a>
-        (use the sidebar for Terms, Privacy, Payment, Delivery, Disclaimer, and more).
-      </p>
-    </section>
   </div>
 </section>
 {% endblock %}

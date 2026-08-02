@@ -731,82 +731,191 @@
     });
   }
 
-  if (requirementsAttach) {
-    requirementsAttach.addEventListener("change", async function () {
-      var file = requirementsAttach.files && requirementsAttach.files[0];
-      if (!file) {
-        return;
-      }
+  function assignFileToInput(input, file) {
+    if (!input || !file || typeof DataTransfer === "undefined") {
+      return false;
+    }
+    try {
+      var dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
 
-      setReqStatus("");
-      if (!isSupportedBriefFile(file)) {
-        setReqStatus("Supported formats: PDF, DOCX, TXT, JPG, PNG.", "error");
-        requirementsAttach.value = "";
-        return;
-      }
+  async function ingestRequirementsFile(file) {
+    if (!file) return;
+    setReqStatus("");
+    if (!isSupportedBriefFile(file)) {
+      setReqStatus("Supported formats: PDF, DOCX, TXT, JPG, PNG.", "error");
+      return;
+    }
+    if (requirementsAttachBtn) {
+      requirementsAttachBtn.disabled = true;
+    }
+    try {
+      var lower = (file.name || "").toLowerCase();
+      var mime = (file.type || "").toLowerCase();
+      var isPlainText =
+        /\.txt$/i.test(lower) || (mime.indexOf("text/") === 0 && mime !== "text/html");
 
-      if (requirementsAttachBtn) {
-        requirementsAttachBtn.disabled = true;
-      }
-
-      try {
-        var lower = (file.name || "").toLowerCase();
-        var mime = (file.type || "").toLowerCase();
-        var isPlainText =
-          /\.txt$/i.test(lower) || (mime.indexOf("text/") === 0 && mime !== "text/html");
-
-        if (isPlainText) {
-          setReqStatus("Loading file…");
-          var plain = (await readTextFileAsUtf8(file)).trim();
-          if (!plain) {
-            setReqStatus("File is empty.", "error");
-            return;
-          }
-          if (requirementsText) {
-            requirementsText.value = plain;
-          }
-          if (setBriefSource) {
-            setBriefSource("paste");
-          }
-          setReqStatus("Brief loaded into Requirements.", "success");
-          return;
-        }
-
-        setReqStatus("Extracting text from brief…");
-        var fd = new FormData();
-        fd.append("file", file);
-        var res = await fetch("/api/extract-brief-text", { method: "POST", body: fd });
-        var data = {};
-        try {
-          data = await res.json();
-        } catch (e2) {
-          setReqStatus("Invalid response from server.", "error");
-          return;
-        }
-        if (!res.ok) {
-          setReqStatus(data.error || "Could not extract text from brief.", "error");
-          return;
-        }
-        var extracted = (data.text || "").trim();
-        if (!extracted) {
-          setReqStatus("No text could be extracted from this file.", "error");
+      if (isPlainText) {
+        setReqStatus("Loading file…");
+        var plain = (await readTextFileAsUtf8(file)).trim();
+        if (!plain) {
+          setReqStatus("File is empty.", "error");
           return;
         }
         if (requirementsText) {
-          requirementsText.value = data.text || "";
+          requirementsText.value = plain;
         }
         if (setBriefSource) {
           setBriefSource("paste");
         }
         setReqStatus("Brief loaded into Requirements.", "success");
-      } catch (err) {
-        setReqStatus("Could not read file.", "error");
-      } finally {
-        if (requirementsAttachBtn) {
-          requirementsAttachBtn.disabled = false;
-        }
+        return;
+      }
+
+      setReqStatus("Extracting text from brief…");
+      var fd = new FormData();
+      fd.append("file", file);
+      var res = await fetch("/api/extract-brief-text", { method: "POST", body: fd });
+      var data = {};
+      try {
+        data = await res.json();
+      } catch (e2) {
+        setReqStatus("Invalid response from server.", "error");
+        return;
+      }
+      if (!res.ok) {
+        setReqStatus(data.error || "Could not extract text from brief.", "error");
+        return;
+      }
+      var extracted = (data.text || "").trim();
+      if (!extracted) {
+        setReqStatus("No text could be extracted from this file.", "error");
+        return;
+      }
+      if (requirementsText) {
+        requirementsText.value = data.text || "";
+      }
+      if (setBriefSource) {
+        setBriefSource("paste");
+      }
+      setReqStatus("Brief loaded into Requirements.", "success");
+    } catch (err) {
+      setReqStatus("Could not read file.", "error");
+    } finally {
+      if (requirementsAttachBtn) {
+        requirementsAttachBtn.disabled = false;
+      }
+      if (requirementsAttach) {
         requirementsAttach.value = "";
       }
+    }
+  }
+
+  async function ingestTextFile(file) {
+    if (!file) return;
+    var formatStatus = $("format_status");
+    function setDocStatus(msg, kind) {
+      if (!formatStatus) return;
+      formatStatus.textContent = msg || "";
+      formatStatus.className = "format-status status" + (kind ? " " + kind : "");
+    }
+    var lower = (file.name || "").toLowerCase();
+    var mime = (file.type || "").toLowerCase();
+    var isPlainText =
+      /\.txt$/i.test(lower) || (mime.indexOf("text/") === 0 && mime !== "text/html");
+    var pasted = $("pasted_text");
+    var fileInput = $("file");
+
+    if (isPlainText) {
+      try {
+        var plain = (await readTextFileAsUtf8(file)).trim();
+        if (!plain) {
+          setDocStatus("File is empty.", "error");
+          return;
+        }
+        if (pasted) pasted.value = plain;
+        if (fileInput) fileInput.value = "";
+        setDocStatus("Text loaded into the editor.", "success");
+      } catch (e) {
+        setDocStatus("Could not read file.", "error");
+      }
+      return;
+    }
+
+    if (!FC.isSupportedDocumentFile(file)) {
+      setDocStatus(FC.unsupportedDocumentMessage(), "error");
+      return;
+    }
+    if (assignFileToInput(fileInput, file)) {
+      setDocStatus("Document attached: " + (file.name || "file"), "success");
+      return;
+    }
+    // Fallback: extract text into paste box
+    try {
+      setDocStatus("Extracting text…");
+      var result = await FC.extractDocumentText(file);
+      if (!result || !result.ok) {
+        setDocStatus((result && result.error) || "Could not read the file.", "error");
+        return;
+      }
+      if (pasted) pasted.value = result.text || "";
+      setDocStatus("Text loaded into the editor.", "success");
+    } catch (err) {
+      setDocStatus("Could not read file.", "error");
+    }
+  }
+
+  function setCoverFileStatus(msg, kind) {
+    var el = $("cover_file_status");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.className = "req-status" + (kind ? " " + kind : "");
+  }
+
+  function ingestCoverFile(file) {
+    if (!file) return;
+    var coverInput = $("cover_file");
+    if (!FC.isSupportedDocumentFile(file)) {
+      setCoverFileStatus("Cover page must be a .docx or .pdf file.", "error");
+      if (coverInput) coverInput.value = "";
+      return;
+    }
+    var includeCover = $("include_cover_page");
+    if (!assignFileToInput(coverInput, file) && coverInput) {
+      if (!(coverInput.files && coverInput.files[0])) {
+        setCoverFileStatus("Could not attach cover file.", "error");
+        return;
+      }
+    }
+    if (includeCover) includeCover.checked = true;
+    var coverCard = document.querySelector(".home-cover-card");
+    if (coverCard) coverCard.open = true;
+    setCoverFileStatus("Cover page ready: " + (file.name || "file"), "success");
+  }
+
+  if (requirementsAttach) {
+    requirementsAttach.addEventListener("change", function () {
+      var file = requirementsAttach.files && requirementsAttach.files[0];
+      if (!file) return;
+      ingestRequirementsFile(file);
+    });
+  }
+
+  var coverFileInput = $("cover_file");
+  if (coverFileInput) {
+    coverFileInput.addEventListener("change", function () {
+      var file = coverFileInput.files && coverFileInput.files[0];
+      if (!file) {
+        setCoverFileStatus("");
+        return;
+      }
+      ingestCoverFile(file);
     });
   }
 
@@ -863,6 +972,18 @@
       statusEl: formatStatusEl,
       onSuccess: function () {
         var pasted = ($("pasted_text") && $("pasted_text").value) || "";
+        var requirements = ($("requirements_text") && $("requirements_text").value) || "";
+        if (window.DMToolHistory) {
+          window.DMToolHistory.push("format", {
+            title: window.DMToolHistory.titleFromText(pasted || requirements, "Format"),
+            payload: {
+              requirements: requirements,
+              pasted_text: pasted,
+              settings: FC.getFormatterConfigFromDom ? FC.getFormatterConfigFromDom() : null,
+            },
+          });
+          if (window.DM_refreshToolHistory) window.DM_refreshToolHistory();
+        }
         if (window.WorkspaceDraft && pasted.trim()) {
           window.WorkspaceDraft.saveFromText(pasted, "Formatted draft");
         } else if (pasted.trim()) {
@@ -877,6 +998,12 @@
           } catch (e) {
             /* ignore */
           }
+          if (window.DMToolHistory) {
+            window.DMToolHistory.push("workspace", {
+              title: window.DMToolHistory.titleFromText(pasted, "Workspace draft"),
+              payload: { text: pasted, title: "Formatted draft" },
+            });
+          }
         }
         if (workspaceCta) {
           workspaceCta.classList.remove("is-hidden");
@@ -884,6 +1011,21 @@
       },
     });
   });
+
+  (function restoreFormatHistory() {
+    if (!window.DMToolHistory || !FC) return;
+    var hid = window.DMToolHistory.historyParam();
+    if (!hid) return;
+    var item = window.DMToolHistory.get("format", hid);
+    if (!item || !item.payload) return;
+    var req = $("requirements_text");
+    var pasted = $("pasted_text");
+    if (req && item.payload.requirements != null) req.value = item.payload.requirements;
+    if (pasted && item.payload.pasted_text != null) pasted.value = item.payload.pasted_text;
+    if (item.payload.settings && FC.applyFormatterConfig) {
+      FC.applyFormatterConfig(item.payload.settings);
+    }
+  })();
 
   var generateReferencesBtn = $("generate_references_btn");
   if (generateReferencesBtn) {
@@ -894,4 +1036,115 @@
   if (generateCitationsBtn) {
     generateCitationsBtn.addEventListener("click", runCitationsWorkflow);
   }
+
+  (function setupFormatDragDrop() {
+    var layout = document.querySelector("[data-tour='format-page'], .home-layout");
+    if (!layout) return;
+    var zones = Array.prototype.slice.call(
+      layout.querySelectorAll("[data-home-drop-zone]")
+    );
+    if (!zones.length) return;
+
+    var dragDepth = 0;
+    var activeZone = null;
+
+    function showZoneOverlays(on) {
+      zones.forEach(function (zone) {
+        var overlay = zone.querySelector("[data-home-zone-overlay]");
+        if (!overlay) return;
+        if (on) {
+          overlay.hidden = false;
+          overlay.removeAttribute("hidden");
+        } else {
+          overlay.hidden = true;
+          zone.classList.remove("is-drop-active");
+        }
+      });
+      layout.classList.toggle("is-dragging-files", !!on);
+      if (!on) activeZone = null;
+    }
+
+    function setActiveZone(zone) {
+      activeZone = zone || null;
+      zones.forEach(function (z) {
+        z.classList.toggle("is-drop-active", z === activeZone);
+      });
+    }
+
+    function hasFiles(e) {
+      var dt = e.dataTransfer;
+      if (!dt) return false;
+      try {
+        var types = dt.types ? Array.prototype.slice.call(dt.types) : [];
+        if (types.indexOf("Files") !== -1) return true;
+        if (types.indexOf("application/x-moz-file") !== -1) return true;
+      } catch (err) {}
+      return !!(dt.files && dt.files.length);
+    }
+
+    function zoneFromEvent(e) {
+      var el = e.target && e.target.closest
+        ? e.target.closest("[data-home-drop-zone]")
+        : null;
+      return el && layout.contains(el) ? el : null;
+    }
+
+    function onDragEnter(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      dragDepth += 1;
+      showZoneOverlays(true);
+      var zone = zoneFromEvent(e);
+      if (zone) setActiveZone(zone);
+    }
+
+    function onDragOver(e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+      showZoneOverlays(true);
+      var zone = zoneFromEvent(e);
+      if (zone) setActiveZone(zone);
+    }
+
+    function onDragLeave(e) {
+      e.preventDefault();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) showZoneOverlays(false);
+    }
+
+    function onDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth = 0;
+      var zone = zoneFromEvent(e) || activeZone;
+      var key = zone ? zone.getAttribute("data-home-drop-zone") : null;
+      showZoneOverlays(false);
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (!files || !files.length) return;
+      var file = files[0];
+      if (key === "requirements") {
+        ingestRequirementsFile(file);
+      } else if (key === "cover") {
+        if (zone && zone.tagName === "DETAILS") zone.open = true;
+        ingestCoverFile(file);
+      } else {
+        ingestTextFile(file);
+      }
+    }
+
+    var targets = [layout];
+    var main = document.querySelector(".app-shell-main");
+    if (main) targets.push(main);
+    targets.forEach(function (el) {
+      el.addEventListener("dragenter", onDragEnter);
+      el.addEventListener("dragover", onDragOver);
+      el.addEventListener("dragleave", onDragLeave);
+      el.addEventListener("drop", onDrop);
+    });
+    window.addEventListener("dragend", function () {
+      dragDepth = 0;
+      showZoneOverlays(false);
+    });
+  })();
 })();

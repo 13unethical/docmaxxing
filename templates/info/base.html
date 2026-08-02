@@ -1,18 +1,26 @@
 {% extends "base.html" %}
 {% block title %}{{ page_title }} — DocMaxxing{% endblock %}
-{% block page_header %}
-<header class="top info-hero">
-  <h1>{{ page_title }}</h1>
-  {% if page_lede %}
-  <p class="lede">{{ page_lede }}</p>
-  {% endif %}
-</header>
-{% endblock %}
+{% block page_header %}{% endblock %}
 {% block content %}
-<section class="info-page">
+<section class="info-hub" aria-label="{{ page_title }}">
   {% include "info/_toc.html" %}
-  <article class="info-article">
-    {% block info_body %}{% endblock %}
-  </article>
+  <div class="info-hub-main">
+    <article class="info-card">
+      {% block info_header %}
+      <header class="info-card-head">
+        <div class="info-card-head-text">
+          <h1 class="info-card-title">{{ page_title }}</h1>
+          {% if page_lede %}
+          <p class="info-card-lede">{{ page_lede }}</p>
+          {% endif %}
+        </div>
+        {% block info_header_actions %}{% endblock %}
+      </header>
+      {% endblock %}
+      <div class="info-card-body">
+        {% block info_body %}{% endblock %}
+      </div>
+    </article>
+  </div>
 </section>
 {% endblock %}

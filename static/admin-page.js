@@ -70,6 +70,10 @@
     topCustomersEmpty: root.querySelector("[data-adm-top-customers-empty]"),
     topCountriesBody: root.querySelector("[data-adm-top-countries]"),
     topCountriesEmpty: root.querySelector("[data-adm-top-countries-empty]"),
+    withdrawalsStatus: root.querySelector("[data-adm-withdrawals-status]"),
+    withdrawalsRefresh: root.querySelector("[data-adm-withdrawals-refresh]"),
+    withdrawalsBody: root.querySelector("[data-adm-withdrawals-body]"),
+    withdrawalsEmpty: root.querySelector("[data-adm-withdrawals-empty]"),
   };
 
   function escapeHtml(str) {
@@ -224,6 +228,132 @@
     if (els.topCountriesEmpty) {
       els.topCountriesEmpty.hidden = hasRealCountry;
     }
+  }
+
+  function setWithdrawalsStatus(msg, isError) {
+    if (!els.withdrawalsStatus) return;
+    els.withdrawalsStatus.textContent = msg || "";
+    els.withdrawalsStatus.classList.toggle("adm-status--error", !!isError);
+  }
+
+  function loadWithdrawals() {
+    if (!els.withdrawalsBody) return Promise.resolve();
+    setWithdrawalsStatus("Loading…");
+    return fetch("/api/admin/withdrawals?status=pending&limit=200", {
+      headers: { Accept: "application/json" },
+    })
+      .then(function (res) {
+        return res.json().catch(function () {
+          return {};
+        }).then(function (d) {
+          return { ok: res.ok, data: d };
+        });
+      })
+      .then(function (r) {
+        if (!r.ok) {
+          setWithdrawalsStatus(
+            (r.data && r.data.error) || "Failed to load withdrawals.",
+            true
+          );
+          return;
+        }
+        var items = (r.data && r.data.items) || [];
+        els.withdrawalsBody.innerHTML = items
+          .map(function (item) {
+            var email = escapeHtml(item.email || "");
+            var name = escapeHtml(item.name || "");
+            var wallet = escapeHtml(item.wallet_details || "");
+            return (
+              '<tr data-adm-withdrawal-row="' +
+              item.id +
+              '">' +
+              '<td class="adm-cell-id">#' +
+              item.id +
+              "</td>" +
+              '<td class="adm-cell-email" title="' +
+              email +
+              '">#' +
+              item.user_id +
+              " · " +
+              (name ? name + " · " : "") +
+              email +
+              "</td>" +
+              '<td class="adm-cell-balance">$' +
+              Number(item.amount_usd || 0).toFixed(2) +
+              "</td>" +
+              '<td class="adm-cell-wallet" title="' +
+              wallet +
+              '">' +
+              wallet +
+              "</td>" +
+              '<td class="adm-cell-date">' +
+              escapeHtml(item.created_at || "") +
+              "</td>" +
+              '<td class="adm-cell-actions">' +
+              '<button type="button" class="adm-btn adm-btn--approve" data-adm-withdrawal-approve="' +
+              item.id +
+              '">Approve</button>' +
+              '<button type="button" class="adm-btn adm-btn--reject" data-adm-withdrawal-reject="' +
+              item.id +
+              '">Reject</button>' +
+              "</td></tr>"
+            );
+          })
+          .join("");
+        if (els.withdrawalsEmpty) {
+          els.withdrawalsEmpty.hidden = items.length > 0;
+        }
+        setWithdrawalsStatus(
+          items.length
+            ? items.length + " pending"
+            : "No pending withdrawals."
+        );
+      })
+      .catch(function () {
+        setWithdrawalsStatus("Network error loading withdrawals.", true);
+      });
+  }
+
+  function resolveWithdrawal(requestId, approve) {
+    var path = approve ? "approve" : "reject";
+    var label = approve ? "Approve" : "Reject";
+    if (
+      !window.confirm(
+        label + " withdrawal #" + requestId + "?" +
+          (approve
+            ? " Confirm you have already sent the funds."
+            : " This refunds the amount to the user’s referral balance.")
+      )
+    ) {
+      return;
+    }
+    setWithdrawalsStatus(label + "ing…");
+    fetch("/api/admin/withdrawals/" + requestId + "/" + path, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
+      .then(function (res) {
+        return res.json().catch(function () {
+          return {};
+        }).then(function (d) {
+          return { ok: res.ok, data: d };
+        });
+      })
+      .then(function (r) {
+        if (!r.ok) {
+          setWithdrawalsStatus(
+            (r.data && (r.data.error || r.data.message)) ||
+              "Failed to " + path + " withdrawal.",
+            true
+          );
+          return;
+        }
+        loadWithdrawals();
+      })
+      .catch(function () {
+        setWithdrawalsStatus("Network error.", true);
+      });
   }
 
   function loadAnalytics() {
@@ -905,6 +1035,34 @@
     });
   }
 
+  if (els.withdrawalsRefresh) {
+    els.withdrawalsRefresh.addEventListener("click", function () {
+      loadWithdrawals();
+    });
+  }
+  if (els.withdrawalsBody) {
+    els.withdrawalsBody.addEventListener("click", function (e) {
+      var approveBtn = e.target.closest("[data-adm-withdrawal-approve]");
+      if (approveBtn) {
+        var approveId = parseInt(
+          approveBtn.getAttribute("data-adm-withdrawal-approve"),
+          10
+        );
+        if (approveId) resolveWithdrawal(approveId, true);
+        return;
+      }
+      var rejectBtn = e.target.closest("[data-adm-withdrawal-reject]");
+      if (rejectBtn) {
+        var rejectId = parseInt(
+          rejectBtn.getAttribute("data-adm-withdrawal-reject"),
+          10
+        );
+        if (rejectId) resolveWithdrawal(rejectId, false);
+      }
+    });
+  }
+
   loadAnalytics();
+  loadWithdrawals();
   loadUsers();
 })();

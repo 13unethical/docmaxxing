@@ -2,689 +2,101 @@
 {% set tools_active = 'assignment' %}
 {% block title %}Assignment — DocMaxxing{% endblock %}
 {% block tools_content %}
-<div class="assignment-grid" data-assignment-page data-dm-tour-page="assignment" data-tour="asg-page">
-  <section class="assignment-main-col">
-    <div class="dm-tool-head">
-      <h1 class="dash-card-title" style="margin:0">Assignment</h1>
-      {% include "_tutorial_btn.html" %}
+<div class="asg-chat" data-assignment-page data-dm-tour-page="assignment" data-tour="asg-page">
+  <div class="asg-drop-overlay" data-asg-drop-overlay hidden>
+    <div class="asg-drop-overlay-inner">
+      <div class="asg-drop-overlay-icons" aria-hidden="true">
+        <svg class="asg-drop-ico asg-drop-ico--doc" viewBox="0 0 48 56" fill="none">
+          <rect x="4" y="2" width="40" height="52" rx="6" fill="#3b82f6"/>
+          <path d="M14 18h20M14 26h16M14 34h12" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <p class="asg-drop-overlay-title">Add something</p>
+      <p class="asg-drop-overlay-lede">Drop any file here to add it to the discussion</p>
     </div>
-    <div class="dash-card dash-card--premium" data-asg-upload-card>
-      <div class="assignment-upload-grid" data-tour="asg-brief">
-        <label class="assignment-drop">
-          <input type="file" accept=".pdf,.docx" hidden data-asg-brief />
-          <span class="assignment-drop-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path
-                d="M7.5 3.75h6.5L19 8.75V20a1.25 1.25 0 0 1-1.25 1.25h-10.5A1.25 1.25 0 0 1 6 20V5a1.25 1.25 0 0 1 1.5-1.25Z"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linejoin="round"
-              />
-              <path d="M14 3.75V8.75H19" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
-            </svg>
-          </span>
-          <span class="assignment-drop-label">Requirements</span>
-        </label>
-        <label class="assignment-drop assignment-drop--optional">
-          <input type="file" accept=".pdf,.docx,.zip" hidden data-asg-extra multiple />
-          <span class="assignment-drop-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path
-                d="M15.5 7.5v7.25a3.75 3.75 0 1 1-7.5 0V6.75a2.25 2.25 0 1 1 4.5 0v7.5a0.75 0.75 0 1 1-1.5 0V7.5"
-                stroke="currentColor"
-                stroke-width="1.6"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-          </span>
-          <span class="assignment-drop-label">Additional files / Materials</span>
-        </label>
-      </div>
+  </div>
 
-      <section class="assignment-files" data-asg-files-section hidden aria-live="polite">
-        <h3 class="assignment-files-title">Uploaded files</h3>
-        <ul class="assignment-files-list" data-asg-files></ul>
-      </section>
-
-      <div data-tour="asg-deadline">
-      <div class="assignment-field-row two">
-        <label class="assignment-field">
-          <span class="assignment-field-label">Deadline date</span>
-          <input type="date" data-asg-deadline-date />
-        </label>
-        <label class="assignment-field">
-          <span class="assignment-field-label">Deadline time</span>
-          <input type="time" data-asg-deadline-time />
-        </label>
-      </div>
-
-      <div class="assignment-field-row">
-        <label class="assignment-field assignment-note-field">
-          <span class="assignment-field-label">Note</span>
-          <textarea
-            rows="2"
-            placeholder="Add your notes"
-            data-asg-note
-          ></textarea>
-        </label>
-      </div>
-      </div>
-
-      <div class="assignment-card-cta" data-tour="asg-analyze">
-        <div class="assignment-submit-row">
-          <button type="button" class="assignment-submit-btn" data-asg-analyze disabled>Analyze &amp; get price</button>
-        </div>
-        <p class="asg-analysis-status" data-asg-analysis-status role="status" aria-live="polite"></p>
-      </div>
+  <div class="asg-chat-scroll" data-asg-chat-scroll>
+    <div class="asg-chat-empty" data-asg-empty>
+      <h1 class="asg-chat-empty-title">Ready when you are</h1>
+      <p class="asg-chat-empty-lede">Attach your brief and materials to get a price.</p>
     </div>
+    <div class="asg-chat-thread" data-asg-thread aria-live="polite"></div>
+  </div>
 
+  <div class="asg-chat-composer-wrap">
     <p class="asg-page-error" data-asg-page-error hidden role="alert"></p>
-
-    <section class="asg-wizard-shell" data-asg-wizard hidden aria-hidden="true">
-      <div class="asg-wizard-card" data-asg-wizard-card></div>
-      <p class="asg-wizard-error" data-asg-wizard-error hidden role="alert"></p>
-      <p class="asg-wizard-status" data-asg-wizard-status hidden role="status" aria-live="polite"></p>
-      <div class="asg-wizard-actions">
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-wizard-back hidden>Back</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-wizard-primary disabled>Continue</button>
-      </div>
-    </section>
-
-    <section class="dash-card dash-card--premium asg-production" data-asg-production hidden aria-live="polite">
-      <div class="asg-production-inner">
-        <h2 class="asg-production-title">Generating your assignment</h2>
-        <div class="asg-production-bar" aria-hidden="true">
-          <div class="asg-production-bar-fill" data-asg-production-fill></div>
-        </div>
-        <p class="asg-production-pct" data-asg-production-pct>0%</p>
-        <p class="asg-production-eta">Estimated time: 3–5 minutes</p>
-      </div>
-    </section>
-
-    <section class="dash-card dash-card--premium asg-complete" data-asg-complete hidden>
-      <div class="asg-complete-inner">
-        <div class="asg-complete-icon" aria-hidden="true">✓</div>
-        <h2 class="asg-complete-title">Your assignment is ready</h2>
-        <p class="asg-complete-lede">Download your document below.</p>
-        <button type="button" class="asg-btn asg-btn--primary asg-complete-download" data-asg-complete-download>Download assignment</button>
-      </div>
-    </section>
-  </section>
-
-  <aside class="assignment-side-col">
-    <div class="dash-card dash-card--sticky dash-card--premium" data-asg-summary-card data-tour="asg-summary">
-      <h2 class="dash-card-title">Project Summary</h2>
-      <dl class="order-summary-list asg-project-summary-list">
-        <div><dt>Words</dt><dd data-asg-summary-words>—</dd></div>
-        <div><dt>Type</dt><dd data-asg-summary-type>—</dd></div>
-        <div><dt>Complexity</dt><dd data-asg-summary-difficulty>—</dd></div>
-        <div data-asg-summary-eta-row hidden><dt>Est. time</dt><dd data-asg-summary-eta>—</dd></div>
-        <div><dt>Deadline</dt><dd data-asg-summary-deadline>—</dd></div>
-      </dl>
-      <div class="asg-price-breakdown" data-asg-price-breakdown hidden></div>
-      <p class="order-total"><span>Total</span><strong data-asg-summary-total>—</strong></p>
-      <p class="asg-price-coins" data-asg-summary-coins hidden></p>
-      <button type="button" class="assignment-pay-btn" data-asg-continue data-tour="asg-start" disabled>Start Writing</button>
-    </div>
-  </aside>
-
-  <div hidden data-asg-legacy-root aria-hidden="true">
-    <section class="dash-card asg-pipeline-shell" data-asg-pipeline-shell hidden aria-labelledby="asg-pipeline-title">
-      <div class="asg-pipeline-head">
-        <h2 class="dash-card-title" id="asg-pipeline-title">Assignment Pipeline</h2>
-      </div>
-
-      <div class="asg-pipeline-stage asg-pipeline-stage--status" data-pipe-stage-static="requirements">
-        <div class="asg-pipeline-stage-row">
-          <span class="asg-pipeline-stage-icon" data-pipe-icon-static="requirements">○</span>
-          <div class="asg-pipeline-stage-meta">
-            <h3>Requirements</h3>
-            <p data-pipe-status-static="requirements">Status only</p>
-          </div>
-        </div>
-      </div>
-
-      <details class="asg-pipeline-stage" data-pipe-stage="research_blueprint">
-        <summary class="asg-pipeline-summary">
-          <span class="asg-pipeline-stage-icon" data-pipe-icon="research_blueprint">○</span>
-          <span class="asg-pipeline-summary-title">Research &amp; Blueprint</span>
-          <span class="asg-pipeline-summary-state" data-pipe-status="research_blueprint">Future</span>
-        </summary>
-        <div class="asg-pipeline-stage-body" data-pipe-slot="research_blueprint"></div>
-      </details>
-
-      <details class="asg-pipeline-stage" data-pipe-stage="writing">
-        <summary class="asg-pipeline-summary">
-          <span class="asg-pipeline-stage-icon" data-pipe-icon="writing">○</span>
-          <span class="asg-pipeline-summary-title">Writing</span>
-          <span class="asg-pipeline-summary-state" data-pipe-status="writing">Future</span>
-        </summary>
-        <div class="asg-pipeline-stage-body" data-pipe-slot="writing"></div>
-      </details>
-
-      <details class="asg-pipeline-stage" data-pipe-stage="review">
-        <summary class="asg-pipeline-summary">
-          <span class="asg-pipeline-stage-icon" data-pipe-icon="review">○</span>
-          <span class="asg-pipeline-summary-title">Academic Review</span>
-          <span class="asg-pipeline-summary-state" data-pipe-status="review">Future</span>
-        </summary>
-        <div class="asg-pipeline-stage-body" data-pipe-slot="review"></div>
-      </details>
-
-      <details class="asg-pipeline-stage" data-pipe-stage="humanizer">
-        <summary class="asg-pipeline-summary">
-          <span class="asg-pipeline-stage-icon" data-pipe-icon="humanizer">○</span>
-          <span class="asg-pipeline-summary-title">Humanization</span>
-          <span class="asg-pipeline-summary-state" data-pipe-status="humanizer">Future</span>
-        </summary>
-        <div class="asg-pipeline-stage-body" data-pipe-slot="humanizer"></div>
-      </details>
-
-      <details class="asg-pipeline-stage" data-pipe-stage="detection">
-        <summary class="asg-pipeline-summary">
-          <span class="asg-pipeline-stage-icon" data-pipe-icon="detection">○</span>
-          <span class="asg-pipeline-summary-title">AI Detection</span>
-          <span class="asg-pipeline-summary-state" data-pipe-status="detection">Future</span>
-        </summary>
-        <div class="asg-pipeline-stage-body" data-pipe-slot="detection"></div>
-      </details>
-
-      <details class="asg-pipeline-stage" data-pipe-stage="delivery">
-        <summary class="asg-pipeline-summary">
-          <span class="asg-pipeline-stage-icon" data-pipe-icon="delivery">○</span>
-          <span class="asg-pipeline-summary-title">Delivery</span>
-          <span class="asg-pipeline-summary-state" data-pipe-status="delivery">Future</span>
-        </summary>
-        <div class="asg-pipeline-stage-body" data-pipe-slot="delivery"></div>
-      </details>
-    </section>
-
-    <section class="dash-card asg-research-card" data-asg-research hidden aria-labelledby="asg-research-title">
-      <div class="asg-analysis-head">
-        <div>
-          <h2 class="dash-card-title" id="asg-research-title">Research Analysis</h2>
-          <p class="asg-analysis-lede">Writing blueprint only — no assignment text is generated at this stage.</p>
-        </div>
-        <span class="asg-confidence-badge">Engine: <strong data-res-engine>—</strong></span>
-      </div>
-
-      <p class="asg-analysis-status" data-asg-research-status role="status" aria-live="polite"></p>
-
-      <dl class="asg-analysis-grid asg-research-summary">
-        <div><dt>Detected Topic</dt><dd data-res-topic>—</dd></div>
-        <div><dt>Main Objective</dt><dd data-res-objective>—</dd></div>
-        <div><dt>Estimated Sources</dt><dd data-res-sources>—</dd></div>
-        <div><dt>Estimated Difficulty</dt><dd data-res-difficulty>—</dd></div>
-        <div><dt>Estimated Completion Time</dt><dd data-res-time>—</dd></div>
-        <div><dt>Writing Tone</dt><dd data-res-tone>—</dd></div>
-      </dl>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Research Questions</h3>
-        <p class="asg-research-main-q"><strong>Main:</strong> <span data-res-main-question>—</span></p>
-        <ul class="asg-analysis-list" data-res-secondary-questions></ul>
-      </div>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Recommended Structure</h3>
-        <p class="asg-research-structure" data-res-structure>—</p>
-        <div class="asg-research-sections" data-res-sections></div>
-      </div>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Potential Risks</h3>
-        <div data-res-risks></div>
-      </div>
-
-      <details class="asg-research-details">
-        <summary>Writer blueprint details</summary>
-        <div class="asg-research-details-grid">
-          <div><h4>Theories</h4><ul class="asg-analysis-list" data-res-theories></ul></div>
-          <div><h4>Concepts</h4><ul class="asg-analysis-list" data-res-concepts></ul></div>
-          <div><h4>Arguments</h4><ul class="asg-analysis-list" data-res-arguments></ul></div>
-          <div><h4>Counterarguments</h4><ul class="asg-analysis-list" data-res-counterarguments></ul></div>
-          <div><h4>Evidence types</h4><ul class="asg-analysis-list" data-res-evidence></ul></div>
-          <div><h4>Notes for writer</h4><ul class="asg-analysis-list" data-res-notes></ul></div>
-        </div>
-      </details>
-
-      <div class="asg-research-edit" data-asg-research-edit hidden>
-        <label class="assignment-field">
-          <span class="assignment-field-label">Assignment topic</span>
-          <input type="text" data-res-edit-topic />
-        </label>
-        <label class="assignment-field">
-          <span class="assignment-field-label">Writing objective</span>
-          <textarea rows="3" data-res-edit-objective></textarea>
-        </label>
-        <label class="assignment-field">
-          <span class="assignment-field-label">Main research question</span>
-          <textarea rows="2" data-res-edit-main-question></textarea>
-        </label>
-        <button type="button" class="asg-btn asg-btn--primary" data-res-save-edit>Save manual edits</button>
-      </div>
-
-      <div class="asg-step-actions asg-step-actions--split">
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-research-back>Back</button>
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-research-edit>Edit Manually</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-to-blueprint disabled>Continue to Blueprint</button>
-      </div>
-
-      <p class="humanizer-ui-note">Research Plan generated from Requirement JSON.</p>
-    </section>
-
-    <section class="dash-card asg-blueprint-card" data-asg-blueprint hidden aria-labelledby="asg-blueprint-title">
-      <div class="asg-analysis-head">
-        <div>
-          <h2 class="dash-card-title" id="asg-blueprint-title">Blueprint Review</h2>
-          <p class="asg-analysis-lede">Exact writing blueprint for the Writer Engine — no paragraphs generated.</p>
-        </div>
-        <span class="asg-confidence-badge">Engine: <strong data-bp-engine>—</strong></span>
-      </div>
-
-      <p class="asg-analysis-status" data-asg-blueprint-status role="status" aria-live="polite"></p>
-
-      <dl class="asg-analysis-grid asg-research-summary">
-        <div><dt>Total Target Words</dt><dd data-bp-total-words>—</dd></div>
-        <div><dt>Total Sections</dt><dd data-bp-total-sections>—</dd></div>
-        <div><dt>Academic Tone</dt><dd data-bp-tone>—</dd></div>
-        <div><dt>Estimated Completion</dt><dd data-bp-completion>—</dd></div>
-      </dl>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Assignment Structure</h3>
-        <p class="asg-research-structure" data-bp-structure>—</p>
-      </div>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Word Distribution</h3>
-        <div class="asg-word-distribution" data-bp-word-distribution></div>
-      </div>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Writing Queue</h3>
-        <ol class="asg-writing-queue" data-bp-writing-queue></ol>
-      </div>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Section Objectives</h3>
-        <div class="asg-blueprint-sections" data-bp-sections></div>
-      </div>
-
-      <details class="asg-research-details">
-        <summary>Blueprint strategy details</summary>
-        <div class="asg-research-details-grid">
-          <div><h4>Citation Strategy</h4><p data-bp-citation-strategy>—</p></div>
-          <div><h4>Transition Rules</h4><ul class="asg-analysis-list" data-bp-transition-rules></ul></div>
-          <div><h4>Critical Analysis Locations</h4><ul class="asg-analysis-list" data-bp-critical-locations></ul></div>
-          <div><h4>Counterargument Locations</h4><ul class="asg-analysis-list" data-bp-counter-locations></ul></div>
-          <div><h4>Conclusion Goals</h4><ul class="asg-analysis-list" data-bp-conclusion-goals></ul></div>
-        </div>
-      </details>
-
-      <div class="asg-research-edit" data-asg-blueprint-edit hidden>
-        <label class="assignment-field">
-          <span class="assignment-field-label">Citation strategy</span>
-          <textarea rows="3" data-bp-edit-citation></textarea>
-        </label>
-        <label class="assignment-field">
-          <span class="assignment-field-label">Academic tone</span>
-          <input type="text" data-bp-edit-tone />
-        </label>
-        <button type="button" class="asg-btn asg-btn--primary" data-bp-save-edit>Save blueprint edits</button>
-      </div>
-
-      <div class="asg-step-actions asg-step-actions--split">
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-blueprint-back>Back</button>
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-blueprint-edit>Edit Blueprint</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-to-writing disabled>Continue to Writing</button>
-      </div>
-
-      <p class="humanizer-ui-note">Writer Engine consumes this Blueprint only.</p>
-    </section>
-
-    <section class="dash-card asg-writing-card" data-asg-writing hidden aria-labelledby="asg-writing-title">
-      <div class="asg-analysis-head">
-        <div>
-          <h2 class="dash-card-title" id="asg-writing-title">Writing Progress</h2>
-          <p class="asg-analysis-lede">One section at a time — each section is reviewed before the next begins.</p>
-        </div>
-        <span class="asg-confidence-badge">Engine: <strong data-wr-engine>—</strong></span>
-      </div>
-
-      <p class="asg-analysis-status" data-asg-writing-status role="status" aria-live="polite"></p>
-
-      <div class="asg-writing-ux">
-        <div class="asg-writing-ux-head">
-          <div>
-            <p class="asg-analysis-label">Writing</p>
-            <h3 class="asg-writing-current-title" data-wr-current-section>—</h3>
-          </div>
-          <div class="asg-writing-ux-progress">
-            <span class="asg-analysis-label">Progress</span>
-            <strong data-wr-progress>—</strong>
-          </div>
-        </div>
-        <div data-wr-progress-bar></div>
-        <div class="asg-analysis-block">
-          <h3 class="asg-analysis-label">Sections</h3>
-          <ul class="asg-section-progress-list" data-wr-section-progress></ul>
-        </div>
-      </div>
-
-      <dl class="asg-analysis-grid asg-research-summary">
-        <div><dt>Writing</dt><dd data-wr-current-section>—</dd></div>
-        <div><dt>Progress</dt><dd data-wr-progress>—</dd></div>
-        <div><dt>Sections Completed</dt><dd data-wr-completed-count>—</dd></div>
-        <div><dt>Current Word Count</dt><dd data-wr-word-count>—</dd></div>
-        <div><dt>Estimated Completion</dt><dd data-wr-estimated-time>—</dd></div>
-        <div><dt>Current Status</dt><dd data-wr-current-status>—</dd></div>
-      </dl>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Writing Queue</h3>
-        <ul class="asg-writing-queue-list" data-wr-queue></ul>
-      </div>
-
-      <div class="asg-analysis-block" data-wr-review-panel hidden>
-        <h3 class="asg-analysis-label">Section Review</h3>
-        <p class="asg-research-main-q"><strong>Score:</strong> <span data-wr-review-score>—</span></p>
-        <ul class="asg-analysis-list" data-wr-review-issues></ul>
-        <ul class="asg-analysis-list" data-wr-review-recommendations></ul>
-      </div>
-
-      <div class="asg-step-actions asg-step-actions--split">
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-writing-back>Back</button>
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-writing-revise hidden>Revise Section</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-writing-advance>Write Next Section</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-writing-continue hidden disabled>Continue</button>
-      </div>
-
-      <p class="humanizer-ui-note">Draft is merged after all sections are completed.</p>
-    </section>
-
-    <section class="dash-card asg-review-card" data-asg-review hidden aria-labelledby="asg-review-title">
-      <div class="asg-analysis-head">
-        <div>
-          <h2 class="dash-card-title" id="asg-review-title">Academic Review Report</h2>
-          <p class="asg-analysis-lede">Professor-style evaluation of the completed draft — the document is never modified.</p>
-        </div>
-        <span class="asg-confidence-badge">Engine: <strong data-rv-engine>—</strong></span>
-      </div>
-
-      <p class="asg-analysis-status" data-asg-review-status role="status" aria-live="polite"></p>
-
-      <ul class="asg-timeline asg-review-check-timeline" data-rv-check-timeline hidden></ul>
-
-      <div class="asg-review-hero">
-        <div class="asg-review-score-ring" data-rv-overall-score>—</div>
-        <div class="asg-review-hero-meta">
-          <span class="asg-review-pass-badge" data-rv-pass-badge>—</span>
-          <p class="asg-analysis-muted">Evaluated against requirements, rubric, and blueprint.</p>
-        </div>
-      </div>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Quality Scores</h3>
-        <div class="asg-review-scores" data-rv-quality-scores></div>
-      </div>
-
-      <div class="asg-review-columns">
-        <div class="asg-analysis-block">
-          <h3 class="asg-analysis-label">Requirement Checklist</h3>
-          <ul class="asg-review-checklist" data-rv-requirement-checklist></ul>
-        </div>
-        <div class="asg-analysis-block">
-          <h3 class="asg-analysis-label">Rubric Checklist</h3>
-          <ul class="asg-review-checklist" data-rv-rubric-checklist></ul>
-        </div>
-      </div>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Issues Found</h3>
-        <div class="asg-review-issues" data-rv-issues></div>
-      </div>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Recommendations</h3>
-        <ul class="asg-analysis-list" data-rv-recommendations></ul>
-      </div>
-
-      <div class="asg-step-actions asg-step-actions--split">
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-review-back>Back</button>
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-review-view-draft>View Draft</button>
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-review-revision>Send to Revision</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-review-continue disabled>Continue</button>
-      </div>
-
-      <p class="humanizer-ui-note">Review Report only · Revision Engine consumes this object later</p>
-    </section>
-
-    <section class="dash-card asg-revision-card" data-asg-revision hidden aria-labelledby="asg-revision-title">
-      <div class="asg-analysis-head">
-        <div>
-          <h2 class="dash-card-title" id="asg-revision-title">Revision History</h2>
-          <p class="asg-analysis-lede">Targeted section fixes from the Review Report — unrelated sections stay unchanged.</p>
-        </div>
-        <span class="asg-confidence-badge">Engine: <strong data-rv-revision-engine>—</strong></span>
-      </div>
-
-      <p class="asg-analysis-status" data-asg-revision-status role="status" aria-live="polite"></p>
-
-      <div class="asg-revision-flow" data-rv-revision-flow hidden></div>
-
-      <dl class="asg-analysis-grid asg-research-summary">
-        <div><dt>Current Version</dt><dd data-rv-current-version>—</dd></div>
-        <div><dt>Revision Attempts</dt><dd data-rv-revision-attempts>—</dd></div>
-        <div><dt>Latest Review Score</dt><dd data-rv-latest-review-score>—</dd></div>
-        <div><dt>Status</dt><dd data-rv-revision-status-label>—</dd></div>
-      </dl>
-
-      <div class="asg-analysis-block" data-rv-manual-review-banner hidden>
-        <p class="asg-missing-item">Maximum automatic revisions reached. Project status: <strong>Needs Manual Review</strong>.</p>
-      </div>
-
-      <div class="asg-analysis-block">
-        <h3 class="asg-analysis-label">Version History</h3>
-        <div class="asg-revision-versions" data-rv-version-list></div>
-      </div>
-
-      <div class="asg-analysis-block" data-rv-compare-panel hidden>
-        <h3 class="asg-analysis-label">Version Comparison</h3>
-        <div class="asg-revision-compare" data-rv-compare-output></div>
-      </div>
-
-      <div class="asg-step-actions asg-step-actions--split">
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-revision-back>Back to Review</button>
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-revision-compare>Compare Versions</button>
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-revision-rerun-review>Re-run Academic Review</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-revision-continue disabled>Continue Pipeline</button>
-      </div>
-
-      <p class="humanizer-ui-note">Max 3 automatic revisions · Reviewer must approve before pipeline continues</p>
-    </section>
-
-    <section class="dash-card asg-humanizer-card" data-asg-humanizer hidden aria-labelledby="asg-humanizer-title">
-      <div class="asg-analysis-head">
-        <div>
-          <h2 class="dash-card-title" id="asg-humanizer-title">Humanization Progress</h2>
-          <p class="asg-analysis-lede">Paragraph-by-paragraph humanization — the full document is never processed at once.</p>
-        </div>
-        <span class="asg-confidence-badge">Engine: <strong data-hz-engine>—</strong></span>
-      </div>
-
-      <p class="asg-analysis-status" data-asg-humanizer-status role="status" aria-live="polite"></p>
-
-      <div class="asg-humanizer-ux">
-        <div class="asg-humanizer-ux-head">
-          <div>
-            <p class="asg-analysis-label">Paragraph</p>
-            <h3 class="asg-humanizer-current" data-hz-current-index>—</h3>
-          </div>
-          <div>
-            <p class="asg-analysis-label">Status</p>
-            <strong data-hz-humanizing-label>—</strong>
-          </div>
-        </div>
-        <div data-hz-progress-bar></div>
-        <dl class="asg-analysis-grid asg-research-summary asg-humanizer-metrics">
-          <div><dt>Progress</dt><dd data-hz-progress>—</dd></div>
-          <div><dt>Average AI Reduction</dt><dd data-hz-ai-reduction>—</dd></div>
-        </dl>
-      </div>
-
-      <dl class="asg-analysis-grid asg-research-summary">
-        <div><dt>Humanizing Paragraph</dt><dd data-hz-current-index>—</dd></div>
-        <div><dt>Progress</dt><dd data-hz-progress>—</dd></div>
-        <div><dt>Current Section</dt><dd data-hz-current-section>—</dd></div>
-        <div><dt>Paragraph Status</dt><dd data-hz-current-status>—</dd></div>
-        <div><dt>Estimated Remaining</dt><dd data-hz-estimated-time>—</dd></div>
-        <div><dt>AI Reduction (avg)</dt><dd data-hz-ai-reduction>—</dd></div>
-      </dl>
-
-      <div class="asg-analysis-block" data-hz-active-panel>
-        <h3 class="asg-analysis-label">Current Paragraph</h3>
-        <p class="asg-research-main-q" data-hz-current-label>—</p>
-      </div>
-
-      <div class="asg-analysis-block" data-hz-summary-panel hidden>
-        <h3 class="asg-analysis-label">Humanization Complete</h3>
-        <dl class="asg-analysis-grid asg-research-summary">
-          <div><dt>Paragraphs Processed</dt><dd data-hz-summary-processed>—</dd></div>
-          <div><dt>Average AI Reduction</dt><dd data-hz-summary-reduction>—</dd></div>
-          <div><dt>Version Created</dt><dd data-hz-summary-version>—</dd></div>
-        </dl>
-      </div>
-
-      <div class="asg-step-actions asg-step-actions--split">
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-humanizer-back>Back</button>
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-humanizer-view-draft hidden>View Draft</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-humanizer-advance>Humanize Next Paragraph</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-humanizer-continue hidden disabled>Continue</button>
-      </div>
-
-      <p class="humanizer-ui-note">Humanized Draft v(n+1) stored separately · source draft is never overwritten</p>
-    </section>
-
-    <section class="dash-card asg-detection-card" data-asg-detection hidden aria-labelledby="asg-detection-title">
-      <div class="asg-analysis-head">
-        <div>
-          <h2 class="dash-card-title" id="asg-detection-title">AI Detection Progress</h2>
-          <p class="asg-analysis-lede">Paragraph-by-paragraph AI analysis — never evaluates the whole document at once.</p>
-        </div>
-        <span class="asg-confidence-badge">Engine: <strong data-det-engine>—</strong></span>
-      </div>
-
-      <p class="asg-analysis-status" data-asg-detection-status role="status" aria-live="polite"></p>
-
-      <div class="asg-detection-ux">
-        <p class="asg-analysis-label">Scanning Paragraphs</p>
-        <dl class="asg-analysis-grid asg-research-summary">
-          <div><dt>Current Paragraph</dt><dd data-det-current-index>—</dd></div>
-          <div><dt>Average AI Score</dt><dd data-det-average>—</dd></div>
-          <div><dt>Problematic Paragraphs</dt><dd data-det-problematic>—</dd></div>
-          <div><dt>Reprocessed Paragraphs</dt><dd data-det-reprocessed-live>—</dd></div>
-        </dl>
-        <div data-det-progress-bar></div>
-      </div>
-
-      <dl class="asg-analysis-grid asg-research-summary asg-detection-legacy-grid">
-        <div><dt>Checking Paragraph</dt><dd data-det-current-index>—</dd></div>
-        <div><dt>Current AI Score</dt><dd data-det-current-score>—</dd></div>
-        <div><dt>Paragraphs Completed</dt><dd data-det-completed>—</dd></div>
-        <div><dt>Average AI Score</dt><dd data-det-average>—</dd></div>
-        <div><dt>Progress</dt><dd data-det-progress>—</dd></div>
-        <div><dt>Threshold (Acceptable)</dt><dd data-det-threshold>—</dd></div>
-      </dl>
-
-      <div class="asg-analysis-block" data-det-active-panel>
-        <h3 class="asg-analysis-label">Current Paragraph</h3>
-        <p class="asg-research-main-q" data-det-current-label>—</p>
-      </div>
-
-      <div class="asg-analysis-block" data-det-summary-panel hidden>
-        <h3 class="asg-analysis-label">Detection Complete</h3>
-        <dl class="asg-analysis-grid asg-research-summary">
-          <div><dt>Overall AI Score</dt><dd data-det-overall-score>—</dd></div>
-          <div><dt>Highest Score</dt><dd data-det-highest-score>—</dd></div>
-          <div><dt>Lowest Score</dt><dd data-det-lowest-score>—</dd></div>
-          <div><dt>Paragraphs Reprocessed</dt><dd data-det-reprocessed>—</dd></div>
-          <div><dt>Final Status</dt><dd data-det-final-status>—</dd></div>
-        </dl>
-        <div class="asg-detection-breakdown" data-det-breakdown></div>
-        <div class="asg-detection-timeline" data-det-timeline></div>
-      </div>
-
-      <div class="asg-step-actions asg-step-actions--split">
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-detection-back>Back</button>
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-detection-view-report hidden>View Report</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-detection-advance>Check Next Paragraph</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-detection-continue hidden disabled>Continue</button>
-      </div>
-
-      <p class="humanizer-ui-note">AI Detection report is generated from the current provider response.</p>
-    </section>
-
-    <section class="dash-card asg-delivery-card" data-asg-delivery hidden aria-labelledby="asg-delivery-title">
-      <div class="asg-delivery-hero">
-        <div class="asg-delivery-badge" aria-hidden="true">✓</div>
-        <div>
-          <h2 class="dash-card-title" id="asg-delivery-title">Project Completed</h2>
-          <p class="asg-analysis-lede">Your final delivery package is ready. Download the complete archive or individual files below.</p>
-        </div>
-      </div>
-
-      <p class="asg-analysis-status" data-asg-delivery-status role="status" aria-live="polite"></p>
-
-      <ul class="asg-timeline asg-delivery-step-timeline" data-dlv-step-timeline></ul>
-
-      <dl class="asg-analysis-grid asg-research-summary asg-delivery-metrics">
-        <div><dt>Completion Time</dt><dd data-dlv-completion-time>—</dd></div>
-        <div><dt>Overall Quality Score</dt><dd data-dlv-quality-score>—</dd></div>
-        <div><dt>Final AI Score</dt><dd data-dlv-ai-score>—</dd></div>
-        <div><dt>Package Status</dt><dd data-dlv-package-status>—</dd></div>
-      </dl>
-
-      <div class="asg-delivery-status-track" data-dlv-status-track aria-label="Packaging progress">
-        <div class="asg-delivery-status-step" data-dlv-step="preparing_files">Preparing Files</div>
-        <div class="asg-delivery-status-step" data-dlv-step="generating_reports">Generating Reports</div>
-        <div class="asg-delivery-status-step" data-dlv-step="packaging">Packaging</div>
-        <div class="asg-delivery-status-step" data-dlv-step="ready">Ready</div>
-      </div>
-
-      <div class="asg-delivery-actions" data-dlv-actions hidden>
-        <button type="button" class="asg-btn asg-btn--primary asg-delivery-download-btn" data-dlv-download-package>
-          Download Delivery Package
+    <form class="asg-chat-composer" data-asg-composer-form>
+      <input type="file" accept=".pdf,.doc,.docx,.zip,.txt,.rtf,.png,.jpg,.jpeg" hidden multiple data-asg-files />
+      <div class="asg-chat-attachments" data-asg-chips hidden></div>
+      <div class="asg-chat-composer-row">
+        <button type="button" class="asg-chat-attach" data-asg-attach aria-label="Attach files">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
         </button>
-        <p class="asg-delivery-size" data-dlv-package-size></p>
+        <label class="sr-only" for="asg-chat-input">Message</label>
+        <textarea
+          id="asg-chat-input"
+          class="asg-chat-input"
+          data-asg-note
+          rows="1"
+          placeholder="Add a note (optional)…"
+        ></textarea>
+        <button type="submit" class="asg-chat-send" data-asg-send disabled aria-label="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 19V5M5 12l7-7 7 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
+    </form>
+    <p class="asg-chat-hint">Upload requirements and materials — Gemini reads them and prices the work.</p>
+  </div>
 
-      <div class="asg-delivery-files" data-dlv-files-panel hidden>
-        <h3 class="asg-analysis-label">Included Files</h3>
-        <ul class="asg-delivery-file-list" data-dlv-file-list></ul>
+  <!-- Hidden hooks for production/complete/revision used by assignment-page.js -->
+  <div class="asg-chat-hidden" hidden aria-hidden="true">
+    <div data-asg-upload-card></div>
+    <div data-asg-summary-card>
+      <span data-asg-summary-words></span>
+      <span data-asg-summary-type></span>
+      <span data-asg-summary-difficulty></span>
+      <span data-asg-summary-eta></span>
+      <span data-asg-summary-deadline></span>
+      <span data-asg-summary-total></span>
+      <span data-asg-summary-coins></span>
+      <div data-asg-price-breakdown></div>
+      <div data-asg-summary-eta-row></div>
+      <button type="button" data-asg-continue>Start Writing</button>
+    </div>
+    <div data-asg-wizard>
+      <div data-asg-wizard-card></div>
+      <p data-asg-wizard-error></p>
+      <p data-asg-wizard-status></p>
+      <button type="button" data-asg-wizard-back>Back</button>
+      <button type="button" data-asg-wizard-primary>Continue</button>
+    </div>
+    <div data-asg-production>
+      <div data-asg-production-fill></div>
+      <span data-asg-production-pct>0%</span>
+    </div>
+    <div data-asg-complete>
+      <button type="button" data-asg-complete-download>Download</button>
+      <button type="button" data-asg-complete-download-secondary>Download again</button>
+      <p data-asg-complete-warn></p>
+      <div data-asg-revchat>
+        <p data-asg-revchat-meta></p>
+        <div data-asg-revchat-thread></div>
+        <form data-asg-revchat-form>
+          <textarea data-asg-revchat-input></textarea>
+          <button type="submit" data-asg-revchat-send>Send</button>
+        </form>
       </div>
-
-      <div class="asg-step-actions asg-step-actions--split">
-        <button type="button" class="asg-btn asg-btn--ghost" data-asg-delivery-back>Back</button>
-        <button type="button" class="asg-btn asg-btn--primary" data-asg-delivery-continue hidden disabled>Continue to Payment</button>
-      </div>
-
-      <p class="humanizer-ui-note">Packaging only — no content is regenerated at this stage</p>
-    </section>
-
-    <dialog class="asg-draft-modal" data-asg-draft-modal>
-      <div class="asg-draft-modal-inner">
-        <div class="asg-draft-modal-head">
-          <h3 data-rv-draft-title>Assignment Draft</h3>
-          <button type="button" class="asg-draft-modal-close" data-asg-draft-modal-close aria-label="Close">×</button>
-        </div>
-        <pre class="asg-draft-modal-body" data-rv-draft-content></pre>
-      </div>
-    </dialog>
+    </div>
+    <div data-asg-analysis-status></div>
+    <div data-asg-files-section><ul data-asg-files></ul></div>
   </div>
 </div>
 {% endblock %}
 {% block tools_scripts %}
-<script src="{{ url_for('static', filename='assignment-page.js') }}?v=20260726-download3"></script>
+<script src="{{ url_for('static', filename='assignment-page.js') }}?v=20260802-chat-history"></script>
 {% endblock %}

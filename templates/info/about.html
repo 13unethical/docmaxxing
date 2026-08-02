@@ -1,27 +1,34 @@
 {% extends "info/base.html" %}
 {% set info_active = "about" %}
 {% set page_title = "About Us" %}
-{% set page_lede = "DocMaxxing is an academic document studio for formatting, humanizing, checking, and delivering student work." %}
+{% set page_lede = "DocMaxxing is an academic document studio for formatting, humanizing, integrity checks, and assignment delivery." %}
 {% block info_body %}
 <p>
   DocMaxxing helps students and researchers ship clean academic documents without fighting Word styles
-  for hours. The product combines formatting, AI humanization, integrity checks, citations, and a full
-  assignment pipeline in one place.
+  for hours. The product combines free formatting, AI humanization, Turnitin-style reports, citations,
+  a full Assignment pipeline, and a referral cashback program in one place.
 </p>
 
-<h2>What you can do</h2>
+<h2>What you can do today</h2>
 <ul>
-  <li><strong>Format</strong> — paste or upload a brief + text, apply Harvard / APA / MLA presets, fonts, margins, cover page, references, and citations, then download a DOCX.</li>
-  <li><strong>Humanizer</strong> — rewrite AI-sounding prose through StealthWriter (Legacy 5.1) in large batches up to ~5,000 words.</li>
-  <li><strong>Turnitin</strong> — run similarity / AI-oriented report workflows with credit-based checks.</li>
-  <li><strong>Assignment</strong> — upload a brief, pay once, then auto-run research → blueprint → writing → citations → humanize → format → review → AI detection → delivery ZIP.</li>
-  <li><strong>Check</strong> — academic requirement checking against your brief.</li>
-  <li><strong>Workspace</strong> — in-editor tools (humanize selections, AI detect highlights, citations) paid with credits.</li>
+  <li><strong>Format</strong> — paste or upload text, apply Harvard / APA / MLA presets, fonts, margins, cover page, references, and citations, then download a DOCX. Free.</li>
+  <li><strong>Humanizer</strong> — rewrite AI-sounding prose through StealthWriter (Legacy 5.1), including large batches up to ~5,000 words in Assignment.</li>
+  <li><strong>Turnitin</strong> — run similarity / AI-oriented report workflows billed in credits.</li>
+  <li><strong>Assignment</strong> — upload a brief, review the price, pay once, then auto-run research → blueprint → writing → citations → humanize → format → review → AI detection → delivery ZIP.</li>
+  <li><strong>Earn &amp; Share</strong> — invite friends, earn cashback on their deposits, unlock milestone rewards, convert to credits, or withdraw.</li>
 </ul>
+
+<h2>Coming soon</h2>
+<ul>
+  <li><strong>Academic Check</strong> — requirement checking against your brief</li>
+  <li><strong>Workspace</strong> — in-editor paid tools</li>
+  <li><strong>Presentation</strong> — presentation helpers</li>
+</ul>
+<p>These items appear in the sidebar and open a “Soon” page until they launch.</p>
 
 <h2>How Assignment works</h2>
 <p>
-  The Assignment pipeline is built around your brief as the source of truth. We extract required sections,
+  The Assignment pipeline treats your brief as the source of truth. We extract required sections,
   word budgets (±10%), formatting rules, rubric / learning outcomes, and mandatory evidence
   (for example lecture/seminar references in Learning Journals). Writing can happen section-by-section;
   humanizing runs on large batches; a grade gate repairs word count and rubric gaps before export.
@@ -29,10 +36,10 @@
 
 <h2>Credits economy</h2>
 <p>
-  Core Format stays free. Academic Check and other paid actions (humanize, AI detect, citation search, Turnitin)
-  spend credits. New accounts receive welcome credits. Packages are sold on the
-  <a href="{{ url_for('pricing') }}">buy credits</a> screen (see also the
-  <a href="{{ url_for('credits') }}">Credits</a> guide).
+  Format stays free. Paid actions (humanize, Turnitin, Assignment, and related metered tools) spend credits.
+  New accounts get 50 welcome credits. Packages are sold on the
+  <a href="{{ url_for('pricing') }}">buy credits</a> screen via Cryptomus or Paddle
+  (see the <a href="{{ url_for('credits') }}">Credits</a> guide).
 </p>
 
 <h2>Who we are for</h2>

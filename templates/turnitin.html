@@ -3,9 +3,11 @@
 {% block title %}Turnitin Similarity Check — DocMaxxing{% endblock %}
 {% block tools_content %}
 <div class="tt-page" data-turnitin-page data-dm-tour-page="turnitin" data-tour="tt-page">
-  <div class="dm-tool-head">
-    <h1 class="tt-page-title" style="margin:0;font-size:1.15rem;font-weight:700">Turnitin</h1>
-    {% include "_tutorial_btn.html" %}
+  <div class="tt-drop-overlay" data-tt-drop-overlay hidden>
+    <div class="tt-drop-overlay-inner">
+      <p class="tt-drop-overlay-title">Drop file to submit</p>
+      <p class="tt-drop-overlay-lede">DOC, DOCX, PDF, or TXT — starts a Turnitin check</p>
+    </div>
   </div>
   <section class="tt-card tt-reports-card" aria-label="My Reports" data-tour="tt-reports">
     <div class="tt-reports-top">
@@ -105,5 +107,5 @@
 </div>
 {% endblock %}
 {% block tools_scripts %}
-<script src="{{ url_for('static', filename='turnitin-page.js') }}"></script>
+<script src="{{ url_for('static', filename='turnitin-page.js') }}?v=20260802-tt-drop"></script>
 {% endblock %}

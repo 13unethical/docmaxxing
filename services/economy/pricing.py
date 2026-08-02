@@ -53,6 +53,9 @@ FEATURE_LABELS: dict[str, str] = {
     "topup": "Top-up",
     "welcome_bonus": "Welcome bonus",
     "admin_adjustment": "Admin adjustment",
+    "referral_signup_bonus": "Referral signup bonus",
+    "referral_milestone": "Referral milestone",
+    "referral_convert": "Referral → credits",
 }
 
 # Top-up packages — Pricing UI + Paddle price_id → credits (Starter / Pro only).

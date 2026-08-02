@@ -32,3 +32,20 @@ def test_prepend_cover_page_inserts_page_break():
     out = io.BytesIO()
     doc.save(out)
     assert out.getvalue()[:2] == b"PK"
+
+
+def test_prepend_cover_document_keeps_body():
+    from formatter.cover_page import prepend_cover_document
+
+    body = Document()
+    body.add_paragraph("Main essay body.")
+
+    cover = Document()
+    cover.add_paragraph("Ready Cover Title")
+    cover.add_paragraph("Student Name")
+
+    prepend_cover_document(body, cover)
+    texts = [p.text for p in body.paragraphs if (p.text or "").strip()]
+    assert texts[0] == "Ready Cover Title"
+    assert "Student Name" in texts
+    assert "Main essay body." in texts

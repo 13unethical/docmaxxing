@@ -42,6 +42,12 @@ def _row_to_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "name": row["name"],
         "created_at": row["created_at"],
         "is_admin": is_admin,
+        "referral_code": row["referral_code"] if "referral_code" in keys else None,
+        "referrer_id": int(row["referrer_id"]) if "referrer_id" in keys and row["referrer_id"] is not None else None,
+        "referral_balance_usd": float(row["referral_balance_usd"] or 0) if "referral_balance_usd" in keys else 0.0,
+        "qualifying_referrals_count": int(row["qualifying_referrals_count"] or 0) if "qualifying_referrals_count" in keys else 0,
+        "is_pro": bool(row["is_pro"]) if "is_pro" in keys else False,
+        "free_turnitin_reports": int(row["free_turnitin_reports"] or 0) if "free_turnitin_reports" in keys else 0,
     }
 
 
@@ -54,8 +60,20 @@ def is_bootstrap_admin_email(email: str) -> bool:
     return bool(configured) and normalize_email(email) == configured
 
 
-def create_user(email: str, password: str, *, name: str | None = None) -> dict[str, Any]:
+def create_user(
+    email: str,
+    password: str,
+    *,
+    name: str | None = None,
+    referral_code: str | None = None,
+) -> dict[str, Any]:
     """Create a user, wallet and welcome bonus. Raises on bad input/dupes."""
+    from .referral import (
+        REFERRAL_SIGNUP_BONUS,
+        _generate_code,
+        lookup_referrer_id,
+    )
+
     email = normalize_email(email)
     if not email or "@" not in email:
         raise AuthError("A valid email is required.")
@@ -64,22 +82,52 @@ def create_user(email: str, password: str, *, name: str | None = None) -> dict[s
 
     password_hash = generate_password_hash(password)
     is_admin = 1 if is_bootstrap_admin_email(email) else 0
+    referrer_id = lookup_referrer_id(referral_code)
+
     with connect() as conn:
         exists = conn.execute(
             "SELECT 1 FROM users WHERE email = ?", (email,)
         ).fetchone()
         if exists:
             raise DuplicateEmail("An account with this email already exists.")
+        own_code = _generate_code(conn)
+        # Prevent self-referral via own code (impossible for new user) and ignore invalid codes silently.
+        if referrer_id is not None:
+            # referrer_id already validated by lookup
+            pass
         cur = conn.execute(
-            "INSERT INTO users (email, name, password_hash, is_admin) VALUES (?, ?, ?, ?)",
-            (email, (name or "").strip() or None, password_hash, is_admin),
+            "INSERT INTO users "
+            "(email, name, password_hash, is_admin, referral_code, referrer_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                email,
+                (name or "").strip() or None,
+                password_hash,
+                is_admin,
+                own_code,
+                referrer_id,
+            ),
         )
         user_id = int(cur.lastrowid)
 
     _wallet.ensure_wallet(user_id)
     if WELCOME_BONUS > 0:
         _wallet.credit(user_id, WELCOME_BONUS, "welcome_bonus")
-    return {"id": user_id, "email": email, "name": (name or "").strip() or None}
+    if referrer_id is not None and REFERRAL_SIGNUP_BONUS > 0:
+        _wallet.credit(
+            user_id,
+            REFERRAL_SIGNUP_BONUS,
+            "referral_signup_bonus",
+            ref_id=f"ref_signup_{user_id}",
+            meta={"referrer_id": referrer_id, "code": (referral_code or "").strip().upper()},
+        )
+    return {
+        "id": user_id,
+        "email": email,
+        "name": (name or "").strip() or None,
+        "referral_code": own_code,
+        "referrer_id": referrer_id,
+    }
 
 
 def verify_credentials(email: str, password: str) -> dict[str, Any] | None:

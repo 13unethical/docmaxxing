@@ -1,20 +1,22 @@
 {% extends "info/base.html" %}
 {% set info_active = "faq" %}
 {% set page_title = "FAQ" %}
-{% set page_lede = "Common questions about DocMaxxing tools, credits, and Assignment delivery." %}
+{% set page_lede = "Common questions about DocMaxxing tools, credits, referrals, and Assignment delivery." %}
 {% block info_body %}
 <h2>Getting started</h2>
-<p><strong>Do I need an account?</strong> You can try Format as a guest for many flows, but buying credits, saving Assignment progress, and paid Workspace actions require Sign up.</p>
-<p><strong>Where do I buy credits?</strong> Read the <a href="{{ url_for('credits') }}">Credits</a> guide, then open <a href="{{ url_for('pricing') }}">Buy credits</a>. Guests are asked to register before checkout.</p>
-<p><strong>What are welcome credits?</strong> New accounts receive a welcome bonus so you can try paid Workspace actions before purchasing.</p>
+<p><strong>Do I need an account?</strong> You can try Format as a guest for many flows. Buying credits, saving Assignment progress, running paid Humanizer / Turnitin actions, and Earn &amp; Share require sign-up.</p>
+<p><strong>Where do I buy credits?</strong> Read the <a href="{{ url_for('credits') }}">Credits</a> guide, then open <a href="{{ url_for('pricing') }}">Buy credits</a>. Checkout uses Cryptomus (crypto) and/or Paddle (cards). Guests are asked to register before checkout.</p>
+<p><strong>What are welcome credits?</strong> New accounts receive <strong>50</strong> welcome credits. Signing up with a referral link also grants <strong>+100</strong> referral bonus credits.</p>
 
 <h2>Format</h2>
 <p><strong>What files can I upload?</strong> Briefs and text as paste or DOC/PDF/TXT/images (as shown on the Format page).</p>
 <p><strong>Which styles are supported?</strong> Harvard, APA, MLA presets plus custom font, size, spacing, margins, cover page, references, and citations.</p>
+<p><strong>Does Format cost credits?</strong> No — Format is free.</p>
 
 <h2>Humanizer</h2>
-<p><strong>How does humanizing run?</strong> Assignment humanizing uses StealthWriter Legacy 5.1 in large batches (up to ~5,000 words), not tiny paragraph-by-paragraph API spam.</p>
+<p><strong>How does humanizing run?</strong> The standalone Humanizer and Assignment humanizing use StealthWriter Legacy 5.1. Assignment batches can run up to ~5,000 words.</p>
 <p><strong>Why is AI score still high?</strong> Later revision / repair steps can rewrite prose. The pipeline re-humanizes after those steps; always re-check the final DOCX on your detector of choice.</p>
+<p><strong>Cost?</strong> Typically <strong>10 credits</strong> per humanize action (Pro users get 10% off paid charges).</p>
 
 <h2>Assignment</h2>
 <p><strong>What is the pipeline?</strong> Upload brief → price → pay → research → blueprint → write sections → citations → humanize → format → review/revision → validation → AI detection → delivery ZIP.</p>
@@ -23,9 +25,17 @@
 
 <h2>Turnitin &amp; detection</h2>
 <p><strong>Is this official Turnitin?</strong> We provide Turnitin-style report workflows through configured providers. Institutional Turnitin portals can still differ.</p>
-<p><strong>Cost?</strong> Similarity check is priced in credits (see Credits page; typically 300 credits per check).</p>
+<p><strong>Cost?</strong> Typically <strong>300 credits</strong> per check. Earn &amp; Share milestones can award free detailed Turnitin reports.</p>
+
+<h2>Earn &amp; Share</h2>
+<p><strong>How does cashback work?</strong> When someone you referred deposits, you earn <strong>40%</strong> of that USD amount into your referral balance.</p>
+<p><strong>What counts as a qualifying friend?</strong> Their first deposit of <strong>$10+</strong>. Milestones unlock free Turnitin reports, bonus credits, and Pro (10% off) at 10 qualifying friends.</p>
+<p><strong>Convert or withdraw?</strong> Convert referral USD to credits at <strong>1.2×</strong>, or request a withdrawal from <strong>$50</strong> minimum (manual review).</p>
+
+<h2>Coming soon</h2>
+<p><strong>What about Check, Workspace, and Presentation?</strong> They are listed in the menu but currently show a Soon page. They are not live yet.</p>
 
 <h2>Billing</h2>
-<p><strong>Who charges my card?</strong> Paddle is the payment processor / merchant of record.</p>
+<p><strong>Who processes payment?</strong> Cryptomus for crypto checkout (when configured) and Paddle for card / wallet payments (merchant of record).</p>
 <p><strong>Refunds?</strong> See <a href="{{ url_for('refund_policy') }}">Refund Policy</a>.</p>
 {% endblock %}

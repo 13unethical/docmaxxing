@@ -842,6 +842,23 @@
       if (resultsWrap) {
         resultsWrap.scrollIntoView({ behavior: "smooth", block: "start" });
       }
+      if (window.DMToolHistory) {
+        var reqText = (requirementsInput && requirementsInput.value) || "";
+        var docText = (pastedInput && pastedInput.value) || "";
+        window.DMToolHistory.push("check", {
+          title: window.DMToolHistory.titleFromText(
+            docText || reqText,
+            "Check · score " + score
+          ),
+          payload: {
+            requirements: reqText,
+            pasted_text: docText,
+            document_type: docType,
+            result: data,
+          },
+        });
+        if (window.DM_refreshToolHistory) window.DM_refreshToolHistory();
+      }
     } catch (err) {
       setStatus((err && err.message) || "Network error. Please try again.", "error");
       hideResults();
@@ -849,4 +866,36 @@
       checkBtn.disabled = false;
     }
   });
+
+  (function restoreCheckHistory() {
+    if (!window.DMToolHistory) return;
+    var hid = window.DMToolHistory.historyParam();
+    if (!hid) return;
+    var item = window.DMToolHistory.get("check", hid);
+    if (!item || !item.payload) return;
+    var p = item.payload;
+    if (requirementsInput && p.requirements != null) requirementsInput.value = p.requirements;
+    if (pastedInput && p.pasted_text != null) pastedInput.value = p.pasted_text;
+    if (docTypeSelect && p.document_type) docTypeSelect.value = p.document_type;
+    var data = p.result;
+    if (!data) return;
+    if (resultsWrap) resultsWrap.classList.remove("hidden");
+    updateScoreRing(data.score);
+    if (verdictEl) {
+      verdictEl.textContent = data.verdict || "—";
+      verdictEl.className = "check-verdict " + verdictClass(data.verdict);
+    }
+    if (summaryEl) summaryEl.textContent = data.summary || "";
+    renderCategories(data.categories);
+    renderStructureAnalysis(data.structure_analysis);
+    renderBulletList(positivesList, data.positives, "Run Check again after fixes to see strengths.");
+    renderBulletList(needsList, data.needs_work, "No major gaps flagged in these categories.");
+    renderIssues(data.issues);
+    renderActionPlan(data.action_plan);
+    renderNextSteps(data.next_steps);
+    renderBulletList(topProblems, pickMainProblems(data), "No critical issues detected.");
+    renderBulletList(fixFirst, data.next_steps, "Review the issue cards and adjust your draft.");
+    renderCitationAndCompliance(data);
+    setStatus("Restored from history.", "success");
+  })();
 })();

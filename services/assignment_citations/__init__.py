@@ -47,6 +47,22 @@ _CLAIMED_CITE_RE = re.compile(
 )
 
 
+_INSERT_CITES_SYSTEM = """You insert a FEW additional in-text citations into an academic draft
+using ONLY the provided allowed works. Return ONLY JSON:
+{
+  "content": "full markdown WITH ## headings, WITHOUT a References section",
+  "notes": ["where you cited"]
+}
+
+Rules:
+- Use ONLY the exact in_text forms from allowed_in_text / works.
+- Insert cites where claims need scholarly support — do not invent sources.
+- Do NOT add unused bibliography entries (caller builds References from used cites).
+- Keep meaning, structure, and complete sentences. Do not rewrite the whole essay.
+- Prefer adding up to target_additional new citation occurrences if natural; fewer is OK.
+"""
+
+
 class CitationLookup(Protocol):
     def search(self, query: str, *, style: str = "APA 7", limit: int = 3) -> dict[str, Any]:
         ...
@@ -206,27 +222,23 @@ class AssignmentCitationEngine:
             if label and label not in in_text:
                 in_text.append(label)
 
-        # 2) Fill to minimum_sources using topic / title searches.
-        fill_queries = _fill_queries(requirement_json, content)
-        for query in fill_queries:
-            if len(references) >= max(settings.minimum_sources, 1):
-                break
-            if len(references) >= settings.maximum_sources:
-                break
-            if query in queries:
-                continue
-            work = self._lookup(query, style=settings.style)
-            if not work:
-                continue
-            ref = str(work.get("reference") or "").strip()
-            label = str(work.get("label") or work.get("intext") or work.get("in_text") or "").strip()
-            if ref and ref not in seen_refs:
-                seen_refs.add(ref)
-                references.append(ref)
-                works.append(work)
-                queries.append(query)
-            if label and label not in in_text:
-                in_text.append(label)
+        # Grow toward minimum by inserting real in-text cites (never pad unused refs).
+        body = _strip_references_section(content)
+        if settings.minimum_sources and len(works) < settings.minimum_sources:
+            body, works, references, in_text, queries = self._expand_used_citations(
+                body,
+                works=works,
+                references=references,
+                in_text=in_text,
+                queries=queries,
+                settings=settings,
+                requirement_json=requirement_json,
+                seen_refs=seen_refs,
+            )
+
+        # Reconcile claimed author-years to verified works, then keep cited-only refs.
+        body = _reconcile_body_with_works(body, works=works, in_text=in_text, style=settings.style)
+        works, references, in_text = _filter_cited_only(body, works=works, references=references)
 
         if settings.sort_alphabetically and references:
             n = min(len(references), len(works))
@@ -242,10 +254,6 @@ class AssignmentCitationEngine:
                 if label and label not in in_text:
                     in_text.append(label)
 
-        # 3) Reconcile body so in-text cites match the final reference list.
-        body = _strip_references_section(content)
-        body = _reconcile_body_with_works(body, works=works, in_text=in_text, style=settings.style)
-
         pack = CitationPack(
             id=str(uuid.uuid4()),
             project_id=project_id,
@@ -255,7 +263,13 @@ class AssignmentCitationEngine:
             in_text=in_text,
             references=references,
             unresolved=unresolved,
-            settings=settings.to_dict(),
+            settings={
+                **settings.to_dict(),
+                "used_sources": len(references),
+                "sources_below_minimum": bool(
+                    settings.minimum_sources and len(references) < settings.minimum_sources
+                ),
+            },
             engine_version=self.VERSION,
             created_at=utc_now().isoformat(),
         )
@@ -274,6 +288,59 @@ class AssignmentCitationEngine:
         updated_draft["reference_settings"] = settings.to_dict()
         return pack, updated_draft
 
+    def _expand_used_citations(
+        self,
+        body: str,
+        *,
+        works: list[dict[str, Any]],
+        references: list[str],
+        in_text: list[str],
+        queries: list[str],
+        settings: ReferenceSettings,
+        requirement_json: dict[str, Any],
+        seen_refs: set[str],
+    ) -> tuple[str, list[dict[str, Any]], list[str], list[str], list[str]]:
+        """Lookup more verified works and insert their cites into body when natural."""
+        need = max(0, settings.minimum_sources - len(works))
+        if need <= 0:
+            return body, works, references, in_text, queries
+
+        for query in _fill_queries(requirement_json, body):
+            if len(works) >= settings.minimum_sources or len(works) >= settings.maximum_sources:
+                break
+            if query in queries:
+                continue
+            work = self._lookup(query, style=settings.style)
+            if not work:
+                continue
+            ref = str(work.get("reference") or "").strip()
+            label = str(work.get("label") or work.get("intext") or work.get("in_text") or "").strip()
+            if not ref or ref in seen_refs or not label:
+                continue
+            # Only keep if we can place the cite in the body.
+            placed = _try_insert_cite(body, label)
+            if not placed:
+                continue
+            body = placed
+            seen_refs.add(ref)
+            references.append(ref)
+            works.append(work)
+            queries.append(query)
+            if label not in in_text:
+                in_text.append(label)
+
+        # Optional LLM pass: insert more from the already-verified pool only.
+        still_need = max(0, settings.minimum_sources - _count_used_cites(body, works))
+        if still_need > 0 and works:
+            body = _llm_insert_allowed_cites(
+                body,
+                works=works,
+                in_text=in_text,
+                style=settings.style,
+                target_additional=min(still_need, 8),
+            )
+        return body, works, references, in_text, queries
+
     def _lookup(self, query: str, *, style: str) -> dict[str, Any] | None:
         try:
             result = self.citations.search(query, style=style, limit=2)
@@ -290,6 +357,163 @@ def _extract_claimed_cites(content: str) -> list[str]:
         if q not in found:
             found.append(q)
     return found
+
+
+def _work_cite_keys(work: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for field in ("label", "intext", "in_text"):
+        val = str(work.get(field) or "").strip()
+        if val:
+            keys.append(val)
+    ref = str(work.get("reference") or "")
+    year = str(work.get("year") or "").strip()
+    # Author surname from "Surname, I. (YEAR)" style refs.
+    m = re.match(r"^([A-Z][A-Za-z''\-]+)", ref)
+    if m and year:
+        keys.append(f"{m.group(1)} ({year})")
+        keys.append(f"{m.group(1)}, {year}")
+    return keys
+
+
+def _body_mentions_work(body: str, work: dict[str, Any]) -> bool:
+    text = body or ""
+    for key in _work_cite_keys(work):
+        if key and key in text:
+            return True
+        # Author (Year) loose match
+        m = re.match(r"^([A-Z][A-Za-z''\-]+)", key)
+        year_m = re.search(r"(19|20)\d{2}", key)
+        if m and year_m:
+            author = m.group(1)
+            year = year_m.group(0)
+            if re.search(rf"\b{re.escape(author)}\b[^\n.]{{0,40}}\b{year}\b", text):
+                return True
+    return False
+
+
+def _count_used_cites(body: str, works: list[dict[str, Any]]) -> int:
+    return sum(1 for w in works if _body_mentions_work(body, w))
+
+
+def _filter_cited_only(
+    body: str,
+    *,
+    works: list[dict[str, Any]],
+    references: list[str],
+) -> tuple[list[dict[str, Any]], list[str], list[str]]:
+    kept_works: list[dict[str, Any]] = []
+    kept_refs: list[str] = []
+    in_text: list[str] = []
+    n = max(len(works), len(references))
+    for i in range(n):
+        work = works[i] if i < len(works) else {}
+        ref = references[i] if i < len(references) else str(work.get("reference") or "")
+        if not work and not ref:
+            continue
+        if not _body_mentions_work(body, work or {"reference": ref}):
+            continue
+        if work:
+            kept_works.append(work)
+        if ref:
+            kept_refs.append(ref)
+        label = str(work.get("label") or work.get("intext") or work.get("in_text") or "").strip()
+        if label and label not in in_text:
+            in_text.append(label)
+    return kept_works, kept_refs, in_text
+
+
+def _try_insert_cite(body: str, label: str) -> str | None:
+    """Append one parenthetical cite to a mid-section sentence if label not already present."""
+    if not body or not label or label in body:
+        return None
+    sections = re.split(r"(?m)^(##\s+.+)$", body)
+    if len(sections) < 3:
+        # Single block — insert before last sentence of body.
+        paras = [p for p in body.split("\n\n") if p.strip()]
+        if len(paras) < 2:
+            return None
+        target = paras[len(paras) // 2]
+        if label in target:
+            return None
+        updated = target.rstrip()
+        if updated.endswith("."):
+            updated = updated[:-1] + f" {label}."
+        else:
+            updated = updated + f" {label}"
+        paras[len(paras) // 2] = updated
+        return "\n\n".join(paras)
+
+    # Prefer a non-References body section that is not the first heading-only chunk.
+    for i in range(1, len(sections) - 1, 2):
+        title = sections[i]
+        chunk = sections[i + 1]
+        if re.search(r"references|bibliography|works cited", title, re.I):
+            continue
+        if label in chunk:
+            continue
+        paras = [p for p in chunk.split("\n\n") if p.strip()]
+        if not paras:
+            continue
+        idx = min(1, len(paras) - 1)
+        target = paras[idx].rstrip()
+        if target.endswith("."):
+            paras[idx] = target[:-1] + f" {label}."
+        else:
+            paras[idx] = target + f" {label}"
+        sections[i + 1] = "\n\n" + "\n\n".join(paras) + "\n\n"
+        return "".join(sections)
+    return None
+
+
+def _llm_insert_allowed_cites(
+    body: str,
+    *,
+    works: list[dict[str, Any]],
+    in_text: list[str],
+    style: str,
+    target_additional: int,
+) -> str:
+    if target_additional <= 0 or not assignment_llm_configured(STAGE_CITATION_EXTRACT):
+        return body
+    payload = {
+        "style": style,
+        "target_additional": target_additional,
+        "allowed_in_text": in_text,
+        "works": [
+            {
+                "in_text": w.get("label") or w.get("intext") or w.get("in_text"),
+                "reference": w.get("reference"),
+                "title": w.get("title"),
+                "year": w.get("year"),
+            }
+            for w in works
+        ],
+        "draft": body[:20000],
+    }
+    try:
+        data, _ = assignment_generate_json(
+            system_prompt=_INSERT_CITES_SYSTEM,
+            user_prompt=json_dumps_truncated(payload),
+            temperature=0.1,
+            max_retries=1,
+            stage=STAGE_CITATION_EXTRACT,
+        )
+    except Exception:  # noqa: BLE001
+        return body
+    if not isinstance(data, dict):
+        return body
+    updated = str(data.get("content") or "").strip()
+    if not updated or len(updated) < max(80, int(len(body) * 0.5)):
+        return body
+    if body.count("## ") >= 2 and updated.count("## ") < 2:
+        return body
+    # Reject if any new cite forms appear that are not in allowed list.
+    allowed = set(in_text)
+    for match in _CLAIMED_CITE_RE.finditer(updated):
+        author = match.group(1).split()[0]
+        if not any(author in a for a in allowed):
+            return body
+    return _strip_references_section(updated)
 
 
 def _extract_queries(
