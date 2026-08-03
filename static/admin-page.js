@@ -74,6 +74,22 @@
     withdrawalsRefresh: root.querySelector("[data-adm-withdrawals-refresh]"),
     withdrawalsBody: root.querySelector("[data-adm-withdrawals-body]"),
     withdrawalsEmpty: root.querySelector("[data-adm-withdrawals-empty]"),
+    todayStatus: root.querySelector("[data-adm-today-status]"),
+    todayRefresh: root.querySelector("[data-adm-today-refresh]"),
+    todayDate: root.querySelector("[data-adm-today-date]"),
+    todayHumanizer: root.querySelector("[data-adm-today-humanizer]"),
+    todayHumanizerUsed: root.querySelector("[data-adm-today-humanizer-used]"),
+    todayHumanizerLimit: root.querySelector("[data-adm-today-humanizer-limit]"),
+    todayTurnitin: root.querySelector("[data-adm-today-turnitin]"),
+    promoForm: root.querySelector("[data-adm-promo-form]"),
+    promoActive: root.querySelector("[data-adm-promo-active]"),
+    promoPercent: root.querySelector("[data-adm-promo-percent]"),
+    promoLimit: root.querySelector("[data-adm-promo-limit]"),
+    turnitinBalance: root.querySelector("[data-adm-turnitin-balance]"),
+    autoEnabled: root.querySelector("[data-adm-auto-enabled]"),
+    autoTime: root.querySelector("[data-adm-auto-time]"),
+    autoMin: root.querySelector("[data-adm-auto-min]"),
+    discountLive: root.querySelector("[data-adm-discount-live]"),
   };
 
   function escapeHtml(str) {
@@ -353,6 +369,186 @@
       })
       .catch(function () {
         setWithdrawalsStatus("Network error.", true);
+      });
+  }
+
+  function setTodayStatus(msg, isError) {
+    if (!els.todayStatus) return;
+    els.todayStatus.textContent = msg || "";
+    els.todayStatus.classList.toggle("adm-status--error", !!isError);
+  }
+
+  function applyTodayPayload(data) {
+    var today = (data && data.today) || {};
+    var settings = (data && data.settings) || {};
+    var discount = (data && data.discount) || {};
+
+    if (els.todayDate) els.todayDate.textContent = today.date || "today";
+    if (els.todayHumanizer) {
+      els.todayHumanizer.textContent = String(
+        today.humanizer_remaining != null
+          ? today.humanizer_remaining
+          : Math.max(
+              0,
+              (today.humanizer_daily_limit || settings.humanizer_daily_limit || 50) -
+                (today.humanizer_requests_count || 0)
+            )
+      );
+    }
+    if (els.todayHumanizerUsed) {
+      els.todayHumanizerUsed.textContent = String(today.humanizer_requests_count || 0);
+    }
+    if (els.todayHumanizerLimit) {
+      els.todayHumanizerLimit.textContent = String(
+        today.humanizer_daily_limit != null
+          ? today.humanizer_daily_limit
+          : settings.humanizer_daily_limit || 50
+      );
+    }
+    if (els.todayTurnitin) {
+      var turnitinBal =
+        today.turnitin_global_balance != null
+          ? today.turnitin_global_balance
+          : settings.turnitin_global_balance != null
+            ? settings.turnitin_global_balance
+            : 0;
+      els.todayTurnitin.textContent = String(turnitinBal);
+    }
+    if (els.promoActive) {
+      els.promoActive.checked = !!settings.is_humanizer_discount_active;
+    }
+    if (els.promoPercent) {
+      els.promoPercent.value = String(
+        settings.humanizer_discount_percent != null
+          ? settings.humanizer_discount_percent
+          : 50
+      );
+    }
+    if (els.promoLimit) {
+      els.promoLimit.value = String(
+        settings.humanizer_daily_limit != null ? settings.humanizer_daily_limit : 50
+      );
+    }
+    if (els.turnitinBalance) {
+      els.turnitinBalance.value = String(
+        settings.turnitin_global_balance != null ? settings.turnitin_global_balance : 0
+      );
+    }
+    if (els.autoEnabled) {
+      els.autoEnabled.checked = !!settings.auto_discount_enabled;
+    }
+    if (els.autoTime) {
+      els.autoTime.value = settings.auto_discount_time || "20:00";
+    }
+    if (els.autoMin) {
+      els.autoMin.value = String(
+        settings.auto_discount_min_remaining != null
+          ? settings.auto_discount_min_remaining
+          : 10
+      );
+    }
+    if (els.discountLive) {
+      if (discount.active) {
+        els.discountLive.textContent =
+          "Live now: −" +
+          (discount.percent || 0) +
+          "% (" +
+          (discount.source || "active") +
+          ")";
+      } else if (discount.source === "auto_waiting") {
+        els.discountLive.textContent =
+          "Auto-Pilot waiting — triggers at " +
+          (discount.trigger_time || settings.auto_discount_time || "20:00") +
+          " GMT+5 if remaining ≥ " +
+          (discount.min_remaining != null
+            ? discount.min_remaining
+            : settings.auto_discount_min_remaining || 10);
+      } else {
+        els.discountLive.textContent = "Discount inactive.";
+      }
+    }
+  }
+
+  function loadTodayUsage() {
+    if (!els.todayHumanizer && !els.promoForm) return Promise.resolve();
+    setTodayStatus("Loading…");
+    return fetch("/api/admin/daily-stats", { headers: { Accept: "application/json" } })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (d) {
+            return { ok: res.ok, status: res.status, data: d };
+          });
+      })
+      .then(function (r) {
+        if (!r.ok) {
+          setTodayStatus(
+            (r.data && (r.data.error || r.data.message)) ||
+              "Failed to load today’s usage. (HTTP " + r.status + ")",
+            true
+          );
+          return;
+        }
+        applyTodayPayload(r.data || {});
+        if (r.data && r.data.warning) {
+          setTodayStatus("Loaded with warning: " + r.data.warning, true);
+        } else {
+          setTodayStatus("");
+        }
+      })
+      .catch(function () {
+        setTodayStatus("Network error loading today’s usage.", true);
+      });
+  }
+
+  function savePromo(e) {
+    if (e) e.preventDefault();
+    if (!els.promoForm) return;
+    setTodayStatus("Saving settings…");
+    var body = {
+      is_humanizer_discount_active: !!(els.promoActive && els.promoActive.checked),
+      humanizer_discount_percent: els.promoPercent
+        ? parseInt(els.promoPercent.value, 10)
+        : 50,
+      humanizer_daily_limit: els.promoLimit ? parseInt(els.promoLimit.value, 10) : 50,
+      turnitin_global_balance: els.turnitinBalance
+        ? parseInt(els.turnitinBalance.value, 10)
+        : 0,
+      auto_discount_enabled: !!(els.autoEnabled && els.autoEnabled.checked),
+      auto_discount_time: els.autoTime ? els.autoTime.value || "20:00" : "20:00",
+      auto_discount_min_remaining: els.autoMin ? parseInt(els.autoMin.value, 10) : 10,
+    };
+    fetch("/api/admin/site-settings", {
+      method: "PATCH",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (d) {
+            return { ok: res.ok, data: d };
+          });
+      })
+      .then(function (r) {
+        if (!r.ok || !r.data || !r.data.success) {
+          setTodayStatus((r.data && r.data.error) || "Could not save settings.", true);
+          return;
+        }
+        applyTodayPayload(r.data);
+        setTodayStatus("Settings saved.");
+      })
+      .catch(function () {
+        setTodayStatus("Network error saving settings.", true);
       });
   }
 
@@ -1035,6 +1231,15 @@
     });
   }
 
+  if (els.todayRefresh) {
+    els.todayRefresh.addEventListener("click", function () {
+      loadTodayUsage();
+    });
+  }
+  if (els.promoForm) {
+    els.promoForm.addEventListener("submit", savePromo);
+  }
+
   if (els.withdrawalsRefresh) {
     els.withdrawalsRefresh.addEventListener("click", function () {
       loadWithdrawals();
@@ -1062,6 +1267,7 @@
     });
   }
 
+  loadTodayUsage();
   loadAnalytics();
   loadWithdrawals();
   loadUsers();

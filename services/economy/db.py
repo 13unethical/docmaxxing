@@ -136,6 +136,24 @@ CREATE INDEX IF NOT EXISTS idx_withdrawal_status
 
 CREATE INDEX IF NOT EXISTS idx_withdrawal_user
     ON withdrawal_requests(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS daily_stats (
+    date                       TEXT PRIMARY KEY,
+    humanizer_requests_count   INTEGER NOT NULL DEFAULT 0,
+    turnitin_requests_count    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS site_settings (
+    id                             INTEGER PRIMARY KEY CHECK (id = 1),
+    is_humanizer_discount_active   INTEGER NOT NULL DEFAULT 0,
+    humanizer_discount_percent     INTEGER NOT NULL DEFAULT 50,
+    humanizer_daily_limit          INTEGER NOT NULL DEFAULT 50,
+    turnitin_global_balance        INTEGER NOT NULL DEFAULT 0,
+    auto_discount_enabled          INTEGER NOT NULL DEFAULT 0,
+    auto_discount_time             TEXT NOT NULL DEFAULT '20:00',
+    auto_discount_min_remaining    INTEGER NOT NULL DEFAULT 10,
+    updated_at                     TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -309,6 +327,13 @@ def _migrate_referral_columns(conn: sqlite3.Connection) -> None:
                 break
 
 
+def _migrate_daily_stats_and_settings(conn: sqlite3.Connection) -> None:
+    """Ensure daily_stats + site_settings exist on older DBs."""
+    from .site_settings import ensure_schema
+
+    ensure_schema(conn)
+
+
 def init_db() -> None:
     """Create tables/indexes if they do not exist. Safe to call repeatedly."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -328,6 +353,7 @@ def init_db() -> None:
         _migrate_paddle_purchases(conn)
         _migrate_cryptomus_payments(conn)
         _migrate_referral_columns(conn)
+        _migrate_daily_stats_and_settings(conn)
         # 3) Indexes that depend on migrated columns.
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tx_user_type ON transactions(user_id, type)"

@@ -35,7 +35,7 @@ USD_TO_COINS: int = _env_int("USD_TO_COINS", 100)
 
 # Flat / base costs in coins, keyed by feature id.
 FEATURE_COSTS: dict[str, int] = {
-    "humanize": _env_int("COST_HUMANIZE", 10),
+    "humanize": _env_int("COST_HUMANIZE", 200),
     "detect": _env_int("COST_DETECT", 10),
     "check": _env_int("COST_CHECK", 20),
     "cite": _env_int("COST_CITE", 2),
@@ -94,7 +94,12 @@ def feature_cost(feature: str, **params: Any) -> int:
         )
     if feature not in FEATURE_COSTS:
         raise KeyError(f"Unknown paid feature: {feature!r}")
-    return int(FEATURE_COSTS[feature])
+    cost = int(FEATURE_COSTS[feature])
+    if feature == "humanize":
+        from .site_settings import apply_humanizer_site_discount
+
+        cost = apply_humanizer_site_discount(cost)
+    return int(cost)
 
 
 def assignment_cost_coins(

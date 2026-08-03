@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Admin Panel — DocMaxxing{% endblock %}
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}" />
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v=20260803-turnitin-global" />
 {% endblock %}
 {% block content %}
 <div class="adm-page" data-admin-page>
@@ -14,6 +14,76 @@
       <span class="adm-stat"><strong data-adm-total-users>0</strong> users</span>
     </div>
   </header>
+
+  <section class="adm-card adm-today" aria-labelledby="adm-today-title" data-adm-today>
+    <div class="adm-analytics-head">
+      <div>
+        <h2 class="adm-section-title" id="adm-today-title">Today’s Usage</h2>
+        <p class="adm-analytics-lede">
+          Counters reset at 00:00 Asia/Tashkent (GMT+5). Date:
+          <span data-adm-today-date>today</span>
+        </p>
+      </div>
+      <button type="button" class="adm-btn adm-btn--ghost" data-adm-today-refresh>Refresh</button>
+    </div>
+    <p class="adm-status" data-adm-today-status role="status" aria-live="polite"></p>
+    <div class="adm-today-grid">
+      <article class="adm-today-card">
+        <p class="adm-today-label">Remaining Humanizer Requests</p>
+        <p class="adm-today-value" data-adm-today-humanizer>0</p>
+        <p class="adm-today-sub">Used <span data-adm-today-humanizer-used>0</span> / <span data-adm-today-humanizer-limit>50</span></p>
+      </article>
+      <article class="adm-today-card">
+        <p class="adm-today-label">Turnitin Global Balance</p>
+        <p class="adm-today-value" data-adm-today-turnitin>0</p>
+      </article>
+    </div>
+
+    <form class="adm-promo-form" data-adm-promo-form>
+      <h3 class="adm-promo-title">Humanizer discount</h3>
+      <p class="adm-promo-lede">
+        Manual toggle always wins. Auto-Pilot can turn the badge/discount on after the trigger time
+        (GMT+5) when remaining requests are high enough. Users never see remaining counts.
+        A 0% discount never shows a badge. Turnitin balance is a hard global pool (does not reset daily).
+      </p>
+      <div class="adm-promo-row">
+        <label class="adm-promo-toggle">
+          <input type="checkbox" data-adm-promo-active />
+          <span>Manual discount ON</span>
+        </label>
+        <label class="adm-promo-percent">
+          <span>Percent OFF</span>
+          <input type="number" min="0" max="100" step="1" value="50" data-adm-promo-percent />
+        </label>
+        <label class="adm-promo-percent">
+          <span>Humanizer daily limit</span>
+          <input type="number" min="0" step="1" value="50" data-adm-promo-limit />
+        </label>
+        <label class="adm-promo-percent">
+          <span>Set Turnitin Global Balance</span>
+          <input type="number" min="0" step="1" value="0" data-adm-turnitin-balance />
+        </label>
+      </div>
+
+      <h3 class="adm-promo-title adm-promo-title--spaced">Auto-Pilot</h3>
+      <div class="adm-promo-row">
+        <label class="adm-promo-toggle">
+          <input type="checkbox" data-adm-auto-enabled />
+          <span>Enable Auto-Pilot</span>
+        </label>
+        <label class="adm-promo-percent">
+          <span>Trigger time (GMT+5)</span>
+          <input type="time" value="20:00" data-adm-auto-time />
+        </label>
+        <label class="adm-promo-percent">
+          <span>Min. remaining to trigger</span>
+          <input type="number" min="0" step="1" value="10" data-adm-auto-min />
+        </label>
+        <button type="submit" class="adm-btn adm-btn--save">Save settings</button>
+      </div>
+      <p class="adm-promo-live" data-adm-discount-live></p>
+    </form>
+  </section>
 
   <section class="adm-card adm-analytics" aria-labelledby="adm-analytics-title" data-adm-analytics>
     <div class="adm-analytics-head">
@@ -265,5 +335,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='admin-page.js') }}"></script>
+<script src="{{ url_for('static', filename='admin-page.js') }}?v=20260803-turnitin-global"></script>
 {% endblock %}

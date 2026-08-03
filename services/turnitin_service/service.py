@@ -115,6 +115,12 @@ class TurnitinService:
                     meta_json=json.dumps(meta),
                     completed_at=job.finished_at.isoformat() if job.finished_at else None,
                 )
+                try:
+                    from services.economy.site_settings import record_turnitin_success
+
+                    record_turnitin_success()
+                except Exception:  # noqa: BLE001
+                    pass
                 # If scores landed but PDFs did not, queue a follow-up download.
                 need_sim = not res.get("similarity_report_path")
                 need_ai = not res.get("ai_report_path")

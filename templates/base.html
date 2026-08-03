@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}DocMaxxing{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260803-info-hub" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260803-hz-badge" />
     <script>
       (function () {
         try {
@@ -93,6 +93,9 @@
               <path d="M5.75 19.25 8.15 18.65" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
             <span class="app-sidebar-label">Humanizer</span>
+            {% if is_humanizer_discount_active and humanizer_discount_percent > 0 %}
+            <span class="nav-discount-badge">-{{ humanizer_discount_percent }}% OFF</span>
+            {% endif %}
           </a>
           <a href="{{ url_for('turnitin') }}" class="app-nav-link{% if _nav == 'turnitin' %} is-active{% endif %}" title="Turnitin"{% if _nav == 'turnitin' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">

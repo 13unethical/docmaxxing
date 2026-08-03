@@ -502,11 +502,24 @@ def inject_account():
     """Expose the current user and coin balance to every template."""
     user = economy_auth.current_user()
     balance = wallet.get_balance(user["id"]) if user else 0
+    try:
+        from services.economy.site_settings import get_current_humanizer_discount_status
+
+        discount = get_current_humanizer_discount_status()
+    except Exception:
+        discount = {
+            "active": False,
+            "percent": 50,
+            "source": "none",
+        }
     return {
         "current_user": user,
         "coin_balance": balance,
         "welcome_bonus": WELCOME_BONUS,
         "is_admin": bool(user and user.get("is_admin")),
+        "is_humanizer_discount_active": bool(discount.get("active"))
+        and int(discount.get("percent") or 0) > 0,
+        "humanizer_discount_percent": int(discount.get("percent") or 0),
     }
 
 
@@ -732,6 +745,98 @@ def legal_refund():
 @economy_auth.admin_required
 def admin_panel():
     return render_template("admin.html", nav_active="admin")
+
+
+@app.get("/api/admin/daily-stats")
+@economy_auth.admin_required
+def api_admin_daily_stats():
+    from services.economy.site_settings import get_admin_dashboard_stats
+
+    try:
+        payload = get_admin_dashboard_stats()
+        return jsonify({"success": True, **payload})
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("admin daily-stats failed")
+        return jsonify(
+            {
+                "success": True,
+                "today": {
+                    "date": None,
+                    "humanizer_requests_count": 0,
+                    "humanizer_daily_limit": 50,
+                    "humanizer_remaining": 50,
+                    "turnitin_global_balance": 0,
+                },
+                "settings": {},
+                "discount": {"active": False, "percent": 0, "source": "none"},
+                "warning": str(exc),
+            }
+        )
+
+
+@app.patch("/api/admin/site-settings")
+@economy_auth.admin_required
+def api_admin_site_settings():
+    from services.economy.site_settings import (
+        get_admin_dashboard_stats,
+        update_site_settings,
+    )
+
+    body = request.get_json(silent=True) or {}
+    kwargs: dict = {}
+    if "is_humanizer_discount_active" in body:
+        kwargs["is_humanizer_discount_active"] = bool(body["is_humanizer_discount_active"])
+    if "humanizer_discount_percent" in body:
+        try:
+            kwargs["humanizer_discount_percent"] = int(body["humanizer_discount_percent"])
+        except (TypeError, ValueError):
+            return jsonify(
+                {"success": False, "error": "humanizer_discount_percent must be an integer."}
+            ), 400
+    if "humanizer_daily_limit" in body:
+        try:
+            kwargs["humanizer_daily_limit"] = int(body["humanizer_daily_limit"])
+        except (TypeError, ValueError):
+            return jsonify(
+                {"success": False, "error": "humanizer_daily_limit must be an integer."}
+            ), 400
+    if "turnitin_global_balance" in body:
+        try:
+            kwargs["turnitin_global_balance"] = int(body["turnitin_global_balance"])
+        except (TypeError, ValueError):
+            return jsonify(
+                {"success": False, "error": "turnitin_global_balance must be an integer."}
+            ), 400
+    if "auto_discount_enabled" in body:
+        kwargs["auto_discount_enabled"] = bool(body["auto_discount_enabled"])
+    if "auto_discount_time" in body:
+        kwargs["auto_discount_time"] = str(body["auto_discount_time"] or "20:00")
+    if "auto_discount_min_remaining" in body:
+        try:
+            kwargs["auto_discount_min_remaining"] = int(body["auto_discount_min_remaining"])
+        except (TypeError, ValueError):
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "auto_discount_min_remaining must be an integer.",
+                }
+            ), 400
+    if not kwargs:
+        return jsonify({"success": False, "error": "No settings provided."}), 400
+    try:
+        settings = update_site_settings(**kwargs)
+        dash = get_admin_dashboard_stats()
+        return jsonify(
+            {
+                "success": True,
+                "settings": settings,
+                "today": dash.get("today"),
+                "discount": dash.get("discount"),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("admin site-settings update failed")
+        return jsonify({"success": False, "error": str(exc)}), 500
 
 
 @app.get("/api/admin/users")
@@ -1373,10 +1478,22 @@ def editor():
 
 @app.route("/humanizer")
 def humanizer():
+    from services.economy.pricing import FEATURE_COSTS
+    from services.economy.site_settings import humanize_credit_cost
+
+    pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
+    base_cost = int(pricing["original_price"])
+    discount_percent = int(pricing["discount_percent"] or 0)
+    is_discount_active = bool(pricing["discount_active"]) and discount_percent > 0
+    discounted_cost = int(pricing["charged"])
     return render_template(
         "humanizer.html",
         nav_active="humanizer",
-        humanize_cost=feature_cost("humanize"),
+        humanize_cost=discounted_cost if is_discount_active else base_cost,
+        base_cost=base_cost,
+        is_discount_active=is_discount_active,
+        discount_percent=discount_percent,
+        discounted_cost=discounted_cost,
     )
 
 
@@ -2146,8 +2263,21 @@ def api_browser_stealthwriter_humanize():
     if not isinstance(text, str) or not text.strip():
         return jsonify({"success": False, "error": "text is required"}), 400
 
-    cost = feature_cost("humanize")
-    charged = _charge_current_user("humanize", cost)
+    from services.economy.pricing import FEATURE_COSTS
+    from services.economy.site_settings import humanize_credit_cost
+
+    pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
+    cost = int(pricing["charged"])
+    charged = _charge_current_user(
+        "humanize",
+        cost,
+        meta={
+            "original_price": pricing["original_price"],
+            "discount_active": pricing["discount_active"],
+            "discount_percent": pricing["discount_percent"],
+            "discount_source": pricing["discount_source"],
+        },
+    )
     if not isinstance(charged, tuple):
         return charged
     user_id, _tx = charged
@@ -2177,6 +2307,12 @@ def api_browser_stealthwriter_humanize():
                 latency=latency_ms,
                 request_id=job.id,
             )
+            try:
+                from services.economy.site_settings import record_humanizer_success
+
+                record_humanizer_success()
+            except Exception:
+                app.logger.exception("daily_stats humanizer increment failed")
             return jsonify(
                 {
                     "success": True,
@@ -2184,6 +2320,9 @@ def api_browser_stealthwriter_humanize():
                     "elapsed_seconds": res.get("elapsed_seconds"),
                     "job_id": job.id,
                     "coins_charged": cost,
+                    "original_price": pricing["original_price"],
+                    "discount_active": pricing["discount_active"],
+                    "discount_percent": pricing["discount_percent"],
                     "balance": wallet.get_balance(user_id),
                 }
             )
