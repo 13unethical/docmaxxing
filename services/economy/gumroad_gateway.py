@@ -42,8 +42,8 @@ def gumroad_ping_secret() -> str:
 def gumroad_product_map() -> dict[str, str]:
     """Map Gumroad short_product_id / permalink → internal package id.
 
-    Built from ``GUMROAD_PRODUCT_CREDITS_1000`` / ``_2500`` env vars and any
-    ``gumroad_product_id`` fields on TOPUP_PACKAGES.
+    Built from ``GUMROAD_PRODUCT_CREDITS_1000`` / ``_2200`` (or legacy ``_2500``)
+    env vars and any ``gumroad_product_id`` fields on TOPUP_PACKAGES.
     """
     mapping: dict[str, str] = {}
     for pkg_id, pkg in TOPUP_PACKAGES.items():
@@ -53,6 +53,7 @@ def gumroad_product_map() -> dict[str, str]:
     # Explicit env keys (also already loaded into packages via pricing.py)
     for env_key, pkg_id in (
         ("GUMROAD_PRODUCT_CREDITS_1000", "credits_1000"),
+        ("GUMROAD_PRODUCT_CREDITS_2200", "credits_2500"),
         ("GUMROAD_PRODUCT_CREDITS_2500", "credits_2500"),
     ):
         gum_id = _env(env_key)
@@ -158,7 +159,7 @@ def extract_user_id(form: Mapping[str, Any]) -> int | None:
 def resolve_package_id(form: Mapping[str, Any]) -> str | None:
     """Map Gumroad ``short_product_id`` / permalink onto TOPUP_PACKAGES ids.
 
-    Prefers exact match against ``GUMROAD_PRODUCT_CREDITS_*`` (e.g. ``1000``, ``2500``).
+    Prefers exact match against ``GUMROAD_PRODUCT_CREDITS_*`` (e.g. ``1000``, ``2200``).
     """
     product_map = gumroad_product_map()
     candidates = [

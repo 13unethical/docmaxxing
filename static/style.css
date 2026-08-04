@@ -87,13 +87,13 @@
   --bg-dark: hsl(336 0% 1%);
   --bg: hsl(300 0% 4%);
   --bg-light: hsl(0 0% 9%);
-  --text: #d2a871;
-  --text-muted: color-mix(in srgb, #d2a871 72%, #64748b);
+  --text: #ffffff;
+  --text-muted: color-mix(in srgb, #ffffff 62%, #64748b);
   --highlight: hsl(330 0% 39%);
   --border: hsl(0 0% 28%);
   --border-muted: hsl(300 0% 18%);
-  --primary: #d2a871;
-  --secondary: #d2a871;
+  --primary: #ffffff;
+  --secondary: #ffffff;
   --danger: hsl(9 26% 64%);
   --warning: hsl(52 19% 57%);
   --success: hsl(146 17% 59%);
@@ -109,7 +109,7 @@
   --on-secondary: hsl(300 0% 4%);
   --cta-text: hsl(300 0% 4%);
   color-scheme: dark;
-  accent-color: #d2a871;
+  accent-color: #ffffff;
 }
 
 @supports (color: oklch(0 0 0)) {
@@ -117,13 +117,13 @@
     --bg-dark: oklch(0.1 0 250);
     --bg: oklch(0.15 0 250);
     --bg-light: oklch(0.2 0 250);
-    --text: #d2a871;
-    --text-muted: color-mix(in srgb, #d2a871 72%, #64748b);
+    --text: #ffffff;
+    --text-muted: color-mix(in srgb, #ffffff 62%, #64748b);
     --highlight: oklch(0.5 0 250);
     --border: oklch(0.4 0 250);
     --border-muted: oklch(0.3 0 250);
-    --primary: #d2a871;
-    --secondary: #d2a871;
+    --primary: #ffffff;
+    --secondary: #ffffff;
     --danger: oklch(0.7 0.05 30);
     --warning: oklch(0.7 0.05 100);
     --success: oklch(0.7 0.05 160);
@@ -324,8 +324,8 @@ h3 a:visited {
 
 [data-theme="dark"] .top-nav .nav-link.is-active {
   color: #000;
-  background: #d2a871;
-  border-color: #d2a871;
+  background: #ffffff;
+  border-color: #ffffff;
 }
 
 [data-theme="dark"] .top-nav .nav-link.is-active .nav-link-icon {
@@ -1146,8 +1146,8 @@ input[type="time"]::-webkit-calendar-picker-indicator {
 
 [data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
 [data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator {
-  /* Tint native white picker icon toward #d2a871 */
-  filter: invert(78%) sepia(28%) saturate(650%) hue-rotate(346deg) brightness(92%) contrast(88%);
+  /* Keep native picker icon light on dark theme */
+  filter: invert(1) brightness(1.05);
 }
 
 fieldset.toggles {
@@ -1789,9 +1789,10 @@ body.support-chat-open {
 
 /* Desktop: brand + nav + account on one baseline. Credits/profile stay fixed
    top-right (also while scrolling); when the viewport shrinks, nav pills wrap
-   down while coin + profile remain in place. */
+   down while coin + profile remain in place.
+   Skip app-shell topbar — it only holds Credits and must not reserve empty width. */
 @media (min-width: 768px) {
-  .nav-inner {
+  .nav-inner:not(.app-topbar-inner) {
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2) var(--space-3);
@@ -1815,7 +1816,7 @@ body.support-chat-open {
     padding-right: 0;
   }
 
-  .nav-account {
+  .nav-account:not(.app-topbar-account) {
     position: fixed;
     top: var(--space-1);
     right: var(--space-2);
@@ -5456,6 +5457,7 @@ body.sidebar-collapsed .nav-discount-badge {
 }
 
 .app-shell-main {
+  position: relative;
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
@@ -5504,6 +5506,52 @@ body.sidebar-collapsed .nav-discount-badge {
 
 .app-topbar-account {
   margin-left: auto;
+}
+
+/* Desktop: no empty full-width credits strip — float the pill over content. */
+@media (min-width: 901px) {
+  .app-topbar {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: auto;
+    width: auto;
+    background: transparent;
+    backdrop-filter: none;
+    border: none;
+    pointer-events: none;
+  }
+
+  .app-topbar-inner {
+    min-height: 0;
+    justify-content: flex-end;
+    padding: 0.55rem 1rem 0.55rem 0.5rem;
+    gap: 0;
+  }
+
+  .app-topbar-inner.nav-inner {
+    padding-right: 1rem;
+  }
+
+  .app-topbar-account {
+    margin-left: 0;
+    pointer-events: auto;
+  }
+
+  .app-topbar-account.nav-account {
+    position: static;
+    top: auto;
+    right: auto;
+  }
+
+  .tools-main .ws {
+    height: 100dvh;
+  }
+
+  /* Editor open: Credits lives in the topbar next to Export — hide floating bar. */
+  body:has([data-ws-editor]:not([hidden])) .app-topbar {
+    display: none;
+  }
 }
 
 .app-sidebar-backdrop {

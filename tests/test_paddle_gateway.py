@@ -184,7 +184,7 @@ def test_fulfill_pending_then_paid(economy, monkeypatch):
         paddle_transaction_id="txn_pending_then_paid",
         product_id="credits_2500",
         price_id="pri_test_2500",
-        credits=2500,
+        credits=2200,
         amount=20.0,
         status=STATUS_PENDING,
     )
@@ -208,8 +208,8 @@ def test_fulfill_pending_then_paid(economy, monkeypatch):
 
     result = fulfill_transaction_completed({"id": "txn_pending_then_paid"})
     assert result["already_credited"] is False
-    assert result["credits_added"] == 2500
-    assert wallet.get_balance(uid) == before + 2500
+    assert result["credits_added"] == 2200
+    assert wallet.get_balance(uid) == before + 2200
     row = purchases.get_by_paddle_transaction_id("txn_pending_then_paid")
     assert row["status"] == STATUS_PAID
 
@@ -224,7 +224,7 @@ def test_apply_paid_purchase_atomic(economy):
         product_id="credits_1000",
         price_id="pri_x",
         credits=1000,
-        amount=9.0,
+        amount=10.0,
         meta={"mock": True},
     )
     assert result["already_credited"] is False
@@ -235,7 +235,7 @@ def test_apply_paid_purchase_atomic(economy):
         product_id="credits_1000",
         price_id="pri_x",
         credits=1000,
-        amount=9.0,
+        amount=10.0,
     )
     assert again["already_credited"] is True
     assert wallet.get_balance(uid) == before + 1000

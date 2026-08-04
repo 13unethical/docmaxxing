@@ -220,7 +220,10 @@ def _charge_current_user(feature: str, cost: int, *, ref_id: str | None = None, 
                 {
                     "success": False,
                     "error": "INSUFFICIENT_COINS",
-                    "message": f"Not enough coins. This costs {exc.required}; you have {exc.balance}.",
+                    "message": (
+                        f"Not enough credits. This requires {exc.required} credits; "
+                        f"you have {exc.balance}."
+                    ),
                     "required": exc.required,
                     "balance": exc.balance,
                 }
@@ -1358,12 +1361,8 @@ def references():
 
 @app.route("/workspace")
 def workspace():
-    """Workspace UI is temporarily gated — keep templates/static intact for later."""
-    return render_template(
-        "soon.html",
-        nav_active="workspace",
-        feature="Workspace",
-    )
+    """Full document workspace — editor, humanize, AI, cite, comments."""
+    return render_template("workspace.html", nav_active="workspace")
 
 
 @app.route("/presentation")
@@ -3469,7 +3468,7 @@ def api_workspace_detect():
     """Run the existing ZeroGPT AI detector on editor text and return spans.
 
     This is a thin frontend adapter over ``zerogpt_client.detect`` — no browser
-    automation is involved.
+    automation is involved. Cost: 1 credit per 100 words (minimum 1).
     """
     payload = request.get_json(silent=True) or {}
     text = str(payload.get("text") or "").strip()
@@ -3478,8 +3477,13 @@ def api_workspace_detect():
     if not _zerogpt_configured():
         return jsonify({"error": "ZeroGPT is not configured. Set ZEROGPT_API_KEY in .env"}), 503
 
-    cost = feature_cost("detect")
-    charged = _charge_current_user("detect", cost)
+    word_count = count_words(text)
+    cost = feature_cost("detect", word_count=word_count)
+    charged = _charge_current_user(
+        "detect",
+        cost,
+        meta={"word_count": word_count, "pricing": "1_per_100_words"},
+    )
     if not isinstance(charged, tuple):
         return charged
     user_id, _tx = charged
@@ -3500,7 +3504,7 @@ def api_workspace_detect():
     container = data if isinstance(data, dict) else raw
     flagged = _extract_flagged_sentences(raw)
     ai_percentage = _detect_number(container, "fakePercentage", "aiPercentage", "ai_percentage", "score") or 0
-    text_words = _detect_number(container, "textWords", "text_words", "words") or count_words(text)
+    text_words = _detect_number(container, "textWords", "text_words", "words") or word_count
     ai_words = _detect_number(container, "aiWords", "ai_words")
     if ai_words is None:
         ai_words = sum(count_words(s) for s in flagged)
@@ -3522,6 +3526,7 @@ def api_workspace_detect():
             "flagged_parts": len(flagged),
             "text_words": int(text_words),
             "ai_words": int(ai_words),
+            "credits_charged": cost,
             "coins_charged": cost,
             "balance": wallet.get_balance(user_id),
         }
@@ -3534,7 +3539,19 @@ def api_workspace_citations_search():
 
     The frontend never talks to Crossref directly and never sees provider
     fields — only normalized works plus formatted in-text/reference strings.
+    Search itself is free; inserting a citation charges via ``/citations/use``.
     """
+    from services.economy import auth as economy_auth
+
+    if economy_auth.current_user() is None:
+        return jsonify(
+            {
+                "success": False,
+                "error": "AUTH_REQUIRED",
+                "message": "Please sign in to continue.",
+            }
+        ), 401
+
     payload = request.get_json(silent=True) or {}
     query = str(payload.get("query") or "").strip()
     style = str(payload.get("style") or "APA 7").strip()
@@ -3545,22 +3562,40 @@ def api_workspace_citations_search():
     if not query:
         return jsonify({"error": "query is required"}), 400
 
-    cost = feature_cost("cite")
-    charged = _charge_current_user("cite", cost)
-    if not isinstance(charged, tuple):
-        return charged
-    user_id, _tx = charged
-
     try:
         result = citation_service.search(query, style=style, limit=limit)
     except Exception as exc:  # noqa: BLE001 — provider network/parse errors
-        _refund_safe(user_id, cost, "cite")
         app.logger.warning("citation search failed: %s", exc)
         return jsonify({"error": f"Citation search failed: {exc}"}), 502
 
-    if isinstance(result, dict):
-        result = {**result, "coins_charged": cost, "balance": wallet.get_balance(user_id)}
     return jsonify(result)
+
+
+@app.post("/api/workspace/citations/use")
+def api_workspace_citations_use():
+    """Charge 2 credits when a citation is inserted / reference added."""
+    payload = request.get_json(silent=True) or {}
+    action = str(payload.get("action") or "insert").strip().lower()
+    if action not in ("insert", "reference", "add_reference"):
+        action = "insert"
+
+    cost = feature_cost("cite")
+    charged = _charge_current_user(
+        "cite",
+        cost,
+        meta={"action": action, "doi": str(payload.get("doi") or "")[:120] or None},
+    )
+    if not isinstance(charged, tuple):
+        return charged
+    user_id, _tx = charged
+    return jsonify(
+        {
+            "success": True,
+            "credits_charged": cost,
+            "coins_charged": cost,
+            "balance": wallet.get_balance(user_id),
+        }
+    )
 
 
 @app.post("/api/humanizer/session")

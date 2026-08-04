@@ -16,8 +16,9 @@
   var Mock = window.WSMock || {};
   var TOUR_KEY = "docmaxxing_ws_tour_done";
   var HUMANIZE_URL = "/api/browser/providers/stealthwriter/humanize";
-  var MAX_WORDS_PER_CALL = 4500;
+  var MAX_WORDS_PER_CALL = 5000;
   var HUMANIZE_COST = Mock.HUMANIZE_COST || 10;
+  var MARK_TOKEN = function (i) { return "⟦WS:" + i + "⟧"; };
 
   var $ = function (sel, ctx) { return (ctx || root).querySelector(sel); };
   var $all = function (sel, ctx) { return Array.prototype.slice.call((ctx || root).querySelectorAll(sel)); };
@@ -349,10 +350,10 @@
   function refreshPending() {
     var marks = $all(".ws-mark", surface);
     var words = marks.reduce(function (sum, m) { return sum + countWords(m.textContent); }, 0);
-    var calls = Math.max(marks.length ? 1 : 0, Math.ceil(words / MAX_WORDS_PER_CALL));
+    var calls = marks.length ? buildMarkBatches(marks).length : 0;
     setText("[data-ws-pending-count]", marks.length);
     setText("[data-ws-pending-words]", words.toLocaleString());
-    setText("[data-ws-pending-cost]", marks.length ? (calls * HUMANIZE_COST) + " coins" : "—");
+    setText("[data-ws-pending-cost]", calls ? (calls * HUMANIZE_COST) + " credits" : "—");
     var run = $("[data-ws-humanize-run]");
     if (run) run.disabled = marks.length === 0;
   }
@@ -444,8 +445,8 @@
             .catch(function () {});
           return;
         }
-        if (m.indexOf("coins") !== -1 || m === "INSUFFICIENT_COINS") {
-          showToast(m === "INSUFFICIENT_COINS" ? "Not enough coins. Top up to continue." : m);
+        if (m.indexOf("credit") !== -1 || m.indexOf("coins") !== -1 || m === "INSUFFICIENT_COINS") {
+          showToast(m === "INSUFFICIENT_COINS" ? "Not enough credits. Top up to continue." : m);
           return;
         }
         fallbackDetection();
@@ -513,28 +514,137 @@
     });
   }
 
+  /** Pack marks into batches that fit StealthWriter's per-call word budget. */
+  function buildMarkBatches(marks) {
+    var batches = [];
+    var current = [];
+    var words = 0;
+    marks.forEach(function (mark) {
+      var w = Math.max(1, countWords(mark.textContent));
+      if (current.length && words + w > MAX_WORDS_PER_CALL) {
+        batches.push(current);
+        current = [];
+        words = 0;
+      }
+      current.push(mark);
+      words += w;
+    });
+    if (current.length) batches.push(current);
+    return batches;
+  }
+
+  /**
+   * Join scattered selections into one StealthWriter payload.
+   * Markers stay on their own lines so we can split the rewritten text back
+   * into the original DOM nodes even when wording/length changes.
+   */
+  function packMarkBatch(marks) {
+    var parts = [
+      "IMPORTANT: Keep every marker line like " + MARK_TOKEN(0) + " exactly unchanged on its own line. Only rewrite the prose under each marker. Do not merge sections.",
+      "",
+    ];
+    marks.forEach(function (mark, i) {
+      parts.push(MARK_TOKEN(i));
+      parts.push(String(mark.textContent || "").replace(/\s+$/g, "").replace(/^\s+/g, ""));
+      parts.push("");
+    });
+    return parts.join("\n");
+  }
+
+  function findMarkSplits(text) {
+    var source = String(text || "");
+    var patterns = [
+      /⟦\s*WS\s*:\s*(\d+)\s*⟧/gi,
+      /\[\s*WS\s*:\s*(\d+)\s*\]/gi,
+      /(?:^|\n)\s*(?:#{1,3}\s*)?(?:\[+\s*)?WS\s*[:_\-]?\s*(\d+)\s*(?:\]+)?\s*(?=\n|$)/gi,
+    ];
+    for (var p = 0; p < patterns.length; p++) {
+      var re = patterns[p];
+      var matches = [];
+      var m;
+      re.lastIndex = 0;
+      while ((m = re.exec(source)) !== null) {
+        matches.push({ index: m.index, id: parseInt(m[1], 10), len: m[0].length });
+      }
+      if (matches.length) return matches;
+    }
+    return [];
+  }
+
+  /** Split a batched StealthWriter response back into per-mark strings. */
+  function unpackMarkBatch(output, expectedCount) {
+    var text = String(output || "");
+    var matches = findMarkSplits(text);
+    if (!matches.length) return null;
+
+    matches.sort(function (a, b) { return a.index - b.index; });
+    var chunks = matches.map(function (item, i) {
+      var start = item.index + item.len;
+      var end = i + 1 < matches.length ? matches[i + 1].index : text.length;
+      return {
+        id: item.id,
+        text: text.slice(start, end).replace(/^\s+/, "").replace(/\s+$/, ""),
+      };
+    });
+
+    var byId = new Array(expectedCount);
+    chunks.forEach(function (chunk) {
+      if (chunk.id >= 0 && chunk.id < expectedCount && byId[chunk.id] == null) {
+        byId[chunk.id] = chunk.text;
+      }
+    });
+    var filled = byId.filter(function (x) { return typeof x === "string"; }).length;
+    if (filled === expectedCount) return byId;
+
+    // StealthWriter sometimes renumbers / drops ids — fall back to document order.
+    if (chunks.length === expectedCount) {
+      return chunks.map(function (c) { return c.text; });
+    }
+    return null;
+  }
+
+  function applyHumanizedPart(mark, original, out) {
+    var rewritten = String(out == null ? "" : out);
+    mark.textContent = rewritten;
+    mark.className =
+      rewritten.trim() && rewritten.trim() !== String(original || "").trim()
+        ? "ws-humanized"
+        : "ws-humanized-unchanged";
+    mark.removeAttribute("data-mark-id");
+    return mark.className === "ws-humanized";
+  }
+
   function runHumanize() {
     var marks = $all(".ws-mark", surface);
     if (!marks.length) { showToast("Mark some text first."); return; }
 
+    var batches = buildMarkBatches(marks);
     startProgress();
-    var done = 0, changed = 0, failed = 0, loginRequired = false, noChangeMsg = "";
-    var authRequired = false, insufficient = false, insufficientMsg = "";
+    var doneMarks = 0;
+    var changed = 0;
+    var failed = 0;
+    var loginRequired = false;
+    var noChangeMsg = "";
+    var authRequired = false;
+    var insufficient = false;
+    var insufficientMsg = "";
+    var splitFailed = false;
 
-    // Sequential: the browser worker serializes anyway, and it lets us replace
-    // each marked selection independently while preserving surrounding format.
-    function next(i) {
-      if (i >= marks.length) return Promise.resolve();
-      var mark = marks[i];
-      var original = mark.textContent;
-      return humanizeOne(original).then(function (r) {
+    // One StealthWriter call per word-budget batch (not per selection).
+    function nextBatch(i) {
+      if (i >= batches.length) return Promise.resolve();
+      var batch = batches[i];
+      var originals = batch.map(function (m) { return m.textContent; });
+      var packed = packMarkBatch(batch);
+
+      return humanizeOne(packed).then(function (r) {
         if (r.payload && r.payload.error === "AUTH_REQUIRED") {
           authRequired = true;
           throw new Error("AUTH_REQUIRED");
         }
         if (r.status === 402 || (r.payload && r.payload.error === "INSUFFICIENT_COINS")) {
           insufficient = true;
-          insufficientMsg = (r.payload && r.payload.message) || "Not enough coins.";
+          insufficientMsg = (r.payload && r.payload.message) || "Not enough credits.";
           throw new Error("INSUFFICIENT_COINS");
         }
         if (r.status === 401 || (r.payload && r.payload.error === "LOGIN_REQUIRED")) {
@@ -546,33 +656,47 @@
           throw new Error("NO_CHANGE");
         }
         if (r.ok && r.payload && r.payload.success) {
-          var out = r.payload.humanized_text || "";
-          mark.textContent = out;
-          mark.className = out.trim() && out.trim() !== original.trim() ? "ws-humanized" : "ws-humanized-unchanged";
-          mark.removeAttribute("data-mark-id");
-          if (mark.className === "ws-humanized") changed++;
+          var parts = unpackMarkBatch(r.payload.humanized_text || "", batch.length);
+          if (!parts) {
+            splitFailed = true;
+            batch.forEach(function (mark) { mark.classList.add("ws-humanized-failed"); });
+            failed += batch.length;
+          } else {
+            batch.forEach(function (mark, j) {
+              if (applyHumanizedPart(mark, originals[j], parts[j])) changed++;
+            });
+          }
         } else {
-          mark.classList.add("ws-humanized-failed");
-          failed++;
+          batch.forEach(function (mark) { mark.classList.add("ws-humanized-failed"); });
+          failed += batch.length;
         }
       }).catch(function (err) {
         var m = String(err && err.message);
-        if (m === "LOGIN_REQUIRED" || m === "NO_CHANGE" || m === "AUTH_REQUIRED" || m === "INSUFFICIENT_COINS") { throw err; }
-        mark.classList.add("ws-humanized-failed");
-        failed++;
+        if (m === "LOGIN_REQUIRED" || m === "NO_CHANGE" || m === "AUTH_REQUIRED" || m === "INSUFFICIENT_COINS") {
+          throw err;
+        }
+        batch.forEach(function (mark) { mark.classList.add("ws-humanized-failed"); });
+        failed += batch.length;
       }).then(function () {
-        done++;
-        setProgress(Math.min(95, Math.round((done / marks.length) * 90) + 6));
-        return next(i + 1);
+        doneMarks += batch.length;
+        setProgress(Math.min(95, Math.round((doneMarks / marks.length) * 90) + 6));
+        return nextBatch(i + 1);
       });
     }
 
-    next(0).then(function () {
+    nextBatch(0).then(function () {
       stopProgress();
       markDirty();
       refreshCounts();
       refreshCoins();
-      showToast("Humanized " + changed + " of " + marks.length + (failed ? " · " + failed + " failed (refunded)" : ""));
+      var msg =
+        "Humanized " + changed + " of " + marks.length +
+        (failed ? " · " + failed + " failed" : "") +
+        (batches.length > 1 ? " · " + batches.length + " StealthWriter calls" : " · 1 StealthWriter call");
+      if (splitFailed) {
+        msg += " · could not split one batch (markers lost) — retry that selection";
+      }
+      showToast(msg);
     }).catch(function (err) {
       stopProgress();
       refreshCoins();
@@ -582,7 +706,7 @@
           .then(function () { runHumanize(); })
           .catch(function () {});
       } else if (insufficient || m === "INSUFFICIENT_COINS") {
-        showToast(insufficientMsg || "Not enough coins. Top up to continue.");
+        showToast(insufficientMsg || "Not enough credits. Top up to continue.");
       } else if (loginRequired) {
         showToast("StealthWriter login required — open the login once, then retry.");
       } else if (m === "NO_CHANGE") {
@@ -624,6 +748,19 @@
     ].filter(function (r) { return !query || r.title.toLowerCase().indexOf(String(query).toLowerCase()) >= 0 || true; });
   }
 
+  function chargeCitationUse(action, meta) {
+    return fetch("/api/workspace/citations/use", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: action || "insert",
+        doi: (meta && meta.doi) || "",
+      }),
+    }).then(function (res) {
+      return res.json().then(function (p) { return { ok: res.ok, status: res.status, p: p }; });
+    });
+  }
+
   function renderCiteResults(results, isMock) {
     var out = $("[data-ws-cite-results]");
     citeResults = results || [];
@@ -644,13 +781,54 @@
     $all("[data-ws-cite-insert]", out).forEach(function (b) {
       b.addEventListener("click", function () {
         var r = citeResults[parseInt(b.getAttribute("data-ws-cite-insert"), 10)];
-        if (r) { insertAtEditor(" " + (r.intext || "(" + (r.label || "") + ")") + " ", true); showToast("Citation inserted."); }
+        if (!r) return;
+        chargeCitationUse("insert", r).then(function (resp) {
+          if (resp.p && (resp.p.error === "AUTH_REQUIRED" || resp.p.error === "REGISTER_REQUIRED")) {
+            requireAuth("Create a free account to insert citations.")
+              .then(function () { b.click(); })
+              .catch(function () {});
+            return;
+          }
+          if (resp.status === 402 || (resp.p && resp.p.error === "INSUFFICIENT_COINS")) {
+            showToast((resp.p && resp.p.message) || "Not enough credits. This requires 2 credits.");
+            return;
+          }
+          if (!resp.ok) {
+            showToast((resp.p && resp.p.message) || (resp.p && resp.p.error) || "Could not charge citation.");
+            return;
+          }
+          insertAtEditor(" " + (r.intext || "(" + (r.label || "") + ")") + " ", true);
+          refreshCoins();
+          showToast("Citation inserted (−2 credits).");
+        }).catch(function () {
+          showToast("Could not insert citation.");
+        });
       });
     });
     $all("[data-ws-cite-ref]", out).forEach(function (b) {
       b.addEventListener("click", function () {
         var r = citeResults[parseInt(b.getAttribute("data-ws-cite-ref"), 10)];
-        if (r) addReference(r.reference || "");
+        if (!r) return;
+        chargeCitationUse("reference", r).then(function (resp) {
+          if (resp.p && (resp.p.error === "AUTH_REQUIRED" || resp.p.error === "REGISTER_REQUIRED")) {
+            requireAuth("Create a free account to add references.")
+              .then(function () { b.click(); })
+              .catch(function () {});
+            return;
+          }
+          if (resp.status === 402 || (resp.p && resp.p.error === "INSUFFICIENT_COINS")) {
+            showToast((resp.p && resp.p.message) || "Not enough credits. This requires 2 credits.");
+            return;
+          }
+          if (!resp.ok) {
+            showToast((resp.p && resp.p.message) || (resp.p && resp.p.error) || "Could not charge citation.");
+            return;
+          }
+          addReference(r.reference || "");
+          refreshCoins();
+        }).catch(function () {
+          showToast("Could not add reference.");
+        });
       });
     });
   }
@@ -675,14 +853,13 @@
             .catch(function () {});
           return;
         }
-        if (r.status === 402 || (r.p && r.p.error === "INSUFFICIENT_COINS")) {
-          if (out) out.innerHTML = '<p class="ws-empty-note">Not enough coins for citation search.</p>';
-          showToast((r.p && r.p.message) || "Not enough coins. Top up to continue.");
+        if (!r.ok) {
+          if (out) out.innerHTML = '<p class="ws-empty-note">Search failed — try again.</p>';
+          showToast((r.p && r.p.error) || "Citation search failed.");
           return;
         }
         if (r.ok && r.p.results && r.p.results.length) renderCiteResults(r.p.results, false);
         else renderCiteResults(mockCite(query), true);
-        refreshCoins();
       })
       .catch(function () { renderCiteResults(mockCite(query), true); });
   }
@@ -897,7 +1074,19 @@
         return mammoth.convertToHtml({ arrayBuffer: buf });
       });
     }).then(function (result) {
-      openEditor({ title: file.name.replace(/\.docx$/i, ""), html: result.value || "<p></p>" });
+      var html = result.value || "<p></p>";
+      // Strip Word/mammoth inline fonts so Inter + theme typography win.
+      html = html
+        .replace(/\sstyle="[^"]*"/gi, function (m) {
+          return m
+            .replace(/font-family:[^;"]+;?/gi, "")
+            .replace(/font-size:[^;"]+;?/gi, "")
+            .replace(/color:[^;"]+;?/gi, "")
+            .replace(/background(-color)?:[^;"]+;?/gi, "")
+            .replace(/line-height:[^;"]+;?/gi, "");
+        })
+        .replace(/\sstyle="\s*"/gi, "");
+      openEditor({ title: file.name.replace(/\.docx$/i, ""), html: html });
       showToast("Imported.");
     }).catch(function () {
       showToast("Import needs an internet connection (Word parser).");

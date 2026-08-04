@@ -22,9 +22,9 @@ window.WSTourSteps = [
   },
   {
     id: "coins",
-    title: "Your coins wallet",
+    title: "Your credits wallet",
     body:
-      "Humanize, AI detection and other actions are paid with coins. Top up anytime — your balance stays valid for 30 days after each purchase.",
+      "Humanize, AI detection and other actions are paid with credits. Top up anytime — your balance stays valid for 30 days after each purchase.",
     target: "[data-tour='coins']",
     tab: null,
     placement: "bottom",
@@ -33,14 +33,14 @@ window.WSTourSteps = [
     id: "mark",
     title: "Step 1 — mark what to humanize",
     body:
-      "Select text in the document, then click Mark selection. Marked passages stay highlighted until you humanize or unmark them. One batch run saves coins.",
+      "Select text in the document, then click Mark selection. Marked passages stay highlighted until you humanize or unmark them. One batch run saves credits.",
     target: "[data-tour='mark-selection']",
     tab: "humanize",
     placement: "left",
   },
   {
     id: "mark-all",
-    title: "Mark everything first — it saves coins",
+    title: "Mark everything first — it saves credits",
     body:
       "Don't humanize piece by piece! Running each paragraph separately charges a full call every time. Mark everything you need first and run once — many small selections humanize together for the same price.",
     target: "[data-tour='mark-all']",
@@ -52,7 +52,7 @@ window.WSTourSteps = [
     id: "detect",
     title: "Detect AI",
     body:
-      "Not sure what a detector would flag? Run our built-in AI check on the whole document: likely AI-written parts come back as purple highlights with an overall AI score. Costs 10 coins per check.",
+      "Not sure what a detector would flag? Run our built-in AI check on the whole document: likely AI-written parts come back as purple highlights with an overall AI score. Costs 1 credit per 100 words.",
     target: "[data-tour='detect-ai']",
     tab: "humanize",
     placement: "left",
@@ -70,7 +70,7 @@ window.WSTourSteps = [
     id: "humanize-run",
     title: "Step 2 — run humanization",
     body:
-      "When you're ready, click Humanize marked selections. You'll see a cost confirmation, then a short lock while we rewrite. Success shows green highlights; failures are refunded.",
+      "When you're ready, click Humanize marked selections. Costs 10 credits per call. Success shows green highlights; failures are refunded.",
     target: "[data-tour='humanize-run']",
     tab: "humanize",
     placement: "left",
@@ -79,7 +79,7 @@ window.WSTourSteps = [
     id: "ai-tab",
     title: "AI writing assistant",
     body:
-      "Select text, pick an action (Improve, Paraphrase, Shorten…), preview the result below, then Replace selection when you're happy. Costs 0.1 coin per 500 words selected.",
+      "Select text, pick an action (Improve, Paraphrase, Shorten…), preview the result below, then Replace selection when you're happy. Costs 0.1 credit per 500 words selected.",
     target: "[data-tour='ai-panel']",
     tab: "ai",
     placement: "left",
@@ -88,7 +88,7 @@ window.WSTourSteps = [
     id: "cite",
     title: "Real citations",
     body:
-      "Search real published papers (via CrossRef) and insert APA, MLA or Harvard citations with one click. Scan your document to catch missing or mismatched references.",
+      "Search real published papers (via CrossRef) and insert APA, MLA or Harvard citations with one click. Each insert costs 2 credits. Scan your document to catch missing or mismatched references.",
     target: "[data-tour='cite-panel']",
     tab: "cite",
     placement: "left",

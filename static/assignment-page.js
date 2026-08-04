@@ -511,7 +511,6 @@
   function syncComposerMode() {
     var input = $("[data-asg-note]");
     var attach = $("[data-asg-attach]");
-    var hint = document.querySelector(".asg-chat-hint");
     if (state.deliveryPackage && state.composerMode !== "brief") {
       state.composerMode = "revision";
       if (input) {
@@ -523,10 +522,6 @@
         attach.hidden = false;
         attach.removeAttribute("hidden");
       }
-      if (hint) {
-        hint.textContent =
-          "Revision chat — up to 5 free rounds. Or attach files to start a new assignment.";
-      }
       syncSendEnabled();
       return;
     }
@@ -535,10 +530,6 @@
     if (attach) {
       attach.hidden = false;
       attach.removeAttribute("hidden");
-    }
-    if (hint) {
-      hint.textContent =
-        "Upload requirements and materials — Gemini reads them and prices the work.";
     }
     syncSendEnabled();
   }

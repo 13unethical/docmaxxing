@@ -1,11 +1,12 @@
-{% extends "workspace_base.html" %}
+{% extends "tools_base.html" %}
+{% set tools_active = 'workspace' %}
 {% block title %}Document Editor — DocMaxxing{% endblock %}
-{% block head_extra %}
+{% block tools_content %}
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-{% endblock %}
-{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260805-contrast-marks" />
+
 <div class="ws" data-workspace data-tour="editor-page">
 
   <!-- ============================ LANDING / DOCUMENT PICKER ============================ -->
@@ -15,18 +16,15 @@
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#2563eb" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
         <span>Document Editor</span>
       </div>
-      <div class="ws-landing-actions">
-        <span class="ws-coins-pill"><span data-ws-coins-landing>0</span> coins</span>
-        <a href="{{ url_for('index') }}" class="ws-btn ws-btn-ghost">← Dashboard</a>
-      </div>
     </div>
 
     <label class="ws-landing-card ws-dropzone" data-ws-dropzone>
       <input type="file" accept=".docx" hidden data-ws-import-input />
-      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#2563eb" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-      <h3>Import a Word document</h3>
-      <p>Drop a .docx here or click to browse — images and tables are preserved (max 20&nbsp;MB)</p>
-      <p class="ws-dropzone-note">⏱ Documents are kept for 7 days after upload, then deleted automatically — export anything you want to keep.</p>
+      <div class="ws-dropzone-inner">
+        <p class="ws-dropzone-title">Drop file to insert</p>
+        <p class="ws-dropzone-lede">DOCX — opens in the editor (images &amp; tables preserved)</p>
+        <p class="ws-dropzone-note">Documents are kept for 7 days, then deleted automatically</p>
+      </div>
     </label>
 
     <button type="button" class="ws-landing-card ws-turnitin-row" data-ws-open-turnitin>
@@ -49,7 +47,6 @@
         <span class="ws-recent-title" data-ws-recent-title>Welcome tour — sample document</span>
         <span class="ws-recent-meta" data-ws-recent-words>262 words</span>
         <span class="ws-recent-meta" data-ws-recent-updated>Updated just now</span>
-        <span class="ws-recent-pill">⏱ Deletes in 7 days</span>
       </button>
     </div>
   </section>
@@ -69,10 +66,7 @@
         </div>
       </div>
       <div class="ws-topbar-right">
-        <span class="ws-pill ws-pill-muted" title="Auto-deletes for privacy">⏱ Deletes in 7 days</span>
         <span class="ws-pill ws-pill-muted"><span data-ws-wordcount>0 words</span> · <span data-ws-charcount>0 chars</span></span>
-        <span class="ws-pill ws-pill-coins" data-tour="coins"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10.5h3.5a1.5 1.5 0 0 1 0 3H10a1.5 1.5 0 0 0 0 3h4" stroke-linecap="round"/></svg> <span data-ws-coins>0</span> coins</span>
-        <button type="button" class="ws-pill ws-pill-topup" data-ws-topup>⊕ Top up</button>
         <button type="button" class="ws-icon-btn" data-ws-history-btn data-tour="history" title="Version history" aria-label="History">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>
         </button>
@@ -84,6 +78,14 @@
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
           Export
         </button>
+        <a href="{{ url_for('pricing') }}" class="coin-pill ws-topbar-credits" title="Credits & pricing">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M12 8.5v7M9.75 10.25h3.5a1.5 1.5 0 0 1 0 3h-2.5a1.5 1.5 0 0 0 0 3h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+          <span data-coin-balance>{% if current_user %}{{ coin_balance }}{% else %}—{% endif %}</span>
+          <span class="coin-pill-label">Credits</span>
+        </a>
       </div>
     </header>
 
@@ -159,7 +161,7 @@
         <div class="ws-panels">
           <!-- HUMANIZE PANEL -->
           <div class="ws-panel is-active" data-ws-panel="humanize">
-            <p class="ws-panel-intro">Select sentences or paragraphs in the document, then <b>mark</b> them. Marks are saved with the document — build up your list across sessions, then run <b>one</b> Humanize pass. Everything marked is packed into as few humanizer calls as possible (10 coins per call, up to 4,500 words each), so many small selections still humanize together for the same 10 coins.</p>
+            <p class="ws-panel-intro">Select sentences or paragraphs in the document, then <b>mark</b> them — marked text gets an <span class="ws-chip ws-chip-amber">amber highlight</span>. Marks are saved with the document — build up your list across sessions, then run <b>one</b> Humanize pass. All marked fragments are packed into as few StealthWriter calls as possible (<b>Costs 10 credits per call</b>, up to 5,000 words each) and placed back into the same spots after rewrite.</p>
 
             <div class="ws-btn-row">
               <button type="button" class="ws-action ws-action-blue" data-ws-mark data-tour="mark-selection"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg> Mark selection</button>
@@ -168,7 +170,7 @@
             <button type="button" class="ws-action ws-action-ghost ws-action-block" data-ws-unmark-all>⊘ Unmark everything</button>
 
             <h4 class="ws-panel-h">AI DETECTION</h4>
-            <p class="ws-panel-sub">Check the whole document with our own AI detector: likely AI-written parts get <span class="ws-chip ws-chip-purple">purple highlights</span> and you see an overall AI score — right here in the editor, no report to download. Costs 10 coins per check.</p>
+            <p class="ws-panel-sub">Check the whole document with our own AI detector: likely AI-written parts get <span class="ws-chip ws-chip-purple">purple highlights</span> and you see an overall AI score — right here in the editor, no report to download. <b>Costs 1 credit per 100 words</b>.</p>
             <button type="button" class="ws-action ws-action-outline ws-action-block" data-ws-detect data-tour="detect-ai">✷ Detect AI</button>
 
             <h4 class="ws-panel-h" data-tour="ai-highlights">AI REPORT HIGHLIGHTS</h4>
@@ -205,7 +207,7 @@
 
           <!-- AI PANEL -->
           <div class="ws-panel" data-ws-panel="ai">
-            <p class="ws-panel-intro">Select text in the document, then choose an action. The rewrite appears here first — nothing changes until you click <b>Replace selection</b>. Each action costs 0.1 coin per 500 words selected (refunded if it fails).</p>
+            <p class="ws-panel-intro">Select text in the document, then choose an action. The rewrite appears here first — nothing changes until you click <b>Replace selection</b>. Each action costs 0.1 credit per 500 words selected (refunded if it fails).</p>
             <div class="ws-ai-grid" data-tour="ai-panel">
               <button type="button" class="ws-ai-btn" data-ws-ai-action="Improve">⇄ Improve</button>
               <button type="button" class="ws-ai-btn" data-ws-ai-action="Paraphrase">✕ Paraphrase</button>
@@ -223,7 +225,7 @@
 
           <!-- CITE PANEL -->
           <div class="ws-panel" data-ws-panel="cite" data-tour="cite-panel">
-            <p class="ws-panel-intro">Search 160M+ scholarly works (CrossRef) by title, keywords, author or DOI, then insert the in-text citation at your cursor and add the full reference to the end of the document.</p>
+            <p class="ws-panel-intro">Search 160M+ scholarly works (CrossRef) by title, keywords, author or DOI, then insert the in-text citation at your cursor and add the full reference to the end of the document. <b>Costs 2 credits</b> each time you insert a citation or add a reference.</p>
             <div class="ws-cite-search">
               <input type="text" class="ws-input" placeholder="e.g. attention is all you need" data-ws-cite-query />
               <button type="button" class="ws-icon-btn ws-cite-go" data-ws-cite-search aria-label="Search"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></button>
@@ -285,4 +287,9 @@
   <!-- Toast -->
   <div class="ws-toast" data-ws-toast hidden></div>
 </div>
+{% endblock %}
+{% block tools_scripts %}
+<script src="{{ url_for('static', filename='workspace/mock-services.js') }}?v=20260805-shell"></script>
+<script src="{{ url_for('static', filename='workspace/tour-steps.js') }}?v=20260805-shell"></script>
+<script src="{{ url_for('static', filename='workspace/workspace-app.js') }}?v=20260805-credits-economy"></script>
 {% endblock %}

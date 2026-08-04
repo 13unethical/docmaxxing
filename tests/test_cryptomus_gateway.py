@@ -48,7 +48,7 @@ def _sign_payload(payload: dict, api_key: str = "test_payment_api_key") -> dict:
 
 
 def test_sign_matches_official_md5_base64_formula():
-    body = '{"amount":"9.00","currency":"USD"}'
+    body = '{"amount":"10.00","currency":"USD"}'
     key = "secret"
     expected = hashlib.md5(
         (base64.b64encode(body.encode()).decode() + key).encode()
@@ -115,7 +115,7 @@ def test_create_invoice_persists_pending_server_price(economy, monkeypatch):
         assert headers["merchant"]
         assert headers["sign"]
         body = json.loads(data.decode("utf-8").replace("\\/", "/"))
-        assert body["amount"] == "9.00"
+        assert body["amount"] == "10.00"
         assert body["currency"] == "USD"
         assert body["order_id"].startswith(f"dm_{uid}_")
         return _Resp()
@@ -127,7 +127,7 @@ def test_create_invoice_persists_pending_server_price(economy, monkeypatch):
     result = create_invoice(user_id=uid, package_id="credits_1000")
     assert result["payment_url"] == "https://pay.cryptomus.com/pay/abc"
     assert result["credits"] == 1000
-    assert result["amount"] == 9.0
+    assert result["amount"] == 10.0
     assert "price_id" not in (result.get("package") or {})
     payment = get_payment_by_order_id(result["order_id"])
     assert payment is not None
@@ -223,7 +223,7 @@ def test_non_paid_webhook_ignored(economy):
             "INSERT INTO cryptomus_payments "
             "(user_id, order_id, amount, currency, credits, package_id, status) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (uid, order_id, 20.0, "USD", 2500, "credits_2500", STATUS_PENDING),
+            (uid, order_id, 20.0, "USD", 2200, "credits_2500", STATUS_PENDING),
         )
 
     payload = _sign_payload(
