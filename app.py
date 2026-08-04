@@ -117,6 +117,10 @@ from services.economy.cryptomus_gateway import (
     handle_webhook as cryptomus_handle_webhook,
     parse_webhook_payload as cryptomus_parse_webhook_payload,
 )
+from services.economy.gumroad_gateway import (
+    GumroadGatewayError,
+    handle_ping as gumroad_handle_ping,
+)
 from services.economy.pricing import USD_TO_COINS
 from services.economy.usage import (
     FEATURE_ASSIGNMENT,
@@ -1259,6 +1263,24 @@ def api_cryptomus_webhook():
     # Cryptomus expects HTTP 200 on successful receipt.
     return jsonify({"ok": True, **result}), 200
 
+
+@app.post("/api/webhooks/gumroad")
+def api_gumroad_webhook():
+    """Gumroad Ping — form-urlencoded sale notification → credit top-up.
+
+    Always returns plain ``200 OK`` so Gumroad stops retrying. Fulfillment is
+    idempotent on ``sale_id``. Pass ``user_id`` as a checkout URL param
+    (``?user_id=123``) so credits land on the right account.
+    """
+    form = request.form
+    try:
+        result = gumroad_handle_ping(form)
+        app.logger.info("gumroad ping ok: %s", result)
+    except GumroadGatewayError as exc:
+        app.logger.warning("gumroad ping ignored/failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("gumroad ping unexpected error: %s", exc)
+    return "OK", 200
 
 @app.post("/api/economy/topup")
 @economy_auth.login_required

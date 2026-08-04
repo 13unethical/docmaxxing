@@ -3862,6 +3862,18 @@ body.support-chat-open {
   transition: background 0.15s ease, border-color 0.15s ease, filter 0.15s ease;
 }
 
+.pricing-plan-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: auto;
+  width: 100%;
+}
+
+.pricing-plan-actions .pricing-plan-btn {
+  margin-top: 0;
+}
+
 .pricing-plan-btn:hover:not(:disabled) {
   background: var(--bg-light);
   border-color: var(--border);
@@ -3882,6 +3894,29 @@ body.support-chat-open {
   filter: brightness(1.06);
   background: var(--primary);
   border-color: transparent;
+}
+
+.pricing-plan-btn--gumroad {
+  background: #111827;
+  border-color: #111827;
+  color: #fff;
+}
+
+.pricing-plan-btn--gumroad:hover {
+  filter: brightness(1.08);
+  background: #111827;
+  border-color: #111827;
+  color: #fff;
+}
+
+.pricing-plan-btn--gumroad-primary {
+  background: #0f766e;
+  border-color: #0f766e;
+}
+
+.pricing-plan-btn--gumroad-primary:hover {
+  background: #0f766e;
+  border-color: #0f766e;
 }
 
 .pricing-plan-btn--ghost {

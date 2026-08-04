@@ -102,6 +102,26 @@ CREATE INDEX IF NOT EXISTS idx_cryptomus_payments_user
 CREATE INDEX IF NOT EXISTS idx_cryptomus_payments_status
     ON cryptomus_payments(status);
 
+CREATE TABLE IF NOT EXISTS gumroad_payments (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_id         TEXT NOT NULL UNIQUE,
+    user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    email           TEXT,
+    product_id      TEXT,
+    short_product_id TEXT,
+    package_id      TEXT,
+    price_cents     INTEGER NOT NULL DEFAULT 0,
+    credits         INTEGER NOT NULL DEFAULT 0,
+    currency        TEXT NOT NULL DEFAULT 'usd',
+    status          TEXT NOT NULL DEFAULT 'Paid',
+    payload_json    TEXT,
+    paid_at         TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_gumroad_payments_user
+    ON gumroad_payments(user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS usage_events (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -334,6 +354,13 @@ def _migrate_daily_stats_and_settings(conn: sqlite3.Connection) -> None:
     ensure_schema(conn)
 
 
+def _migrate_gumroad_payments(conn: sqlite3.Connection) -> None:
+    """Ensure gumroad_payments exists on older DBs."""
+    from .gumroad_gateway import ensure_gumroad_schema
+
+    ensure_gumroad_schema(conn)
+
+
 def init_db() -> None:
     """Create tables/indexes if they do not exist. Safe to call repeatedly."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -352,6 +379,7 @@ def init_db() -> None:
         _migrate_transactions(conn)
         _migrate_paddle_purchases(conn)
         _migrate_cryptomus_payments(conn)
+        _migrate_gumroad_payments(conn)
         _migrate_referral_columns(conn)
         _migrate_daily_stats_and_settings(conn)
         # 3) Indexes that depend on migrated columns.

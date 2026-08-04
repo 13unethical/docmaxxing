@@ -15,13 +15,32 @@
           <h2 class="pricing-plan-title">Starter</h2>
           <p class="pricing-plan-price"><span class="pricing-plan-amount">$9</span></p>
           <p class="pricing-plan-credits">1,000 Credits</p>
-          <button
-            type="button"
-            class="pricing-plan-btn"
-            data-topup="credits_1000"
-          >
-            Buy Credits
-          </button>
+          <div class="pricing-plan-actions">
+            <button
+              type="button"
+              class="pricing-plan-btn"
+              data-topup="credits_1000"
+            >
+              Buy with Crypto
+            </button>
+            {% if current_user %}
+            <a
+              class="pricing-plan-btn pricing-plan-btn--gumroad"
+              href="https://abdurakhim6.gumroad.com/l/1000?url_params[user_id]={{ current_user.id }}"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Buy with Card (Gumroad)
+            </a>
+            {% else %}
+            <a
+              class="pricing-plan-btn pricing-plan-btn--gumroad"
+              href="{{ url_for('login', next=url_for('pricing')) }}"
+            >
+              Sign in · Buy with Card
+            </a>
+            {% endif %}
+          </div>
         </article>
 
         <article class="pricing-plan pricing-plan--featured" data-plan="pro">
@@ -29,13 +48,32 @@
           <h2 class="pricing-plan-title">Pro</h2>
           <p class="pricing-plan-price"><span class="pricing-plan-amount">$20</span></p>
           <p class="pricing-plan-credits">2,500 Credits</p>
-          <button
-            type="button"
-            class="pricing-plan-btn pricing-plan-btn--primary"
-            data-topup="credits_2500"
-          >
-            Buy Credits
-          </button>
+          <div class="pricing-plan-actions">
+            <button
+              type="button"
+              class="pricing-plan-btn pricing-plan-btn--primary"
+              data-topup="credits_2500"
+            >
+              Buy with Crypto
+            </button>
+            {% if current_user %}
+            <a
+              class="pricing-plan-btn pricing-plan-btn--gumroad pricing-plan-btn--gumroad-primary"
+              href="https://abdurakhim6.gumroad.com/l/2500?url_params[user_id]={{ current_user.id }}"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Buy with Card (Gumroad)
+            </a>
+            {% else %}
+            <a
+              class="pricing-plan-btn pricing-plan-btn--gumroad pricing-plan-btn--gumroad-primary"
+              href="{{ url_for('login', next=url_for('pricing')) }}"
+            >
+              Sign in · Buy with Card
+            </a>
+            {% endif %}
+          </div>
         </article>
 
         <article class="pricing-plan pricing-plan--custom" data-plan="custom">

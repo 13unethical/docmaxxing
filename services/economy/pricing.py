@@ -67,6 +67,7 @@ TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
         "coins": 1000,
         "featured": False,
         "price_id": _env_str("PADDLE_PRICE_CREDITS_1000"),
+        "gumroad_product_id": _env_str("GUMROAD_PRODUCT_CREDITS_1000"),
     },
     "credits_2500": {
         "id": "credits_2500",
@@ -76,6 +77,7 @@ TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
         "featured": True,
         "badge": "MOST POPULAR",
         "price_id": _env_str("PADDLE_PRICE_CREDITS_2500"),
+        "gumroad_product_id": _env_str("GUMROAD_PRODUCT_CREDITS_2500"),
     },
 }
 
