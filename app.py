@@ -196,6 +196,14 @@ app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days
 
 economy_init_db()
 turnitin_init_db()
+try:
+    from services.economy.telegram_poller import try_start_telegram_poller
+
+    try_start_telegram_poller()
+except Exception:  # noqa: BLE001
+    import logging as _logging
+
+    _logging.getLogger(__name__).exception("telegram poller failed to start")
 bootstrap_admin_from_env()
 wallet = WalletService()
 paddle_purchases = PaddlePurchaseService()
