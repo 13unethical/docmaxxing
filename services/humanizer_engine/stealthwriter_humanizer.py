@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
-from services.browser.providers.stealthwriter import DEFAULT_STEALTHWRITER_MODEL
+from services.browser.providers.stealthwriter import (
+    ASSIGNMENT_STEALTHWRITER_LEVEL,
+    DEFAULT_STEALTHWRITER_MODEL,
+)
 from services.humanizer_engine.constants import MIN_HUMANIZE_CHARS
 from services.humanizer_engine.heading_utils import (
     join_body_and_references,
@@ -29,10 +32,12 @@ class StealthWriterTextHumanizer:
         self,
         *,
         model: str | None = None,
+        level: int | None = None,
         max_words: int | None = None,
         humanize_fn: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self.model = (model or DEFAULT_STEALTHWRITER_MODEL).strip() or DEFAULT_STEALTHWRITER_MODEL
+        self.level = int(level if level is not None else ASSIGNMENT_STEALTHWRITER_LEVEL)
         self.max_words = max(50, int(max_words if max_words is not None else _STEALTHWRITER_MAX_WORDS))
         self._humanize_fn = humanize_fn
         self._fallback_scorer = MockTextHumanizer()
@@ -70,11 +75,11 @@ class StealthWriterTextHumanizer:
                 from services.browser.thread_affinity import run_on_browser_thread
 
                 def _call() -> dict[str, Any]:
-                    return humanize_text(chunk, model=self.model)
+                    return humanize_text(chunk, model=self.model, level=self.level)
 
                 result = run_on_browser_thread(_call, timeout=240)
             else:
-                result = fn(chunk, model=self.model)
+                result = fn(chunk, model=self.model, level=self.level)
 
             if result.get("success"):
                 output = (result.get("humanized_text") or "").strip()

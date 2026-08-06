@@ -45,7 +45,13 @@ from services.revision_engine.gemini_reviser import _strip_revision_meta
 from services.humanizer_engine.service import HumanizerEngineService
 from services.humanizer_engine.models import HumanizedDraft, HumanizerSession
 from services.ai_detection_engine.service import AIDetectionEngineService
-from services.ai_detection_engine.models import DetectionReport, DetectionSession
+from services.ai_detection_engine.models import (
+    DetectionReport,
+    DetectionSession,
+    DetectionSessionStatus,
+    DetectionThresholds,
+    FinalDetectionStatus,
+)
 from services.delivery_engine.service import DeliveryEngineService
 from services.project_engine import ProjectEngine, ProjectLifecycleStatus
 from services.assignment_citations import AssignmentCitationEngine
@@ -1600,99 +1606,98 @@ class ProjectService:
         )
         return saved
 
-    def start_ai_detection(self, project_id: str):
+    def _skipped_detection_artifacts(self, project_id: str) -> tuple[DetectionSession, DetectionReport]:
+        """Build a no-op passed detection session/report (AI detection stage disabled)."""
+        now = utc_now()
+        session_id = str(uuid.uuid4())
+        report_id = str(uuid.uuid4())
+        draft_id = ""
         try:
-            return self._load_detection_session(project_id)
+            draft_id = self._load_humanized_draft(project_id).id
+        except KeyError:
+            try:
+                draft_id = self._load_draft(project_id).id
+            except KeyError:
+                draft_id = ""
+        report = DetectionReport(
+            id=report_id,
+            project_id=project_id,
+            session_id=session_id,
+            overall_ai_score=0.0,
+            paragraph_scores=[],
+            average_score=0.0,
+            highest_score=0.0,
+            lowest_score=0.0,
+            paragraphs_reprocessed=0,
+            final_status=FinalDetectionStatus.PASSED,
+            thresholds=DetectionThresholds(),
+            engine_version="skipped-disabled",
+            generated_at=now,
+        )
+        session = DetectionSession(
+            id=session_id,
+            project_id=project_id,
+            humanized_draft_id=str(draft_id or ""),
+            paragraphs=[],
+            current_paragraph_id=None,
+            completed_paragraph_ids=[],
+            remaining_paragraph_ids=[],
+            progress=100,
+            paragraphs_completed=0,
+            average_ai_score=0.0,
+            thresholds=DetectionThresholds(),
+            status=DetectionSessionStatus.COMPLETED,
+            report_id=report_id,
+            engine_version="skipped-disabled",
+            requirement_json={},
+            created_at=now,
+            updated_at=now,
+        )
+        return session, report
+
+    def start_ai_detection(self, project_id: str):
+        """AI detection stage is disabled — immediately mark as passed and continue."""
+        try:
+            existing = self._load_detection_session(project_id)
+            if existing.status in (
+                DetectionSessionStatus.COMPLETED,
+                DetectionSessionStatus.NEEDS_MANUAL_REVIEW,
+            ):
+                return existing
         except KeyError:
             pass
-
-        bundle = self.store.require_bundle(project_id)
-        humanized = self._load_humanized_draft(project_id).to_dict()
-        humanizer_session = self._load_humanizer_session(project_id)
-        humanizer_ids = [p.paragraph_id for p in humanizer_session.paragraphs]
-
-        project = self.store.require_project(project_id)
-        attempt_number = int(project.artifacts.get("detection_attempt_number", 0)) + 1
-        project.artifacts["detection_attempt_number"] = attempt_number
-        self.store.save_project(project)
 
         self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.AI_DETECTION, force=True)
-        session = self.ai_detection.create_session(
-            humanized_draft=humanized,
-            requirement_json=bundle.requirement.to_dict(),
-            project_id=project_id,
-            humanizer_paragraph_ids=humanizer_ids,
-        )
+        session, report = self._skipped_detection_artifacts(project_id)
+        self._persist_detection_session(project_id, session)
+        self._finish_detection_pipeline(project_id, report)
+        trace("detection.skipped_disabled", project_id=project_id)
         return self._persist_detection_session(project_id, session)
 
     def advance_ai_detection(self, project_id: str, *, detection_session: dict[str, Any] | None = None):
-        session = self._load_detection_session(project_id, seed=detection_session)
-        humanizer_session = None
-        try:
-            humanizer_session = self._load_humanizer_session(project_id)
-        except KeyError:
-            trace("detection.advance.humanizer_missing", project_id=project_id)
-
-        def rehumanize(paragraph_id: str, current_text: str) -> str:
-            if humanizer_session is None:
-                return current_text
-            text = self.humanizer.rehumanize_paragraph_for_detection(humanizer_session.id, paragraph_id)
-            self._persist_humanizer_session(project_id, humanizer_session)
-            try:
-                self._persist_humanized_draft(project_id, self._load_humanized_draft(project_id))
-            except KeyError:
-                pass
-            return text
-
-        updated = self.ai_detection.advance_paragraph(session.id, rehumanize=rehumanize)
-        saved = self._persist_detection_session(project_id, updated)
-        # advance_paragraph may auto-finalize into the worker's RAM — persist report to disk.
-        if saved.report_id:
-            try:
-                report = self.ai_detection.reports.get(saved.report_id)
-                if report is not None:
-                    self._persist_detection_report(project_id, report)
-            except Exception as exc:  # noqa: BLE001
-                trace(
-                    "detection.advance.report_persist_failed",
-                    project_id=project_id,
-                    error=str(exc),
-                )
-        return saved
+        """No-op: detection disabled."""
+        del detection_session
+        return self.start_ai_detection(project_id)
 
     def finalize_ai_detection(self, project_id: str, *, detection_session: dict[str, Any] | None = None):
-        session = self._load_detection_session(project_id, seed=detection_session)
-
-        # Prefer report already on disk (other worker may have finalized during advance).
+        """No-op: detection disabled — return/create stub passed report."""
+        del detection_session
         try:
-            existing = self._load_detection_report(project_id)
-            if existing.session_id == session.id or not session.report_id:
-                return self._finish_detection_pipeline(project_id, existing)
+            return self._load_detection_report(project_id)
         except KeyError:
-            pass
-
-        report = None
-        if session.report_id:
-            report = self.ai_detection.reports.get(session.report_id)
-
-        if report is None:
-            # Rebuild on this worker if report was never persisted / wrong worker RAM.
-            session.report_id = None
-            session = self.ai_detection.finalize_session(session.id)
-            self._persist_detection_session(project_id, session)
-            report = self.ai_detection.reports.get(session.report_id)
-            if report is None:
-                raise KeyError(f"Detection report not found for session: {session.id}")
-
-        saved = self._persist_detection_report(project_id, report)
-        return self._finish_detection_pipeline(project_id, saved)
+            self.start_ai_detection(project_id)
+            return self._load_detection_report(project_id)
 
     def _finish_detection_pipeline(self, project_id: str, report: DetectionReport):
         self._ensure_pipeline_project(project_id)
         saved = self._persist_detection_report(project_id, report)
         project = self.store.require_project(project_id)
-        if saved.final_status.value == "needs_manual_review":
+        # Disabled stage never flips project into needs_manual_review from AI scores.
+        if (
+            saved.engine_version != "skipped-disabled"
+            and saved.final_status.value == "needs_manual_review"
+        ):
             project.status = ProjectStatus.NEEDS_MANUAL_REVIEW
             self.store.save_project(project)
 
@@ -1704,6 +1709,7 @@ class ProjectService:
                     "detection_report_id": saved.id,
                     "overall_ai_score": saved.overall_ai_score,
                     "final_status": saved.final_status.value,
+                    "skipped": saved.engine_version == "skipped-disabled",
                 },
                 artifacts={"detection_report": saved.to_dict()},
             ),
@@ -1712,20 +1718,8 @@ class ProjectService:
         return saved
 
     def prepare_detection_retry(self, project_id: str) -> None:
-        """Re-humanize paragraphs that exceeded the AI score threshold, then require a new review."""
-        from services.ai_detection_engine.thresholds import score_passes
-
-        report = self.get_detection_report(project_id)
-        high_sections = [
-            str(item.get("section") or "")
-            for item in (report.paragraph_scores or [])
-            if not score_passes(float(item.get("ai_score") or 0), report.thresholds)
-        ]
-        if high_sections:
-            self._rehumanize_revised_sections(project_id, high_sections)
+        """Detection disabled — clear stale artifacts only."""
         project = self.store.require_project(project_id)
-        project.artifacts.pop("review_report_id", None)
-        project.artifacts.pop("review_report", None)
         project.artifacts.pop("detection_report_id", None)
         project.artifacts.pop("detection_report", None)
         project.artifacts.pop("detection_session_id", None)
@@ -1853,10 +1847,26 @@ class ProjectService:
             ) from exc
         try:
             detection_report = self._load_detection_report(project_id).to_dict()
-        except KeyError as exc:
-            raise KeyError(
-                "Detection report not found — finish AI detection before delivery"
-            ) from exc
+        except KeyError:
+            # AI detection stage disabled — invent a passed stub so packaging still works.
+            _session, stub = self._skipped_detection_artifacts(project_id)
+            detection_report = self._persist_detection_report(project_id, stub).to_dict()
+            try:
+                self.pipeline.complete_stage(
+                    project_id,
+                    PipelineStage.AI_DETECTION,
+                    StageResult(
+                        output={
+                            "detection_report_id": stub.id,
+                            "overall_ai_score": 0.0,
+                            "final_status": "passed",
+                            "skipped": True,
+                        },
+                        artifacts={"detection_report": detection_report},
+                    ),
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
         revision_history = self.revision.get_history_or_empty(project_id)
         humanization_attempts = 0

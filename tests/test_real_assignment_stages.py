@@ -36,7 +36,7 @@ def test_stage_providers_are_real():
     assert providers[PipelineStage.CITATION_GENERATION] == StageProvider.CITATION_ENGINE
     assert providers[PipelineStage.FORMATTING] == StageProvider.FORMAT_ENGINE
     assert providers[PipelineStage.REQUIREMENT_VALIDATION] == StageProvider.GEMINI
-    assert providers[PipelineStage.AI_DETECTION] == StageProvider.ZEROGPT
+    assert providers[PipelineStage.AI_DETECTION] == StageProvider.INTERNAL
 
 
 def test_failed_stage_retry_does_not_reset_prior_stages():

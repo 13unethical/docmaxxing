@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Verify email — DocMaxxing{% endblock %}
+{% block content %}
+<section class="auth-wrap">
+  <div class="card auth-card">
+    <h1 class="auth-title">Enter verification code</h1>
+    <p class="auth-sub">
+      We sent a 6-digit code{% if email %} to <strong>{{ email }}</strong>{% endif %}.
+      Enter it below to unlock Workspace.
+      {% if otp_minutes %}The code expires in {{ otp_minutes }} minutes.{% endif %}
+    </p>
+
+    {% if error %}
+    <p class="auth-error" role="alert">{{ error }}</p>
+    {% endif %}
+    {% if resent or request.args.get('resent') %}
+    <p class="auth-flash" role="status">A new code is on the way — check your inbox.</p>
+    {% endif %}
+
+    <form method="post" action="/verify-email/code" class="auth-form" data-dm-otp-form>
+      <input type="hidden" name="action" value="verify" />
+      <label class="auth-field">
+        <span class="auth-label">Verification code</span>
+        <input
+          type="text"
+          name="code"
+          inputmode="numeric"
+          pattern="[0-9]{6}"
+          maxlength="6"
+          minlength="6"
+          autocomplete="one-time-code"
+          required
+          autofocus
+          placeholder="123456"
+          class="auth-otp-input"
+        />
+      </label>
+      <button type="submit" class="cta auth-submit">Verify &amp; continue</button>
+    </form>
+
+    <form method="post" action="/verify-email/code" class="auth-form auth-form--resend">
+      <input type="hidden" name="action" value="resend" />
+      <button type="submit" class="auth-resend-btn">Resend code</button>
+    </form>
+
+    <p class="auth-alt">
+      Wrong account?
+      <form method="post" action="{{ url_for('logout') }}" style="display:inline">
+        <button type="submit" class="linkish">Log out</button>
+      </form>
+    </p>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var input = document.querySelector(".auth-otp-input");
+    if (!input) return;
+    input.addEventListener("input", function () {
+      input.value = input.value.replace(/\D/g, "").slice(0, 6);
+    });
+  });
+</script>
+{% endblock %}

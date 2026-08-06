@@ -186,6 +186,16 @@
       if (inp.name) body[inp.name] = inp.value;
     });
     if (kind === "register") {
+      if ((body.password || "") !== (body.password_confirm || "")) {
+        showError("Passwords do not match.");
+        return;
+      }
+    }
+    var btn = q(".dm-auth-submit", form);
+    var label = btn ? btn.textContent : "";
+    if (btn) { btn.disabled = true; btn.textContent = "Please wait…"; }
+    showError("");
+    if (kind === "register") {
       try {
         var params = new URLSearchParams(window.location.search);
         var ref = params.get("ref") || params.get("referral_code") || "";
@@ -195,13 +205,19 @@
           if (stored) body.referral_code = stored;
         }
       } catch (e) {}
+      return (window.DMDeviceFingerprint
+        ? window.DMDeviceFingerprint()
+        : Promise.resolve("")
+      ).then(function (fp) {
+        if (fp) body.device_fingerprint = fp;
+        return postAuth(url, body, btn, label);
+      });
     }
-    var btn = q(".dm-auth-submit", form);
-    var label = btn ? btn.textContent : "";
-    if (btn) { btn.disabled = true; btn.textContent = "Please wait…"; }
-    showError("");
+    return postAuth(url, body, btn, label);
+  }
 
-    fetch(url, {
+  function postAuth(url, body, btn, label) {
+    return fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
@@ -214,6 +230,12 @@
       .then(function (r) {
         if (btn) { btn.disabled = false; btn.textContent = label; }
         if (r.ok && r.data && r.data.success) {
+          var needsVerify = r.data.email_verification_required
+            || (r.data.user && r.data.user.is_verified === false);
+          if (needsVerify) {
+            window.location.href = "/verify-email/code";
+            return;
+          }
           onAuthSuccess(r.data);
         } else {
           showError((r.data && r.data.error) || "Something went wrong. Please try again.");

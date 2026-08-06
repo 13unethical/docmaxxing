@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from services.browser.providers.stealthwriter import (
+    ASSIGNMENT_STEALTHWRITER_LEVEL,
     DEFAULT_STEALTHWRITER_MODEL,
     _model_already_selected,
     _model_match_labels,
@@ -22,6 +23,11 @@ def test_default_model_is_legacy_5_1():
     assert DEFAULT_STEALTHWRITER_MODEL == "Legacy 5.1"
 
 
+def test_assignment_default_level_is_10():
+    assert ASSIGNMENT_STEALTHWRITER_LEVEL == 10
+    assert StealthWriterTextHumanizer().level == 10
+
+
 def test_model_match_labels_include_ghost_alias():
     labels = _model_match_labels("Legacy 5.1")
     assert "Legacy 5.1" in labels
@@ -35,11 +41,11 @@ def test_model_already_selected_accepts_ghost_label():
     assert not _model_already_selected(_FakePage("Ghost 5.2 Mini"), "Legacy 5.1")
 
 
-def test_stealthwriter_humanizer_passes_legacy_model(monkeypatch):
+def test_stealthwriter_humanizer_passes_legacy_model():
     calls: list[dict] = []
 
-    def fake_humanize(text: str, *, model: str | None = None):
-        calls.append({"text": text, "model": model})
+    def fake_humanize(text: str, *, model: str | None = None, level: int | None = None):
+        calls.append({"text": text, "model": model, "level": level})
         return {"success": True, "humanized_text": f"human::{text}"}
 
     humanizer = StealthWriterTextHumanizer(humanize_fn=fake_humanize)
@@ -50,12 +56,13 @@ def test_stealthwriter_humanizer_passes_legacy_model(monkeypatch):
     out = humanizer.humanize(sample)
     assert out.startswith("human::")
     assert calls and calls[0]["model"] == "Legacy 5.1"
+    assert calls[0]["level"] == 10
 
 
 def test_stealthwriter_humanizer_chunks_long_input():
     calls: list[str] = []
 
-    def fake_humanize(text: str, *, model: str | None = None):
+    def fake_humanize(text: str, *, model: str | None = None, level: int | None = None):
         calls.append(text)
         return {"success": True, "humanized_text": text[::-1]}
 
@@ -68,7 +75,7 @@ def test_stealthwriter_humanizer_chunks_long_input():
 
 
 def test_stealthwriter_humanizer_raises_on_failure():
-    def fake_humanize(text: str, *, model: str | None = None):
+    def fake_humanize(text: str, *, model: str | None = None, level: int | None = None):
         return {"success": False, "error": "LOGIN_REQUIRED"}
 
     humanizer = StealthWriterTextHumanizer(humanize_fn=fake_humanize)
@@ -88,7 +95,7 @@ def test_stealthwriter_humanizer_raises_on_failure():
 def test_stealthwriter_humanizer_retries_then_raises_on_no_change():
     calls = {"n": 0}
 
-    def fake_humanize(text: str, *, model: str | None = None):
+    def fake_humanize(text: str, *, model: str | None = None, level: int | None = None):
         calls["n"] += 1
         return {
             "success": False,
@@ -112,7 +119,7 @@ def test_stealthwriter_humanizer_retries_then_raises_on_no_change():
 
 
 def test_stealthwriter_humanizer_rejects_identical_output():
-    def fake_humanize(text: str, *, model: str | None = None):
+    def fake_humanize(text: str, *, model: str | None = None, level: int | None = None):
         return {"success": True, "humanized_text": text}
 
     humanizer = StealthWriterTextHumanizer(humanize_fn=fake_humanize)

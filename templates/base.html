@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}DocMaxxing{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260805-dark-white" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260805-otp" />
     <script>
       (function () {
         try {
@@ -372,7 +372,8 @@
     </script>
     <script src="{{ url_for('static', filename='ui.js') }}"></script>
     <script src="{{ url_for('static', filename='common.js') }}?v=20260802-fmt-drop"></script>
-    <script src="{{ url_for('static', filename='auth-modal.js') }}"></script>
+    <script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
+    <script src="{{ url_for('static', filename='auth-modal.js') }}?v=20260805-otp"></script>
     <script src="{{ url_for('static', filename='support-chat.js') }}"></script>
     <script src="{{ url_for('static', filename='tool-history.js') }}?v=20260802-newchat-tools"></script>
     <script src="{{ url_for('static', filename='app-shell.js') }}?v=20260802-open-sidebar"></script>

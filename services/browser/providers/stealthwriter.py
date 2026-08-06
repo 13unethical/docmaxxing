@@ -34,6 +34,16 @@ DEFAULT_STEALTHWRITER_MODEL = (
     os.environ.get("STEALTHWRITER_MODEL") or "Legacy 5.1"
 ).strip() or "Legacy 5.1"
 
+# Rewrite intensity 1–10. StealthWriter UI defaults to 8; Assignment pins 10.
+DEFAULT_STEALTHWRITER_LEVEL = max(
+    1,
+    min(10, int(os.environ.get("STEALTHWRITER_LEVEL") or "8")),
+)
+ASSIGNMENT_STEALTHWRITER_LEVEL = max(
+    1,
+    min(10, int(os.environ.get("STEALTHWRITER_ASSIGNMENT_LEVEL") or "10")),
+)
+
 
 def _page() -> Any:
     """The StealthWriter persistent tab, owned by BrowserService."""
@@ -463,6 +473,103 @@ def _ensure_model_selected(page: Any, model: str = DEFAULT_STEALTHWRITER_MODEL) 
         pass
 
 
+def _normalize_rewrite_level(level: int | str | None) -> int | None:
+    """Clamp StealthWriter rewrite level to 1–10, or None to leave UI unchanged."""
+    if level is None or level == "":
+        return None
+    try:
+        value = int(level)
+    except (TypeError, ValueError):
+        return None
+    return max(1, min(10, value))
+
+
+def _rewrite_level_already_selected(page: Any, level: int) -> bool:
+    """True when the numbered Level chip for ``level`` looks selected."""
+    try:
+        return bool(
+            page.evaluate(
+                """(wanted) => {
+                    const label = Array.from(document.querySelectorAll('span,label,div,p'))
+                      .find(el => {
+                        const t = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+                        return t === 'Level';
+                      });
+                    if (!label) return false;
+                    let root = label.parentElement;
+                    for (let i = 0; i < 4 && root; i++) {
+                      const buttons = Array.from(root.querySelectorAll('button'));
+                      const match = buttons.find(b => {
+                        const t = (b.textContent || '').replace(/\\s+/g, ' ').trim();
+                        return t === String(wanted);
+                      });
+                      if (match) {
+                        const cls = match.className || '';
+                        return /\\bbg-background\\b/.test(cls) || /\\bshadow-sm\\b/.test(cls);
+                      }
+                      root = root.parentElement;
+                    }
+                    return false;
+                }""",
+                int(level),
+            )
+        )
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _ensure_rewrite_level(page: Any, level: int | str | None) -> None:
+    """Pin StealthWriter rewrite Level chip (1–10). Soft-fails if UI changes."""
+    wanted = _normalize_rewrite_level(level)
+    if wanted is None:
+        return
+    if _rewrite_level_already_selected(page, wanted):
+        return
+    try:
+        clicked = page.evaluate(
+            """(wanted) => {
+                const label = Array.from(document.querySelectorAll('span,label,div,p'))
+                  .find(el => {
+                    const t = (el.textContent || '').replace(/\\s+/g, ' ').trim();
+                    return t === 'Level';
+                  });
+                if (!label) return false;
+                let root = label.parentElement;
+                for (let i = 0; i < 4 && root; i++) {
+                  const buttons = Array.from(root.querySelectorAll('button'));
+                  const match = buttons.find(b => {
+                    const t = (b.textContent || '').replace(/\\s+/g, ' ').trim();
+                    return t === String(wanted);
+                  });
+                  if (match) {
+                    match.click();
+                    return true;
+                  }
+                  root = root.parentElement;
+                }
+                return false;
+            }""",
+            int(wanted),
+        )
+        if clicked:
+            page.wait_for_timeout(200)
+            print(f"[stealthwriter] rewrite level set to {wanted}", flush=True)
+            return
+    except Exception as exc:  # noqa: BLE001
+        print(f"[stealthwriter] rewrite level click failed: {exc}", flush=True)
+
+    # Fallback: Playwright get_by_role near Level label.
+    try:
+        level_row = page.locator("div").filter(has=page.get_by_text(re.compile(r"^\s*Level\s*$")))
+        btn = level_row.locator("button", has_text=re.compile(rf"^\s*{wanted}\s*$")).first
+        if btn.count() > 0 and btn.is_visible(timeout=1500):
+            btn.click(timeout=3000, force=True)
+            page.wait_for_timeout(200)
+            print(f"[stealthwriter] rewrite level set to {wanted} (locator)", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[stealthwriter] rewrite level locator failed: {exc}", flush=True)
+
+
 def _dismiss_ui_overlays(page: Any) -> None:
     """Close open menus/modals that intercept clicks on the humanizer textarea."""
     try:
@@ -737,11 +844,17 @@ def _recover_stealthwriter_page(level: str) -> Any:
 
 
 # ------------------------------------------------------------------ humanize workflow
-def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
+def humanize_text(
+    text: str,
+    *,
+    model: str | None = None,
+    level: int | str | None = None,
+) -> dict[str, Any]:
     """Run one end-to-end humanization in the shared long-lived browser.
 
     Does not perform login. If the session is expired, returns LOGIN_REQUIRED.
     Always pins the model to Legacy 5.1 (or ``STEALTHWRITER_MODEL`` / ``model``).
+    Optional ``level`` pins the rewrite Level chip (1–10); Assignment uses 10.
     Retries with a fresh tab / full browser restart when Playwright reports a
     closed page (common after long idle or health-monitor recovery).
     """
@@ -750,6 +863,7 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
         return {"success": False, "error": "text is required", "humanized_text": None}
 
     selected_model = (model or DEFAULT_STEALTHWRITER_MODEL).strip() or DEFAULT_STEALTHWRITER_MODEL
+    selected_level = _normalize_rewrite_level(level)
     started = time.monotonic()
     last_exc: BaseException | None = None
 
@@ -765,6 +879,7 @@ def humanize_text(text: str, *, model: str | None = None) -> dict[str, Any]:
             result = _humanize_text_once(
                 cleaned,
                 selected_model=selected_model,
+                selected_level=selected_level,
                 started=started,
             )
             # Authentic limit toast → NO_CHANGE. Retry once with a fresh tab in case
@@ -807,6 +922,7 @@ def _humanize_text_once(
     cleaned: str,
     *,
     selected_model: str,
+    selected_level: int | None,
     started: float,
 ) -> dict[str, Any]:
     page = _page()
@@ -822,8 +938,9 @@ def _humanize_text_once(
     if _is_sign_in_url(page.url):
         return {"success": False, "error": "LOGIN_REQUIRED"}
 
-    # Pin model before pasting — dropdown can remount after text entry.
+    # Pin model + rewrite level before pasting — dropdown can remount after text entry.
     _ensure_model_selected(page, selected_model)
+    _ensure_rewrite_level(page, selected_level)
     _dismiss_ui_overlays(page)
 
     # Locate textarea
@@ -844,8 +961,9 @@ def _humanize_text_once(
             _collect_page_diagnostics(page, step="paste_text"),
         ) from exc
 
-    # Re-assert model in case pasting reset the picker.
+    # Re-assert model/level in case pasting reset the picker.
     _ensure_model_selected(page, selected_model)
+    _ensure_rewrite_level(page, selected_level)
     _dismiss_ui_overlays(page)
 
     # Click Humanize

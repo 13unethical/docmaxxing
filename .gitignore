@@ -9,3 +9,5 @@ tmp/
 browser_profiles/
 chrome_profile.tgz
 .sw_investigation/
+static/uploads/avatars/*
+!static/uploads/avatars/.gitkeep

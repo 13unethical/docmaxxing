@@ -504,7 +504,7 @@
     return fetch(HUMANIZE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: text }),
+      body: JSON.stringify({ text: text, source: "workspace_partial" }),
     }).then(function (res) {
       return res.text().then(function (body) {
         var p = {};

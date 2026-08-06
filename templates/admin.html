@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Admin Panel — DocMaxxing{% endblock %}
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v=20260803-turnitin-global" />
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v=20260806-dataset2" />
 {% endblock %}
 {% block content %}
 <div class="adm-page" data-admin-page>
@@ -187,6 +187,55 @@
     </div>
   </section>
 
+  <section class="adm-card adm-dataset" aria-labelledby="adm-dataset-title" data-adm-dataset>
+    <div class="adm-analytics-head">
+      <div>
+        <h2 class="adm-section-title" id="adm-dataset-title">ML Datasets</h2>
+        <p class="adm-analytics-lede">
+          Passive corpora for future fine-tuning. Raw text is stored as received;
+          sanitization happens at export time.
+          <a href="{{ url_for('admin_dataset_stats_page') }}">Full dataset stats →</a>
+        </p>
+      </div>
+      <button type="button" class="adm-btn adm-btn--ghost" data-adm-dataset-refresh>Refresh</button>
+    </div>
+    <p class="adm-status" data-adm-dataset-status role="status" aria-live="polite"></p>
+    <h3 class="adm-section-subtitle">Humanizer Dataset</h3>
+    <div class="adm-kpi-grid" data-adm-dataset-grid>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Total Datapoints</p>
+        <p class="adm-kpi-value" data-adm-dataset-total>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Standalone Humanizer</p>
+        <p class="adm-kpi-value" data-adm-dataset-standalone>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Assignments</p>
+        <p class="adm-kpi-value" data-adm-dataset-assignment>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Workspace (partial)</p>
+        <p class="adm-kpi-value" data-adm-dataset-workspace>—</p>
+      </article>
+    </div>
+    <h3 class="adm-section-subtitle">AI Detection Dataset</h3>
+    <div class="adm-kpi-grid" data-adm-detector-grid>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Total Detection Logs</p>
+        <p class="adm-kpi-value" data-adm-detector-total>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Auto (&gt;20% + highlights)</p>
+        <p class="adm-kpi-value" data-adm-detector-auto>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Manual Highlights</p>
+        <p class="adm-kpi-value" data-adm-detector-manual>—</p>
+      </article>
+    </div>
+  </section>
+
   <section class="adm-card">
     <div class="adm-toolbar">
       <div class="adm-search-wrap">
@@ -335,5 +384,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='admin-page.js') }}?v=20260803-turnitin-global"></script>
+<script src="{{ url_for('static', filename='admin-page.js') }}?v=20260806-dataset2"></script>
 {% endblock %}

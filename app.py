@@ -17,6 +17,7 @@ import io
 import json
 import os
 import re
+import threading
 import time
 import traceback
 import uuid
@@ -94,6 +95,9 @@ from services.economy import (
 )
 from services.economy import auth as economy_auth
 from services.economy.admin import AdminError, AdminService, bootstrap_admin_from_env
+from services.economy.avatar_upload import AvatarUploadError, validate_and_store_avatar
+from services.economy.disposable_email import DisposableEmailError
+from services.economy.email_verify import OTP_TTL_MINUTES
 from services.economy.paddle_purchases import (
     PaddlePurchaseService,
 )
@@ -132,7 +136,30 @@ from services.economy.usage import (
 from services.turnitin_service import TurnitinService, init_db as turnitin_init_db
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB uploads
+# Document / assignment uploads may be large; avatar route enforces its own 2 MB cap.
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+_REPO_ROOT = Path(__file__).resolve().parent
+_AVATAR_MAX_BYTES = 2 * 1024 * 1024
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = (os.environ.get(name) or "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("1", "true", "yes", "y", "on"):
+        return True
+    if raw in ("0", "false", "no", "n", "off"):
+        return False
+    return default
+
+
+# SMTP / Resend — loaded from .env via load_dotenv above.
+app.config["MAIL_SERVER"] = (os.environ.get("MAIL_SERVER") or "").strip()
+app.config["MAIL_PORT"] = int((os.environ.get("MAIL_PORT") or "587").strip() or "587")
+app.config["MAIL_USERNAME"] = (os.environ.get("MAIL_USERNAME") or "").strip()
+app.config["MAIL_PASSWORD"] = (os.environ.get("MAIL_PASSWORD") or "").strip()
+app.config["MAIL_USE_TLS"] = _env_bool("MAIL_USE_TLS", True)
+app.config["MAIL_FROM"] = (os.environ.get("MAIL_FROM") or "").strip()
 
 
 def _require_strong_secret_key() -> str:
@@ -196,6 +223,16 @@ def _charge_current_user(feature: str, cost: int, *, ref_id: str | None = None, 
         )
         resp.status_code = 401
         return resp
+    if not economy_auth.user_email_verified(user):
+        resp = jsonify(
+            {
+                "success": False,
+                "error": "EMAIL_NOT_VERIFIED",
+                "message": "Please verify your email before continuing.",
+            }
+        )
+        resp.status_code = 403
+        return resp
 
     effective = int(cost)
     used_free_turnitin = False
@@ -241,6 +278,136 @@ def _charge_current_user(feature: str, cost: int, *, ref_id: str | None = None, 
             "ref_id": ref_id,
         },
     )
+
+
+def _send_user_verification_email(user: dict, *, background: bool = False) -> str | None:
+    """Issue a fresh OTP, persist it, and email the 6-digit code (never a magic link)."""
+    user_id = int(user["id"])
+    try:
+        code = economy_auth.issue_verification_otp(user_id)
+    except economy_auth.AuthError:
+        app.logger.exception("OTP issue failed user_id=%s", user_id)
+        return None
+
+    # Re-read from DB so the emailed value matches what verify will check.
+    from services.economy.db import connect as economy_connect
+
+    with economy_connect() as conn:
+        row = conn.execute(
+            "SELECT email, verification_code FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    if row is None or not row["verification_code"]:
+        app.logger.error("OTP missing after issue user_id=%s", user_id)
+        return None
+    code = str(row["verification_code"]).strip()
+    to_email = str(row["email"] or user.get("email") or "").strip()
+    name = user.get("name")
+
+    def _do_send() -> None:
+        # Import inside the worker so a stale reloader never keeps the old
+        # magic-link implementation bound in a closure.
+        from services.economy.email_verify import (
+            EmailVerifyError as _EmailVerifyError,
+            send_verification_otp_email as _send_otp,
+        )
+
+        try:
+            _send_otp(to_email=to_email, code=code, name=name)
+        except _EmailVerifyError:
+            app.logger.exception("OTP email failed user_id=%s to=%s", user_id, to_email)
+
+    if background:
+        def _run() -> None:
+            with app.app_context():
+                _do_send()
+
+        threading.Thread(target=_run, daemon=True).start()
+    else:
+        _do_send()
+    return code
+
+
+def _load_owned_project(project_id: str):
+    """IDOR guard: return (bundle, None) or (None, flask_response)."""
+    user = economy_auth.current_user()
+    if user is None:
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "AUTH_REQUIRED",
+                    "message": "Please sign in to continue.",
+                }
+            ),
+            401,
+        )
+    try:
+        bundle = project_service.get_project(project_id)
+    except KeyError:
+        return None, (jsonify({"error": "Project not found"}), 404)
+    owner = str(getattr(bundle.project, "user_id", None) or "").strip()
+    if economy_auth.is_admin(user):
+        return bundle, None
+    if not owner or owner != str(user["id"]):
+        return None, (jsonify({"error": "Forbidden"}), 403)
+    return bundle, None
+
+
+def _require_project_owner_response(project_id: str):
+    """Return error response if caller cannot access project, else None."""
+    _bundle, err = _load_owned_project(project_id)
+    return err
+
+
+# Pages + APIs that must never be usable before email verification.
+_EMAIL_VERIFIED_PREFIXES = (
+    "/workspace",
+    "/editor",
+    "/humanizer",
+    "/turnitin",
+    "/assignment",
+    "/assignments",
+    "/api/workspace",
+    "/api/humanizer",
+    "/api/turnitin",
+    "/api/assignment",
+    "/api/browser/providers/stealthwriter/humanize",
+)
+
+
+def _path_requires_email_verification(path: str) -> bool:
+    for prefix in _EMAIL_VERIFIED_PREFIXES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return True
+    return False
+
+
+@app.before_request
+def _email_verification_wall():
+    """Strict wall: Workspace, Humanizer, Turnitin, Assignment + their APIs."""
+    path = request.path or ""
+    if not _path_requires_email_verification(path):
+        return None
+    return economy_auth.email_verification_gate()
+
+
+@app.before_request
+def _assignment_project_ownership_guard():
+    """IDOR prevention: every /api/assignment/projects/<id>/… call must own the project."""
+    path = request.path or ""
+    marker = "/api/assignment/projects/"
+    if not path.startswith(marker):
+        return None
+    rest = path[len(marker) :].lstrip("/")
+    if not rest:
+        return None
+    project_id = rest.split("/", 1)[0]
+    if project_id in {"upload"}:
+        return None
+    if len(project_id) < 10:
+        return None
+    return _require_project_owner_response(project_id)
 
 
 def _refund_safe(user_id: int, cost: int, feature: str, *, ref_id: str | None = None) -> None:
@@ -535,7 +702,10 @@ def inject_account():
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    if economy_auth.current_user():
+    existing = economy_auth.current_user()
+    if existing:
+        if not economy_auth.user_email_verified(existing):
+            return redirect(url_for("verify_email_code"))
         return redirect(url_for("index"))
     ref_code = (request.values.get("ref") or request.values.get("referral_code") or "").strip()
     if request.method == "GET":
@@ -550,15 +720,40 @@ def register():
     email = (request.form.get("email") or "").strip()
     name = (request.form.get("name") or "").strip()
     password = request.form.get("password") or ""
+    password_confirm = (
+        request.form.get("password_confirm") or request.form.get("confirm_password") or ""
+    )
+    fingerprint = (request.form.get("device_fingerprint") or "").strip()
     referral_code = (
         (request.form.get("referral_code") or request.form.get("ref") or "").strip()
         or session.get("pending_referral_code")
         or ""
     )
+    if password != password_confirm:
+        return render_template(
+            "register.html",
+            nav_active=None,
+            error="Passwords do not match.",
+            form={"email": email, "name": name},
+            referral_code=referral_code,
+        ), 400
     try:
         user = economy_auth.create_user(
-            email, password, name=name, referral_code=referral_code or None
+            email,
+            password,
+            name=name,
+            referral_code=referral_code or None,
+            ip_address=economy_auth.client_ip_from_request(),
+            device_fingerprint=fingerprint or None,
         )
+    except DisposableEmailError as exc:
+        return render_template(
+            "register.html",
+            nav_active=None,
+            error=str(exc),
+            form={"email": email, "name": name},
+            referral_code=referral_code,
+        ), 400
     except economy_auth.DuplicateEmail:
         return render_template(
             "register.html",
@@ -578,13 +773,96 @@ def register():
 
     session.pop("pending_referral_code", None)
     economy_auth.login_user(user["id"])
+    # Always land on the notice page until the address is verified
+    # (bootstrap admin is created already verified and may skip).
+    if not economy_auth.user_email_verified(user):
+        _send_user_verification_email(user, background=True)
+        return redirect(url_for("verify_email_code"))
     return redirect(url_for("index"))
+
+
+@app.route("/verify-email/code", methods=["GET", "POST"])
+@app.route("/verify-email/notice", methods=["GET", "POST"])
+@economy_auth.login_required
+def verify_email_code():
+    """Enter the 6-digit OTP sent by email (legacy /notice URL kept as alias)."""
+    user = economy_auth.current_user()
+    if user and economy_auth.user_email_verified(user):
+        return redirect(url_for("workspace"))
+
+    error = None
+    resent = False
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "verify").strip().lower()
+        if action == "resend":
+            if user:
+                code = _send_user_verification_email(user)
+                resent = True
+                if code and (os.environ.get("EXPOSE_VERIFY_CODE") or "").strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                ):
+                    # Local/debug only — never enable in production.
+                    app.logger.info("EXPOSE_VERIFY_CODE user=%s code=%s", user.get("id"), code)
+            return render_template(
+                "verify_email.html",
+                nav_active=None,
+                email=(user or {}).get("email"),
+                resent=True,
+                otp_minutes=OTP_TTL_MINUTES,
+            )
+
+        submitted = (request.form.get("code") or request.form.get("verification_code") or "").strip()
+        try:
+            assert user is not None
+            economy_auth.verify_email_otp(int(user["id"]), submitted)
+            return redirect(url_for("workspace"))
+        except economy_auth.AuthError as exc:
+            error = str(exc)
+
+    return render_template(
+        "verify_email.html",
+        nav_active=None,
+        email=(user or {}).get("email"),
+        error=error,
+        resent=resent,
+        otp_minutes=OTP_TTL_MINUTES,
+    )
+
+
+@app.post("/verify-email/resend")
+@economy_auth.login_required
+def verify_email_resend():
+    """Compatibility endpoint — issues a new OTP and shows the code form."""
+    user = economy_auth.current_user()
+    if user and economy_auth.user_email_verified(user):
+        return redirect(url_for("workspace"))
+    if user:
+        _send_user_verification_email(user)
+    return redirect(url_for("verify_email_code", resent=1))
+
+
+@app.get("/verify-email/<token>")
+def verify_email_legacy_token(token: str):
+    """Old magic-link URLs → OTP page (cross-device links no longer verify)."""
+    _ = token
+    user = economy_auth.current_user()
+    if user and economy_auth.user_email_verified(user):
+        return redirect(url_for("workspace"))
+    if user:
+        return redirect(url_for("verify_email_code"))
+    return redirect(url_for("login", next=url_for("verify_email_code")))
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     next_url = request.values.get("next") or ""
-    if economy_auth.current_user():
+    existing = economy_auth.current_user()
+    if existing:
+        if not economy_auth.user_email_verified(existing):
+            return redirect(url_for("verify_email_code"))
         return redirect(next_url or url_for("index"))
     if request.method == "GET":
         return render_template("login.html", nav_active=None, next_url=next_url)
@@ -602,7 +880,9 @@ def login():
         ), 401
 
     economy_auth.login_user(user["id"])
-    if next_url.startswith("/"):
+    if not economy_auth.user_email_verified(user):
+        return redirect(url_for("verify_email_code"))
+    if next_url.startswith("/") and not next_url.startswith("//"):
         return redirect(next_url)
     return redirect(url_for("index"))
 
@@ -905,6 +1185,18 @@ def api_admin_set_role(user_id: int):
     return jsonify({"success": True, **result})
 
 
+@app.delete("/api/admin/users/<int:user_id>")
+@app.post("/api/admin/users/<int:user_id>/delete")
+@economy_auth.admin_required
+def api_admin_delete_user(user_id: int):
+    actor_id = economy_auth.current_user_id()
+    try:
+        result = admin_service.delete_user(user_id, actor_id=int(actor_id))
+    except AdminError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, **result})
+
+
 @app.get("/api/admin/users/<int:user_id>/ledger")
 @economy_auth.admin_required
 def api_admin_user_ledger(user_id: int):
@@ -1017,14 +1309,43 @@ def api_admin_analytics():
     return jsonify({"success": True, **payload})
 
 
+@app.get("/api/admin/dataset-stats")
+@economy_auth.admin_required
+def api_admin_dataset_stats():
+    """Humanizer + AI-detection ML dataset collection counters."""
+    from services.dataset_logger import get_dataset_recent_samples, get_dataset_stats
+
+    try:
+        stats = get_dataset_stats()
+        samples = get_dataset_recent_samples(limit=10)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("dataset-stats failed")
+        return jsonify({"success": False, "error": str(exc)}), 500
+    return jsonify({"success": True, **stats, **samples})
+
+
+@app.route("/admin/dataset-stats")
+@economy_auth.admin_required
+def admin_dataset_stats_page():
+    """Dedicated admin view for humanizer + detector dataset progress."""
+    return render_template("admin_dataset_stats.html", nav_active="admin")
+
+
 # ------------------------------------------------- JSON auth (register modal)
 
 
 def _auth_success_payload(user: dict) -> dict:
     return {
         "success": True,
-        "user": {"id": user["id"], "email": user["email"], "name": user.get("name")},
+        "user": {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user.get("name"),
+            "is_verified": bool(user.get("is_verified")),
+            "avatar_file": user.get("avatar_file"),
+        },
         "balance": wallet.get_balance(user["id"]),
+        "welcome_bonus_granted": bool(user.get("welcome_bonus_granted")),
     }
 
 
@@ -1034,20 +1355,45 @@ def api_auth_register():
     email = str(payload.get("email") or "").strip()
     name = str(payload.get("name") or "").strip()
     password = str(payload.get("password") or "")
+    password_confirm = str(
+        payload.get("password_confirm") or payload.get("confirm_password") or ""
+    )
+    fingerprint = str(payload.get("device_fingerprint") or "").strip()
     referral_code = str(
         payload.get("referral_code") or payload.get("ref") or session.get("pending_referral_code") or ""
     ).strip()
+    if password != password_confirm:
+        return jsonify({"success": False, "error": "Passwords do not match."}), 400
     try:
         user = economy_auth.create_user(
-            email, password, name=name, referral_code=referral_code or None
+            email,
+            password,
+            name=name,
+            referral_code=referral_code or None,
+            ip_address=economy_auth.client_ip_from_request(),
+            device_fingerprint=fingerprint or None,
         )
+    except DisposableEmailError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
     except economy_auth.DuplicateEmail as exc:
         return jsonify({"success": False, "error": str(exc)}), 409
     except economy_auth.AuthError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
     session.pop("pending_referral_code", None)
     economy_auth.login_user(user["id"])
-    return jsonify(_auth_success_payload(user))
+    verify_code = None
+    needs_verify = not economy_auth.user_email_verified(user)
+    if needs_verify:
+        verify_code = _send_user_verification_email(user, background=True)
+    payload_out = _auth_success_payload(user)
+    payload_out["email_verification_required"] = needs_verify
+    if verify_code and (os.environ.get("EXPOSE_VERIFY_CODE") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        payload_out["verify_code"] = verify_code
+    return jsonify(payload_out)
 
 
 @app.post("/api/auth/login")
@@ -1059,13 +1405,45 @@ def api_auth_login():
     if user is None:
         return jsonify({"success": False, "error": "Incorrect email or password."}), 401
     economy_auth.login_user(user["id"])
-    return jsonify(_auth_success_payload(user))
+    payload_out = _auth_success_payload(user)
+    payload_out["email_verification_required"] = not economy_auth.user_email_verified(user)
+    return jsonify(payload_out)
 
 
 @app.post("/api/auth/logout")
 def api_auth_logout():
     economy_auth.logout_user()
     return jsonify({"success": True})
+
+
+@app.post("/api/upload_avatar")
+@economy_auth.login_required
+def api_upload_avatar():
+    """Secure avatar upload — 2 MB, png/jpg/jpeg/webp only."""
+    user = economy_auth.current_user()
+    assert user is not None
+    upload = request.files.get("avatar") or request.files.get("file")
+    content_length = request.content_length or 0
+    if content_length and content_length > _AVATAR_MAX_BYTES + 4096:
+        return jsonify({"success": False, "error": "Avatar must be 2 MB or smaller."}), 413
+    try:
+        relative = validate_and_store_avatar(
+            upload,
+            user_id=int(user["id"]),
+            repo_root=_REPO_ROOT,
+        )
+        updated = economy_auth.set_avatar_file(int(user["id"]), relative)
+    except AvatarUploadError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except economy_auth.AuthError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify(
+        {
+            "success": True,
+            "avatar_file": updated.get("avatar_file"),
+            "avatar_url": url_for("static", filename=relative),
+        }
+    )
 
 
 # ------------------------------------------------------------- economy API
@@ -1360,6 +1738,7 @@ def references():
 
 
 @app.route("/workspace")
+@economy_auth.email_verified_required
 def workspace():
     """Full document workspace — editor, humanize, AI, cite, comments."""
     return render_template("workspace.html", nav_active="workspace")
@@ -1498,6 +1877,7 @@ def editor():
 
 
 @app.route("/humanizer")
+@economy_auth.email_verified_required
 def humanizer():
     from services.economy.pricing import FEATURE_COSTS
     from services.economy.site_settings import humanize_credit_cost
@@ -1519,6 +1899,7 @@ def humanizer():
 
 
 @app.route("/assignment")
+@economy_auth.email_verified_required
 def assignment():
     return render_template("assignment.html", nav_active="assignment")
 
@@ -1551,6 +1932,7 @@ def api_assignment_projects_list():
 
 
 @app.post("/api/assignment/projects")
+@economy_auth.login_required
 def api_assignment_project_create():
     """Create an assignment project with files, requirement shell, and pipeline."""
     payload = request.get_json(silent=True) or {}
@@ -1562,7 +1944,8 @@ def api_assignment_project_create():
         return jsonify({"error": "files must be an array"}), 400
 
     session_uid = economy_auth.current_user_id()
-    user_id = str(session_uid) if session_uid is not None else (payload.get("user_id") and str(payload.get("user_id")))
+    # Never trust client-supplied user_id (IDOR).
+    user_id = str(session_uid)
 
     try:
         bundle = project_service.create_project(
@@ -1581,11 +1964,11 @@ def api_assignment_project_create():
 
 
 @app.get("/api/assignment/projects/<project_id>")
+@economy_auth.login_required
 def api_assignment_project_get(project_id: str):
-    try:
-        bundle = project_service.get_project(project_id)
-    except KeyError as exc:
-        return _assignment_not_found("get", project_id, exc)
+    bundle, err = _load_owned_project(project_id)
+    if err is not None:
+        return err
     try:
         return jsonify(_project_api_payload(bundle))
     except Exception as exc:  # noqa: BLE001
@@ -1599,7 +1982,11 @@ def api_assignment_project_get(project_id: str):
 
 
 @app.post("/api/assignment/projects/<project_id>/files")
+@economy_auth.login_required
 def api_assignment_project_add_file(project_id: str):
+    denied = _require_project_owner_response(project_id)
+    if denied is not None:
+        return denied
     payload = request.get_json(silent=True) or {}
     original_filename = (payload.get("original_filename") or payload.get("name") or "").strip()
     file_type = (payload.get("file_type") or payload.get("source") or "").strip()
@@ -1621,6 +2008,7 @@ def api_assignment_project_add_file(project_id: str):
 
 
 @app.post("/api/assignment/projects/upload")
+@economy_auth.login_required
 def api_assignment_project_upload():
     """Create a project and persist uploaded assignment files."""
     note = (request.form.get("note") or request.form.get("lecture_notes") or "").strip()
@@ -1643,7 +2031,7 @@ def api_assignment_project_upload():
     try:
         session_uid = economy_auth.current_user_id()
         bundle = project_service.create_project(
-            user_id=str(session_uid) if session_uid is not None else None,
+            user_id=str(session_uid),
             title=title,
             deadline=deadline,
             note=note or None,
@@ -2272,6 +2660,7 @@ def api_browser_stealthwriter_check_login():
 
 
 @app.post("/api/browser/providers/stealthwriter/humanize")
+@economy_auth.email_verified_required
 def api_browser_stealthwriter_humanize():
     """Humanize via the production job engine (retries, timeout, recovery, logs).
 
@@ -2283,6 +2672,13 @@ def api_browser_stealthwriter_humanize():
     text = payload.get("text")
     if not isinstance(text, str) or not text.strip():
         return jsonify({"success": False, "error": "text is required"}), 400
+
+    raw_source = str(payload.get("source") or "standalone").strip().lower()
+    dataset_source = (
+        raw_source
+        if raw_source in ("standalone", "workspace_partial", "assignment")
+        else "standalone"
+    )
 
     from services.economy.pricing import FEATURE_COSTS
     from services.economy.site_settings import humanize_credit_cost
@@ -2320,6 +2716,7 @@ def api_browser_stealthwriter_humanize():
             res = job.result or {}
             elapsed = res.get("elapsed_seconds")
             latency_ms = int(float(elapsed) * 1000) if elapsed is not None else None
+            humanized_out = res.get("humanized_text")
             _record_usage_safe(
                 user_id,
                 feature=FEATURE_HUMANIZER,
@@ -2334,10 +2731,21 @@ def api_browser_stealthwriter_humanize():
                 record_humanizer_success()
             except Exception:
                 app.logger.exception("daily_stats humanizer increment failed")
+            try:
+                from services.dataset_logger import log_humanization_event
+
+                log_humanization_event(
+                    user_id,
+                    dataset_source,
+                    text,
+                    humanized_out if isinstance(humanized_out, str) else "",
+                )
+            except Exception:
+                app.logger.exception("dataset_logger stealthwriter hook failed")
             return jsonify(
                 {
                     "success": True,
-                    "humanized_text": res.get("humanized_text"),
+                    "humanized_text": humanized_out,
                     "elapsed_seconds": res.get("elapsed_seconds"),
                     "job_id": job.id,
                     "coins_charged": cost,
@@ -3439,6 +3847,7 @@ def api_assignment_project_restore_draft(project_id: str):
 
 
 @app.post("/api/humanizer/run")
+@economy_auth.email_verified_required
 def api_humanizer_run():
     """Humanize via StealthWriter browser automation (legacy alias for the humanizer page)."""
     return api_browser_stealthwriter_humanize()
@@ -3464,6 +3873,7 @@ def _detect_number(container: dict, *keys) -> float | int | None:
 
 
 @app.post("/api/workspace/detect")
+@economy_auth.email_verified_required
 def api_workspace_detect():
     """Run the existing ZeroGPT AI detector on editor text and return spans.
 
@@ -3518,6 +3928,22 @@ def api_workspace_detect():
         request_id=None,
     )
 
+    # Passive detector corpus: AI > 20% with sentence-level highlights.
+    try:
+        if float(ai_percentage) > 20.0 and flagged:
+            from services.dataset_logger import infer_human_segments, log_detection_event
+
+            log_detection_event(
+                user_id,
+                text,
+                float(ai_percentage),
+                flagged,
+                infer_human_segments(text, flagged),
+                "auto_report_over_20",
+            )
+    except Exception:
+        app.logger.exception("dataset_logger workspace detect hook failed")
+
     return jsonify(
         {
             "ai_percentage": round(float(ai_percentage), 1),
@@ -3534,6 +3960,7 @@ def api_workspace_detect():
 
 
 @app.post("/api/workspace/citations/search")
+@economy_auth.email_verified_required
 def api_workspace_citations_search():
     """Search scholarly works via the CitationService (Crossref provider).
 
@@ -3541,17 +3968,6 @@ def api_workspace_citations_search():
     fields — only normalized works plus formatted in-text/reference strings.
     Search itself is free; inserting a citation charges via ``/citations/use``.
     """
-    from services.economy import auth as economy_auth
-
-    if economy_auth.current_user() is None:
-        return jsonify(
-            {
-                "success": False,
-                "error": "AUTH_REQUIRED",
-                "message": "Please sign in to continue.",
-            }
-        ), 401
-
     payload = request.get_json(silent=True) or {}
     query = str(payload.get("query") or "").strip()
     style = str(payload.get("style") or "APA 7").strip()
@@ -3572,6 +3988,7 @@ def api_workspace_citations_search():
 
 
 @app.post("/api/workspace/citations/use")
+@economy_auth.email_verified_required
 def api_workspace_citations_use():
     """Charge 2 credits when a citation is inserted / reference added."""
     payload = request.get_json(silent=True) or {}
@@ -3671,6 +4088,26 @@ def api_assignment_humanizer_advance(project_id: str):
         return jsonify({"error": "Humanizer session not found"}), 404
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 502
+    try:
+        from services.dataset_logger import log_humanization_event
+
+        uid = economy_auth.current_user_id()
+        completed = list(getattr(session, "completed_paragraph_ids", None) or [])
+        if uid and completed:
+            last_id = completed[-1]
+            try:
+                para = session.paragraph_by_id(last_id)
+            except KeyError:
+                para = None
+            if para is not None:
+                log_humanization_event(
+                    int(uid),
+                    "assignment",
+                    getattr(para, "original_text", None),
+                    getattr(para, "humanized_text", None),
+                )
+    except Exception:
+        app.logger.exception("dataset_logger assignment hook failed")
     return jsonify(session.to_dict())
 
 
@@ -4263,6 +4700,7 @@ def api_assignment_stage_run(project_id: str):
 
 
 @app.route("/turnitin")
+@economy_auth.email_verified_required
 def turnitin():
     return render_template(
         "turnitin.html",
@@ -4276,7 +4714,7 @@ def _turnitin_row_api(row: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/api/turnitin/reports")
-@economy_auth.login_required
+@economy_auth.email_verified_required
 def api_turnitin_reports():
     user_id = economy_auth.current_user_id()
     rows = turnitin_service.store.list_for_user(user_id)
@@ -4284,7 +4722,7 @@ def api_turnitin_reports():
 
 
 @app.get("/api/turnitin/submissions/<submission_id>")
-@economy_auth.login_required
+@economy_auth.email_verified_required
 def api_turnitin_submission(submission_id: str):
     user_id = economy_auth.current_user_id()
     row = turnitin_service.store.get_for_user(submission_id, user_id)
@@ -4294,7 +4732,7 @@ def api_turnitin_submission(submission_id: str):
 
 
 @app.delete("/api/turnitin/submissions/<submission_id>")
-@economy_auth.login_required
+@economy_auth.email_verified_required
 def api_turnitin_delete(submission_id: str):
     user_id = economy_auth.current_user_id()
     if not turnitin_service.store.delete_for_user(submission_id, user_id):
@@ -4303,7 +4741,7 @@ def api_turnitin_delete(submission_id: str):
 
 
 @app.post("/api/turnitin/submissions/<submission_id>/highlights")
-@economy_auth.login_required
+@economy_auth.email_verified_required
 def api_turnitin_request_highlights(submission_id: str):
     """Queue a PlagDetect AI Highlights job (optional, user-initiated)."""
     user_id = economy_auth.current_user_id()
@@ -4377,7 +4815,7 @@ def api_turnitin_request_highlights(submission_id: str):
 
 
 @app.post("/api/turnitin/submissions/<submission_id>/fetch-reports")
-@economy_auth.login_required
+@economy_auth.email_verified_required
 def api_turnitin_fetch_reports(submission_id: str):
     """Re-download missing Similarity / AI / Highlights PDFs from PlagDetect."""
     user_id = economy_auth.current_user_id()
@@ -4445,7 +4883,7 @@ def api_turnitin_fetch_reports(submission_id: str):
 
 
 @app.get("/api/turnitin/submissions/<submission_id>/report/<kind>")
-@economy_auth.login_required
+@economy_auth.email_verified_required
 def api_turnitin_report_download(submission_id: str, kind: str):
     from services.turnitin_service.store import resolve_report_path
 
@@ -4469,7 +4907,7 @@ def api_turnitin_report_download(submission_id: str, kind: str):
 
 
 @app.post("/api/turnitin/check")
-@economy_auth.login_required
+@economy_auth.email_verified_required
 def api_turnitin_check():
     """Upload a document, charge coins, and queue a PlagDetect browser job."""
     user_id = economy_auth.current_user_id()

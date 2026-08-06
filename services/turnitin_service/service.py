@@ -28,6 +28,63 @@ class TurnitinService:
         dest.mkdir(parents=True, exist_ok=True)
         return dest
 
+    def _extract_upload_text(self, row: dict[str, Any]) -> str:
+        """Best-effort plain text from the stored Turnitin upload (raw for ML)."""
+        upload_path = (row.get("upload_path") or "").strip()
+        if not upload_path:
+            return ""
+        path = Path(upload_path)
+        if not path.is_file():
+            return ""
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return ""
+        # Plain text files
+        suffix = path.suffix.lower()
+        if suffix in {".txt", ".md"}:
+            try:
+                return data.decode("utf-8", errors="replace")
+            except Exception:  # noqa: BLE001
+                return ""
+        try:
+            from formatter.document_io import extract_text_from_document_bytes
+
+            return extract_text_from_document_bytes(data, filename=path.name) or ""
+        except Exception:  # noqa: BLE001
+            try:
+                return data.decode("utf-8", errors="replace")
+            except Exception:  # noqa: BLE001
+                return ""
+
+    def _log_detector_sample(
+        self,
+        *,
+        user_id: int | None,
+        row: dict[str, Any],
+        ai_percentage: float | int | None,
+        capture_type: str,
+        ai_segments: list[Any] | None = None,
+        human_segments: list[Any] | None = None,
+    ) -> None:
+        try:
+            from services.dataset_logger import log_detection_event
+
+            full_text = self._extract_upload_text(row)
+            if not full_text.strip():
+                # Still record a stub so we keep the score even if extraction fails.
+                full_text = f"[turnitin_submission:{row.get('id')}|file:{row.get('filename')}]"
+            log_detection_event(
+                user_id,
+                full_text,
+                ai_percentage,
+                ai_segments or [],
+                human_segments or [],
+                capture_type,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
     def to_api_row(self, row: dict[str, Any]) -> dict[str, Any]:
         meta = row.get("meta") or {}
         ai_display = meta.get("ai_score_display")
@@ -121,6 +178,7 @@ class TurnitinService:
                     record_turnitin_success()
                 except Exception:  # noqa: BLE001
                     pass
+
                 # If scores landed but PDFs did not, queue a follow-up download.
                 need_sim = not res.get("similarity_report_path")
                 need_ai = not res.get("ai_report_path")
@@ -213,6 +271,23 @@ class TurnitinService:
                     ai_highlights_report_path=res.get("ai_highlights_report_path"),
                     meta_json=json.dumps(meta),
                 )
+                try:
+                    updated = self.store.get(submission_id) or row
+                    hl_pct = res.get("ai_highlights")
+                    if hl_pct is None:
+                        hl_pct = updated.get("ai_highlights")
+                    if hl_pct is None:
+                        hl_pct = updated.get("ai_score")
+                    self._log_detector_sample(
+                        user_id=updated.get("user_id"),
+                        row=updated,
+                        ai_percentage=hl_pct,
+                        capture_type="manual_highlights",
+                        ai_segments=[],
+                        human_segments=[],
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
                 return
 
             message = job.error or job.error_code or "Highlights failed"

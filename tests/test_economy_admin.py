@@ -105,6 +105,32 @@ def test_cannot_remove_last_admin(fresh_db):
         fresh_db.set_admin(admin["id"], is_admin=False, actor_id=admin["id"])
 
 
+def test_delete_user(fresh_db):
+    admin = _make_admin()
+    user = auth.create_user("gone@example.com", "secret123", name="Gone")
+    uid = user["id"]
+    result = fresh_db.delete_user(uid, actor_id=admin["id"])
+    assert result["deleted"] is True
+    assert result["email"] == "gone@example.com"
+    assert auth.get_user(uid) is None
+    assert fresh_db.list_users()["total"] == 1
+
+
+def test_cannot_delete_self(fresh_db):
+    admin = _make_admin()
+    with pytest.raises(AdminError):
+        fresh_db.delete_user(admin["id"], actor_id=admin["id"])
+
+
+def test_cannot_delete_last_admin(fresh_db):
+    admin = _make_admin()
+    other = auth.create_user("other@example.com", "secret123")
+    # Promote other then try deleting the only remaining path:
+    # deleting admin while they are sole admin fails.
+    with pytest.raises(AdminError):
+        fresh_db.delete_user(admin["id"], actor_id=other["id"])
+
+
 def test_bootstrap_admin_from_env(tmp_path, monkeypatch):
     monkeypatch.setattr(economy_db, "DB_PATH", tmp_path / "economy.db")
     economy_db.init_db()

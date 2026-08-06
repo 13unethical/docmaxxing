@@ -151,6 +151,76 @@ class AdminService:
             "isAdmin": bool(is_admin),
         }
 
+    def delete_user(self, user_id: int, *, actor_id: int) -> dict[str, Any]:
+        """Permanently delete a user and cascaded economy rows."""
+        user_id = int(user_id)
+        actor_id = int(actor_id)
+        if user_id == actor_id:
+            raise AdminError("You cannot delete your own account from the admin panel.")
+
+        with connect() as conn:
+            row = conn.execute(
+                "SELECT id, email, is_admin, avatar_file FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+            if row is None:
+                raise AdminError("User not found.")
+
+            if int(row["is_admin"]):
+                admin_count = conn.execute(
+                    "SELECT COUNT(*) AS c FROM users WHERE is_admin = 1"
+                ).fetchone()["c"]
+                if int(admin_count) <= 1:
+                    raise AdminError("You cannot delete the last admin account.")
+
+            # Referral links are soft FKs (added via ALTER) — clear them first.
+            conn.execute(
+                "UPDATE users SET referrer_id = NULL WHERE referrer_id = ?",
+                (user_id,),
+            )
+            avatar_file = row["avatar_file"] if "avatar_file" in row.keys() else None
+            conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+        self._cleanup_avatar_file(avatar_file)
+        self._cleanup_turnitin_for_user(user_id)
+
+        return {
+            "userId": user_id,
+            "email": row["email"],
+            "deleted": True,
+        }
+
+    @staticmethod
+    def _cleanup_avatar_file(avatar_file: str | None) -> None:
+        if not avatar_file:
+            return
+        try:
+            from pathlib import Path
+
+            repo_root = Path(__file__).resolve().parents[2]
+            # Stored as relative path under static/ (e.g. uploads/avatars/…)
+            path = (repo_root / "static" / str(avatar_file)).resolve()
+            avatars_root = (repo_root / "static" / "uploads" / "avatars").resolve()
+            if path.is_file() and str(path).startswith(str(avatars_root)):
+                path.unlink()
+        except OSError:
+            pass
+
+    @staticmethod
+    def _cleanup_turnitin_for_user(user_id: int) -> None:
+        """Best-effort cleanup of Turnitin rows (separate SQLite DB)."""
+        try:
+            from services.turnitin_service.store import TurnitinStore
+
+            store = TurnitinStore()
+            rows = store.list_for_user(int(user_id), limit=500)
+            for row in rows:
+                sid = row.get("id")
+                if sid:
+                    store.delete_for_user(str(sid), int(user_id))
+        except Exception:  # noqa: BLE001
+            pass
+
     def get_ledger(
         self,
         user_id: int,

@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}Dataset Stats — Admin — DocMaxxing{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v=20260806-dataset3" />
+{% endblock %}
+{% block content %}
+<div class="adm-page" data-adm-dataset-page>
+  <header class="adm-header">
+    <div>
+      <h1 class="adm-title">ML Dataset Stats</h1>
+      <p class="adm-desc">
+        Raw corpora for future fine-tuning (store raw, sanitize on export).
+        <a href="{{ url_for('admin_panel') }}">← Back to Admin Panel</a>
+      </p>
+    </div>
+    <button type="button" class="adm-btn adm-btn--ghost" data-adm-dataset-refresh>Refresh</button>
+  </header>
+
+  <section class="adm-card adm-dataset" aria-labelledby="adm-humanizer-title">
+    <h2 class="adm-section-title" id="adm-humanizer-title">Humanizer Dataset</h2>
+    <p class="adm-status" data-adm-dataset-status role="status" aria-live="polite"></p>
+    <div class="adm-kpi-grid">
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Total Datapoints Collected</p>
+        <p class="adm-kpi-value" data-adm-dataset-total>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Collected from Standalone</p>
+        <p class="adm-kpi-value" data-adm-dataset-standalone>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Collected from Assignments</p>
+        <p class="adm-kpi-value" data-adm-dataset-assignment>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Collected from Workspace</p>
+        <p class="adm-kpi-value" data-adm-dataset-workspace>—</p>
+      </article>
+    </div>
+    <h3 class="adm-section-subtitle">Recent samples</h3>
+    <div class="adm-table-wrap">
+      <table class="adm-table adm-dataset-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Source</th>
+            <th>Original (raw)</th>
+            <th>Humanized (raw)</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody data-adm-humanizer-samples>
+          <tr><td colspan="5" class="adm-muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="adm-card adm-dataset" aria-labelledby="adm-detector-title" style="margin-top:1.25rem">
+    <h2 class="adm-section-title" id="adm-detector-title">AI Detection Dataset</h2>
+    <div class="adm-kpi-grid">
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Total Detection Logs</p>
+        <p class="adm-kpi-value" data-adm-detector-total>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Auto Report (&gt;20%)</p>
+        <p class="adm-kpi-value" data-adm-detector-auto>—</p>
+      </article>
+      <article class="adm-kpi">
+        <p class="adm-kpi-label">Manual Highlights</p>
+        <p class="adm-kpi-value" data-adm-detector-manual>—</p>
+      </article>
+    </div>
+    <h3 class="adm-section-subtitle">Recent samples</h3>
+    <div class="adm-table-wrap">
+      <table class="adm-table adm-dataset-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Type</th>
+            <th>AI %</th>
+            <th>Full text</th>
+            <th>AI / Human segs</th>
+            <th>Created</th>
+          </tr>
+        </thead>
+        <tbody data-adm-detector-samples>
+          <tr><td colspan="6" class="adm-muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var root = document.querySelector("[data-adm-dataset-page]") || document;
+  var els = {
+    status: root.querySelector("[data-adm-dataset-status]"),
+    total: root.querySelector("[data-adm-dataset-total]"),
+    standalone: root.querySelector("[data-adm-dataset-standalone]"),
+    assignment: root.querySelector("[data-adm-dataset-assignment]"),
+    workspace: root.querySelector("[data-adm-dataset-workspace]"),
+    detectorTotal: root.querySelector("[data-adm-detector-total]"),
+    detectorAuto: root.querySelector("[data-adm-detector-auto]"),
+    detectorManual: root.querySelector("[data-adm-detector-manual]"),
+    humanizerSamples: root.querySelector("[data-adm-humanizer-samples]"),
+    detectorSamples: root.querySelector("[data-adm-detector-samples]"),
+    refresh: root.querySelector("[data-adm-dataset-refresh]"),
+  };
+  function setStatus(msg, isErr) {
+    if (!els.status) return;
+    els.status.textContent = msg || "";
+    els.status.classList.toggle("adm-status--err", !!isErr);
+  }
+  function fmt(n) {
+    var v = Number(n);
+    return isNaN(v) ? "—" : Math.round(v).toLocaleString();
+  }
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+  function renderHumanizer(rows) {
+    if (!els.humanizerSamples) return;
+    if (!rows || !rows.length) {
+      els.humanizerSamples.innerHTML = '<tr><td colspan="5" class="adm-muted">No samples yet.</td></tr>';
+      return;
+    }
+    els.humanizerSamples.innerHTML = rows.map(function (r) {
+      return "<tr>"
+        + "<td>" + esc(r.id) + "</td>"
+        + "<td><code>" + esc(r.source) + "</code></td>"
+        + "<td class=\"adm-sample-cell\">" + esc(r.original_preview) + "</td>"
+        + "<td class=\"adm-sample-cell\">" + esc(r.humanized_preview) + "</td>"
+        + "<td>" + esc(r.created_at || "") + "</td>"
+        + "</tr>";
+    }).join("");
+  }
+  function renderDetector(rows) {
+    if (!els.detectorSamples) return;
+    if (!rows || !rows.length) {
+      els.detectorSamples.innerHTML = '<tr><td colspan="6" class="adm-muted">No samples yet.</td></tr>';
+      return;
+    }
+    els.detectorSamples.innerHTML = rows.map(function (r) {
+      var pct = r.ai_percentage == null ? "—" : Number(r.ai_percentage).toFixed(1) + "%";
+      var segs = (r.ai_segments_count || 0) + " / " + (r.human_segments_count || 0);
+      return "<tr>"
+        + "<td>" + esc(r.id) + "</td>"
+        + "<td><code>" + esc(r.capture_type) + "</code></td>"
+        + "<td>" + esc(pct) + "</td>"
+        + "<td class=\"adm-sample-cell\">" + esc(r.full_text_preview) + "</td>"
+        + "<td>" + esc(segs)
+        + (r.ai_segment_preview ? "<div class=\"adm-sample-sub\">" + esc(r.ai_segment_preview) + "</div>" : "")
+        + "</td>"
+        + "<td>" + esc(r.created_at || "") + "</td>"
+        + "</tr>";
+    }).join("");
+  }
+  function load() {
+    setStatus("Loading…");
+    fetch("/api/admin/dataset-stats", { headers: { Accept: "application/json" } })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (r) {
+        if (!r.ok || !r.data || !r.data.success) {
+          setStatus((r.data && r.data.error) || "Failed to load dataset stats.", true);
+          return;
+        }
+        if (els.total) els.total.textContent = fmt(r.data.total);
+        if (els.standalone) els.standalone.textContent = fmt(r.data.standalone);
+        if (els.assignment) els.assignment.textContent = fmt(r.data.assignment);
+        if (els.workspace) els.workspace.textContent = fmt(r.data.workspace_partial);
+        if (els.detectorTotal) els.detectorTotal.textContent = fmt(r.data.detector_total);
+        if (els.detectorAuto) els.detectorAuto.textContent = fmt(r.data.auto_report_over_20);
+        if (els.detectorManual) els.detectorManual.textContent = fmt(r.data.manual_highlights);
+        renderHumanizer(r.data.humanizer_recent);
+        renderDetector(r.data.detector_recent);
+        setStatus("");
+      })
+      .catch(function () { setStatus("Network error.", true); });
+  }
+  if (els.refresh) els.refresh.addEventListener("click", load);
+  load();
+})();
+</script>
+{% endblock %}

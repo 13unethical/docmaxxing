@@ -90,6 +90,15 @@
     autoTime: root.querySelector("[data-adm-auto-time]"),
     autoMin: root.querySelector("[data-adm-auto-min]"),
     discountLive: root.querySelector("[data-adm-discount-live]"),
+    datasetStatus: root.querySelector("[data-adm-dataset-status]"),
+    datasetTotal: root.querySelector("[data-adm-dataset-total]"),
+    datasetStandalone: root.querySelector("[data-adm-dataset-standalone]"),
+    datasetAssignment: root.querySelector("[data-adm-dataset-assignment]"),
+    datasetWorkspace: root.querySelector("[data-adm-dataset-workspace]"),
+    detectorTotal: root.querySelector("[data-adm-detector-total]"),
+    detectorAuto: root.querySelector("[data-adm-detector-auto]"),
+    detectorManual: root.querySelector("[data-adm-detector-manual]"),
+    datasetRefresh: root.querySelector("[data-adm-dataset-refresh]"),
   };
 
   function escapeHtml(str) {
@@ -585,6 +594,61 @@
       });
   }
 
+  function setDatasetStatus(msg, isError) {
+    if (!els.datasetStatus) return;
+    els.datasetStatus.textContent = msg || "";
+    els.datasetStatus.classList.toggle("adm-status--error", !!isError);
+  }
+
+  function loadDatasetStats() {
+    if (!els.datasetTotal && !els.datasetStatus) return;
+    setDatasetStatus("Loading dataset stats…");
+    return fetch("/api/admin/dataset-stats", { headers: { Accept: "application/json" } })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (data) {
+            return { ok: res.ok, status: res.status, data: data };
+          });
+      })
+      .then(function (r) {
+        if (r.status === 401 || r.status === 403) {
+          setDatasetStatus("Admin access required.", true);
+          return;
+        }
+        if (!r.ok || !r.data || !r.data.success) {
+          setDatasetStatus((r.data && r.data.error) || "Failed to load dataset stats.", true);
+          return;
+        }
+        if (els.datasetTotal) els.datasetTotal.textContent = formatNumber(r.data.total);
+        if (els.datasetStandalone) {
+          els.datasetStandalone.textContent = formatNumber(r.data.standalone);
+        }
+        if (els.datasetAssignment) {
+          els.datasetAssignment.textContent = formatNumber(r.data.assignment);
+        }
+        if (els.datasetWorkspace) {
+          els.datasetWorkspace.textContent = formatNumber(r.data.workspace_partial);
+        }
+        if (els.detectorTotal) {
+          els.detectorTotal.textContent = formatNumber(r.data.detector_total);
+        }
+        if (els.detectorAuto) {
+          els.detectorAuto.textContent = formatNumber(r.data.auto_report_over_20);
+        }
+        if (els.detectorManual) {
+          els.detectorManual.textContent = formatNumber(r.data.manual_highlights);
+        }
+        setDatasetStatus("");
+      })
+      .catch(function () {
+        setDatasetStatus("Network error loading dataset stats.", true);
+      });
+  }
+
   function setStatus(msg, isError) {
     if (!els.status) return;
     els.status.textContent = msg || "";
@@ -666,6 +730,13 @@
           '<button type="button" class="adm-btn adm-btn--usage" data-adm-usage="' +
           user.id +
           '">Usage</button>' +
+          '<button type="button" class="adm-btn adm-btn--delete" data-adm-delete="' +
+          user.id +
+          '" data-adm-delete-email="' +
+          escapeHtml(user.email) +
+          '"' +
+          (saving ? " disabled" : "") +
+          ">Delete</button>" +
           (user.isAdmin
             ? '<span class="adm-badge adm-badge--admin">Admin</span>'
             : '<span class="adm-badge adm-badge--user">User</span>') +
@@ -1124,6 +1195,60 @@
       });
   }
 
+  function deleteUser(userId, email) {
+    var label = email || ("#" + userId);
+    if (
+      !window.confirm(
+        "Delete account " +
+          label +
+          " permanently?\n\nThis removes their wallet, ledger, and purchases. This cannot be undone."
+      )
+    ) {
+      return;
+    }
+    state.saving[userId] = true;
+    renderTable();
+    setStatus("Deleting user #" + userId + "…");
+
+    fetch("/api/admin/users/" + userId + "/delete", {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: "{}",
+    })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (data) {
+            return { ok: res.ok, data: data };
+          });
+      })
+      .then(function (r) {
+        delete state.saving[userId];
+        if (!r.ok || !r.data || !r.data.success) {
+          setStatus((r.data && r.data.error) || "Could not delete user.", true);
+          renderTable();
+          return;
+        }
+        state.users = state.users.filter(function (u) {
+          return u.id !== userId;
+        });
+        state.total = Math.max(0, (state.total || 0) - 1);
+        if (state.ledgerUser && state.ledgerUser.id === userId) {
+          closeLedger();
+        }
+        renderTable();
+        setStatus("Deleted " + (r.data.email || "user #" + userId) + ".");
+      })
+      .catch(function () {
+        delete state.saving[userId];
+        setStatus("Network error while deleting user.", true);
+        renderTable();
+      });
+  }
+
   if (els.search) {
     var searchTimer = null;
     els.search.addEventListener("input", function () {
@@ -1178,6 +1303,15 @@
         if (usageUserId) {
           openUsage(usageUserId);
         }
+        return;
+      }
+      var deleteBtn = e.target.closest("[data-adm-delete]");
+      if (deleteBtn) {
+        var deleteUserId = parseInt(deleteBtn.getAttribute("data-adm-delete"), 10);
+        var deleteEmail = deleteBtn.getAttribute("data-adm-delete-email") || "";
+        if (deleteUserId) {
+          deleteUser(deleteUserId, deleteEmail);
+        }
       }
     });
   }
@@ -1231,6 +1365,12 @@
     });
   }
 
+  if (els.datasetRefresh) {
+    els.datasetRefresh.addEventListener("click", function () {
+      loadDatasetStats();
+    });
+  }
+
   if (els.todayRefresh) {
     els.todayRefresh.addEventListener("click", function () {
       loadTodayUsage();
@@ -1269,6 +1409,7 @@
 
   loadTodayUsage();
   loadAnalytics();
+  loadDatasetStats();
   loadWithdrawals();
   loadUsers();
 })();

@@ -92,7 +92,7 @@ PIPELINE_STAGE_SPECS: tuple[StageSpec, ...] = (
     StageSpec(
         PipelineStage.HUMANIZATION,
         "Humanization",
-        "Refine voice with StealthWriter Legacy 5.1.",
+        "Refine voice with StealthWriter Legacy 5.1 at rewrite level 10.",
         StageProvider.HUMANIZER,
         10,
     ),
@@ -127,8 +127,8 @@ PIPELINE_STAGE_SPECS: tuple[StageSpec, ...] = (
     StageSpec(
         PipelineStage.AI_DETECTION,
         "AI Detection",
-        "ZeroGPT Business AI detection before delivery.",
-        StageProvider.ZEROGPT,
+        "Skipped — ZeroGPT assignment gate disabled.",
+        StageProvider.INTERNAL,
         15,
     ),
     StageSpec(

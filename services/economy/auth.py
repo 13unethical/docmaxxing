@@ -1,26 +1,32 @@
 """Account creation, credentials and Flask session helpers.
 
 Email + password auth backed by the economy SQLite DB. Passwords are hashed
-with Werkzeug (ships with Flask). New accounts receive a welcome coin bonus.
+with Werkzeug (ships with Flask). New accounts may receive a welcome credit
+bonus subject to soft IP / device fingerprint anti-abuse limits.
 """
 
 from __future__ import annotations
 
 import functools
 import os
+import re
 import sqlite3
+from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from flask import g, jsonify, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .db import connect
+from .disposable_email import DisposableEmailError, assert_not_disposable
+from .email_verify import OTP_TTL_MINUTES, generate_otp_code
 from .pricing import WELCOME_BONUS
 from .wallet import WalletService
 
 _wallet = WalletService()
 
 SESSION_KEY = "user_id"
+_FINGERPRINT_RE = re.compile(r"^[a-fA-F0-9]{16,128}$")
 
 
 class AuthError(Exception):
@@ -29,6 +35,10 @@ class AuthError(Exception):
 
 class DuplicateEmail(AuthError):
     """Raised when registering an email that already exists."""
+
+
+class EmailNotVerified(AuthError):
+    """Raised when a verified email is required."""
 
 
 def _row_to_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -42,6 +52,13 @@ def _row_to_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "name": row["name"],
         "created_at": row["created_at"],
         "is_admin": is_admin,
+        "is_verified": bool(row["is_verified"]) if "is_verified" in keys else False,
+        "ip_address": row["ip_address"] if "ip_address" in keys else None,
+        "device_fingerprint": row["device_fingerprint"] if "device_fingerprint" in keys else None,
+        "avatar_file": row["avatar_file"] if "avatar_file" in keys else None,
+        "welcome_bonus_granted": bool(row["welcome_bonus_granted"])
+        if "welcome_bonus_granted" in keys
+        else False,
         "referral_code": row["referral_code"] if "referral_code" in keys else None,
         "referrer_id": int(row["referrer_id"]) if "referrer_id" in keys and row["referrer_id"] is not None else None,
         "referral_balance_usd": float(row["referral_balance_usd"] or 0) if "referral_balance_usd" in keys else 0.0,
@@ -60,14 +77,66 @@ def is_bootstrap_admin_email(email: str) -> bool:
     return bool(configured) and normalize_email(email) == configured
 
 
+def normalize_fingerprint(raw: str | None) -> str | None:
+    text = (raw or "").strip()
+    if not text or not _FINGERPRINT_RE.match(text):
+        return None
+    return text.lower()
+
+
+def client_ip_from_request() -> str | None:
+    """Best-effort client IP (honours first X-Forwarded-For hop when present)."""
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    if forwarded:
+        return forwarded[:64]
+    addr = (request.remote_addr or "").strip()
+    return addr[:64] if addr else None
+
+
+def fingerprint_already_bonus(fingerprint: str | None) -> bool:
+    if not fingerprint:
+        return False
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM users "
+            "WHERE device_fingerprint = ? AND welcome_bonus_granted = 1 "
+            "LIMIT 1",
+            (fingerprint,),
+        ).fetchone()
+    return row is not None
+
+
+def should_grant_welcome_bonus(
+    *,
+    ip_address: str | None = None,
+    device_fingerprint: str | None,
+) -> bool:
+    """Soft anti-abuse: deny welcome bonus only when this device already got one.
+
+    ``ip_address`` is still recorded on the user row for analytics/logs, but it
+    never gates the welcome bonus — shared campus/dorm Wi‑Fi must not block students.
+    """
+    _ = ip_address
+    if WELCOME_BONUS <= 0:
+        return False
+    if fingerprint_already_bonus(device_fingerprint):
+        return False
+    return True
+
+
 def create_user(
     email: str,
     password: str,
     *,
     name: str | None = None,
     referral_code: str | None = None,
+    ip_address: str | None = None,
+    device_fingerprint: str | None = None,
 ) -> dict[str, Any]:
-    """Create a user, wallet and welcome bonus. Raises on bad input/dupes."""
+    """Create a user, wallet and (optionally) welcome bonus.
+
+    Raises AuthError / DuplicateEmail / DisposableEmailError on bad input.
+    """
     from .referral import (
         REFERRAL_SIGNUP_BONUS,
         _generate_code,
@@ -77,12 +146,20 @@ def create_user(
     email = normalize_email(email)
     if not email or "@" not in email:
         raise AuthError("A valid email is required.")
+    assert_not_disposable(email)
     if not password or len(password) < 6:
         raise AuthError("Password must be at least 6 characters.")
 
     password_hash = generate_password_hash(password)
     is_admin = 1 if is_bootstrap_admin_email(email) else 0
+    # Bootstrap admin is treated as verified.
+    is_verified = 1 if is_admin else 0
     referrer_id = lookup_referrer_id(referral_code)
+    fingerprint = normalize_fingerprint(device_fingerprint)
+    ip = (ip_address or "").strip()[:64] or None
+    grant_welcome = should_grant_welcome_bonus(
+        ip_address=ip, device_fingerprint=fingerprint
+    )
 
     with connect() as conn:
         exists = conn.execute(
@@ -91,29 +168,37 @@ def create_user(
         if exists:
             raise DuplicateEmail("An account with this email already exists.")
         own_code = _generate_code(conn)
-        # Prevent self-referral via own code (impossible for new user) and ignore invalid codes silently.
-        if referrer_id is not None:
-            # referrer_id already validated by lookup
-            pass
         cur = conn.execute(
             "INSERT INTO users "
-            "(email, name, password_hash, is_admin, referral_code, referrer_id) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "(email, name, password_hash, is_admin, is_verified, "
+            " referral_code, referrer_id, ip_address, device_fingerprint, "
+            " welcome_bonus_granted) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 email,
                 (name or "").strip() or None,
                 password_hash,
                 is_admin,
+                is_verified,
                 own_code,
                 referrer_id,
+                ip,
+                fingerprint,
+                1 if grant_welcome else 0,
             ),
         )
         user_id = int(cur.lastrowid)
 
     _wallet.ensure_wallet(user_id)
-    if WELCOME_BONUS > 0:
-        _wallet.credit(user_id, WELCOME_BONUS, "welcome_bonus")
+    if grant_welcome and WELCOME_BONUS > 0:
+        _wallet.credit(
+            user_id,
+            WELCOME_BONUS,
+            "welcome_bonus",
+            meta={"ip": ip, "fingerprint": fingerprint},
+        )
     if referrer_id is not None and REFERRAL_SIGNUP_BONUS > 0:
+        # Referral signup bonus still applies (separate from welcome anti-abuse).
         _wallet.credit(
             user_id,
             REFERRAL_SIGNUP_BONUS,
@@ -127,7 +212,134 @@ def create_user(
         "name": (name or "").strip() or None,
         "referral_code": own_code,
         "referrer_id": referrer_id,
+        "is_verified": bool(is_verified),
+        "welcome_bonus_granted": bool(grant_welcome),
+        "avatar_file": None,
     }
+
+
+def mark_email_verified(user_id: int, email: str | None = None) -> dict[str, Any]:
+    """Mark the account verified and clear any pending OTP."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE id = ?", (int(user_id),)
+        ).fetchone()
+        if row is None:
+            raise AuthError("User not found.")
+        if email is not None and normalize_email(row["email"]) != normalize_email(email):
+            raise AuthError("Verification does not match this account.")
+        conn.execute(
+            "UPDATE users SET is_verified = 1, "
+            "verification_code = NULL, verification_code_expires = NULL "
+            "WHERE id = ?",
+            (int(user_id),),
+        )
+    try:
+        g._economy_user = None
+    except RuntimeError:
+        pass
+    user = get_user(user_id)
+    if user is None:
+        raise AuthError("User not found.")
+    return user
+
+
+def issue_verification_otp(user_id: int) -> str:
+    """Create a fresh 6-digit OTP (15 min TTL) and persist it on the user row."""
+    code = generate_otp_code()
+    expires = datetime.utcnow() + timedelta(minutes=OTP_TTL_MINUTES)
+    expires_iso = expires.strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM users WHERE id = ?", (int(user_id),)
+        ).fetchone()
+        if row is None:
+            raise AuthError("User not found.")
+        conn.execute(
+            "UPDATE users SET verification_code = ?, verification_code_expires = ? "
+            "WHERE id = ?",
+            (code, expires_iso, int(user_id)),
+        )
+    try:
+        g._economy_user = None
+    except RuntimeError:
+        pass
+    return code
+
+
+def _parse_utc_naive(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip().replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text[:26], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def verify_email_otp(user_id: int, code: str) -> dict[str, Any]:
+    """Validate a submitted OTP and mark the user verified on success."""
+    cleaned = re.sub(r"\D", "", (code or "").strip())
+    if len(cleaned) != 6:
+        raise AuthError("Enter the 6-digit code from your email.")
+
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id, email, is_verified, verification_code, verification_code_expires "
+            "FROM users WHERE id = ?",
+            (int(user_id),),
+        ).fetchone()
+        if row is None:
+            raise AuthError("User not found.")
+        if bool(row["is_verified"]):
+            return get_user(int(user_id))  # type: ignore[return-value]
+
+        stored = (row["verification_code"] or "").strip()
+        if not stored:
+            raise AuthError("No verification code on file. Please request a new one.")
+        if stored != cleaned:
+            raise AuthError("Incorrect code. Please try again.")
+
+        expires = _parse_utc_naive(row["verification_code_expires"])
+        if expires is None or datetime.utcnow() > expires:
+            raise AuthError("This code has expired. Please request a new one.")
+
+        conn.execute(
+            "UPDATE users SET is_verified = 1, "
+            "verification_code = NULL, verification_code_expires = NULL "
+            "WHERE id = ?",
+            (int(user_id),),
+        )
+
+    try:
+        g._economy_user = None
+    except RuntimeError:
+        pass
+    user = get_user(user_id)
+    if user is None:
+        raise AuthError("User not found.")
+    return user
+
+
+def set_avatar_file(user_id: int, filename: str | None) -> dict[str, Any]:
+    with connect() as conn:
+        row = conn.execute("SELECT id FROM users WHERE id = ?", (int(user_id),)).fetchone()
+        if row is None:
+            raise AuthError("User not found.")
+        conn.execute(
+            "UPDATE users SET avatar_file = ? WHERE id = ?",
+            ((filename or None), int(user_id)),
+        )
+    try:
+        g._economy_user = None
+    except RuntimeError:
+        pass
+    user = get_user(user_id)
+    if user is None:
+        raise AuthError("User not found.")
+    return user
 
 
 def verify_credentials(email: str, password: str) -> dict[str, Any] | None:
@@ -189,7 +401,6 @@ def update_profile(user_id: int, *, name: str | None = None) -> dict[str, Any]:
         if row is None:
             raise AuthError("User not found.")
         conn.execute("UPDATE users SET name = ? WHERE id = ?", (cleaned, user_id))
-    # Bust request cache if present (inside a Flask request).
     try:
         cached = getattr(g, "_economy_user", None)
         if cached and cached.get("id") == user_id:
@@ -292,6 +503,58 @@ def login_required(view: Callable) -> Callable:
                     401,
                 )
             return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def user_email_verified(user: dict[str, Any] | None) -> bool:
+    """Strict check — only explicit True counts as verified."""
+    if not user:
+        return False
+    return user.get("is_verified") is True
+
+
+def email_verification_gate():
+    """Return a Flask response if login/verify is required; else None."""
+    user = current_user()
+    if user is None:
+        if _wants_json():
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "AUTH_REQUIRED",
+                        "message": "Please sign in to continue.",
+                    }
+                ),
+                401,
+            )
+        return redirect(url_for("login", next=request.path))
+    if not user_email_verified(user):
+        if _wants_json():
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "EMAIL_NOT_VERIFIED",
+                        "message": "Please verify your email before continuing.",
+                    }
+                ),
+                403,
+            )
+        return redirect(url_for("verify_email_code"))
+    return None
+
+
+def email_verified_required(view: Callable) -> Callable:
+    """Require login + verified email (Workspace and paid tools)."""
+
+    @functools.wraps(view)
+    def wrapped(*args: Any, **kwargs: Any):
+        blocked = email_verification_gate()
+        if blocked is not None:
+            return blocked
         return view(*args, **kwargs)
 
     return wrapped

@@ -30,9 +30,43 @@
         </div>
         <div>
           <dt>Email</dt>
-          <dd>{{ current_user.email }}</dd>
+          <dd>
+            {{ current_user.email }}
+            {% if current_user.is_verified %}
+            <span class="acct-badge">Verified</span>
+            {% else %}
+            <span class="acct-badge acct-badge--warn">Unverified</span>
+            <a href="{{ url_for('verify_email_code') }}">Verify now</a>
+            {% endif %}
+          </dd>
         </div>
       </dl>
+
+      <div class="acct-avatar-block">
+        {% if current_user.avatar_file %}
+        <img
+          class="acct-avatar-img"
+          src="{{ url_for('static', filename=current_user.avatar_file) }}"
+          alt="Avatar"
+          width="72"
+          height="72"
+        />
+        {% endif %}
+        <form
+          class="acct-form"
+          action="{{ url_for('api_upload_avatar') }}"
+          method="post"
+          enctype="multipart/form-data"
+          data-avatar-form
+        >
+          <label class="acct-field">
+            <span class="acct-label">Avatar (PNG/JPG/WebP, max 2 MB)</span>
+            <input type="file" name="avatar" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" required />
+          </label>
+          <button type="submit" class="acct-btn">Upload avatar</button>
+          <p class="acct-hint" data-avatar-status hidden></p>
+        </form>
+      </div>
 
       <form method="post" action="{{ url_for('account') }}" class="acct-form">
         <input type="hidden" name="action" value="profile" />
@@ -72,4 +106,34 @@
     </section>
   </div>
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var form = document.querySelector("[data-avatar-form]");
+  if (!form) return;
+  var status = form.querySelector("[data-avatar-status]");
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var fd = new FormData(form);
+    if (status) {
+      status.hidden = false;
+      status.textContent = "Uploading…";
+    }
+    fetch(form.action, { method: "POST", body: fd, credentials: "same-origin" })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok) {
+          if (status) status.textContent = (res.d && res.d.error) || "Upload failed";
+          return;
+        }
+        if (status) status.textContent = "Avatar updated.";
+        window.location.reload();
+      })
+      .catch(function () {
+        if (status) status.textContent = "Network error";
+      });
+  });
+})();
+</script>
 {% endblock %}

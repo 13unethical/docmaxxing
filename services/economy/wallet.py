@@ -26,7 +26,7 @@ class InsufficientCoins(WalletError):
         self.required = int(required)
         self.balance = int(balance)
         super().__init__(
-            f"Insufficient coins: need {self.required}, have {self.balance}"
+            f"Insufficient credits: need {self.required}, have {self.balance}"
         )
 
 
@@ -80,21 +80,35 @@ class WalletService:
         delta = signed_credits(kind=kind, amount=amount)
         tx_type, reference_type = classify_transaction(kind=kind, feature=feature)
         with connect() as conn:
-            # Immediate lock so concurrent debits can't race the balance read.
+            # Immediate write lock — concurrent debit/credit cannot race.
             conn.execute("BEGIN IMMEDIATE")
             self._ensure_wallet(conn, user_id)
             row = conn.execute(
                 "SELECT balance FROM wallets WHERE user_id = ?", (user_id,)
             ).fetchone()
             balance_before = int(row["balance"]) if row else 0
-            balance_after = balance_before + delta
-            if balance_after < 0:
-                raise InsufficientCoins(required=amount, balance=balance_before)
-            conn.execute(
-                "UPDATE wallets SET balance = ?, updated_at = datetime('now') "
-                "WHERE user_id = ?",
-                (balance_after, user_id),
-            )
+
+            if kind == "debit":
+                # Atomic conditional debit — prevents TOCTOU under concurrency.
+                cur = conn.execute(
+                    "UPDATE wallets SET balance = balance - ?, "
+                    "updated_at = datetime('now') "
+                    "WHERE user_id = ? AND balance >= ?",
+                    (amount, user_id, amount),
+                )
+                if cur.rowcount != 1:
+                    raise InsufficientCoins(required=amount, balance=balance_before)
+                balance_after = balance_before - amount
+            else:
+                balance_after = balance_before + delta
+                if balance_after < 0:
+                    raise InsufficientCoins(required=amount, balance=balance_before)
+                conn.execute(
+                    "UPDATE wallets SET balance = ?, updated_at = datetime('now') "
+                    "WHERE user_id = ?",
+                    (balance_after, user_id),
+                )
+
             cur = conn.execute(
                 "INSERT INTO transactions "
                 "(user_id, kind, feature, amount, balance_before, balance_after, "

@@ -5,15 +5,16 @@
         <div class="card auth-card">
           <h1 class="auth-title">Create your account</h1>
           <p class="auth-sub">
-            {% if welcome_bonus %}Get <strong>{{ welcome_bonus }} welcome coins</strong> to try Workspace tools.{% else %}Start using DocMaxxing.{% endif %}
+            {% if welcome_bonus %}Get up to <strong>{{ welcome_bonus }} welcome credits</strong> after you verify your email.{% else %}Start using DocMaxxing.{% endif %}
           </p>
 
           {% if error %}
           <p class="auth-error" role="alert">{{ error }}</p>
           {% endif %}
 
-          <form method="post" action="{{ url_for('register') }}" class="auth-form">
+          <form method="post" action="{{ url_for('register') }}" class="auth-form" data-dm-register-form>
             <input type="hidden" name="referral_code" value="{{ referral_code or '' }}" />
+            <input type="hidden" name="device_fingerprint" value="" data-dm-fingerprint />
             <label class="auth-field">
               <span class="auth-label">Name <span class="auth-optional">(optional)</span></span>
               <input type="text" name="name" autocomplete="name"
@@ -29,10 +30,42 @@
               <input type="password" name="password" required autocomplete="new-password"
                      minlength="6" placeholder="At least 6 characters" />
             </label>
+            <label class="auth-field">
+              <span class="auth-label">Confirm password</span>
+              <input type="password" name="password_confirm" required autocomplete="new-password"
+                     minlength="6" placeholder="Repeat your password" />
+            </label>
             <button type="submit" class="cta auth-submit">Create account</button>
           </form>
 
           <p class="auth-alt">Already have an account? <a href="{{ url_for('login') }}">Sign in</a></p>
         </div>
       </section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var fp = document.querySelector("[data-dm-fingerprint]");
+    if (fp && window.DMDeviceFingerprint) {
+      window.DMDeviceFingerprint().then(function (id) { fp.value = id || ""; });
+    }
+    var form = document.querySelector("[data-dm-register-form]");
+    if (!form) return;
+    form.addEventListener("submit", function (e) {
+      var pass = form.querySelector('input[name="password"]');
+      var confirm = form.querySelector('input[name="password_confirm"]');
+      if (pass && confirm && pass.value !== confirm.value) {
+        e.preventDefault();
+        alert("Passwords do not match.");
+        return;
+      }
+      var btn = form.querySelector('button[type="submit"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "Creating account…";
+      }
+    });
+  });
+</script>
 {% endblock %}

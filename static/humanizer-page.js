@@ -169,7 +169,7 @@
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       credentials: "same-origin",
-      body: JSON.stringify({ text: source }),
+      body: JSON.stringify({ text: source, source: "standalone" }),
     })
       .then(parseApiResponse)
       .then(function (payload) {

@@ -24,7 +24,7 @@ def test_stage_specs_map_providers_for_future_integrations():
     assert providers[PipelineStage.BLUEPRINT] == StageProvider.CLAUDE
     assert providers[PipelineStage.WRITING] == StageProvider.CLAUDE
     assert providers[PipelineStage.HUMANIZATION] == StageProvider.HUMANIZER
-    assert providers[PipelineStage.AI_DETECTION] == StageProvider.ZEROGPT
+    assert providers[PipelineStage.AI_DETECTION] == StageProvider.INTERNAL
     assert providers[PipelineStage.REQUIREMENT_VALIDATION] == StageProvider.GEMINI
     assert providers[PipelineStage.CITATION_GENERATION] == StageProvider.CITATION_ENGINE
     assert providers[PipelineStage.FORMATTING] == StageProvider.FORMAT_ENGINE

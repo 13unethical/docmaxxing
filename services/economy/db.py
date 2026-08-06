@@ -174,6 +174,39 @@ CREATE TABLE IF NOT EXISTS site_settings (
     auto_discount_min_remaining    INTEGER NOT NULL DEFAULT 10,
     updated_at                     TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS humanizer_dataset_logs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source            TEXT NOT NULL,
+    original_text     TEXT NOT NULL,
+    humanized_text    TEXT NOT NULL,
+    final_user_edit   TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_humanizer_dataset_source
+    ON humanizer_dataset_logs(source, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_humanizer_dataset_user
+    ON humanizer_dataset_logs(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS detector_dataset_logs (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    full_text         TEXT NOT NULL,
+    ai_percentage     REAL,
+    ai_segments       TEXT NOT NULL DEFAULT '[]',
+    human_segments    TEXT NOT NULL DEFAULT '[]',
+    capture_type      TEXT NOT NULL,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_detector_dataset_capture
+    ON detector_dataset_logs(capture_type, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_detector_dataset_user
+    ON detector_dataset_logs(user_id, created_at DESC);
 """
 
 
@@ -361,6 +394,115 @@ def _migrate_gumroad_payments(conn: sqlite3.Connection) -> None:
     ensure_gumroad_schema(conn)
 
 
+def _migrate_security_columns(conn: sqlite3.Connection) -> None:
+    """Email verify, anti-abuse fingerprint/IP, avatar path."""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    if not exists:
+        return
+    cols = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(users)").fetchall()
+    }
+    newly_added_verified = "is_verified" not in cols
+    alters = [
+        ("is_verified", "ALTER TABLE users ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0"),
+        ("ip_address", "ALTER TABLE users ADD COLUMN ip_address TEXT"),
+        ("device_fingerprint", "ALTER TABLE users ADD COLUMN device_fingerprint TEXT"),
+        ("avatar_file", "ALTER TABLE users ADD COLUMN avatar_file TEXT"),
+        (
+            "welcome_bonus_granted",
+            "ALTER TABLE users ADD COLUMN welcome_bonus_granted INTEGER NOT NULL DEFAULT 0",
+        ),
+        ("verification_code", "ALTER TABLE users ADD COLUMN verification_code TEXT"),
+        (
+            "verification_code_expires",
+            "ALTER TABLE users ADD COLUMN verification_code_expires TEXT",
+        ),
+    ]
+    for name, sql in alters:
+        if name not in cols:
+            try:
+                conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass
+
+    # First-time rollout: grandfather existing accounts as verified.
+    if newly_added_verified:
+        try:
+            conn.execute("UPDATE users SET is_verified = 1")
+        except sqlite3.OperationalError:
+            pass
+
+    # Grandfather welcome_bonus_granted for accounts that already received the bonus.
+    try:
+        conn.execute(
+            "UPDATE users SET welcome_bonus_granted = 1 "
+            "WHERE id IN ("
+            "  SELECT DISTINCT user_id FROM transactions "
+            "  WHERE feature = 'welcome_bonus' AND kind = 'credit'"
+            ")"
+        )
+    except sqlite3.OperationalError:
+        pass
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_users_ip_address "
+        "ON users(ip_address) WHERE ip_address IS NOT NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_users_device_fingerprint "
+        "ON users(device_fingerprint) WHERE device_fingerprint IS NOT NULL"
+    )
+
+
+def _migrate_humanizer_dataset(conn: sqlite3.Connection) -> None:
+    """ML fine-tuning corpus: humanize pairs + AI detector samples."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS humanizer_dataset_logs (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            source            TEXT NOT NULL,
+            original_text     TEXT NOT NULL,
+            humanized_text    TEXT NOT NULL,
+            final_user_edit   TEXT,
+            created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_humanizer_dataset_source "
+        "ON humanizer_dataset_logs(source, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_humanizer_dataset_user "
+        "ON humanizer_dataset_logs(user_id, created_at DESC)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS detector_dataset_logs (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            full_text         TEXT NOT NULL,
+            ai_percentage     REAL,
+            ai_segments       TEXT NOT NULL DEFAULT '[]',
+            human_segments    TEXT NOT NULL DEFAULT '[]',
+            capture_type      TEXT NOT NULL,
+            created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_detector_dataset_capture "
+        "ON detector_dataset_logs(capture_type, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_detector_dataset_user "
+        "ON detector_dataset_logs(user_id, created_at DESC)"
+    )
+
+
 def init_db() -> None:
     """Create tables/indexes if they do not exist. Safe to call repeatedly."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -382,6 +524,8 @@ def init_db() -> None:
         _migrate_gumroad_payments(conn)
         _migrate_referral_columns(conn)
         _migrate_daily_stats_and_settings(conn)
+        _migrate_security_columns(conn)
+        _migrate_humanizer_dataset(conn)
         # 3) Indexes that depend on migrated columns.
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tx_user_type ON transactions(user_id, type)"
