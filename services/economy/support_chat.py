@@ -1,8 +1,9 @@
 """Two-way support helpdesk backed by SQLite + Telegram Reply.
 
 User messages are stored and forwarded to the admin Telegram chat with a
-strict ``User ID: {id}`` footer so admins can Reply in Telegram and the
-webhook can route the answer back to the correct account.
+strict ``User ID: {id}`` footer. Replies are routed back via:
+1) ``reply_to_message.message_id`` map (preferred), then
+2) parsing ``User ID:`` from the replied-to text.
 """
 
 from __future__ import annotations
@@ -40,7 +41,7 @@ class SupportMessage:
 
 
 def ensure_support_messages_schema(conn: Any) -> None:
-    """Create ``support_messages`` if missing (idempotent)."""
+    """Create ``support_messages`` (+ telegram map) if missing."""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS support_messages (
@@ -55,6 +56,20 @@ def ensure_support_messages_schema(conn: Any) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_support_messages_user_created "
         "ON support_messages(user_id, created_at ASC)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS support_telegram_map (
+            telegram_message_id INTEGER PRIMARY KEY,
+            user_id             INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            support_message_id  INTEGER REFERENCES support_messages(id) ON DELETE SET NULL,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_support_telegram_map_user "
+        "ON support_telegram_map(user_id)"
     )
 
 
@@ -92,6 +107,55 @@ def save_support_message(*, user_id: int, sender: str, message: str) -> SupportM
         message=str(row["message"]),
         created_at=str(row["created_at"]) if row["created_at"] else None,
     )
+
+
+def bind_telegram_message(
+    *,
+    telegram_message_id: int,
+    user_id: int,
+    support_message_id: int | None = None,
+) -> None:
+    """Remember which site user owns an outbound Telegram message_id."""
+    tg_id = int(telegram_message_id)
+    uid = int(user_id)
+    if tg_id < 1 or uid < 1:
+        return
+    with connect() as conn:
+        ensure_support_messages_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO support_telegram_map
+                (telegram_message_id, user_id, support_message_id)
+            VALUES (?, ?, ?)
+            ON CONFLICT(telegram_message_id) DO UPDATE SET
+                user_id = excluded.user_id,
+                support_message_id = COALESCE(
+                    excluded.support_message_id,
+                    support_telegram_map.support_message_id
+                )
+            """,
+            (tg_id, uid, int(support_message_id) if support_message_id else None),
+        )
+
+
+def lookup_user_id_by_telegram_message(telegram_message_id: int | None) -> int | None:
+    if telegram_message_id is None:
+        return None
+    try:
+        tg_id = int(telegram_message_id)
+    except (TypeError, ValueError):
+        return None
+    if tg_id < 1:
+        return None
+    with connect() as conn:
+        ensure_support_messages_schema(conn)
+        row = conn.execute(
+            "SELECT user_id FROM support_telegram_map WHERE telegram_message_id = ?",
+            (tg_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return int(row["user_id"])
 
 
 def list_support_messages(
@@ -164,10 +228,10 @@ def extract_user_id_from_telegram_text(text: str | None) -> int | None:
     """Parse ``User ID: {id}`` from a Telegram message the admin replied to."""
     if not text:
         return None
-    match = USER_ID_FOOTER_RE.search(str(text))
+    raw = str(text).replace("\xa0", " ").strip()
+    match = USER_ID_FOOTER_RE.search(raw)
     if not match:
-        # Fallback: any occurrence (older messages / extra whitespace).
-        loose = re.search(r"User ID:\s*(\d+)", str(text), re.IGNORECASE)
+        loose = re.search(r"User\s*ID\s*[:#]\s*(\d+)", raw, re.IGNORECASE)
         if not loose:
             return None
         match = loose
@@ -178,10 +242,14 @@ def extract_user_id_from_telegram_text(text: str | None) -> int | None:
     return uid if uid > 0 else None
 
 
+def normalize_chat_id(value: Any) -> str:
+    return str(value or "").strip().strip('"').strip("'")
+
+
 def parse_admin_reply_from_update(payload: dict[str, Any]) -> dict[str, Any] | None:
     """Extract admin reply text + target user_id from a Telegram Update.
 
-    Returns ``{"user_id": int, "message": str}`` or ``None`` if not a Reply.
+    Returns ``{"user_id": int, "message": str, "via": str}`` or ``None``.
     """
     if not isinstance(payload, dict):
         return None
@@ -191,11 +259,21 @@ def parse_admin_reply_from_update(payload: dict[str, Any]) -> dict[str, Any] | N
     reply_to = message.get("reply_to_message")
     if not isinstance(reply_to, dict):
         return None
-    reply_text = reply_to.get("text") or reply_to.get("caption") or ""
-    user_id = extract_user_id_from_telegram_text(str(reply_text))
-    if user_id is None:
-        return None
+
     admin_text = (message.get("text") or message.get("caption") or "").strip()
     if not admin_text:
         return None
-    return {"user_id": user_id, "message": admin_text}
+
+    via = ""
+    user_id = lookup_user_id_by_telegram_message(reply_to.get("message_id"))
+    if user_id is not None:
+        via = "telegram_map"
+    else:
+        reply_text = reply_to.get("text") or reply_to.get("caption") or ""
+        user_id = extract_user_id_from_telegram_text(str(reply_text))
+        if user_id is not None:
+            via = "user_id_footer"
+
+    if user_id is None:
+        return None
+    return {"user_id": int(user_id), "message": admin_text, "via": via}

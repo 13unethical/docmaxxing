@@ -77,8 +77,24 @@ def test_parse_admin_reply_from_update():
         }
     }
     parsed = parse_admin_reply_from_update(payload)
-    assert parsed == {"user_id": 15, "message": "Sure, refunding now."}
+    assert parsed == {"user_id": 15, "message": "Sure, refunding now.", "via": "user_id_footer"}
     assert parse_admin_reply_from_update({"message": {"text": "no reply"}}) is None
+
+
+def test_parse_admin_reply_via_telegram_map(economy_db):
+    from services.economy.support_chat import bind_telegram_message
+
+    uid = economy_db
+    bind_telegram_message(telegram_message_id=555001, user_id=uid, support_message_id=None)
+    parsed = parse_admin_reply_from_update(
+        {
+            "message": {
+                "text": "Mapped reply",
+                "reply_to_message": {"message_id": 555001, "text": "no footer here"},
+            }
+        }
+    )
+    assert parsed == {"user_id": uid, "message": "Mapped reply", "via": "telegram_map"}
 
 
 def test_telegram_webhook_persists_admin_reply(economy_db, monkeypatch):
