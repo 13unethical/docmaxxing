@@ -5061,12 +5061,75 @@ def api_version():
     )
 
 
+def _telegram_credentials() -> tuple[str, str] | tuple[None, None]:
+    token = (os.environ.get("TELEGRAM_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
+    chat_id = (os.environ.get("CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
+    if not token or not chat_id:
+        return None, None
+    return token, chat_id
+
+
+def _send_telegram_text(text: str) -> tuple[dict[str, Any] | None, str | None, int]:
+    """POST sendMessage. Returns (tg_json, error_message, http_status_on_error)."""
+    token, chat_id = _telegram_credentials()
+    if not token or not chat_id:
+        return None, "Telegram is not configured. Set TELEGRAM_TOKEN and CHAT_ID environment variables.", 503
+
+    body = text if len(text) <= TELEGRAM_TEXT_MAX_LEN else text[: TELEGRAM_TEXT_MAX_LEN - 1] + "…"
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    try:
+        tg_res = requests.post(
+            url,
+            json={"chat_id": chat_id, "text": body},
+            timeout=TELEGRAM_SEND_MESSAGE_TIMEOUT_S,
+        )
+    except requests.Timeout:
+        return None, "Telegram did not respond in time.", 502
+    except requests.RequestException:
+        app.logger.exception("feedback: Telegram request failed")
+        return None, "Could not reach Telegram.", 502
+
+    try:
+        tg_data = tg_res.json()
+    except ValueError:
+        return None, "Unexpected response from Telegram.", 502
+
+    if not tg_res.ok or not tg_data.get("ok"):
+        desc = tg_data.get("description") if isinstance(tg_data, dict) else None
+        app.logger.warning(
+            "feedback: Telegram API error %s — %s",
+            tg_res.status_code,
+            desc or (tg_res.text[:200] if tg_res.text else ""),
+        )
+        return None, "Could not deliver message.", 502
+    return tg_data if isinstance(tg_data, dict) else {}, None, 200
+
+
 def _feedback_from_request():
     """
-    Parse JSON {\"message\": \"...\"}, send to Telegram if configured.
+    Parse JSON {\"message\": \"...\"}, store SupportMessage, send to Telegram.
+    Requires a signed-in user so replies can be routed back via User ID.
     Returns (flask Response, http_status).
     """
     try:
+        from services.economy.support_chat import (
+            format_telegram_outbound,
+            save_support_message,
+        )
+
+        user = economy_auth.current_user()
+        if not user:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "AUTH_REQUIRED",
+                        "message": "Please sign in to use support chat.",
+                    }
+                ),
+                401,
+            )
+
         raw = request.get_data(cache=True)
         payload = request.get_json(silent=True)
         if payload is None:
@@ -5079,55 +5142,34 @@ def _feedback_from_request():
         if not message:
             return jsonify({"error": "Message is required."}), 400
 
-        token = (os.environ.get("TELEGRAM_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip()
-        chat_id = (os.environ.get("CHAT_ID") or os.environ.get("TELEGRAM_CHAT_ID") or "").strip()
-        if not token or not chat_id:
-            app.logger.error("feedback: TELEGRAM_TOKEN and CHAT_ID are not both set")
+        user_id = int(user["id"])
+        saved = save_support_message(user_id=user_id, sender="user", message=message)
+        outbound = format_telegram_outbound(
+            message=message,
+            user_id=user_id,
+            email=str(user.get("email") or ""),
+            name=str(user.get("name") or ""),
+        )
+        _tg_data, err, err_status = _send_telegram_text(outbound)
+        if err:
+            # Message is already saved so the transcript is not lost if Telegram is down.
+            app.logger.error("feedback: Telegram delivery failed after save: %s", err)
+            if err_status == 503:
+                return jsonify({"error": err, "saved": True, "message": saved.to_dict()}), 503
             return (
                 jsonify(
                     {
-                        "error": "Telegram is not configured. Set TELEGRAM_TOKEN and CHAT_ID environment variables.",
+                        "error": err,
+                        "saved": True,
+                        "message": saved.to_dict(),
+                        "success": False,
                     }
                 ),
-                503,
+                err_status,
             )
 
-        if len(message) > TELEGRAM_TEXT_MAX_LEN:
-            text = message[: TELEGRAM_TEXT_MAX_LEN - 1] + "…"
-        else:
-            text = message
-
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        try:
-            tg_res = requests.post(
-                url,
-                json={"chat_id": chat_id, "text": text},
-                timeout=TELEGRAM_SEND_MESSAGE_TIMEOUT_S,
-            )
-        except requests.Timeout:
-            app.logger.warning("feedback: Telegram sendMessage timed out")
-            return jsonify({"error": "Telegram did not respond in time."}), 502
-        except requests.RequestException:
-            app.logger.exception("feedback: Telegram request failed")
-            return jsonify({"error": "Could not reach Telegram."}), 502
-
-        try:
-            tg_data = tg_res.json()
-        except ValueError:
-            app.logger.error("feedback: Telegram returned non-JSON (status %s)", tg_res.status_code)
-            return jsonify({"error": "Unexpected response from Telegram."}), 502
-
-        if not tg_res.ok or not tg_data.get("ok"):
-            desc = tg_data.get("description") if isinstance(tg_data, dict) else None
-            app.logger.warning(
-                "feedback: Telegram API error %s — %s",
-                tg_res.status_code,
-                desc or (tg_res.text[:200] if tg_res.text else ""),
-            )
-            return jsonify({"error": "Could not deliver message."}), 502
-
-        app.logger.info("feedback: delivered via Telegram")
-        return jsonify({"success": True}), 200
+        app.logger.info("feedback: delivered via Telegram user_id=%s msg_id=%s", user_id, saved.id)
+        return jsonify({"success": True, "message": saved.to_dict()}), 200
     except Exception:  # noqa: BLE001
         app.logger.exception("feedback: unexpected error")
         return jsonify({"error": "Something went wrong processing feedback."}), 500
@@ -5135,7 +5177,7 @@ def _feedback_from_request():
 
 @app.route("/api/feedback", methods=["POST"])
 def api_feedback():
-    """POST JSON {\"message\": \"...\"}; forwards to Telegram when env vars are set."""
+    """POST JSON {\"message\": \"...\"}; stores chat + forwards to Telegram when configured."""
     body, status = _feedback_from_request()
     return body, status
 
@@ -5144,6 +5186,89 @@ def api_feedback():
 def feedback():
     """Backward-compatible alias for POST /api/feedback."""
     return api_feedback()
+
+
+@app.get("/api/chat/messages")
+@economy_auth.login_required
+def api_chat_messages():
+    """Return support chat history for the signed-in user (polling endpoint)."""
+    from services.economy.support_chat import list_support_messages
+
+    user_id = economy_auth.current_user_id()
+    if user_id is None:
+        return jsonify({"success": False, "error": "AUTH_REQUIRED"}), 401
+    after_raw = (request.args.get("after_id") or "").strip()
+    after_id = int(after_raw) if after_raw.isdigit() else None
+    messages = list_support_messages(int(user_id), after_id=after_id)
+    return jsonify(
+        {
+            "success": True,
+            "messages": [m.to_dict() for m in messages],
+        }
+    )
+
+
+@app.post("/api/telegram-webhook")
+def api_telegram_webhook():
+    """Telegram Bot API webhook — admin Reply → SupportMessage(sender=admin).
+
+    Set the bot webhook to this URL. Optional ``TELEGRAM_WEBHOOK_SECRET`` must
+    match ``?secret=`` or ``X-Telegram-Bot-Api-Secret-Token`` when configured.
+    """
+    from services.economy.support_chat import (
+        parse_admin_reply_from_update,
+        save_support_message,
+    )
+
+    expected_secret = (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
+    if expected_secret:
+        got = (
+            (request.args.get("secret") or "").strip()
+            or (request.headers.get("X-Telegram-Bot-Api-Secret-Token") or "").strip()
+        )
+        if got != expected_secret:
+            app.logger.warning("telegram webhook: bad secret")
+            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        # Always 200 for malformed noise so Telegram does not hammer retries forever
+        # unless auth failed above.
+        return jsonify({"ok": True, "ignored": True}), 200
+
+    # Optional: only accept messages from the configured admin chat.
+    _, admin_chat_id = _telegram_credentials()
+    message = payload.get("message") or payload.get("edited_message") or {}
+    if admin_chat_id and isinstance(message, dict):
+        chat = message.get("chat") or {}
+        incoming_chat = str(chat.get("id") or "")
+        if incoming_chat and incoming_chat != str(admin_chat_id):
+            app.logger.info("telegram webhook: ignore foreign chat_id=%s", incoming_chat)
+            return jsonify({"ok": True, "ignored": True}), 200
+
+    parsed = parse_admin_reply_from_update(payload)
+    if not parsed:
+        return jsonify({"ok": True, "ignored": True}), 200
+
+    try:
+        saved = save_support_message(
+            user_id=int(parsed["user_id"]),
+            sender="admin",
+            message=str(parsed["message"]),
+        )
+    except ValueError as exc:
+        app.logger.warning("telegram webhook: persist rejected: %s", exc)
+        return jsonify({"ok": True, "ignored": True, "reason": str(exc)}), 200
+    except Exception:  # noqa: BLE001
+        app.logger.exception("telegram webhook: persist failed")
+        return jsonify({"ok": False, "error": "persist_failed"}), 500
+
+    app.logger.info(
+        "telegram webhook: admin reply saved user_id=%s msg_id=%s",
+        saved.user_id,
+        saved.id,
+    )
+    return jsonify({"ok": True, "message": saved.to_dict()}), 200
 
 
 @app.post("/parse-requirements")

@@ -25,15 +25,15 @@ _DEFAULT_WORDS = 1200
 # (level, type, length, sources, rubric depth, technical/analytical demand).
 _DIFFICULTY_MULTIPLIERS = {
     1: 1.00,
-    2: 1.10,
-    3: 1.20,
-    4: 1.35,
-    5: 1.50,
-    6: 1.70,
-    7: 1.90,
-    8: 2.15,
-    9: 2.45,
-    10: 2.80,
+    2: 1.05,
+    3: 1.10,
+    4: 1.15,
+    5: 1.20,
+    6: 1.25,
+    7: 1.30,
+    8: 1.35,
+    9: 1.45,
+    10: 1.50,
 }
 
 # --- estimated preparation time (informational, not a price factor) --------

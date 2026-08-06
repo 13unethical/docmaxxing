@@ -207,6 +207,17 @@ CREATE INDEX IF NOT EXISTS idx_detector_dataset_capture
 
 CREATE INDEX IF NOT EXISTS idx_detector_dataset_user
     ON detector_dataset_logs(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS support_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender      TEXT NOT NULL CHECK (sender IN ('user', 'admin')),
+    message     TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_support_messages_user_created
+    ON support_messages(user_id, created_at ASC);
 """
 
 
@@ -503,6 +514,13 @@ def _migrate_humanizer_dataset(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_support_messages(conn: sqlite3.Connection) -> None:
+    """Two-way Telegram helpdesk transcript."""
+    from .support_chat import ensure_support_messages_schema
+
+    ensure_support_messages_schema(conn)
+
+
 def init_db() -> None:
     """Create tables/indexes if they do not exist. Safe to call repeatedly."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -526,6 +544,7 @@ def init_db() -> None:
         _migrate_daily_stats_and_settings(conn)
         _migrate_security_columns(conn)
         _migrate_humanizer_dataset(conn)
+        _migrate_support_messages(conn)
         # 3) Indexes that depend on migrated columns.
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tx_user_type ON transactions(user_id, type)"

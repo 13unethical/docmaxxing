@@ -334,12 +334,19 @@
           <h2 class="support-chat-panel-title" id="support_chat_title">How can we help?</h2>
           <button type="button" class="support-chat-close" data-support-close aria-label="Close chat">&times;</button>
         </div>
+        <div
+          id="support_chat_thread"
+          class="support-chat-thread"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+        ></div>
         <p id="support_chat_status" class="support-chat-status" role="status" aria-live="polite"></p>
         <label class="support-chat-sr-only" for="support_chat_message">Your message</label>
         <textarea
           id="support_chat_message"
           class="support-chat-textarea"
-          rows="4"
+          rows="3"
           placeholder="Tell us what to improve..."
         ></textarea>
         <button type="button" class="support-chat-send" id="support_chat_send">Send</button>
@@ -374,7 +381,7 @@
     <script src="{{ url_for('static', filename='common.js') }}?v=20260802-fmt-drop"></script>
     <script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
     <script src="{{ url_for('static', filename='auth-modal.js') }}?v=20260805-otp"></script>
-    <script src="{{ url_for('static', filename='support-chat.js') }}"></script>
+    <script src="{{ url_for('static', filename='support-chat.js') }}?v=20260806-helpdesk"></script>
     <script src="{{ url_for('static', filename='tool-history.js') }}?v=20260802-newchat-tools"></script>
     <script src="{{ url_for('static', filename='app-shell.js') }}?v=20260802-open-sidebar"></script>
     {% block scripts %}{% endblock %}

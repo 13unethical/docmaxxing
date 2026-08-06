@@ -1632,6 +1632,9 @@ code {
   bottom: 5.5rem;
   width: min(22rem, calc(100vw - 2.5rem));
   max-width: 22rem;
+  max-height: min(34rem, calc(100vh - 6.5rem));
+  display: flex;
+  flex-direction: column;
   padding: 1.1rem 1.15rem 1.15rem;
   background: var(--bg-light);
   border-radius: 16px;
@@ -1653,6 +1656,7 @@ code {
   justify-content: space-between;
   gap: 0.5rem;
   margin-bottom: 0.65rem;
+  flex-shrink: 0;
 }
 
 .support-chat-panel-title {
@@ -1661,6 +1665,64 @@ code {
   font-weight: 700;
   color: var(--text);
   letter-spacing: -0.02em;
+}
+
+.support-chat-thread {
+  flex: 1 1 auto;
+  min-height: 8rem;
+  max-height: 16rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
+  padding: 0.35rem 0.15rem 0.35rem 0;
+}
+
+.support-chat-empty {
+  margin: 0.5rem 0.25rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.support-chat-bubble {
+  max-width: 92%;
+  padding: 0.45rem 0.65rem;
+  border-radius: 12px;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.support-chat-bubble--user {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--primary) 14%, var(--bg-light));
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border-muted));
+}
+
+.support-chat-bubble--admin {
+  align-self: flex-start;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-muted);
+}
+
+.support-chat-bubble-label {
+  display: block;
+  margin-bottom: 0.15rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.support-chat-bubble-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .support-chat-close {
@@ -1702,6 +1764,7 @@ code {
   min-height: 1.1rem;
   font-size: 0.82rem;
   color: var(--muted);
+  flex-shrink: 0;
 }
 
 .support-chat-status--success {
@@ -1722,6 +1785,7 @@ code {
   padding: 0.65rem 0.75rem;
   font: inherit;
   font-size: 0.9rem;
+  flex-shrink: 0;
   line-height: 1.45;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -5415,11 +5479,12 @@ body.sidebar-collapsed .nav-discount-badge {
   font: inherit;
   font-size: 0.8rem;
   font-weight: 500;
+  line-height: 1.35;
   cursor: pointer;
   text-decoration: none;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .app-sidebar-history-item:hover,
