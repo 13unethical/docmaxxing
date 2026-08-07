@@ -19,12 +19,15 @@
 
 <h2>3. Processors</h2>
 <p>
-  DocMaxxing supports two checkout paths:
+  DocMaxxing checkout is processed by <strong>Lemon Squeezy</strong> (merchant of record for card / wallet payments).
 </p>
+{# Emergency fallbacks kept in codebase but not offered:
 <ul>
   <li><strong>Cryptomus</strong> — crypto payments (preferred when configured).</li>
   <li><strong>Paddle</strong> — card and wallet payments; Paddle acts as merchant of record and may appear on your bank statement.</li>
+  <li><strong>Gumroad</strong> — legacy card checkout.</li>
 </ul>
+#}
 <p>
   DocMaxxing does not store full payment card numbers. Crypto wallet details you submit for
   Earn &amp; Share withdrawals are used only to process payout requests.
@@ -39,9 +42,10 @@
 
 <h2>5. When credits appear</h2>
 <p>
-  After a successful Cryptomus or Paddle payment confirmation, credits are added to your account balance.
+  After a successful Lemon Squeezy payment confirmation, credits are added to your account balance.
   If payment succeeds but balance does not update within a short time, contact support with your
-  account email and the Cryptomus order id or Paddle transaction id.
+  account email and the Lemon Squeezy order id.
+  {# Previously: Cryptomus order id or Paddle transaction id. #}
 </p>
 
 <h2>6. Referral cashback (not a purchase)</h2>

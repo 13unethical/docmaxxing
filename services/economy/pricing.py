@@ -70,6 +70,8 @@ TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
         "featured": False,
         "price_id": _env_str("PADDLE_PRICE_CREDITS_1000"),
         "gumroad_product_id": _env_str("GUMROAD_PRODUCT_CREDITS_1000"),
+        "lemon_variant_id": _env_str("LEMON_VARIANT_CREDITS_1000"),
+        "lemon_checkout_url": _env_str("LEMON_CHECKOUT_CREDITS_1000"),
     },
     "credits_2500": {
         "id": "credits_2500",
@@ -82,8 +84,43 @@ TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
         # Prefer new env key; fall back to legacy _2500 product id mapping.
         "gumroad_product_id": _env_str("GUMROAD_PRODUCT_CREDITS_2200")
         or _env_str("GUMROAD_PRODUCT_CREDITS_2500"),
+        "lemon_variant_id": _env_str("LEMON_VARIANT_CREDITS_2200")
+        or _env_str("LEMON_VARIANT_CREDITS_2500"),
+        "lemon_checkout_url": _env_str("LEMON_CHECKOUT_CREDITS_2200")
+        or _env_str("LEMON_CHECKOUT_CREDITS_2500"),
     },
 }
+
+
+def lemon_store_checkout_base() -> str:
+    """Base for Lemon buy links, e.g. https://docmaxxing.lemonsqueezy.com/checkout/buy"""
+    return (
+        _env_str("LEMON_CHECKOUT_BASE")
+        or "https://docmaxxing.lemonsqueezy.com/checkout/buy"
+    ).rstrip("/")
+
+
+def lemon_checkout_url_for_package(
+    package_id: str,
+    *,
+    user_id: int | None = None,
+) -> str | None:
+    """Build a Lemon Squeezy checkout URL that embeds ``custom_data.user_id``."""
+    pkg = package(package_id)
+    if not pkg:
+        return None
+    explicit = str(pkg.get("lemon_checkout_url") or "").strip()
+    variant = str(pkg.get("lemon_variant_id") or "").strip()
+    if explicit:
+        url = explicit
+    elif variant:
+        url = f"{lemon_store_checkout_base()}/{variant}"
+    else:
+        return None
+    if user_id is not None and int(user_id) > 0:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}checkout[custom][user_id]={int(user_id)}"
+    return url
 
 
 def detect_cost_credits(word_count: int) -> int:

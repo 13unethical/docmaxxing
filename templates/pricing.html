@@ -16,6 +16,23 @@
           <p class="pricing-plan-price"><span class="pricing-plan-amount">$10</span></p>
           <p class="pricing-plan-credits">1,000 Credits</p>
           <div class="pricing-plan-actions">
+            {% if current_user %}
+            <a
+              class="pricing-plan-btn pricing-plan-btn--primary"
+              href="https://docmaxxing.lemonsqueezy.com/checkout/buy/5074ed4e-a06f-4860-acb0-d6044357d549?checkout[custom][user_id]={{ current_user.id }}"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Buy with Card / Apple Pay
+            </a>
+            {% else %}
+            <a
+              class="pricing-plan-btn pricing-plan-btn--primary"
+              href="{{ url_for('login', next=url_for('pricing')) }}"
+            >
+              Sign in · Buy with Card / Apple Pay
+            </a>
+            {% endif %}
             <button
               type="button"
               class="pricing-plan-btn"
@@ -23,6 +40,7 @@
             >
               Buy with Crypto
             </button>
+            {# Gumroad emergency fallback — kept disabled
             {% if current_user %}
             <a
               class="pricing-plan-btn pricing-plan-btn--gumroad"
@@ -40,6 +58,7 @@
               Sign in · Buy with Card
             </a>
             {% endif %}
+            #}
           </div>
         </article>
 
@@ -49,13 +68,31 @@
           <p class="pricing-plan-price"><span class="pricing-plan-amount">$20</span></p>
           <p class="pricing-plan-credits">2,200 Credits</p>
           <div class="pricing-plan-actions">
+            {% if current_user %}
+            <a
+              class="pricing-plan-btn pricing-plan-btn--primary"
+              href="https://docmaxxing.lemonsqueezy.com/checkout/buy/8bd0501d-302f-4054-a905-302112b8e267?checkout[custom][user_id]={{ current_user.id }}"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Buy with Card / Apple Pay
+            </a>
+            {% else %}
+            <a
+              class="pricing-plan-btn pricing-plan-btn--primary"
+              href="{{ url_for('login', next=url_for('pricing')) }}"
+            >
+              Sign in · Buy with Card / Apple Pay
+            </a>
+            {% endif %}
             <button
               type="button"
-              class="pricing-plan-btn pricing-plan-btn--primary"
+              class="pricing-plan-btn"
               data-topup="credits_2500"
             >
               Buy with Crypto
             </button>
+            {# Gumroad emergency fallback — kept disabled
             {% if current_user %}
             <a
               class="pricing-plan-btn pricing-plan-btn--gumroad pricing-plan-btn--gumroad-primary"
@@ -73,6 +110,7 @@
               Sign in · Buy with Card
             </a>
             {% endif %}
+            #}
           </div>
         </article>
 
@@ -117,5 +155,5 @@
       </section>
 {% endblock %}
 {% block scripts %}
-    <script src="{{ url_for('static', filename='pricing.js') }}?v=20260727-cryptomus"></script>
+    <script src="{{ url_for('static', filename='pricing.js') }}?v=20260807-crypto-lemon"></script>
 {% endblock %}

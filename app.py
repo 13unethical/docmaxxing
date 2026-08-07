@@ -125,6 +125,12 @@ from services.economy.gumroad_gateway import (
     GumroadGatewayError,
     handle_ping as gumroad_handle_ping,
 )
+from services.economy.lemon_squeezy_gateway import (
+    LemonSqueezyGatewayError,
+    LemonSqueezySignatureError,
+    handle_webhook_event as lemon_squeezy_handle_webhook,
+    verify_lemon_squeezy_signature,
+)
 from services.economy.pricing import USD_TO_COINS
 from services.economy.usage import (
     FEATURE_ASSIGNMENT,
@@ -1580,6 +1586,48 @@ def api_paddle_webhook():
     return jsonify({"ok": True, **result}), 200
 
 
+@app.post("/api/webhooks/lemon-squeezy")
+def api_lemon_squeezy_webhook():
+    """Lemon Squeezy webhook — HMAC X-Signature verified, order_created → coins.
+
+    Configure the store webhook URL to this endpoint and set
+    ``LEMON_SQUEEZY_WEBHOOK_SECRET`` to the signing secret from Lemon.
+    Pass ``user_id`` in checkout ``custom_data`` so credits land on the right account.
+    """
+    raw = request.get_data(cache=True, as_text=False)
+    signature = request.headers.get("X-Signature")
+    try:
+        verify_lemon_squeezy_signature(raw, signature)
+    except LemonSqueezySignatureError as exc:
+        app.logger.warning("lemon-squeezy webhook signature failed: %s", exc)
+        return jsonify({"error": "invalid_signature", "message": str(exc)}), 403
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        app.logger.warning("lemon-squeezy webhook: invalid JSON body")
+        return jsonify({"error": "invalid_json"}), 400
+
+    if not isinstance(payload, dict):
+        return jsonify({"error": "invalid_payload"}), 400
+
+    try:
+        result = lemon_squeezy_handle_webhook(payload)
+    except LemonSqueezyGatewayError as exc:
+        app.logger.warning("lemon-squeezy webhook rejected: %s", exc)
+        # 400 for bad custom_data / unknown variant — Lemon should not infinite-retry.
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("lemon-squeezy webhook fulfill failed: %s", exc)
+        # 500 so Lemon retries transient DB/outage failures (idempotent on success).
+        return jsonify({"error": "fulfillment_failed"}), 500
+
+    # Spec: successful credit path returns {"status": "success"}.
+    if result.get("status") == "success":
+        return jsonify({"status": "success", **{k: v for k, v in result.items() if k != "status"}}), 200
+    return jsonify(result), 200
+
+
 @app.post("/api/payments/create")
 @economy_auth.login_required
 def api_payments_create():
@@ -1661,6 +1709,9 @@ def api_gumroad_webhook():
     idempotent on ``sale_id``. Pass ``user_id`` as a checkout URL param
     (``?user_id=123``) so credits land on the right account.
     """
+    # Gumroad emergency fallback — keep disabled (do not delete body below).
+    return jsonify({"error": "Payment method temporarily disabled"}), 403
+
     form = request.form
     try:
         result = gumroad_handle_ping(form)

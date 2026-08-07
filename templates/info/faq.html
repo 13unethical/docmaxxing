@@ -5,7 +5,8 @@
 {% block info_body %}
 <h2>Getting started</h2>
 <p><strong>Do I need an account?</strong> You can try Format as a guest for many flows. Buying credits, saving Assignment progress, running paid Humanizer / Turnitin actions, and Earn &amp; Share require sign-up.</p>
-<p><strong>Where do I buy credits?</strong> Read the <a href="{{ url_for('credits') }}">Credits</a> guide, then open <a href="{{ url_for('pricing') }}">Buy credits</a>. Checkout uses Cryptomus (crypto) and/or Paddle (cards). Guests are asked to register before checkout.</p>
+<p><strong>Where do I buy credits?</strong> Read the <a href="{{ url_for('credits') }}">Credits</a> guide, then open <a href="{{ url_for('pricing') }}">Buy credits</a>. Checkout uses Lemon Squeezy. Guests are asked to register before checkout.</p>
+{# Previously: Cryptomus (crypto) and/or Paddle (cards). #}
 <p><strong>What are welcome credits?</strong> New accounts receive <strong>50</strong> welcome credits. Signing up with a referral link also grants <strong>+100</strong> referral bonus credits.</p>
 
 <h2>Format</h2>
@@ -36,6 +37,7 @@
 <p><strong>What about Check, Workspace, and Presentation?</strong> They are listed in the menu but currently show a Soon page. They are not live yet.</p>
 
 <h2>Billing</h2>
-<p><strong>Who processes payment?</strong> Cryptomus for crypto checkout (when configured) and Paddle for card / wallet payments (merchant of record).</p>
+<p><strong>Who processes payment?</strong> Lemon Squeezy for card / wallet payments (merchant of record).</p>
+{# Previously: Cryptomus for crypto checkout and Paddle for card / wallet payments. #}
 <p><strong>Refunds?</strong> See <a href="{{ url_for('refund_policy') }}">Refund Policy</a>.</p>
 {% endblock %}

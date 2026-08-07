@@ -405,6 +405,13 @@ def _migrate_gumroad_payments(conn: sqlite3.Connection) -> None:
     ensure_gumroad_schema(conn)
 
 
+def _migrate_lemon_squeezy_payments(conn: sqlite3.Connection) -> None:
+    """Ensure lemon_squeezy_payments exists on older DBs."""
+    from .lemon_squeezy_gateway import ensure_lemon_squeezy_schema
+
+    ensure_lemon_squeezy_schema(conn)
+
+
 def _migrate_security_columns(conn: sqlite3.Connection) -> None:
     """Email verify, anti-abuse fingerprint/IP, avatar path."""
     exists = conn.execute(
@@ -540,6 +547,7 @@ def init_db() -> None:
         _migrate_paddle_purchases(conn)
         _migrate_cryptomus_payments(conn)
         _migrate_gumroad_payments(conn)
+        _migrate_lemon_squeezy_payments(conn)
         _migrate_referral_columns(conn)
         _migrate_daily_stats_and_settings(conn)
         _migrate_security_columns(conn)
