@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from docx import Document
 
-from services.assignment_formatting import _docx_from_markdown, _job_from_requirement
+from services.assignment_formatting import _docx_from_markdown, _overrides_from_requirement
 from services.assignment_spec import (
     build_assignment_spec,
     needs_expansion,
@@ -130,12 +130,16 @@ def test_docx_from_markdown_peels_heading_from_body():
 
 
 def test_format_job_consumes_analyzer_formatting_fields():
-    job = _job_from_requirement(_lj_requirement())
-    assert job.font_family == "Times New Roman"
-    assert job.font_size_pt == 12
-    assert job.line_spacing == 2.0
-    assert job.alignment == "left"
-    assert job.margin_preset == "normal"
+    overrides, style = _overrides_from_requirement(_lj_requirement())
+    assert style.value == "harvard"
+    assert overrides.font_family is not None
+    assert overrides.font_family.value == "Times New Roman"
+    assert overrides.font_size_pt == 12
+    assert overrides.line_spacing == 2.0
+    assert overrides.alignment is not None
+    assert overrides.alignment.value == "left"
+    assert overrides.margins is not None
+    assert overrides.margins.top_in == 1.0
 
 
 def test_render_sections_uses_blank_line_after_heading():

@@ -166,7 +166,7 @@ def test_parse_line_spacing_labels():
     assert _parse_line_spacing("Double") == 2.0
     assert _parse_line_spacing("single") == 1.0
     assert _parse_line_spacing("1.5") == 1.5
-    assert _parse_line_spacing(None) == 2.0
+    assert _parse_line_spacing(None) is None
 
 
 def test_zerogpt_detector_maps_score(monkeypatch):

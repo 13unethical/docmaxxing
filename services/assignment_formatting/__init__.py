@@ -1,4 +1,4 @@
-"""Format Engine stage for assignment projects."""
+"""Format Engine stage for assignment projects — Formatter V2 pipeline."""
 
 from __future__ import annotations
 
@@ -11,8 +11,19 @@ from typing import Any
 
 from docx import Document
 
-from formatter.format_job import FormatJob
-from formatter.pipeline import format_document_full
+from formatter_v2.pipeline import format_document_v2, resolve_style_name
+from formatter_v2.profiles import load_profile
+from formatter_v2.resolve import resolve_format_spec
+from formatter_v2.spec import (
+    Alignment,
+    FontFamily,
+    Margins,
+    PageNumberPosition,
+    PageNumbering,
+    ParagraphRole,
+    StyleName,
+    UserOverrides,
+)
 from services.assignment_pipeline.models import utc_now
 from services.assignment_spec.validate import count_body_words, count_words
 
@@ -26,10 +37,14 @@ def _storage_root() -> Path:
     return (_REPO_ROOT / "data" / "projects").resolve()
 
 
-def _parse_line_spacing(value: Any, *, default: float = 2.0) -> float:
-    """Accept numeric or Word-style labels like Double / Single / 1.5."""
+def _parse_line_spacing(value: Any) -> float | None:
+    """Accept numeric or Word-style labels like Double / Single / 1.5.
+
+    Missing / unparseable values return None so the style profile supplies
+    the default — Assignment no longer hardcodes 2.0.
+    """
     if value is None or value == "":
-        return default
+        return None
     if isinstance(value, (int, float)):
         return float(value)
     text = str(value).strip().lower().replace("-", " ").replace("_", " ")
@@ -43,6 +58,7 @@ def _parse_line_spacing(value: Any, *, default: float = 2.0) -> float:
         "1.5 lines": 1.5,
         "one and a half": 1.5,
         "double": 2.0,
+        "double spaced": 2.0,
         "double spacing": 2.0,
         "2.0": 2.0,
         "2": 2.0,
@@ -51,95 +67,165 @@ def _parse_line_spacing(value: Any, *, default: float = 2.0) -> float:
     }
     if text in aliases:
         return aliases[text]
+    for key, num in aliases.items():
+        if key in text and key.isalpha():
+            return num
+    try:
+        return float(text.split()[0])
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _parse_optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip().split()[0]
     try:
         return float(text)
     except (TypeError, ValueError):
-        return default
+        return None
 
 
-def _parse_int(value: Any, *, default: int) -> int:
-    if value is None or value == "":
-        return default
+def _parse_font_family(value: Any) -> FontFamily | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    for fam in FontFamily:
+        if fam.value.lower() == text.lower():
+            return fam
+        if fam.name.lower() == text.lower().replace(" ", "_"):
+            return fam
+    return None
+
+
+def _parse_alignment(value: Any) -> Alignment | None:
+    if not value:
+        return None
+    text = str(value).strip().lower()
+    if text in {"centre", "center"}:
+        return Alignment.CENTER
     try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return default
+        return Alignment(text)
+    except ValueError:
+        return None
 
 
-def _job_from_requirement(requirement_json: dict[str, Any]) -> FormatJob:
-    from services.assignment_spec import build_assignment_spec
+def _parse_margins(fmt: dict[str, Any]) -> Margins | None:
+    raw_margins = fmt.get("margins")
+    if isinstance(raw_margins, dict):
+        try:
+            return Margins.model_validate(raw_margins)
+        except Exception:  # noqa: BLE001
+            return None
+    preset = str(fmt.get("margin_preset") or "").strip().lower()
+    if preset in {"normal", "narrow", "wide"}:
+        return Margins.preset(preset)  # type: ignore[arg-type]
+    raw = fmt.get("margins_inches")
+    if raw is None:
+        raw = raw_margins
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, (int, float)):
+        value = float(raw)
+        return Margins(top_in=value, bottom_in=value, left_in=value, right_in=value)
+    match = re.search(r"(\d+(?:\.\d+)?)", str(raw))
+    if not match:
+        return None
+    value = float(match.group(1))
+    return Margins(top_in=value, bottom_in=value, left_in=value, right_in=value)
 
-    fmt = requirement_json.get("formatting") if isinstance(requirement_json.get("formatting"), dict) else {}
-    # Prefer AssignmentSpec so analyzer field names (font_size, margins, double-spaced)
-    # are normalized once for every downstream consumer.
+
+def _parse_page_numbering(value: Any) -> PageNumbering | None:
+    if not value:
+        return None
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
     try:
-        spec = build_assignment_spec(requirement_json)
-        fmt_spec = spec.formatting.to_dict()
-    except Exception:  # noqa: BLE001
-        fmt_spec = {}
-        spec = None
+        return PageNumbering(position=PageNumberPosition(text))
+    except ValueError:
+        return None
 
-    raw_spacing = (
-        fmt_spec.get("line_spacing")
-        if fmt_spec.get("line_spacing") is not None
-        else fmt.get("line_spacing")
-    )
-    if raw_spacing is None:
-        raw_spacing = requirement_json.get("line_spacing")
 
-    style = str(
+def _margin_preset_name(margins: Margins) -> str:
+    for name in ("normal", "narrow", "wide"):
+        preset = Margins.preset(name)  # type: ignore[arg-type]
+        if (
+            preset.top_in == margins.top_in
+            and preset.bottom_in == margins.bottom_in
+            and preset.left_in == margins.left_in
+            and preset.right_in == margins.right_in
+        ):
+            return name
+    return "custom"
+
+
+def _style_from_requirement(requirement_json: dict[str, Any], fmt: dict[str, Any]) -> StyleName:
+    raw = (
         fmt.get("style")
         or requirement_json.get("format_style")
         or requirement_json.get("citation_style")
-        or (spec.citation_style if spec else None)
         or "harvard"
-    ).lower()
-    if "apa" in style:
-        style_id = "apa"
-    elif "mla" in style:
-        style_id = "mla"
-    else:
-        style_id = "harvard"
-
-    font_size = fmt_spec.get("font_size_pt")
-    if font_size is None:
-        font_size = fmt.get("font_size_pt", fmt.get("font_size"))
-    alignment = str(fmt_spec.get("alignment") or fmt.get("alignment") or "left").lower()
-    if alignment not in {"left", "justify"}:
-        alignment = "left"
-    margin_preset = str(
-        fmt_spec.get("margin_preset")
-        or fmt.get("margin_preset")
-        or "normal"
     )
+    return resolve_style_name(str(raw))
 
-    return FormatJob(
-        font_family=str(fmt_spec.get("font_family") or fmt.get("font_family") or "Times New Roman"),
-        font_size_pt=_parse_int(font_size, default=12),
-        line_spacing=_parse_line_spacing(raw_spacing, default=2.0),
-        alignment=alignment,
-        first_line_indent=bool(fmt.get("first_line_indent", False)),
-        space_before_pt=_parse_int(fmt.get("space_before_pt"), default=0),
-        space_after_pt=_parse_int(fmt.get("space_after_pt"), default=0),
-        margin_preset=margin_preset,
-        page_number_position=str(fmt.get("page_number_position") or "bottom_center"),
-        auto_headings=bool(fmt.get("auto_headings", True)),
-        heading_all_caps=bool(fmt.get("heading_all_caps", False)),
-        auto_justify_refs=bool(fmt.get("auto_justify_refs", True)),
-        format_style=style_id,
-        requirement_headings=bool(fmt.get("requirement_headings", True)),
-        heading_size_pt=_parse_int(fmt.get("heading_size_pt") or fmt_spec.get("heading_size_pt"), default=14),
-        references_hanging_indent_inches=float(
-            fmt_spec.get("references_hanging_indent_inches")
-            if fmt_spec.get("references_hanging_indent_inches") is not None
-            else fmt.get("references_hanging_indent_inches", 0.5)
-        ),
-        references_on_new_page=bool(
-            fmt_spec.get("references_on_new_page")
-            if fmt_spec.get("references_on_new_page") is not None
-            else fmt.get("references_on_new_page", True)
-        ),
+
+def _overrides_from_requirement(requirement_json: dict[str, Any]) -> tuple[UserOverrides, StyleName]:
+    """Map brief fields that were actually specified onto UserOverrides.
+
+    Unspecified fields stay None so StyleProfile defaults apply — including
+    line spacing and page-number position.
+    """
+    fmt = requirement_json.get("formatting") if isinstance(requirement_json.get("formatting"), dict) else {}
+    style = _style_from_requirement(requirement_json, fmt)
+    data: dict[str, Any] = {}
+
+    font_family = _parse_font_family(fmt.get("font_family"))
+    if font_family is not None:
+        data["font_family"] = font_family
+
+    font_size = _parse_optional_float(fmt.get("font_size_pt") if fmt.get("font_size_pt") is not None else fmt.get("font_size"))
+    if font_size is not None:
+        data["font_size_pt"] = font_size
+
+    spacing = _parse_line_spacing(
+        fmt.get("line_spacing") if fmt.get("line_spacing") is not None else requirement_json.get("line_spacing")
     )
+    if spacing is not None:
+        data["line_spacing"] = spacing
+
+    alignment = _parse_alignment(fmt.get("alignment"))
+    if alignment is not None:
+        data["alignment"] = alignment
+
+    if "first_line_indent" in fmt:
+        data["first_line_indent"] = bool(fmt.get("first_line_indent"))
+
+    margins = _parse_margins(fmt)
+    if margins is not None:
+        data["margins"] = margins
+
+    page_numbering = _parse_page_numbering(fmt.get("page_number_position"))
+    if page_numbering is not None:
+        data["page_numbering"] = page_numbering
+
+    heading_size = _parse_optional_float(fmt.get("heading_size_pt"))
+    if heading_size is not None:
+        data["heading_size_pt"] = heading_size
+
+    return UserOverrides.model_validate(data), style
+
+
+def _profile_summary(spec) -> dict[str, Any]:
+    body = spec.roles[ParagraphRole.BODY]
+    return {
+        "font_family": body.font_family.value,
+        "font_size_pt": float(body.font_size_pt),
+        "line_spacing": float(body.line_spacing),
+        "alignment": body.alignment.value,
+        "margin_preset": _margin_preset_name(spec.page.margins),
+        "page_number_position": spec.page_numbering.position.value,
+    }
 
 
 def _docx_from_markdown(title: str, content: str) -> Document:
@@ -204,7 +290,7 @@ def _docx_from_markdown(title: str, content: str) -> Document:
 
 
 class AssignmentFormatEngine:
-    VERSION = "format-engine-1.0"
+    VERSION = "format-engine-2.0"
 
     def format_draft(
         self,
@@ -221,63 +307,39 @@ class AssignmentFormatEngine:
         # Brief often requires stating word count on the front of the assessment.
         if body_words > 0 and not re.search(r"(?im)^\s*word\s*count\s*:", content):
             content = f"Word count: {body_words}\n\n{content.lstrip()}"
-        job = _job_from_requirement(requirement_json)
+
+        overrides, style_name = _overrides_from_requirement(requirement_json)
+        profile = load_profile(style_name)
+        resolution = resolve_format_spec(profile, overrides)
+
         document = _docx_from_markdown(title, content)
-        from formatter.document_reconstruction import reconstruct_document_before_format
-        from formatter.requirement_headings import extract_format_section_labels
-
-        required = requirement_json.get("required_sections") or requirement_json.get("requiredSections") or []
-        if isinstance(required, list):
-            required_sections = [str(s).strip() for s in required if str(s).strip()]
-        else:
-            required_sections = []
-        # Strip parenthetical brief notes: "Introduction (article title…)" → "Introduction"
-        cleaned_sections: list[str] = []
-        for label in required_sections:
-            base = label.split("(", 1)[0].strip() or label
-            cleaned_sections.append(base)
-        if not cleaned_sections:
-            cleaned_sections = extract_format_section_labels(str(requirement_json.get("raw_brief") or ""))
-
-        recon = reconstruct_document_before_format(
-            document,
-            document_type=str(requirement_json.get("document_type") or "other"),
-            required_sections=cleaned_sections or None,
-            prefer_ai=False,
-        )
-        format_document_full(document, job, recon.assignments)
+        source = io.BytesIO()
+        document.save(source)
+        result = format_document_v2(source.getvalue(), overrides, style_name)
 
         out_dir = _storage_root() / project_id / "formatted"
         out_dir.mkdir(parents=True, exist_ok=True)
         filename = "formatted.docx"
         path = out_dir / filename
-        buf = io.BytesIO()
-        document.save(buf)
-        path.write_bytes(buf.getvalue())
+        path.write_bytes(result.docx_bytes)
 
+        notices = [n.model_dump(mode="json") for n in result.notices]
         return {
             "id": str(uuid.uuid4()),
             "project_id": project_id,
             "path": str(path),
             "filename": filename,
-            "style_id": job.format_style,
+            "style_id": style_name.value,
             "word_count": int(draft.get("total_words") or count_body_words(content)),
             "body_word_count": int(draft.get("total_words") or count_body_words(content)),
             "document_word_count": count_words(content),
-            "profile_summary": {
-                "font_family": job.font_family,
-                "font_size_pt": job.font_size_pt,
-                "line_spacing": job.line_spacing,
-                "alignment": job.alignment,
-                "margin_preset": job.margin_preset,
-                "page_number_position": job.page_number_position,
-            },
+            "profile_summary": _profile_summary(resolution.spec),
+            "notices": notices,
             "applied_rules": [
-                "page_style",
-                "page_numbers",
-                "paragraph_styles",
-                "headings",
-                "references_justify" if job.auto_justify_refs else "references",
+                "v2_pipeline",
+                result.extractor_name,
+                "resolve_format_spec",
+                "build_document",
             ],
             "engine_version": self.VERSION,
             "formatted_at": utc_now().isoformat(),

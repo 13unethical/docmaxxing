@@ -34,6 +34,11 @@ jobs:
             if ! grep -q '^PROJECT_ENGINE_DIR=' .env 2>/dev/null; then
               echo 'PROJECT_ENGINE_DIR=/root/docmaxxing/data/project_engine' >> .env
             fi
+            if grep -q '^FORMATTER_V2_ENABLED=' .env 2>/dev/null; then
+              sed -i 's/^FORMATTER_V2_ENABLED=.*/FORMATTER_V2_ENABLED=1/' .env
+            else
+              echo 'FORMATTER_V2_ENABLED=1' >> .env
+            fi
             source venv/bin/activate
             pip install -r requirements.txt
             install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service

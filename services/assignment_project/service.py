@@ -1419,6 +1419,7 @@ class ProjectService:
                     "formatted_document_id": formatted.get("id"),
                     "path": formatted.get("path"),
                     "style_id": formatted.get("style_id"),
+                    "notices": formatted.get("notices") or [],
                 },
                 artifacts={"formatted_document": formatted},
             ),
