@@ -348,6 +348,70 @@ def split_body_and_references(
     return body, references
 
 
+def partition_blocks_by_references(
+    blocks: list[Block],
+    paragraphs: Sequence[Paragraph | None] | None = None,
+    *,
+    content_latch: bool = True,
+) -> tuple[list[Block], list[Block]]:
+    """Latch references on pre-classified blocks without re-running role heuristics."""
+    if not blocks:
+        return [], []
+
+    texts = [
+        b.text if isinstance(b.text, str) else str(b.text) for b in blocks
+    ]
+    paras = list(paragraphs) if paragraphs is not None else [None] * len(blocks)
+
+    heading_idx = find_heading_latch_index(texts)
+    content_range: tuple[int, int] | None = None
+    if heading_idx is not None:
+        latch_mode = "heading"
+        latch_start = heading_idx
+        latch_end = find_heading_latch_end(texts, heading_idx)
+    elif content_latch:
+        content_range = find_content_latch_range(texts, paras)
+        if content_range is None:
+            latch_mode = "none"
+            latch_start = len(texts)
+            latch_end = len(texts)
+        else:
+            latch_mode = "content"
+            latch_start, latch_end = content_range
+    else:
+        latch_mode = "none"
+        latch_start = len(texts)
+        latch_end = len(texts)
+
+    body: list[Block] = []
+    references: list[Block] = []
+
+    for i, block in enumerate(blocks):
+        text = texts[i]
+        stripped = (text or "").strip()
+        if not stripped:
+            continue
+
+        if latch_start <= i < latch_end:
+            if latch_mode == "heading" and i == latch_start:
+                references.append(Block(ParagraphRole.REFERENCES_HEADING, stripped))
+            else:
+                references.append(Block(ParagraphRole.REFERENCES_ENTRY, stripped))
+            continue
+
+        if (
+            latch_mode == "heading"
+            and i == latch_end
+            and is_refs_latch_breaker(stripped)
+        ):
+            body.append(Block(refs_latch_break_role(stripped), stripped))
+            continue
+
+        body.append(block)
+
+    return body, references
+
+
 def move_appendices_from_body(model: DocumentModel) -> DocumentModel:
     """Move appendix blocks from ``body`` into ``appendices``.
 

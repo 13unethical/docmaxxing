@@ -298,6 +298,20 @@
     }
   }
 
+  function formatExpectedSections(sections) {
+    if (!sections || !sections.length) return "";
+    return sections.join("\n");
+  }
+
+  function parseExpectedSections(text) {
+    return String(text || "")
+      .split(/\n+/)
+      .map(function (line) {
+        return line.trim();
+      })
+      .filter(Boolean);
+  }
+
   function parseAbbrEntries(text) {
     var entries = {};
     String(text || "")
@@ -376,6 +390,9 @@
     $("v2_refs_heading").value = refs.heading_text || "References";
     $("v2_refs_new_page").checked = refs.on_new_page !== false;
     $("v2_refs_numbered").checked = !!refs.numbered;
+
+    var structure = form.structure || {};
+    $("v2_expected_sections").value = formatExpectedSections(structure.expected_sections || []);
 
     state.applying = false;
     updateStyleHint();
@@ -466,6 +483,12 @@
         heading_text: ($("v2_refs_heading").value || "").trim() || "References",
         on_new_page: $("v2_refs_new_page").checked,
         numbered: $("v2_refs_numbered").checked,
+      };
+    }
+
+    if (state.touched.structure) {
+      out.structure = {
+        expected_sections: parseExpectedSections($("v2_expected_sections").value),
       };
     }
 
@@ -590,6 +613,14 @@
       if (r.on_new_page != null) $("v2_refs_new_page").checked = !!r.on_new_page;
       if (r.numbered != null) $("v2_refs_numbered").checked = !!r.numbered;
       state.touched.references = true;
+    }
+
+    if (overrides.structure) {
+      var st = overrides.structure;
+      if (st.expected_sections) {
+        $("v2_expected_sections").value = formatExpectedSections(st.expected_sections);
+      }
+      state.touched.structure = true;
     }
 
     if (overrides.abbreviations) {

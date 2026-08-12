@@ -20,13 +20,11 @@ from formatter_v2.render.document import Block
 from formatter_v2.render.model import DocumentModel
 from formatter_v2.resolve import ResolutionNotice
 from formatter_v2.spec import ParagraphRole
+from formatter_v2.structure.expected_sections import apply_expected_sections
 from formatter_v2.structure.references import (
-    find_heading_latch_index,
-    find_heading_latch_end,
     find_content_latch_range,
-    is_refs_latch_breaker,
-    refs_latch_break_role,
     move_appendices_from_body,
+    partition_blocks_by_references,
 )
 from formatter_v2.structure.numbered import classify_numbered_line
 
@@ -276,7 +274,12 @@ class WordStylesExtractor:
     def __init__(self) -> None:
         self.last_notices: list[ResolutionNotice] = []
 
-    def extract(self, source: object) -> DocumentModel:
+    def extract(
+        self,
+        source: object,
+        *,
+        expected_sections: list[str] | None = None,
+    ) -> DocumentModel:
         document = _coerce_document(source)
         texts: list[str] = []
         paragraphs: list[Paragraph | None] = []
@@ -287,57 +290,15 @@ class WordStylesExtractor:
             texts.append(stripped)
             paragraphs.append(paragraph)
 
-        # References heading latch is based on title matching and stops at a
-        # first "section breaker" paragraph (appendix, annex, etc).
-        heading_idx = find_heading_latch_index(texts)
-        if heading_idx is not None:
-            latch_mode = "heading"
-            latch_start = heading_idx
-            latch_end = find_heading_latch_end(texts, heading_idx)
-        else:
-            latch_mode = "none"
-            latch_start = len(texts)
-            latch_end = len(texts)
-
-        body_texts_for_numbering = [
-            texts[i] for i in range(len(texts)) if not (latch_start <= i < latch_end)
-        ]
-
-        body: list[Block] = []
-        body_paras: list[Paragraph | None] = []
-        references: list[Block] = []
-
+        body_texts_for_numbering = list(texts)
+        prelim: list[Block] = []
         seen_nonempty = False
         body_numbering_index = 0
 
         for i, text in enumerate(texts):
-            para = paragraphs[i] if i < len(paragraphs) else None
-            if not (text or "").strip():
-                continue
+            para = paragraphs[i]
             stripped = (text or "").strip()
-
-            if latch_start <= i < latch_end:
-                if latch_mode == "heading" and i == latch_start:
-                    references.append(Block(ParagraphRole.REFERENCES_HEADING, stripped))
-                else:
-                    references.append(
-                        Block(ParagraphRole.REFERENCES_ENTRY, stripped)
-                    )
-                continue
-
-            # When the latch is based on a "References" heading, the very first
-            # "section breaker" paragraph must be re-typed as appendix heading
-            # (or a generic heading). This mirrors split_body_and_references()
-            # in formatter_v2.structure.references.
-            if (
-                latch_mode == "heading"
-                and i == latch_end
-                and is_refs_latch_breaker(stripped)
-            ):
-                body.append(Block(refs_latch_break_role(stripped), stripped))
-                body_paras.append(para)
-                seen_nonempty = True
-                body_numbering_index += 1
+            if not stripped:
                 continue
 
             numbered_role = classify_numbered_line(
@@ -345,22 +306,24 @@ class WordStylesExtractor:
             )
             body_numbering_index += 1
             if numbered_role is not None:
-                body.append(Block(numbered_role, stripped))
-                body_paras.append(para)
+                prelim.append(Block(numbered_role, stripped))
                 seen_nonempty = True
                 continue
 
             is_first = not seen_nonempty
             seen_nonempty = True
             role = _role_from_style(stripped, para, is_first)
-            body.append(Block(role, stripped))
-            body_paras.append(para)
+            prelim.append(Block(role, stripped))
 
+        sec_notices: list[ResolutionNotice] = []
+        if expected_sections:
+            prelim, sec_notices = apply_expected_sections(prelim, expected_sections)
+
+        body, references = partition_blocks_by_references(prelim, paragraphs)
         model = DocumentModel(body=body, references=references)
         model, override_notices = apply_style_plausibility_overrides(model)
 
-        # Content latch: only when no references heading exists.
-        # Do it with indices so we can keep body_paras aligned for post-heuristics.
+        body_paras = [None] * len(model.body)
         if not any(b.role == ParagraphRole.REFERENCES_ENTRY for b in model.references):
             body_texts = [_plain(b) for b in model.body]
             found = find_content_latch_range(body_texts, body_paras)
@@ -378,18 +341,13 @@ class WordStylesExtractor:
                     ],
                     appendices=list(model.appendices),
                 )
-                body_paras = body_paras[:start] + body_paras[end:]
 
-        # Post heuristics: run over paragraphs that remained BODY by Word styles.
-        # Do not override explicit Word roles (Heading/Title/Quote/List/Captions).
         body_texts = [_plain(b) for b in model.body]
-        for i, (block, para) in enumerate(zip(model.body, body_paras)):
+        for i, block in enumerate(model.body):
             if block.role not in {ParagraphRole.BODY, ParagraphRole.BODY_FIRST}:
                 continue
             text = _plain(block).strip()
 
-            # Numbered section/list classifier should keep working even when
-            # Word paragraph style is Normal.
             numbered_role = classify_numbered_line(body_texts, i)
             if numbered_role is not None:
                 model.body[i] = Block(numbered_role, block.text)
@@ -404,9 +362,9 @@ class WordStylesExtractor:
             if _HEURISTIC_BULLET_RE.match(text):
                 model.body[i] = Block(ParagraphRole.LIST_BULLET, block.text)
                 continue
-            if _looks_like_block_quote(text, para):
+            if _looks_like_block_quote(text, None):
                 model.body[i] = Block(ParagraphRole.BLOCK_QUOTE, block.text)
                 continue
 
-        self.last_notices = list(override_notices)
+        self.last_notices = [*sec_notices, *override_notices]
         return move_appendices_from_body(model)

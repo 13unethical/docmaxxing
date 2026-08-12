@@ -168,6 +168,9 @@ def profile_form_defaults(profile: StyleProfile) -> dict[str, Any]:
         },
         "captions": profile.captions.model_dump(mode="json"),
         "references": profile.references.model_dump(mode="json"),
+        "structure": {
+            "expected_sections": [],
+        },
         "citations": {
             "style_override": profile.citations.style_override.value
             if profile.citations.style_override

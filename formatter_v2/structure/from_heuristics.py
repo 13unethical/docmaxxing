@@ -20,12 +20,15 @@ from docx.text.paragraph import Paragraph
 
 from services.document_structure_engine import detect_heading_level
 
+from formatter_v2.resolve import ResolutionNotice
 from formatter_v2.render.document import Block
 from formatter_v2.render.model import DocumentModel
 from formatter_v2.spec import ParagraphRole
+from formatter_v2.structure.expected_sections import apply_expected_sections
+from formatter_v2.structure.numbered import classify_numbered_line
 from formatter_v2.structure.references import (
     move_appendices_from_body,
-    split_body_and_references,
+    partition_blocks_by_references,
 )
 
 _BULLET_RE = re.compile(r"^[\u2022\u2023\u25E6\u00B7\-\*•]\s+")
@@ -110,7 +113,15 @@ def _role_for_paragraph(
 class HeuristicsExtractor:
     """V1 heading levels + a few V2-only role detectors; unknown → BODY."""
 
-    def extract(self, source: object) -> DocumentModel:
+    def __init__(self) -> None:
+        self.last_notices: list[ResolutionNotice] = []
+
+    def extract(
+        self,
+        source: object,
+        *,
+        expected_sections: list[str] | None = None,
+    ) -> DocumentModel:
         pairs = _coerce_paragraphs(source)
         texts: list[str] = []
         paragraphs: list[Paragraph | None] = []
@@ -121,10 +132,30 @@ class HeuristicsExtractor:
             texts.append(stripped)
             paragraphs.append(paragraph)
 
-        body, references = split_body_and_references(
-            texts,
-            paragraphs,
-            _role_for_paragraph,
-        )
+        body_texts_for_numbering = list(texts)
+        prelim: list[Block] = []
+        seen_nonempty = False
+        body_numbering_index = 0
+        for text, paragraph in zip(texts, paragraphs, strict=True):
+            numbered_role = classify_numbered_line(
+                body_texts_for_numbering, body_numbering_index
+            )
+            body_numbering_index += 1
+            if numbered_role is not None:
+                prelim.append(Block(numbered_role, text))
+                seen_nonempty = True
+                continue
+
+            is_first = not seen_nonempty
+            seen_nonempty = True
+            role = _role_for_paragraph(text, paragraph, is_first)
+            prelim.append(Block(role, text))
+
+        self.last_notices = []
+        if expected_sections:
+            prelim, sec_notices = apply_expected_sections(prelim, expected_sections)
+            self.last_notices.extend(sec_notices)
+
+        body, references = partition_blocks_by_references(prelim, paragraphs)
         model = DocumentModel(body=body, references=references)
         return move_appendices_from_body(model)

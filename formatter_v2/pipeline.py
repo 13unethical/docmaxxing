@@ -112,16 +112,23 @@ def format_document_v2(
     # references matching is not thrown off by lookalike letters.
     source, integrity_notices = normalize_source(source)
 
+    expected_sections: list[str] = []
+    if overrides.structure and overrides.structure.expected_sections:
+        expected_sections = list(overrides.structure.expected_sections)
+
     extractor, extractor_name, document = select_extractor(source)
+    extract_kwargs = {"expected_sections": expected_sections or None}
     if document is not None:
-        model = extractor.extract(document)
+        model = extractor.extract(document, **extract_kwargs)
     else:
-        model = extractor.extract(source)
+        model = extractor.extract(source, **extract_kwargs)
 
     extraction_notices: list[ResolutionNotice] = list(integrity_notices)
 
-    if isinstance(extractor, WordStylesExtractor):
+    if getattr(extractor, "last_notices", None):
         extraction_notices.extend(extractor.last_notices)
+
+    if isinstance(extractor, WordStylesExtractor):
         from formatter_v2.structure.from_word_styles import implausible_heading_notices
 
         extraction_notices.extend(implausible_heading_notices(model))

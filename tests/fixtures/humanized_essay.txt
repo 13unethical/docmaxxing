@@ -1,0 +1,18 @@
+Introduction
+Students increasingly rely on automated formatting before submission.
+
+2. Literature Review
+• Item one
+• Item two
+
+3. Methods
+This study reviews a sample academic essay structure.
+
+4. Findings The results summarized in Table 1 show measurable gains in clarity.
+Table 1. Summary of results
+
+5. Discussion
+The findings align with prior work on document structure.
+
+6. Conclusion
+Some body text.
