@@ -1,0 +1,268 @@
+/* ============================================================
+   DocMaxxing — design tokens
+   Подключать ПЕРВЫМ, до components.css и до любого фичевого CSS.
+
+   Правило: ни один компонент не содержит hex/rgb напрямую.
+   Только var(--...). Если нужного токена нет — добавь его сюда,
+   а не хардкод в компоненте.
+
+   Темы переключаются атрибутом на <html>:
+     <html data-theme="dark">  /  <html data-theme="light">
+   Атрибут ставит theme.js синхронно в <head> (см. no-flash сниппет).
+   :root = светлая тема — это же фолбэк, если JS отключён.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* --- Поверхности ------------------------------------------------ */
+  --bg:            #FAFAF9;  /* фон страницы */
+  --surface-1:     #FFFFFF;  /* карточка */
+  --surface-2:     #F4F4F2;  /* вложенный блок внутри карточки */
+  --surface-3:     #EAEAE7;  /* hover / выделенная строка */
+  --surface-inset: #F0F0EE;  /* поля ввода, dropzone */
+
+  /* --- Границы ----------------------------------------------------- */
+  --border:        #E3E3DF;  /* обычная граница карточки */
+  --border-strong: #C9C9C4;  /* граница инпута, акцентная линия */
+  --border-dashed: #CFCFCA;  /* пунктир dropzone */
+
+  /* --- Текст ------------------------------------------------------- */
+  --text:          #141414;  /* заголовки, основной текст */
+  --text-secondary:#5A5A57;  /* подписи, описания */
+  --text-muted:    #8E8E8A;  /* плейсхолдеры, лейблы шагов */
+  --text-inverse:  #FFFFFF;  /* текст на тёмной заливке */
+
+  /* --- Акцент (выбранный стиль, ссылки, фокус) --------------------- */
+  --accent:        #2563EB;
+  --accent-hover:  #1D4ED8;
+  --accent-text:   #1D4ED8;  /* акцентный текст на светлой подложке */
+  --accent-soft:   #E7EFFD;  /* заливка выбранного чипа */
+  --accent-border: #BFD4FA;
+
+  /* --- Предупреждение (блок «Отступления от стандарта») ------------ */
+  --warn:          #B45309;
+  --warn-text:     #92400E;
+  --warn-soft:     #FDF3E3;
+  --warn-border:   #F0D8A8;
+
+  /* --- Ошибка / успех ---------------------------------------------- */
+  --danger:        #DC2626;
+  --danger-text:   #B91C1C;
+  --danger-soft:   #FDECEC;
+  --danger-border: #F5C6C6;
+
+  --success:       #15803D;
+  --success-text:  #166534;
+  --success-soft:  #E9F6EE;
+  --success-border:#BFE3CC;
+
+  /* --- Кнопка primary (инвертированная относительно фона) ---------- */
+  --btn-primary-bg:       #141414;
+  --btn-primary-bg-hover: #2A2A2A;
+  --btn-primary-text:     #FFFFFF;
+
+  /* --- Тени -------------------------------------------------------- */
+  --shadow-1: 0 1px 2px rgba(20, 20, 20, .06);
+  --shadow-2: 0 4px 16px rgba(20, 20, 20, .08);
+  --shadow-3: 0 12px 40px rgba(20, 20, 20, .12);
+
+  /* --- Оверлей модалок --------------------------------------------- */
+  --overlay: rgba(20, 20, 20, .45);
+
+  /* ================================================================
+     Ниже — токены, не зависящие от темы
+     ================================================================ */
+
+  /* --- Радиусы ----------------------------------------------------- */
+  --radius-xs:   6px;
+  --radius-sm:   10px;
+  --radius-md:   14px;   /* инпуты, чипы, кнопки */
+  --radius-lg:   18px;   /* карточки */
+  --radius-xl:   24px;
+  --radius-pill: 999px;
+
+  /* --- Отступы (шаг 4px) ------------------------------------------- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* --- Типографика -------------------------------------------------- */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+               Consolas, monospace;
+
+  --text-xs:   12px;
+  --text-sm:   13px;
+  --text-base: 15px;
+  --text-md:   17px;
+  --text-lg:   20px;
+  --text-xl:   24px;
+  --text-2xl:  30px;
+  --text-3xl:  38px;
+
+  --leading-tight:   1.2;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.65;
+
+  --weight-normal:   400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  --tracking-tight: -0.02em;
+  --tracking-wide:   0.04em;  /* для лейблов «Шаг 1», «Предпросмотр» */
+
+  /* --- Движение ----------------------------------------------------- */
+  --ease:      cubic-bezier(.2, .6, .3, 1);
+  --dur-fast:  120ms;
+  --dur:       200ms;
+  --dur-slow:  320ms;
+
+  /* --- Слои --------------------------------------------------------- */
+  --z-dropdown: 100;
+  --z-sticky:   200;
+  --z-overlay:  900;
+  --z-modal:    1000;
+  --z-toast:    1100;
+
+  /* --- Раскладка ----------------------------------------------------- */
+  --container:      1180px;
+  --container-narrow: 760px;
+  --header-height:  64px;
+}
+
+/* ============================================================
+   ТЁМНАЯ ТЕМА
+   ============================================================ */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:            #0F0F0F;
+  --surface-1:     #1A1A1A;
+  --surface-2:     #222222;
+  --surface-3:     #2C2C2C;
+  --surface-inset: #171717;
+
+  --border:        #2A2A2A;
+  --border-strong: #3D3D3D;
+  --border-dashed: #3A3A3A;
+
+  --text:          #F2F2F0;
+  --text-secondary:#A0A09C;
+  --text-muted:    #6E6E6A;
+  --text-inverse:  #141414;
+
+  --accent:        #3B82F6;
+  --accent-hover:  #60A5FA;
+  --accent-text:   #7CB0FF;
+  --accent-soft:   #13294D;
+  --accent-border: #1F3E70;
+
+  --warn:          #F0A63C;
+  --warn-text:     #F0A63C;
+  --warn-soft:     #3A2408;
+  --warn-border:   #5A3A0F;
+
+  --danger:        #F87171;
+  --danger-text:   #F87171;
+  --danger-soft:   #3A1616;
+  --danger-border: #5C2222;
+
+  --success:       #4ADE80;
+  --success-text:  #4ADE80;
+  --success-soft:  #12301E;
+  --success-border:#1E4A30;
+
+  --btn-primary-bg:       #FFFFFF;
+  --btn-primary-bg-hover: #E4E4E2;
+  --btn-primary-text:     #141414;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .5);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, .55);
+  --shadow-3: 0 12px 40px rgba(0, 0, 0, .65);
+
+  --overlay: rgba(0, 0, 0, .65);
+}
+
+/* ============================================================
+   БАЗА
+   ============================================================ */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Плавный переход при смене темы — только цвета, не всё подряд */
+body,
+.card, .btn, .chip, .input, .alert, .dropzone, .panel {
+  transition: background-color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease),
+              color var(--dur) var(--ease);
+}
+
+/* Во время переключения темы отключаем переходы, чтобы не «плыло» */
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after { transition: none !important; }
+
+h1, h2, h3, h4 {
+  margin: 0;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--weight-semibold);
+}
+
+p { margin: 0; }
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+::placeholder { color: var(--text-muted); opacity: 1; }
+
+/* Единый фокус на весь сайт */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
