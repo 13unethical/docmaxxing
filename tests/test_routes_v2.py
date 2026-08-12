@@ -60,9 +60,9 @@ def test_format_v2_page_renders_when_flag_enabled() -> None:
         assert res.status_code == 200
         html = res.get_data(as_text=True)
         assert "Harvard (Cite Them Right)" in html
-        assert "Ваш документ" in html
-        assert "Стиль оформления" in html
-        assert "Форматировать" in html
+        assert "Your document" in html
+        assert "Citation &amp; layout style" in html
+        assert ">Format</button>" in html
         assert "format_v2.js" in html
 
 
@@ -172,7 +172,7 @@ def test_heading_size_not_in_default_visible_fields() -> None:
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
         html = _client().get("/format-v2").get_data(as_text=True)
     assert 'id="v2_heading_size_pt"' in html
-    assert 'value="">— по профилю —</option>' in html
+    assert 'value="">— profile default —</option>' in html
     main, _sep, style_settings = html.partition('id="v2-style-settings"')
     assert "heading_size" not in main.lower()
     assert "v2_heading_size_pt" in style_settings
@@ -233,9 +233,9 @@ def test_profile_cover_title_not_prefilled_with_assignment() -> None:
 def test_format_v2_ui_has_compact_advanced_rows() -> None:
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
         html = _client().get("/format-v2").get_data(as_text=True)
-    assert "Дополнительно" in html
+    assert "Advanced" in html
     assert "Дополнительно — свёрнуто" not in html
-    assert 'placeholder="Название работы"' in html
+    assert 'placeholder="Paper title"' in html
     assert 'class="v2-advanced-row"' in html
 
 
@@ -342,7 +342,7 @@ def test_chat_response_includes_summary_for_successful_edit() -> None:
                 "formatter_v2.chat.apply.apply_chat_edit",
                 return_value=(
                     UserOverrides(line_spacing=1.5),
-                    "интервал 2.0 → 1.5",
+                    "line spacing 2.0 → 1.5",
                     [],
                 ),
             ),
@@ -367,7 +367,7 @@ def test_chat_response_includes_summary_for_successful_edit() -> None:
     assert res.status_code == 200
     assert res.is_json
     data = res.get_json()
-    assert data["summary"] == "интервал 2.0 → 1.5"
+    assert data["summary"] == "line spacing 2.0 → 1.5"
     assert data["overrides"]["line_spacing"] == 1.5
     doc = _download_docx(client, data["document_id"])
     assert doc.status_code == 200
@@ -425,7 +425,7 @@ def test_response_metadata_survives_cyrillic_without_encoding() -> None:
                 "formatter_v2.chat.apply.apply_chat_edit",
                 return_value=(
                     UserOverrides(line_spacing=1.5),
-                    "интервал 2.0 → 1.5",
+                    "line spacing 2.0 → 1.5",
                     [],
                 ),
             ),
@@ -437,7 +437,7 @@ def test_response_metadata_survives_cyrillic_without_encoding() -> None:
                         ResolutionNotice(
                             field="line_spacing",
                             severity="info",
-                            message="Harvard задаёт полуторный интервал по умолчанию.",
+                            message="Harvard uses 1.5 spacing by default.",
                         )
                     ],
                     extractor_name="word_styles",
@@ -456,8 +456,8 @@ def test_response_metadata_survives_cyrillic_without_encoding() -> None:
     assert res.status_code == 200
     assert res.is_json
     data = res.get_json()
-    assert data["summary"] == "интервал 2.0 → 1.5"
-    assert "полуторный" in data["notices"][0]["message"]
+    assert data["summary"] == "line spacing 2.0 → 1.5"
+    assert "1.5 spacing" in data["notices"][0]["message"]
     assert res.headers.get("X-Format-Chat-Summary") is None
     assert res.headers.get("X-Format-Notices") is None
     doc = _download_docx(client, data["document_id"])
@@ -470,7 +470,7 @@ def test_chat_history_element_present_after_formatting() -> None:
         html = _client().get("/format-v2").get_data(as_text=True)
     assert 'id="v2_chat_history"' in html
     assert 'id="v2_chat_history_wrap"' in html
-    assert "История правок" in html
+    assert "Edit history" in html
     panel_start = html.index('id="v2_chat_panel"')
     panel_html = html[panel_start:]
     assert 'id="v2_chat_history_wrap"' in panel_html

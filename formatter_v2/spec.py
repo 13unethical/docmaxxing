@@ -214,8 +214,8 @@ class TypographySpec(StrictModel):
     def _no_conflicting_indents(self) -> TypographySpec:
         if self.first_line_indent_in > 0 and self.hanging_indent_in > 0:
             raise ValueError(
-                "first_line_indent_in и hanging_indent_in взаимоисключающие: "
-                "первая строка не может быть одновременно сдвинута вправо и влево"
+                "first_line_indent_in and hanging_indent_in are mutually exclusive: "
+                "the first line cannot be indented both right and left"
             )
         return self
 
@@ -223,8 +223,8 @@ class TypographySpec(StrictModel):
     def _no_small_caps_with_upper(self) -> TypographySpec:
         if self.small_caps and self.text_case == TextCase.UPPER:
             raise ValueError(
-                "small_caps и text_case=UPPER взаимоисключающие: "
-                "капитель и принудительные прописные нельзя применять вместе"
+                "small_caps and text_case=UPPER are mutually exclusive: "
+                "small caps and forced uppercase cannot be applied together"
             )
         return self
 
@@ -296,7 +296,7 @@ class CoverPage(StrictModel):
     @model_validator(mode="after")
     def _title_required_when_enabled(self) -> CoverPage:
         if self.enabled and self.mode == "form" and not self.title.strip():
-            raise ValueError("Титульный лист включён, но заголовок работы пустой")
+            raise ValueError("Cover page is enabled, but the paper title is empty")
         return self
 
 
@@ -426,7 +426,7 @@ class FormatSpec(StrictModel):
         missing = [r.value for r in ParagraphRole if r not in self.roles]
         if missing:
             raise ValueError(
-                "FormatSpec должен покрывать все роли абзацев. Не заполнены: "
+                "FormatSpec must cover every paragraph role. Missing: "
                 + ", ".join(missing)
             )
         return self
@@ -500,13 +500,13 @@ class ExtractedRequirements(StrictModel):
     evidence: dict[str, str] = Field(
         default_factory=dict,
         description=(
-            "Имя поля -> дословная цитата из брифа, обосновавшая значение. "
-            "Показывается пользователю и используется для отладки промпта."
+            "Field name -> verbatim quote from the brief that justified the value. "
+            "Shown to the user and used to debug the prompt."
         ),
     )
     unsupported: list[str] = Field(
         default_factory=list,
-        description="Найденные в брифе требования, которые сервис пока не умеет (напр. OSCOLA).",
+        description="Requirements found in the brief that the service does not support yet (e.g. OSCOLA).",
     )
     warnings: list[str] = Field(default_factory=list)
 
@@ -517,13 +517,13 @@ class ExtractedRequirements(StrictModel):
             and self.word_count_max is not None
             and self.word_count_min > self.word_count_max
         ):
-            raise ValueError("word_count_min больше word_count_max")
+            raise ValueError("word_count_min is greater than word_count_max")
         if (
             self.min_references is not None
             and self.max_references is not None
             and self.min_references > self.max_references
         ):
-            raise ValueError("min_references больше max_references")
+            raise ValueError("min_references is greater than max_references")
         return self
 
     def is_empty(self) -> bool:

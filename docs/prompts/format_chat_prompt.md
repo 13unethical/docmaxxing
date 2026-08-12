@@ -4,7 +4,7 @@
 `PROMPT_VERSION` в `formatter_v2/chat/edit.py` и сохраняй версию
 рядом с результатом — иначе непонятно, каким промптом получен разбор.
 
-`PROMPT_VERSION = "1.1.0"`
+`PROMPT_VERSION = "1.1.1"`
 
 ---
 
@@ -23,9 +23,11 @@ Return JSON with exactly these keys:
 - relative — array of {field, direction} for relative numeric requests.
   field is one of margins, font_size_pt, line_spacing.
   direction is increase or decrease. Empty array when none.
-- summary — a short description in the user's language of what will change.
+- summary — a short description in English of what will change.
 - rejected — array of strings. Each string is one declined request in the
-  form "request — reason". Use an empty array when nothing is rejected.
+  form "request — reason". Write summary and rejected reasons in English,
+  even if the user wrote in another language. Use an empty array when
+  nothing is rejected.
 
 RULES
 
@@ -58,6 +60,8 @@ RULES
 6. Use the current style and overrides context only to resolve references like
    "remove the page number" or "switch back to double spacing". Do not change
    settings the user did not mention.
+
+7. Always answer in English. summary and rejected reasons must be English.
 ```
 
 ## User message template

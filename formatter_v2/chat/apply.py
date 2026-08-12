@@ -178,7 +178,7 @@ def apply_relative_changes(
             rejected.append(
                 RejectedItem(
                     request=str(item),
-                    reason="некорректное относительное изменение",
+                    reason="invalid relative change",
                 )
             )
             continue

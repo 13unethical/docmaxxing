@@ -12,12 +12,12 @@
   };
 
   var SPACING_LABELS = {
-    "1": "одинарный интервал",
-    "1.0": "одинарный интервал",
-    "1.15": "интервал 1,15",
-    "1.5": "полуторный интервал",
-    "2": "двойной интервал",
-    "2.0": "двойной интервал",
+    "1": "single spacing",
+    "1.0": "single spacing",
+    "1.15": "1.15 spacing",
+    "1.5": "1.5 spacing",
+    "2": "double spacing",
+    "2.0": "double spacing",
   };
 
   var STYLE_HINTS = {
@@ -37,10 +37,10 @@
   };
 
   var MARGIN_LABELS = {
-    normal: 'поля 1"',
-    narrow: 'поля 0,5"',
-    wide: 'поля 1,5"',
-    custom: "поля из профиля",
+    normal: '1" margins',
+    narrow: '0.5" margins',
+    wide: '1.5" margins',
+    custom: "profile margins",
   };
 
   var state = {
@@ -62,7 +62,7 @@
   };
 
   var CHAT_FETCH_TIMEOUT_MS = 30000;
-  var CHAT_PENDING_DEFAULT = "Применяю правку…";
+  var CHAT_PENDING_DEFAULT = "Applying edit…";
 
   function fetchWithTimeout(url, options, timeoutMs) {
     var controller = new AbortController();
@@ -148,7 +148,7 @@
 
   function spacingLabel(value) {
     var key = normalizeLineSpacingOption(value);
-    return SPACING_LABELS[key] || ("интервал " + key);
+    return SPACING_LABELS[key] || ("spacing " + key);
   }
 
   function marginLabel(preset) {
@@ -769,9 +769,9 @@
     if (!res.ok) {
       if (ct.indexOf("application/json") !== -1) {
         var err = await res.json();
-        throw new Error(err.error || "Что-то пошло не так.");
+        throw new Error(err.error || "Something went wrong.");
       }
-      throw new Error("Ошибка сервера (" + res.status + ").");
+      throw new Error("Server error (" + res.status + ").");
     }
 
     var data = await res.json();
@@ -784,7 +784,7 @@
     var rejected = data.rejected || [];
     var documentId = data.document_id;
     if (!documentId) {
-      throw new Error("Сервер не вернул идентификатор документа.");
+      throw new Error("The server did not return a document id.");
     }
 
     var docRes = await fetchWithTimeout(
@@ -795,9 +795,9 @@
     if (!docRes.ok) {
       if ((docRes.headers.get("content-type") || "").indexOf("application/json") !== -1) {
         var dlErr = await docRes.json();
-        throw new Error(dlErr.error || "Не удалось скачать документ.");
+        throw new Error(dlErr.error || "Could not download the document.");
       }
-      throw new Error("Не удалось скачать документ (" + docRes.status + ").");
+      throw new Error("Could not download the document (" + docRes.status + ").");
     }
 
     var blob = await docRes.blob();
@@ -819,12 +819,12 @@
     if (!message) return;
 
     if (!state.hasFormatted) {
-      renderChatError("Сначала отформатируйте документ.");
-      setFormatStatus("Сначала отформатируйте документ.", "error");
+      renderChatError("Format the document first.");
+      setFormatStatus("Format the document first.", "error");
       return;
     }
 
-    setChatPending(true, "Применяю правку…");
+    setChatPending(true, "Applying edit…");
     renderChatSummary("");
     renderChatRejected([]);
 
@@ -848,16 +848,16 @@
       if (applied) {
         renderChatSummary(summary);
         appendChatHistoryEntry(summary);
-        if (window.AppUI) window.AppUI.showToast("Документ обновлён", "success");
+        if (window.AppUI) window.AppUI.showToast("Document updated", "success");
       } else if (rejected.length) {
         state.overrideUndoStack.pop();
         updateUndoButton();
-        renderChatError("Правка не применена");
+        renderChatError("Edit was not applied");
         renderChatRejected(rejected);
       } else {
         state.overrideUndoStack.pop();
         updateUndoButton();
-        renderChatError("Не удалось применить правку: сервер не вернул изменений.");
+        renderChatError("Could not apply the edit: the server returned no changes.");
       }
 
       if (input) input.value = "";
@@ -865,8 +865,8 @@
       state.overrideUndoStack.pop();
       updateUndoButton();
       var errMsg = e.name === "AbortError"
-        ? "Превышено время ожидания (30 с). Проверьте соединение и попробуйте снова."
-        : (e.message || "Не удалось применить правку.");
+        ? "Timed out after 30s. Check your connection and try again."
+        : (e.message || "Could not apply the edit.");
       renderChatError(errMsg);
     } finally {
       setChatPending(false);
@@ -884,7 +884,7 @@
 
     var btn = $("v2_chat_undo");
     if (btn) btn.disabled = true;
-    setChatPending(true, "Откатываю правку…");
+    setChatPending(true, "Undoing edit…");
 
     try {
       var res = await fetchWithTimeout(
@@ -898,8 +898,8 @@
       await handleFormatJsonResponse(res, { skipAutoDownload: true });
     } catch (e) {
       var undoErr = e.name === "AbortError"
-        ? "Превышено время ожидания (30 с)."
-        : (e.message || "Не удалось откатить.");
+        ? "Timed out after 30s."
+        : (e.message || "Could not undo.");
       renderChatError(undoErr);
     } finally {
       setChatPending(false);
@@ -1103,12 +1103,12 @@
     var status = $("v2_requirements_status");
     var brief = ($("v2_requirements_text").value || "").trim();
     if (!brief) {
-      setStatus(status, "Сначала вставьте требования.", "error");
+      setStatus(status, "Paste the requirements first.", "error");
       return;
     }
     var btn = $("v2_parse_btn");
     if (btn) btn.disabled = true;
-    setStatus(status, "Разбираем…");
+    setStatus(status, "Parsing…");
     try {
       var fd = new FormData();
       fd.append("requirements_text", brief);
@@ -1134,11 +1134,11 @@
       var warn = (data.warnings && data.warnings[0]) || "";
       setStatus(
         status,
-        warn || "Настройки заполнены — проверьте перед форматированием.",
+        warn || "Settings filled in — review them before formatting.",
         warn ? "warn" : "success"
       );
     } catch (err) {
-      setStatus(status, err.message || "Не удалось разобрать.", "error");
+      setStatus(status, err.message || "Could not parse the brief.", "error");
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -1154,7 +1154,7 @@
     setFormatStatus("");
 
     if (!file && !pasted) {
-      setFormatStatus("Загрузите DOCX/PDF или вставьте текст.", "error");
+      setFormatStatus("Upload a DOCX/PDF or paste your text.", "error");
       return;
     }
 
@@ -1162,7 +1162,7 @@
     var fd = buildDocumentFormData(overrides);
 
     if (btn) btn.disabled = true;
-    setFormatStatus("Форматируем…");
+    setFormatStatus("Formatting…");
 
     try {
       var res = await fetch("/api/format-v2", { method: "POST", body: fd });
@@ -1175,10 +1175,10 @@
       renderChatSummary("");
       renderChatRejected([]);
       showChatPanel(true);
-      setFormatStatus("Документ готов", "success");
-      if (window.AppUI) window.AppUI.showToast("Документ скачан", "success");
+      setFormatStatus("Document ready", "success");
+      if (window.AppUI) window.AppUI.showToast("Document downloaded", "success");
     } catch (e) {
-      setFormatStatus(e.message || "Сетевая ошибка — сервер запущен?", "error");
+      setFormatStatus(e.message || "Network error — is the server running?", "error");
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -1220,7 +1220,7 @@
         });
       }
       onStyleChange(state.style).catch(function (err) {
-        setFormatStatus(err.message || "Не удалось загрузить профиль.", "error");
+        setFormatStatus(err.message || "Could not load the style profile.", "error");
       });
     } catch (err) {
       console.error("[format-v2] init failed:", err);

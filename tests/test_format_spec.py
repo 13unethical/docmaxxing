@@ -65,14 +65,14 @@ def test_format_spec_rejects_missing_roles() -> None:
     with pytest.raises(ValidationError) as exc_info:
         FormatSpec(roles=incomplete)
     message = str(exc_info.value)
-    assert "FormatSpec должен покрывать все роли" in message or "Не заполнены" in message
+    assert "FormatSpec must cover every paragraph role" in message or "Missing:" in message
     assert ParagraphRole.DOC_TITLE.value in message
 
 
 def test_typography_forbids_first_line_and_hanging_together() -> None:
     with pytest.raises(ValidationError) as exc_info:
         TypographySpec(first_line_indent_in=0.5, hanging_indent_in=0.5)
-    assert "взаимоисключающие" in str(exc_info.value)
+    assert "mutually exclusive" in str(exc_info.value)
 
 
 def test_extracted_requirements_partial_json() -> None:

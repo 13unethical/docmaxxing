@@ -269,7 +269,7 @@ def test_timeout_returns_empty_changes_not_error() -> None:
     assert result["changes"] == {}
     assert result["summary"] == ""
     assert result["rejected"]
-    assert "время ожидания" in result["rejected"][0]
+    assert "timed out" in result["rejected"][0]
 
     new, summary, rejected = apply_chat_edit(
         "интервал 1.5",
@@ -280,7 +280,7 @@ def test_timeout_returns_empty_changes_not_error() -> None:
     assert new.line_spacing == 2.0
     assert summary == ""
     assert rejected
-    assert "время ожидания" in rejected[0].reason
+    assert "timed out" in rejected[0].reason
 
 
 def test_prompt_version_matches_document() -> None:
@@ -398,14 +398,14 @@ def test_response_without_changes_and_rejections_shows_error() -> None:
     )
     assert summary == ""
     assert rejected
-    assert "время ожидания" in rejected[0].reason
+    assert "timed out" in rejected[0].reason
 
     js_path = Path(__file__).resolve().parents[1] / "static" / "format_v2.js"
     js = js_path.read_text(encoding="utf-8")
     send_start = js.index("async function sendChatEdit")
     send_end = js.index("async function undoChatEdit")
     send_body = js[send_start:send_end]
-    assert "Не удалось применить правку: сервер не вернул изменений." in send_body
+    assert "Could not apply the edit: the server returned no changes." in send_body
     assert "state.overrideUndoStack.pop()" in send_body
 
 
@@ -413,8 +413,8 @@ def test_summarize_override_changes_line_spacing_and_margins() -> None:
     before = UserOverrides(line_spacing=2.0, margins=Margins.preset("normal"))
     after = UserOverrides(line_spacing=1.5, margins=Margins(top_in=1.25, bottom_in=1.25, left_in=1.25, right_in=1.25))
     summary = summarize_override_changes(before, after)
-    assert "интервал 2.0 → 1.5" in summary
-    assert 'поля 1" → 1.25"' in summary
+    assert "line spacing 2.0 → 1.5" in summary
+    assert 'margins 1" → 1.25"' in summary
 
 
 def test_chat_edit_returns_within_timeout_when_model_hangs() -> None:
@@ -461,9 +461,9 @@ def test_loading_indicator_shown_only_in_chat_panel() -> None:
     undo_end = js.index("function renderNotices")
     undo_body = js[undo_start:undo_end]
     assert "setChatPending(true" in send_body
-    assert "Применяю правку" in send_body
-    assert 'setFormatStatus("Применя' not in send_body
-    assert 'setFormatStatus("Правка' not in send_body
+    assert "Applying edit" in send_body
+    assert 'setFormatStatus("Applying' not in send_body
+    assert 'setFormatStatus("Edit' not in send_body
     assert "setFormatStatus" not in undo_body
     assert "setChatPending(true" in undo_body
 
@@ -584,5 +584,5 @@ def test_summary_shows_profile_value_as_the_old_value() -> None:
     )
     assert rejected == []
     assert new.line_spacing == 1.5
-    assert "интервал 2.0 → 1.5" in summary
+    assert "line spacing 2.0 → 1.5" in summary
     assert "— →" not in summary

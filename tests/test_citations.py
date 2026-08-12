@@ -191,7 +191,7 @@ def test_from_doi_network_error_returns_message() -> None:
         item, err = from_doi("10.1000/xyz")
     assert item is None
     assert err is not None
-    assert "ожидания" in err.lower() or "timeout" in err.lower() or "Превышено" in err
+    assert "timeout" in err.lower() or "timed out" in err.lower()
 
 
 def test_from_isbn_maps_open_library() -> None:
@@ -246,7 +246,7 @@ def test_from_raw_string_rejects_low_score() -> None:
     with patch("formatter_v2.citations.sources.requests.get", return_value=mock_resp):
         item, err = from_raw_string("some obscure string")
     assert item is None
-    assert err == "не удалось распознать источник"
+    assert err == "could not recognise the source"
 
 
 def test_from_manual_accepts_form_fields() -> None:

@@ -194,9 +194,9 @@ def numbered_section_notices(model: DocumentModel) -> list[ResolutionNotice]:
             field="structure.numbered_sections",
             severity="info",
             message=(
-                "В исходнике найдена ручная нумерация разделов "
-                f"({longest} секций подряд). Стоит проверить, нужна ли она "
-                "в итоговом документе — номера в тексте сохранены без изменений."
+                "The source uses manual section numbering "
+                f"({longest} consecutive sections). Check whether those numbers "
+                "are still needed in the formatted document — they were left unchanged."
             ),
         )
     ]

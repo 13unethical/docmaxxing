@@ -171,7 +171,7 @@ def test_implausible_heading_notice_when_too_many_h1() -> None:
     notices = implausible_heading_notices(model)
     assert len(notices) == 1
     assert notices[0].severity == "info"
-    assert "заголовков" in notices[0].message
+    assert "headings" in notices[0].message
 
 
 def _appendix_after_refs_lines() -> list[str]:

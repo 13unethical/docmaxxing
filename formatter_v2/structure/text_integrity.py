@@ -130,9 +130,9 @@ def integrity_notices(substituted: int, letter_count: int) -> list[ResolutionNot
             field="text.homoglyphs",
             severity="deviation",
             message=(
-                "В тексте найдены подменённые буквы (кириллица/греческий вместо "
-                f"латиницы): исправлено символов — {substituted}. "
-                "Стоит проверить исходник на копирование из PDF/скана."
+                "The source text contains lookalike letters (Cyrillic/Greek instead of "
+                f"Latin): {substituted} character(s) were corrected. "
+                "Check the original for copy-paste from a PDF or scan."
             ),
         )
     ]

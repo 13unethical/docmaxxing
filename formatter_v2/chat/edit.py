@@ -23,7 +23,7 @@ from formatter_v2.spec import (
     UserOverrides,
 )
 
-PROMPT_VERSION = "1.1.0"
+PROMPT_VERSION = "1.1.1"
 
 _PROMPT_PATH = (
     Path(__file__).resolve().parents[2]
@@ -189,7 +189,7 @@ def _timeout_chat_response() -> dict[str, Any]:
         "changes": {},
         "relative": [],
         "summary": "",
-        "rejected": ["запрос — превышено время ожидания модели (15 с)"],
+        "rejected": ["request — model timed out (15s)"],
     }
 
 

@@ -41,11 +41,11 @@ def _safe_get(
     try:
         response = requests.get(url, headers=headers, params=params, timeout=timeout)
     except requests.Timeout:
-        return None, f"Превышено время ожидания при запросе {url}"
+        return None, f"Timed out requesting {url}"
     except requests.RequestException as exc:
-        return None, f"Сетевая ошибка при запросе {url}: {exc}"
+        return None, f"Network error requesting {url}: {exc}"
     if response.status_code >= 400:
-        return None, f"HTTP {response.status_code} при запросе {url}"
+        return None, f"HTTP {response.status_code} requesting {url}"
     return response, None
 
 
@@ -93,7 +93,7 @@ def from_doi(doi: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceResult:
     """Resolve a DOI via content negotiation (response is already CSL-JSON)."""
     cleaned = _clean_doi(doi)
     if not cleaned:
-        return None, "Пустой DOI"
+        return None, "Empty DOI"
     url = f"https://doi.org/{quote(cleaned)}"
     response, err = _safe_get(
         url,
@@ -101,15 +101,15 @@ def from_doi(doi: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceResult:
         timeout=timeout,
     )
     if err or response is None:
-        return None, err or "Не удалось получить метаданные DOI"
+        return None, err or "Could not fetch DOI metadata"
     try:
         data = response.json()
     except ValueError:
-        return None, "Ответ doi.org не является JSON"
+        return None, "doi.org response is not JSON"
     try:
         item = _item_from_mapping(data, fallback_id=cleaned)
     except Exception as exc:  # noqa: BLE001 — validate soft-fails for callers
-        return None, f"Не удалось разобрать CSL-JSON для DOI: {exc}"
+        return None, f"Could not parse CSL-JSON for DOI: {exc}"
     if not item.DOI:
         item = item.model_copy(update={"DOI": cleaned})
     return item, None
@@ -119,15 +119,15 @@ def from_isbn(isbn: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceResult:
     """Resolve an ISBN via Open Library and map to CSLItem."""
     cleaned = re.sub(r"[^0-9Xx]", "", isbn.strip())
     if not cleaned:
-        return None, "Пустой ISBN"
+        return None, "Empty ISBN"
     url = f"https://openlibrary.org/isbn/{cleaned}.json"
     response, err = _safe_get(url, timeout=timeout)
     if err or response is None:
-        return None, err or "Не удалось получить метаданные ISBN"
+        return None, err or "Could not fetch ISBN metadata"
     try:
         data = response.json()
     except ValueError:
-        return None, "Ответ Open Library не является JSON"
+        return None, "Open Library response is not JSON"
 
     title = data.get("title")
     authors: list[CSLName] = []
@@ -158,7 +158,7 @@ def from_isbn(isbn: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceResult:
             URL=f"https://openlibrary.org/isbn/{cleaned}",
         )
     except Exception as exc:  # noqa: BLE001
-        return None, f"Не удалось собрать CSLItem из Open Library: {exc}"
+        return None, f"Could not build CSLItem from Open Library: {exc}"
     return item, None
 
 
@@ -166,12 +166,12 @@ def from_url(url: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceResult:
     """Build a webpage CSLItem from HTML metadata."""
     cleaned = url.strip()
     if not cleaned:
-        return None, "Пустой URL"
+        return None, "Empty URL"
     if not re.match(r"^https?://", cleaned, flags=re.I):
         cleaned = "https://" + cleaned
     response, err = _safe_get(cleaned, headers={"User-Agent": "DocMaxxingFormatter/2.0"}, timeout=timeout)
     if err or response is None:
-        return None, err or "Не удалось загрузить страницу"
+        return None, err or "Could not load the page"
     soup = BeautifulSoup(response.text, "html.parser")
 
     def meta(*names: str) -> str | None:
@@ -206,7 +206,7 @@ def from_url(url: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceResult:
             URL=cleaned,
         )
     except Exception as exc:  # noqa: BLE001
-        return None, f"Не удалось собрать CSLItem из URL: {exc}"
+        return None, f"Could not build CSLItem from URL: {exc}"
     return item, None
 
 
@@ -214,7 +214,7 @@ def from_raw_string(text: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceR
     """Fuzzy-match a bibliographic string via Crossref; None if score is too low."""
     query = text.strip()
     if not query:
-        return None, "Пустая строка источника"
+        return None, "Empty source string"
     response, err = _safe_get(
         "https://api.crossref.org/works",
         params={"query.bibliographic": query, "rows": 1},
@@ -222,18 +222,18 @@ def from_raw_string(text: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceR
         timeout=timeout,
     )
     if err or response is None:
-        return None, err or "Не удалось запросить Crossref"
+        return None, err or "Could not query Crossref"
     try:
         payload = response.json()
     except ValueError:
-        return None, "Ответ Crossref не является JSON"
+        return None, "Crossref response is not JSON"
     items = (((payload or {}).get("message") or {}).get("items")) or []
     if not items:
-        return None, "не удалось распознать источник"
+        return None, "could not recognise the source"
     hit = items[0]
     score = float(hit.get("score") or 0)
     if score < CROSSREF_SCORE_THRESHOLD:
-        return None, "не удалось распознать источник"
+        return None, "could not recognise the source"
     # Crossref message item is not CSL-JSON; map common fields.
     doi = hit.get("DOI")
     if doi:
@@ -242,7 +242,7 @@ def from_raw_string(text: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceR
     try:
         item = _item_from_mapping(mapped, fallback_id=hit.get("URL") or query[:64])
     except Exception as exc:  # noqa: BLE001
-        return None, f"Не удалось разобрать результат Crossref: {exc}"
+        return None, f"Could not parse Crossref result: {exc}"
     return item, None
 
 
@@ -281,7 +281,7 @@ def from_manual(fields: dict[str, Any]) -> SourceResult:
     try:
         item = CSLItem.model_validate(fields)
     except Exception as exc:  # noqa: BLE001
-        return None, f"Некорректные поля источника: {exc}"
+        return None, f"Invalid source fields: {exc}"
     return item, None
 
 

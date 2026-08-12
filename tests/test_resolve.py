@@ -209,7 +209,7 @@ def test_resolver_does_not_mutate_the_profile() -> None:
 
 def test_style_mismatch_raises() -> None:
     profile = _profile(StyleName.APA7)
-    with pytest.raises(ValueError, match="не совпадает"):
+    with pytest.raises(ValueError, match="does not match"):
         resolve_format_spec(profile, UserOverrides(style=StyleName.MLA9))
 
 

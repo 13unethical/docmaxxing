@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Форматирование — DocMaxxing{% endblock %}
+{% block title %}Format — DocMaxxing{% endblock %}
 {% block head_extra %}
 <style>
   .v2-layout { width: 100%; min-width: 0; }
@@ -371,20 +371,20 @@
             >
               <div class="home-zone-drop-overlay" data-v2-zone-overlay hidden>
                 <div class="home-zone-drop-overlay-inner">
-                  <p class="home-zone-drop-title">Отпустите файл</p>
-                  <p class="home-zone-drop-lede">DOCX, PDF или TXT</p>
+                  <p class="home-zone-drop-title">Drop your file</p>
+                  <p class="home-zone-drop-lede">DOCX, PDF or TXT</p>
                 </div>
               </div>
               <div class="home-unified-top">
-                <p class="v2-step-label">Шаг 1</p>
+                <p class="v2-step-label">Step 1</p>
                 <div class="home-zone-head">
-                  <h2 class="card-title" id="v2-doc-label">Ваш документ</h2>
+                  <h2 class="card-title" id="v2-doc-label">Your document</h2>
                 </div>
                 <div class="home-doc-toolbar">
-                  <div class="home-doc-segment" role="tablist" aria-label="Способ ввода документа" data-v2-doc-segment>
+                  <div class="home-doc-segment" role="tablist" aria-label="How to add your document" data-v2-doc-segment>
                     <span class="home-doc-segment-thumb" aria-hidden="true"></span>
-                    <button type="button" class="home-doc-segment-btn is-active" role="tab" aria-selected="true" data-v2-doc-source="drop">Файл</button>
-                    <button type="button" class="home-doc-segment-btn" role="tab" aria-selected="false" data-v2-doc-source="paste">Вставить текст</button>
+                    <button type="button" class="home-doc-segment-btn is-active" role="tab" aria-selected="true" data-v2-doc-source="drop">File</button>
+                    <button type="button" class="home-doc-segment-btn" role="tab" aria-selected="false" data-v2-doc-source="paste">Paste text</button>
                   </div>
                   <input type="file" id="v2_file" hidden accept=".docx,.pdf,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" />
                 </div>
@@ -394,23 +394,23 @@
                     <path d="M17 8l-5-5-5 5" />
                     <path d="M12 3v12" />
                   </svg>
-                  <p class="v2-drop-placeholder-title">Перетащите DOCX или вставьте текст</p>
-                  <p class="v2-drop-placeholder-hint">Нажмите, чтобы выбрать файл</p>
+                  <p class="v2-drop-placeholder-title">Drop a DOCX or paste your text</p>
+                  <p class="v2-drop-placeholder-hint">Click to choose a file</p>
                 </div>
                 <p class="v2-file-name" id="v2_file_name" aria-live="polite"></p>
                 <div class="home-doc-panel home-document-paste" data-v2-doc-panel="paste" hidden>
                   <label class="field">
-                    <textarea id="v2_pasted_text" rows="12" placeholder="Вставьте текст работы…"></textarea>
+                    <textarea id="v2_pasted_text" rows="12" placeholder="Paste your paper…"></textarea>
                   </label>
                 </div>
               </div>
             </section>
 
             <section class="card v2-style-card" aria-labelledby="v2-style-label">
-              <p class="v2-step-label">Шаг 2</p>
-              <h2 class="card-title" id="v2-style-label">Стиль оформления</h2>
+              <p class="v2-step-label">Step 2</p>
+              <h2 class="card-title" id="v2-style-label">Citation &amp; layout style</h2>
               <input type="hidden" id="v2_format_style" value="harvard" />
-              <div class="preset-row v2-style-row" role="group" aria-label="Стиль оформления" data-v2-style-control>
+              <div class="preset-row v2-style-row" role="group" aria-label="Citation and layout style" data-v2-style-control>
                 <button type="button" class="preset-chip is-active" data-v2-style="harvard" title="Harvard (Cite Them Right)">Harvard</button>
                 <button type="button" class="preset-chip" data-v2-style="apa7" title="APA 7">APA 7</button>
                 <button type="button" class="preset-chip" data-v2-style="mla9" title="MLA 9">MLA 9</button>
@@ -425,73 +425,73 @@
               <summary class="settings-summary" id="v2-brief-label">
                 <span class="settings-summary-main">
                   <span class="settings-summary-copy">
-                    <span class="settings-summary-title"><span class="v2-requirements-wand" aria-hidden="true">✦</span>Есть требования преподавателя? Вставьте — заполним настройки сами</span>
+                    <span class="settings-summary-title"><span class="v2-requirements-wand" aria-hidden="true">✦</span>Have a brief from your lecturer? Paste it — we'll fill in the settings</span>
                   </span>
                 </span>
               </summary>
               <div class="settings-body">
                 <label class="field home-brief-paste">
-                  <textarea id="v2_requirements_text" rows="6" placeholder="Вставьте бриф, рубрику или письмо преподавателя…" autocomplete="off"></textarea>
+                  <textarea id="v2_requirements_text" rows="6" placeholder="Paste the brief, rubric, or lecturer email…" autocomplete="off"></textarea>
                 </label>
                 <div class="field-row" style="margin-top:0.6rem;gap:0.6rem;align-items:center">
-                  <button type="button" class="btn-secondary" id="v2_parse_btn">Разобрать</button>
+                  <button type="button" class="btn-secondary" id="v2_parse_btn">Parse brief</button>
                   <p id="v2_requirements_status" class="req-chat-status req-status" role="status"></p>
                 </div>
               </div>
             </details>
 
             <div class="v2-format-actions">
-              <button type="button" class="cta" id="v2_format_btn">Форматировать</button>
+              <button type="button" class="cta" id="v2_format_btn">Format</button>
               <p id="v2_format_status" class="format-status status" role="status" aria-live="polite"></p>
             </div>
 
-            <p class="v2-advanced-label">Дополнительно</p>
+            <p class="v2-advanced-label">Advanced</p>
 
             <div class="v2-advanced-block">
             <details class="v2-advanced-row" aria-labelledby="v2-cover-settings">
-              <summary id="v2-cover-settings">Титульный лист</summary>
+              <summary id="v2-cover-settings">Cover page</summary>
               <div class="settings-body">
                 <label class="check">
                   <input type="checkbox" id="v2_cover_enabled" data-v2-field="cover_page" />
-                  <span>Добавить титульный лист <span class="v2-evidence" data-evidence-for="cover_page" hidden title="">i</span></span>
+                  <span>Add a cover page <span class="v2-evidence" data-evidence-for="cover_page" hidden title="">i</span></span>
                 </label>
                 <div class="field-row two">
                   <label class="field">
-                    <span class="label">Название</span>
-                    <input type="text" id="v2_cover_title" data-v2-field="cover_page" placeholder="Название работы" autocomplete="off" />
+                    <span class="label">Title</span>
+                    <input type="text" id="v2_cover_title" data-v2-field="cover_page" placeholder="Paper title" autocomplete="off" />
                   </label>
                   <label class="field">
-                    <span class="label">Студент</span>
+                    <span class="label">Student</span>
                     <input type="text" id="v2_cover_student" data-v2-field="cover_page" autocomplete="off" />
                   </label>
                 </div>
                 <div class="field-row two">
                   <label class="field">
-                    <span class="label">Преподаватель</span>
+                    <span class="label">Lecturer</span>
                     <input type="text" id="v2_cover_lecturer" data-v2-field="cover_page" autocomplete="off" />
                   </label>
                   <label class="field">
-                    <span class="label">Курс</span>
+                    <span class="label">Course</span>
                     <input type="text" id="v2_cover_course" data-v2-field="cover_page" autocomplete="off" />
                   </label>
                 </div>
                 <label class="field">
-                  <span class="label">Дата сдачи</span>
+                  <span class="label">Submission date</span>
                   <input type="date" id="v2_cover_date" data-v2-field="cover_page" />
                 </label>
               </div>
             </details>
 
             <details class="v2-advanced-row" aria-labelledby="v2-toc-settings">
-              <summary id="v2-toc-settings">Оглавление и приложения</summary>
+              <summary id="v2-toc-settings">Contents &amp; appendices</summary>
               <div class="settings-body">
                 <label class="check">
                   <input type="checkbox" id="v2_toc_enabled" data-v2-field="table_of_contents" data-v2-toggle="toc" />
-                  <span>Оглавление <span class="v2-evidence" data-evidence-for="table_of_contents" hidden title="">i</span></span>
+                  <span>Table of contents <span class="v2-evidence" data-evidence-for="table_of_contents" hidden title="">i</span></span>
                 </label>
                 <div class="field-row two" data-v2-depends-on="toc">
                   <label class="field">
-                    <span class="label">Глубина</span>
+                    <span class="label">Depth</span>
                     <select id="v2_toc_max_depth" data-v2-field="table_of_contents">
                       <option value="1">1</option>
                       <option value="2">2</option>
@@ -501,42 +501,42 @@
                   </label>
                   <label class="check" style="align-self:end" data-v2-depends-on="toc">
                     <input type="checkbox" id="v2_toc_field_based" data-v2-field="table_of_contents" />
-                    <span>Поле Word (TOC)</span>
+                    <span>Word TOC field</span>
                   </label>
                 </div>
                 <label class="check">
                   <input type="checkbox" id="v2_abbr_enabled" data-v2-field="abbreviations" data-v2-toggle="abbr" />
-                  <span>Список сокращений</span>
+                  <span>List of abbreviations</span>
                 </label>
                 <label class="field" data-v2-depends-on="abbr">
-                  <span class="label">Сокращения (CODE — значение)</span>
+                  <span class="label">Abbreviations (CODE — meaning)</span>
                   <textarea id="v2_abbr_entries" rows="3" data-v2-field="abbreviations" placeholder="IPCC — Intergovernmental Panel on Climate Change"></textarea>
                 </label>
                 <label class="check">
                   <input type="checkbox" id="v2_appendices_enabled" data-v2-field="appendices" data-v2-toggle="appendices" />
-                  <span>Приложения <span class="v2-evidence" data-evidence-for="appendices" hidden title="">i</span></span>
+                  <span>Appendices <span class="v2-evidence" data-evidence-for="appendices" hidden title="">i</span></span>
                 </label>
                 <label class="check" data-v2-depends-on="appendices">
                   <input type="checkbox" id="v2_appendices_lettered" data-v2-field="appendices" checked />
-                  <span>Буквенная нумерация (A, B, C…)</span>
+                  <span>Letter labels (A, B, C…)</span>
                 </label>
                 <label class="check" data-v2-depends-on="appendices">
                   <input type="checkbox" id="v2_captions_enabled" data-v2-field="captions" checked />
-                  <span>Автонумерация подписей</span>
+                  <span>Auto-number captions</span>
                 </label>
                 <div class="field-row two" data-v2-depends-on="appendices">
                   <label class="field">
-                    <span class="label">Подпись таблицы</span>
+                    <span class="label">Table caption</span>
                     <select id="v2_table_position" data-v2-field="captions">
-                      <option value="above">Над таблицей</option>
-                      <option value="below">Под таблицей</option>
+                      <option value="above">Above table</option>
+                      <option value="below">Below table</option>
                     </select>
                   </label>
                   <label class="field">
-                    <span class="label">Подпись рисунка</span>
+                    <span class="label">Figure caption</span>
                     <select id="v2_figure_position" data-v2-field="captions">
-                      <option value="above">Над рисунком</option>
-                      <option value="below">Под рисунком</option>
+                      <option value="above">Above figure</option>
+                      <option value="below">Below figure</option>
                     </select>
                   </label>
                 </div>
@@ -544,34 +544,34 @@
             </details>
 
             <details class="v2-advanced-row" aria-labelledby="v2-refs-settings">
-              <summary id="v2-refs-settings">Список литературы</summary>
+              <summary id="v2-refs-settings">References</summary>
               <div class="settings-body">
                 <label class="check">
                   <input type="checkbox" id="v2_refs_enabled" data-v2-field="references" checked />
-                  <span>Включить список литературы</span>
+                  <span>Include a reference list</span>
                 </label>
                 <label class="field">
-                  <span class="label">Заголовок секции</span>
+                  <span class="label">Section heading</span>
                   <input type="text" id="v2_refs_heading" data-v2-field="references" autocomplete="off" />
                 </label>
                 <label class="check">
                   <input type="checkbox" id="v2_refs_new_page" data-v2-field="references" checked />
-                  <span>С новой страницы</span>
+                  <span>Start on a new page</span>
                 </label>
                 <label class="check">
                   <input type="checkbox" id="v2_refs_numbered" data-v2-field="references" />
-                  <span>Нумерованный список (IEEE)</span>
+                  <span>Numbered list (IEEE)</span>
                 </label>
               </div>
             </details>
 
             <details class="v2-advanced-row" aria-labelledby="v2-style-settings">
-              <summary id="v2-style-settings">Изменить настройки стиля</summary>
+              <summary id="v2-style-settings">Override style settings</summary>
               <div class="settings-body">
-                <p class="card-hint" style="margin:0 0 0.75rem;font-size:0.82rem">Только изменённые поля отправляются как переопределения</p>
+                <p class="card-hint" style="margin:0 0 0.75rem;font-size:0.82rem">Only fields you change are sent as overrides</p>
                 <div class="field-row two">
                   <label class="field">
-                    <span class="label">Шрифт <span class="v2-evidence" data-evidence-for="font_family" hidden title="">i</span></span>
+                    <span class="label">Font <span class="v2-evidence" data-evidence-for="font_family" hidden title="">i</span></span>
                     <select id="v2_font_family" data-v2-field="font_family">
                       <option value="Times New Roman">Times New Roman</option>
                       <option value="Arial">Arial</option>
@@ -583,7 +583,7 @@
                     </select>
                   </label>
                   <label class="field">
-                    <span class="label">Кегль (pt) <span class="v2-evidence" data-evidence-for="font_size_pt" hidden title="">i</span></span>
+                    <span class="label">Size (pt) <span class="v2-evidence" data-evidence-for="font_size_pt" hidden title="">i</span></span>
                     <select id="v2_font_size" data-v2-field="font_size_pt">
                       <option value="10">10</option>
                       <option value="11">11</option>
@@ -597,7 +597,7 @@
                 </div>
                 <div class="field-row two">
                   <label class="field">
-                    <span class="label">Интервал <span class="v2-evidence" data-evidence-for="line_spacing" hidden title="">i</span></span>
+                    <span class="label">Line spacing <span class="v2-evidence" data-evidence-for="line_spacing" hidden title="">i</span></span>
                     <select id="v2_line_spacing" data-v2-field="line_spacing">
                       <option value="1.0">1.0</option>
                       <option value="1.15">1.15</option>
@@ -606,31 +606,31 @@
                     </select>
                   </label>
                   <label class="field">
-                    <span class="label">Выравнивание <span class="v2-evidence" data-evidence-for="alignment" hidden title="">i</span></span>
+                    <span class="label">Alignment <span class="v2-evidence" data-evidence-for="alignment" hidden title="">i</span></span>
                     <select id="v2_alignment" data-v2-field="alignment">
-                      <option value="left">По левому краю</option>
-                      <option value="justify">По ширине</option>
-                      <option value="center">По центру</option>
-                      <option value="right">По правому краю</option>
+                      <option value="left">Left</option>
+                      <option value="justify">Justified</option>
+                      <option value="center">Center</option>
+                      <option value="right">Right</option>
                     </select>
                   </label>
                 </div>
                 <label class="check">
                   <input type="checkbox" id="v2_first_line_indent" data-v2-field="first_line_indent" />
-                  <span>Красная строка (0,5″) <span class="v2-evidence" data-evidence-for="first_line_indent" hidden title="">i</span></span>
+                  <span>First-line indent (0.5″) <span class="v2-evidence" data-evidence-for="first_line_indent" hidden title="">i</span></span>
                 </label>
                 <div class="field-row two">
                   <label class="field">
-                    <span class="label">Поля <span class="v2-evidence" data-evidence-for="margins" hidden title="">i</span></span>
+                    <span class="label">Margins <span class="v2-evidence" data-evidence-for="margins" hidden title="">i</span></span>
                     <select id="v2_margin_preset" data-v2-field="margins">
-                      <option value="normal">Обычные (1″)</option>
-                      <option value="narrow">Узкие (0,5″)</option>
-                      <option value="wide">Широкие (1,5″)</option>
-                      <option value="custom">Из профиля</option>
+                      <option value="normal">Normal (1″)</option>
+                      <option value="narrow">Narrow (0.5″)</option>
+                      <option value="wide">Wide (1.5″)</option>
+                      <option value="custom">From profile</option>
                     </select>
                   </label>
                   <label class="field">
-                    <span class="label">Размер страницы <span class="v2-evidence" data-evidence-for="page_size" hidden title="">i</span></span>
+                    <span class="label">Page size <span class="v2-evidence" data-evidence-for="page_size" hidden title="">i</span></span>
                     <select id="v2_page_size" data-v2-field="page_size">
                       <option value="a4">A4</option>
                       <option value="letter">Letter</option>
@@ -638,23 +638,23 @@
                   </label>
                 </div>
                 <label class="field">
-                  <span class="label">Номера страниц <span class="v2-evidence" data-evidence-for="page_numbering" hidden title="">i</span></span>
+                  <span class="label">Page numbers <span class="v2-evidence" data-evidence-for="page_numbering" hidden title="">i</span></span>
                   <select id="v2_page_number_position" data-v2-field="page_numbering">
-                    <option value="none">Нет</option>
-                    <option value="top_left">Вверху слева</option>
-                    <option value="top_center">Вверху по центру</option>
-                    <option value="top_right">Вверху справа</option>
-                    <option value="bottom_left">Внизу слева</option>
-                    <option value="bottom_center">Внизу по центру</option>
-                    <option value="bottom_right">Внизу справа</option>
+                    <option value="none">None</option>
+                    <option value="top_left">Top left</option>
+                    <option value="top_center">Top center</option>
+                    <option value="top_right">Top right</option>
+                    <option value="bottom_left">Bottom left</option>
+                    <option value="bottom_center">Bottom center</option>
+                    <option value="bottom_right">Bottom right</option>
                   </select>
                 </label>
                 <div class="v2-expert-only">
                   <div class="field-row two">
                     <label class="field">
-                      <span class="label">Размер заголовков (pt)</span>
+                      <span class="label">Heading size (pt)</span>
                       <select id="v2_heading_size_pt" data-v2-field="heading_size_pt">
-                        <option value="">— по профилю —</option>
+                        <option value="">— profile default —</option>
                         <option value="14">14</option>
                         <option value="16">16</option>
                         <option value="18">18</option>
@@ -662,9 +662,9 @@
                       </select>
                     </label>
                     <label class="field">
-                      <span class="label">Стиль цитирования (override)</span>
+                      <span class="label">Citation style override</span>
                       <select id="v2_citation_style_override" data-v2-field="citations">
-                        <option value="">Как основной стиль</option>
+                        <option value="">Same as document style</option>
                         <option value="harvard">Harvard (Cite Them Right)</option>
                         <option value="apa7">APA 7</option>
                         <option value="mla9">MLA 9</option>
@@ -682,7 +682,7 @@
 
           <div class="v2-column v2-column--preview">
             <section class="card v2-preview-card" aria-labelledby="v2-preview-label">
-              <h2 class="card-title" id="v2-preview-label">Предпросмотр</h2>
+              <h2 class="card-title" id="v2-preview-label">Preview</h2>
               <div class="v2-page-preview" id="v2_page_preview" aria-hidden="true">
                 <div class="v2-page-preview__inner" id="v2_page_preview_inner">
                   <div class="v2-page-preview__cover" id="v2_preview_cover" hidden>
@@ -696,32 +696,32 @@
               <p class="v2-preview-summary" id="v2_preview_summary" aria-live="polite"></p>
             </section>
             <div id="v2_notices" class="v2-notices-panel" hidden aria-live="polite">
-              <p class="v2-notices-title">Отступления от стандарта</p>
+              <p class="v2-notices-title">Departures from the style</p>
               <div id="v2_notices_list"></div>
             </div>
             <section id="v2_chat_panel" class="v2-chat-panel" hidden aria-labelledby="v2-chat-label">
-              <h3 class="v2-chat-title" id="v2-chat-label">После форматирования</h3>
+              <h3 class="v2-chat-title" id="v2-chat-label">After formatting</h3>
               <div class="v2-chat-row">
                 <input
                   type="text"
                   id="v2_chat_message"
                   class="v2-chat-input"
-                  placeholder="Сделай интервал 1.5…"
+                  placeholder="Make spacing 1.5…"
                   autocomplete="off"
                 />
               </div>
               <div class="v2-chat-actions">
-                <button type="button" class="btn-secondary" id="v2_chat_send">Применить</button>
-                <button type="button" class="btn-secondary" id="v2_chat_undo" disabled>Отменить</button>
-                <a id="v2_download_latest" class="btn-secondary v2-download-link" href="#" hidden download>Скачать актуальный DOCX</a>
+                <button type="button" class="btn-secondary" id="v2_chat_send">Apply</button>
+                <button type="button" class="btn-secondary" id="v2_chat_undo" disabled>Undo</button>
+                <a id="v2_download_latest" class="btn-secondary v2-download-link" href="#" hidden download>Download current DOCX</a>
               </div>
-              <p id="v2_chat_pending" class="v2-chat-pending" hidden>Применяю правку…</p>
+              <p id="v2_chat_pending" class="v2-chat-pending" hidden>Applying edit…</p>
               <p id="v2_chat_summary" class="v2-chat-summary" aria-live="polite"></p>
               <ul id="v2_chat_rejected" class="v2-chat-rejected" aria-live="polite"></ul>
               <div id="v2_chat_history_wrap" class="v2-chat-history-wrap" hidden>
-                <p class="v2-chat-history-title" id="v2_chat_history_label">История правок</p>
+                <p class="v2-chat-history-title" id="v2_chat_history_label">Edit history</p>
                 <ol id="v2_chat_history" class="v2-chat-history" aria-labelledby="v2_chat_history_label"></ol>
-                <p id="v2_chat_history_empty" class="v2-chat-history-empty">Правки появятся здесь.</p>
+                <p id="v2_chat_history_empty" class="v2-chat-history-empty">Edits will show up here.</p>
               </div>
             </section>
           </div>
@@ -729,5 +729,5 @@
       </div>
 {% endblock %}
 {% block scripts %}
-    <script src="{{ url_for('static', filename='format_v2.js') }}?v=20260812-v2-json-api-fix"></script>
+    <script src="{{ url_for('static', filename='format_v2.js') }}?v=20260812-v2-en"></script>
 {% endblock %}

@@ -226,8 +226,8 @@ def apply_style_plausibility_overrides(
                 field="structure.style_overrides",
                 severity="info",
                 message=(
-                    f"Переразмечено абзацев из-за противоречий стилей Word: {overrides}. "
-                    "Длинные «Heading» стали телом; короткие нумерованные Normal — заголовками."
+                    f"Reclassified {overrides} paragraph(s) because Word styles conflicted. "
+                    "Long Heading paragraphs became body text; short numbered Normal paragraphs became headings."
                 ),
             )
         )
@@ -261,9 +261,9 @@ def implausible_heading_notices(model: DocumentModel) -> list[ResolutionNotice]:
                 field="structure.headings",
                 severity="info",
                 message=(
-                    "В исходном документе найдено необычно много заголовков "
-                    f"(заголовков: {heading_n}, абзацев текста: {body_n}). "
-                    "Структуру стоит проверить вручную."
+                    "The source document has an unusually high number of headings "
+                    f"(headings: {heading_n}, body paragraphs: {body_n}). "
+                    "Review the structure by hand."
                 ),
             )
         ]

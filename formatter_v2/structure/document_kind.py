@@ -71,9 +71,9 @@ def kind_notices(kind: DocumentKind) -> list[ResolutionNotice]:
             field="structure.document_kind",
             severity="deviation",
             message=(
-                "Документ похож на сценарий презентации (slide script). "
-                "Академическое форматирование к нему применимо плохо — "
-                "проверьте результат вручную."
+                "This document looks like a slide script. "
+                "Academic formatting does not apply well here — "
+                "review the result by hand."
             ),
         )
     ]

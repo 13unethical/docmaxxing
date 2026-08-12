@@ -222,8 +222,8 @@ def resolve_format_spec(
 
     if overrides.style is not None and overrides.style != profile.name:
         raise ValueError(
-            f"Профиль {profile.name.value} не совпадает с выбранным стилем "
-            f"{overrides.style.value}. Загрузите профиль нужного стиля до вызова резолвера."
+            f"Profile {profile.name.value} does not match the selected style "
+            f"{overrides.style.value}. Load the matching style profile before calling the resolver."
         )
 
     roles = copy.deepcopy(profile.roles)
@@ -256,9 +256,9 @@ def resolve_format_spec(
                     field="line_spacing",
                     severity="info",
                     message=(
-                        f"{profile.display_name} задаёт особый интервал для "
+                        f"{profile.display_name} uses a different line spacing for "
                         f"{', '.join(_role_label(r) for r in preserved)} — "
-                        "он сохранён без изменений."
+                        "that spacing was left unchanged."
                     ),
                 )
             )
@@ -276,8 +276,8 @@ def resolve_format_spec(
                 ResolutionNotice(
                     field="alignment",
                     message=(
-                        f"{profile.display_name} предписывает выравнивание по левому краю. "
-                        "Выравнивание по ширине — отступление от стандарта."
+                        f"{profile.display_name} requires left alignment. "
+                        "Justified text is a departure from the style."
                     ),
                 )
             )
@@ -301,8 +301,8 @@ def resolve_format_spec(
                 ResolutionNotice(
                     field="heading_size_pt",
                     message=(
-                        f"{profile.display_name} требует одинакового кегля у заголовков "
-                        "и основного текста. Увеличение заголовков — отступление от стандарта."
+                        f"{profile.display_name} requires the same type size for headings "
+                        "and body text. Enlarging headings is a departure from the style."
                     ),
                 )
             )
@@ -315,9 +315,9 @@ def resolve_format_spec(
                 ResolutionNotice(
                     field="margins",
                     message=(
-                        f"{profile.display_name} задаёт фиксированные поля "
-                        f"({_margins_label(profile.page.margins)}). Изменение полей — "
-                        "отступление от стандарта."
+                        f"{profile.display_name} specifies fixed margins "
+                        f"({_margins_label(profile.page.margins)}). Changing them is "
+                        "a departure from the style."
                     ),
                 )
             )
@@ -342,8 +342,8 @@ def resolve_format_spec(
             ResolutionNotice(
                 field="cover_page",
                 message=(
-                    f"{profile.display_name} не предусматривает отдельный титульный лист. "
-                    "Его добавление — отступление от стандарта."
+                    f"{profile.display_name} does not use a separate cover page. "
+                    "Adding one is a departure from the style."
                 ),
             )
         )
@@ -358,7 +358,7 @@ def resolve_format_spec(
             ResolutionNotice(
                 field="references.sort",
                 message=(
-                    f"{profile.display_name} предписывает порядок списка литературы: "
+                    f"{profile.display_name} requires references to be ordered "
                     f"{_sort_label(profile.references.sort)}."
                 ),
             )
@@ -428,10 +428,10 @@ _NOTABLE_SPACING_ROLES: frozenset[ParagraphRole] = frozenset(
 )
 
 _ROLE_LABELS: dict[ParagraphRole, str] = {
-    ParagraphRole.REFERENCES_ENTRY: "списка литературы",
-    ParagraphRole.BLOCK_QUOTE: "блочных цитат",
-    ParagraphRole.FOOTNOTE: "сносок",
-    ParagraphRole.TABLE_CELL: "таблиц",
+    ParagraphRole.REFERENCES_ENTRY: "the reference list",
+    ParagraphRole.BLOCK_QUOTE: "block quotations",
+    ParagraphRole.FOOTNOTE: "footnotes",
+    ParagraphRole.TABLE_CELL: "tables",
 }
 
 
@@ -448,6 +448,6 @@ def _margins_label(margins: Margins) -> str:
 
 def _sort_label(sort: object) -> str:
     return {
-        "alphabetical": "по алфавиту",
-        "order_of_appearance": "по порядку появления в тексте",
+        "alphabetical": "alphabetically",
+        "order_of_appearance": "in order of appearance",
     }.get(getattr(sort, "value", str(sort)), str(sort))
