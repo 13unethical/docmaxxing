@@ -1773,6 +1773,9 @@ def api_economy_topup():
 
 @app.route("/")
 def index():
+    """Format tab. V2 UI when ``FORMATTER_V2_ENABLED``; otherwise the legacy page."""
+    if formatter_v2_enabled():
+        return render_template("format_v2.html", nav_active="home")
     return render_template("index.html", nav_active="home")
 
 

@@ -66,6 +66,25 @@ def test_format_v2_page_renders_when_flag_enabled() -> None:
         assert "format_v2.js" in html
 
 
+def test_home_format_tab_uses_v2_when_flag_enabled() -> None:
+    with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
+        res = _client().get("/")
+        assert res.status_code == 200
+        html = res.get_data(as_text=True)
+        assert "format_v2.js" in html
+        assert "Harvard (Cite Them Right)" in html
+        assert 'id="format_btn"' not in html
+
+
+def test_home_format_tab_uses_v1_when_flag_disabled() -> None:
+    with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "0"}, clear=False):
+        res = _client().get("/")
+        assert res.status_code == 200
+        html = res.get_data(as_text=True)
+        assert "format_v2.js" not in html
+        assert 'id="format_btn"' in html
+
+
 def test_form_has_single_style_control() -> None:
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
         html = _client().get("/format-v2").get_data(as_text=True)
