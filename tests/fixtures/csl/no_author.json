@@ -1,0 +1,10 @@
+[
+  {
+    "id": "no-author-webpage",
+    "type": "webpage",
+    "title": "About Climate Policy",
+    "URL": "https://example.com/climate-policy",
+    "issued": {"date-parts": [[2022]]},
+    "container-title": "Example Institute"
+  }
+]

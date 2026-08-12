@@ -1,0 +1,11 @@
+[
+  {
+    "id": "doe-lost-title",
+    "type": "book",
+    "title": "The Lost Title of Coastal Memory",
+    "author": [{"family": "Doe", "given": "Jane"}],
+    "issued": {"date-parts": [[2015]]},
+    "publisher": "Harbor Press",
+    "publisher-place": "Chicago"
+  }
+]

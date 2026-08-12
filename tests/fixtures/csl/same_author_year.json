@@ -1,0 +1,22 @@
+[
+  {
+    "id": "smith-2020-one",
+    "type": "article-journal",
+    "title": "Early Warning Systems for Storm Surge",
+    "container-title": "Hazard Science",
+    "author": [{"family": "Smith", "given": "John"}],
+    "issued": {"date-parts": [[2020]]},
+    "volume": "9",
+    "page": "10-19"
+  },
+  {
+    "id": "smith-2020-two",
+    "type": "article-journal",
+    "title": "Insurance Markets after Flood Events",
+    "container-title": "Hazard Science",
+    "author": [{"family": "Smith", "given": "John"}],
+    "issued": {"date-parts": [[2020]]},
+    "volume": "9",
+    "page": "20-31"
+  }
+]

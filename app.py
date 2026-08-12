@@ -6006,6 +6006,287 @@ def format_document():
         return jsonify({"error": f"Could not format document: {str(e)}"}), 500
 
 
+def formatter_v2_enabled() -> bool:
+    """Feature flag for the parallel Formatter V2 pipeline (default off)."""
+    return os.environ.get("FORMATTER_V2_ENABLED", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+@app.get("/format-v2")
+def format_v2_page():
+    """Formatter V2 UI. Gated by ``FORMATTER_V2_ENABLED`` (404 when off)."""
+    if not formatter_v2_enabled():
+        return jsonify({"error": "Not found"}), 404
+    return render_template("format_v2.html", nav_active="home")
+
+
+@app.get("/api/format-v2/profile/<style>")
+def api_format_v2_profile(style: str):
+    """Return StyleProfile (+ flattened form defaults) as JSON for the V2 UI."""
+    if not formatter_v2_enabled():
+        return jsonify({"error": "Not found"}), 404
+    try:
+        from formatter_v2.web_api import profile_payload
+
+        return jsonify(profile_payload(style))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("format-v2 profile failed")
+        return jsonify({"error": f"Could not load profile: {exc}"}), 500
+
+
+@app.post("/api/extract-requirements-v2")
+def api_extract_requirements_v2():
+    """Parse an assignment brief via Formatter V2 smartform.
+
+    Multipart: ``requirements_text`` (required). Returns
+    ``{overrides, evidence_by_field, warnings, prompt_version}``.
+    """
+    if not formatter_v2_enabled():
+        return jsonify({"error": "Not found"}), 404
+
+    brief = (request.form.get("requirements_text") or "").strip()
+    if not brief:
+        return jsonify({"error": "Paste requirements text first."}), 400
+    if len(brief) > MAX_TEXT_CHARS:
+        return (
+            jsonify(
+                {
+                    "error": (
+                        f"Requirements text is too long "
+                        f"(max {MAX_TEXT_CHARS:,} characters)."
+                    )
+                }
+            ),
+            400,
+        )
+
+    style_raw = (
+        request.form.get("format_style")
+        or request.form.get("style")
+        or "harvard"
+    )
+
+    try:
+        from formatter_v2.pipeline import resolve_style_name
+        from formatter_v2.profiles import load_profile
+        from formatter_v2.smartform import extract_requirements, to_user_overrides
+        from formatter_v2.smartform.extract import PROMPT_VERSION
+        from formatter_v2.smartform.gemini_client import GeminiSmartformClient
+
+        style = resolve_style_name(style_raw)
+        profile = load_profile(style)
+        extracted = extract_requirements(brief, GeminiSmartformClient())
+        if extracted.style is not None:
+            profile = load_profile(extracted.style)
+        prefill = to_user_overrides(extracted, profile)
+        return jsonify(
+            {
+                "overrides": prefill.overrides.model_dump(mode="json", exclude_none=True),
+                "evidence_by_field": prefill.evidence_by_field,
+                "warnings": list(extracted.warnings),
+                "unsupported": list(extracted.unsupported),
+                "prompt_version": PROMPT_VERSION,
+                "style": (extracted.style.value if extracted.style else style.value),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("extract-requirements-v2 failed")
+        return jsonify({"error": f"Could not analyse brief: {exc}"}), 502
+
+
+@app.post("/api/format-v2")
+def format_document_v2_route():
+    """V2 formatter behind FORMATTER_V2_ENABLED.
+
+    Accepts the same document inputs as ``/api/format`` (file or pasted_text)
+    plus optional ``overrides`` JSON and ``format_style``.
+
+    Returns JSON ``{document_id, summary, rejected, notices, overrides}``.
+    Download the DOCX via ``GET /api/format-v2/download/<document_id>``.
+    """
+    if not formatter_v2_enabled():
+        return jsonify({"error": "Not found"}), 404
+
+    try:
+        from formatter_v2.pipeline import format_document_v2
+        from formatter_v2.web_api import parse_user_overrides_from_form
+
+        file_storage = request.files.get("file")
+        pasted_raw = request.form.get("pasted_text") or ""
+        clean_spaces = _truthy(request.form, "clean_extra_spaces")
+        clean_breaks = _truthy(request.form, "clean_extra_linebreaks")
+
+        source: object
+        if file_storage and file_storage.filename:
+            if not is_supported_document_upload(file_storage.filename, file_storage.mimetype):
+                return (
+                    jsonify(
+                        {
+                            "error": "Invalid file type. Upload a .docx or .pdf file.",
+                        }
+                    ),
+                    400,
+                )
+            raw = file_storage.read()
+            if not raw:
+                return jsonify({"error": "The uploaded file is empty."}), 400
+            try:
+                # Reuse V1 loaders for PDF→DOCX / cleanup only; formatting is V2.
+                doc = build_document_from_upload(
+                    raw,
+                    file_storage.filename,
+                    mimetype=file_storage.mimetype,
+                    cleaning_spaces=clean_spaces,
+                    cleaning_breaks=clean_breaks,
+                )
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            except RuntimeError as e:
+                app.logger.warning("format-v2: %s", e)
+                return jsonify({"error": str(e)}), 503
+            source = doc
+        elif pasted_raw.strip():
+            source = [line for line in pasted_raw.replace("\r\n", "\n").split("\n")]
+        else:
+            return (
+                jsonify(
+                    {
+                        "error": "Please upload a .docx or .pdf file, or paste some non-empty text.",
+                    }
+                ),
+                400,
+            )
+
+        try:
+            overrides = parse_user_overrides_from_form(request.form)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+        style = (
+            request.form.get("format_style")
+            or request.form.get("style_preset")
+            or request.form.get("citation_style")
+            or (overrides.style.value if overrides.style else None)
+            or "harvard"
+        )
+        result = format_document_v2(source, overrides, style)
+        from formatter_v2.document_store import get_document_store
+        from formatter_v2.web_api import format_v2_response_payload
+
+        document_id = get_document_store().save(result.docx_bytes)
+        return jsonify(
+            format_v2_response_payload(
+                document_id=document_id,
+                overrides=overrides,
+                notices=result.notices,
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        app.logger.exception("Format V2 failed")
+        return jsonify({"error": f"Could not format document: {str(e)}"}), 500
+
+
+@app.get("/api/format-v2/download/<document_id>")
+def format_v2_download_route(document_id: str):
+    """Download a formatted DOCX stored by ``POST /api/format-v2`` or chat."""
+    if not formatter_v2_enabled():
+        return jsonify({"error": "Not found"}), 404
+
+    from formatter_v2.document_store import get_document_store
+
+    path = get_document_store().resolve(document_id)
+    if path is None:
+        return jsonify({"error": "Document not found or expired."}), 404
+
+    return send_file(
+        path,
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        as_attachment=True,
+        download_name="formatted_document.docx",
+    )
+
+
+@app.post("/api/format-v2/chat")
+def format_v2_chat_route():
+    """Apply a post-format chat edit.
+
+    Returns JSON ``{document_id, summary, rejected, notices, overrides}``.
+    Download the DOCX via ``GET /api/format-v2/download/<document_id>``.
+    """
+    if not formatter_v2_enabled():
+        return jsonify({"error": "Not found"}), 404
+
+    message = (request.form.get("message") or "").strip()
+    if not message:
+        return jsonify({"error": "message is required"}), 400
+
+    try:
+        from formatter_v2.chat.apply import apply_chat_edit
+        from formatter_v2.chat.gemini_client import GeminiChatClient
+        from formatter_v2.document_store import get_document_store
+        from formatter_v2.pipeline import format_document_v2
+        from formatter_v2.web_api import (
+            format_v2_response_payload,
+            load_format_v2_source_from_form,
+            parse_user_overrides_from_form,
+        )
+
+        try:
+            current_overrides = parse_user_overrides_from_form(request.form)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+        try:
+            source = load_format_v2_source_from_form(
+                request.form,
+                request.files,
+                build_document_from_upload=build_document_from_upload,
+                is_supported_document_upload=is_supported_document_upload,
+            )
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        except RuntimeError as e:
+            app.logger.warning("format-v2 chat: %s", e)
+            return jsonify({"error": str(e)}), 503
+
+        style = (
+            request.form.get("format_style")
+            or request.form.get("style_preset")
+            or (current_overrides.style.value if current_overrides.style else None)
+            or "harvard"
+        )
+
+        new_overrides, summary, rejected = apply_chat_edit(
+            message,
+            current_overrides,
+            style,
+            GeminiChatClient(),
+        )
+
+        result = format_document_v2(source, new_overrides, style)
+        document_id = get_document_store().save(result.docx_bytes)
+        return jsonify(
+            format_v2_response_payload(
+                document_id=document_id,
+                overrides=new_overrides,
+                notices=result.notices,
+                summary=summary,
+                rejected=[
+                    {"request": r.request, "reason": r.reason} for r in rejected
+                ],
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        app.logger.exception("Format V2 chat failed")
+        return jsonify({"error": f"Could not apply edit: {str(e)}"}), 500
+
+
 @app.get("/api/test/zerogpt")
 def api_test_zerogpt():
     """Connectivity test endpoint for raw ZeroGPT Detection API response."""
@@ -6170,6 +6451,13 @@ def _install_browser_submitter() -> None:
 # Providers are known as soon as the app module loads, even before Chrome starts.
 _register_browser_providers()
 _install_browser_submitter()
+
+try:
+    from formatter_v2.document_store import ensure_store_started
+
+    ensure_store_started(testing=app.config.get("TESTING", False))
+except Exception as _format_v2_store_exc:  # noqa: BLE001
+    print(f"[format-v2] document store init skipped: {_format_v2_store_exc}", flush=True)
 
 
 if __name__ == "__main__":

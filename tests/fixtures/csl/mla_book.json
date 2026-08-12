@@ -1,0 +1,10 @@
+[
+  {
+    "id": "mla-smith-book",
+    "type": "book",
+    "title": "Tides and Texts",
+    "author": [{"family": "Smith", "given": "John"}],
+    "issued": {"date-parts": [[2018]]},
+    "publisher": "Atlantic Books"
+  }
+]

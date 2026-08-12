@@ -1,0 +1,14 @@
+[
+  {
+    "id": "journal-italic",
+    "type": "article-journal",
+    "title": "Measuring Wetland Recovery After Storms",
+    "container-title": "Journal of Examples",
+    "author": [{"family": "Rivera", "given": "Sofia"}],
+    "issued": {"date-parts": [[2022]]},
+    "volume": "14",
+    "issue": "3",
+    "page": "200-215",
+    "DOI": "10.1000/journal.2022"
+  }
+]

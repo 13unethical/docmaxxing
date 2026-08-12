@@ -1,0 +1,17 @@
+[
+  {
+    "id": "smith-jones-2020",
+    "type": "article-journal",
+    "title": "Collaborative Planning for Sea-Level Rise",
+    "container-title": "Policy Sciences",
+    "author": [
+      {"family": "Smith", "given": "Jane"},
+      {"family": "Jones", "given": "Mark"}
+    ],
+    "issued": {"date-parts": [[2020]]},
+    "volume": "53",
+    "issue": "4",
+    "page": "701-720",
+    "DOI": "10.1000/sj.2020"
+  }
+]

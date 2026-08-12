@@ -1,0 +1,16 @@
+[
+  {
+    "id": "four-authors-2019",
+    "type": "book",
+    "title": "Handbook of Urban Resilience",
+    "author": [
+      {"family": "Brown", "given": "Alice"},
+      {"family": "Clark", "given": "Brian"},
+      {"family": "Davis", "given": "Carla"},
+      {"family": "Evans", "given": "Dylan"}
+    ],
+    "issued": {"date-parts": [[2019]]},
+    "publisher": "Coastal University Press",
+    "publisher-place": "London"
+  }
+]

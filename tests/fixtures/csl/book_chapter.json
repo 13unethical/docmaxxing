@@ -1,0 +1,17 @@
+[
+  {
+    "id": "chapter-editors",
+    "type": "chapter",
+    "title": "Legal Tools for Managed Retreat",
+    "container-title": "Climate Law in Practice",
+    "author": [{"family": "Writer", "given": "Ann"}],
+    "editor": [
+      {"family": "Editor", "given": "Ed"},
+      {"family": "Other", "given": "Olivia"}
+    ],
+    "issued": {"date-parts": [[2018]]},
+    "page": "11-30",
+    "publisher": "University Press",
+    "publisher-place": "Oxford"
+  }
+]

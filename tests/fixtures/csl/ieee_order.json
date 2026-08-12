@@ -1,0 +1,37 @@
+[
+  {
+    "id": "alpha2018",
+    "type": "article-journal",
+    "title": "Coastal Flood Barriers in Northern Europe",
+    "container-title": "Journal of Climate Adaptation",
+    "author": [{"family": "Alpha", "given": "Ada"}],
+    "issued": {"date-parts": [[2018]]},
+    "volume": "4",
+    "issue": "2",
+    "page": "101-118",
+    "DOI": "10.1000/alpha.2018"
+  },
+  {
+    "id": "beta2019",
+    "type": "article-journal",
+    "title": "Managed Retreat and Municipal Finance",
+    "container-title": "Urban Policy Review",
+    "author": [{"family": "Beta", "given": "Ben"}],
+    "issued": {"date-parts": [[2019]]},
+    "volume": "12",
+    "issue": "1",
+    "page": "45-67",
+    "DOI": "10.1000/beta.2019"
+  },
+  {
+    "id": "gamma2020",
+    "type": "article-journal",
+    "title": "Nature-Based Shoreline Design",
+    "container-title": "Ecological Engineering Letters",
+    "author": [{"family": "Gamma", "given": "Gina"}],
+    "issued": {"date-parts": [[2020]]},
+    "volume": "8",
+    "page": "22-30",
+    "DOI": "10.1000/gamma.2020"
+  }
+]
