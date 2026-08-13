@@ -14,6 +14,7 @@ TYPE_USAGE = "USAGE"
 TYPE_REFUND = "REFUND"
 TYPE_ADMIN_ADD = "ADMIN_ADD"
 TYPE_ADMIN_REMOVE = "ADMIN_REMOVE"
+TYPE_ADMIN_SET = "ADMIN_SET"
 TYPE_BONUS = "BONUS"
 
 # Reference type (which product / channel)
@@ -37,6 +38,7 @@ FEATURE_TO_REFERENCE: dict[str, str] = {
     "topup": REF_PADDLE,
     "welcome_bonus": REF_SYSTEM,
     "admin_adjustment": REF_ADMIN,
+    "admin_set": REF_ADMIN,
 }
 
 
@@ -45,6 +47,9 @@ def classify_transaction(*, kind: str, feature: str) -> tuple[str, str]:
     kind = (kind or "").strip().lower()
     feature = (feature or "").strip().lower()
     ref = FEATURE_TO_REFERENCE.get(feature, REF_SYSTEM)
+
+    if feature == "admin_set":
+        return TYPE_ADMIN_SET, REF_ADMIN
 
     if feature == "admin_adjustment":
         if kind == "debit":

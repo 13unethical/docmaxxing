@@ -695,18 +695,25 @@
           '<td class="adm-cell-balance">' +
           '<form class="adm-balance-form" data-adm-balance-form="' +
           user.id +
-          '">' +
-          '<input type="number" min="0" step="1" class="adm-balance-input" value="' +
-          user.balance +
-          '" data-adm-balance-input="' +
+          '" data-adm-current-balance="' +
+          Number(user.balance) +
+          '" title="Enter the exact new balance (replaces current, does not add)">' +
+          '<span class="adm-balance-current">' +
+          '<span class="adm-balance-current-label">Now </span>' +
+          escapeHtml(formatNumber(user.balance)) +
+          "</span>" +
+          '<div class="adm-balance-input-row">' +
+          '<input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" ' +
+          'class="adm-balance-input" value="" placeholder="New balance" ' +
+          'data-adm-balance-input="' +
           user.id +
-          '" aria-label="Coin balance for user ' +
+          '" aria-label="New exact balance for user ' +
           user.id +
           '" />' +
           '<button type="submit" class="adm-btn adm-btn--save"' +
           (saving ? " disabled" : "") +
-          ">Save</button>" +
-          "</form></td>" +
+          ">Set</button>" +
+          "</div></form></td>" +
           '<td class="adm-cell-date">' +
           formatDate(user.createdAt) +
           "</td>" +
@@ -769,6 +776,10 @@
         var credits = Number(tx.credits) || 0;
         var creditClass = credits >= 0 ? "adm-credits--pos" : "adm-credits--neg";
         var type = escapeHtml(tx.type || "—");
+        var creditsLabel =
+          tx.type === "ADMIN_SET"
+            ? "→ " + formatNumber(tx.balance_after)
+            : formatCredits(credits);
         return (
           "<tr>" +
           "<td>" +
@@ -782,7 +793,7 @@
           '<td class="adm-credits ' +
           creditClass +
           '">' +
-          escapeHtml(formatCredits(credits)) +
+          escapeHtml(creditsLabel) +
           "</td>" +
           "<td>" +
           escapeHtml(String(tx.balance_before)) +
@@ -1110,15 +1121,69 @@
     }
   }
 
-  function saveBalance(userId, inputEl) {
-    var value = parseInt(inputEl.value, 10);
-    if (isNaN(value) || value < 0) {
-      setStatus("Balance must be a non-negative number.", true);
+  function parseBalanceInput(raw, currentBalance) {
+    var cleaned = String(raw == null ? "" : raw).trim().replace(/,/g, "").replace(/\s/g, "");
+    if (!cleaned || !/^\d+$/.test(cleaned)) {
+      return { ok: false, error: "Enter a whole number for the new balance." };
+    }
+    var value = Number(cleaned);
+    if (!Number.isFinite(value) || value < 0 || value > Number.MAX_SAFE_INTEGER) {
+      return { ok: false, error: "Enter a valid non-negative whole number." };
+    }
+    value = Math.trunc(value);
+
+    var current = Number(currentBalance);
+    if (Number.isFinite(current) && current >= 0) {
+      var currentStr = String(Math.trunc(current));
+      var valueStr = String(value);
+      // Catch accidental append: e.g. current 505050110 + typing "500" → 505050110500
+      if (
+        valueStr.length > currentStr.length &&
+        valueStr.indexOf(currentStr) === 0 &&
+        value !== current
+      ) {
+        return {
+          ok: false,
+          error:
+            "That looks like digits appended to the current balance (" +
+            formatNumber(current) +
+            "). Enter only the new total (e.g. 1500), not the old balance plus extra digits.",
+        };
+      }
+    }
+
+    return { ok: true, value: value };
+  }
+
+  function saveBalance(userId, inputEl, currentBalance) {
+    var parsed = parseBalanceInput(inputEl.value, currentBalance);
+    if (!parsed.ok) {
+      setStatus(parsed.error, true);
       return;
     }
+    var value = parsed.value;
+    var current = Number(currentBalance);
+    if (!Number.isFinite(current)) {
+      current = 0;
+    }
+
+    if (
+      !window.confirm(
+        "Set user #" +
+          userId +
+          " balance?\n\nCurrent: " +
+          formatNumber(current) +
+          " coins\nNew:     " +
+          formatNumber(value) +
+          " coins\n\nThis replaces the balance (does not add)."
+      )
+    ) {
+      return;
+    }
+
     state.saving[userId] = true;
     renderTable();
-    setStatus("Saving balance for user #" + userId + "…");
+    setStatus("Setting balance for user #" + userId + " to " + formatNumber(value) + "…");
 
     fetch("/api/admin/users/" + userId + "/balance", {
       method: "PATCH",
@@ -1126,7 +1191,7 @@
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ balance: value }),
+      body: JSON.stringify({ balance: value, reason: "Admin set balance" }),
     })
       .then(function (res) {
         return res
@@ -1141,16 +1206,32 @@
       .then(function (r) {
         delete state.saving[userId];
         if (!r.ok || !r.data || !r.data.success) {
-          setStatus((r.data && r.data.error) || "Could not update balance.", true);
+          setStatus((r.data && r.data.error) || "Could not set balance.", true);
           renderTable();
           return;
         }
-        updateUserLocal(userId, { balance: r.data.balance });
-        setStatus("Balance updated for user #" + userId + ".");
+        var next = Number(r.data.balance);
+        if (!Number.isFinite(next)) {
+          next = value;
+        }
+        updateUserLocal(userId, { balance: Math.trunc(next) });
+        setStatus(
+          "Balance set to " +
+            formatNumber(Math.trunc(next)) +
+            " for user #" +
+            userId +
+            " (was " +
+            formatNumber(r.data.previousBalance != null ? r.data.previousBalance : current) +
+            ")."
+        );
+        if (state.ledgerUserId === userId) {
+          state.ledgerBalance = Math.trunc(next);
+          openLedger(userId);
+        }
       })
       .catch(function () {
         delete state.saving[userId];
-        setStatus("Network error while saving balance.", true);
+        setStatus("Network error while setting balance.", true);
         renderTable();
       });
   }
@@ -1261,14 +1342,22 @@
   }
 
   if (els.body) {
+    els.body.addEventListener("focusin", function (e) {
+      var input = e.target.closest("[data-adm-balance-input]");
+      if (input && typeof input.select === "function") {
+        input.select();
+      }
+    });
+
     els.body.addEventListener("submit", function (e) {
       var form = e.target.closest("[data-adm-balance-form]");
       if (!form) return;
       e.preventDefault();
       var userId = parseInt(form.getAttribute("data-adm-balance-form"), 10);
       var input = form.querySelector("[data-adm-balance-input]");
+      var currentBalance = form.getAttribute("data-adm-current-balance");
       if (userId && input) {
-        saveBalance(userId, input);
+        saveBalance(userId, input, currentBalance);
       }
     });
 

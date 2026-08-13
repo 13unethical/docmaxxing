@@ -50,10 +50,38 @@ def test_set_balance_credit_and_debit(fresh_db):
     updated = fresh_db.set_balance(user["id"], start + 40, admin_id=admin["id"])
     assert updated["balance"] == start + 40
     assert updated["delta"] == 40
+    assert WalletService().get_balance(user["id"]) == start + 40
 
     updated = fresh_db.set_balance(user["id"], 10, admin_id=admin["id"])
     assert updated["balance"] == 10
     assert updated["previousBalance"] == start + 40
+    assert updated["delta"] == 10 - (start + 40)
+    assert WalletService().get_balance(user["id"]) == 10
+
+
+def test_set_balance_is_absolute_not_increment(fresh_db):
+    """Typing 1500 must land exactly 1500, even if the wallet already has coins."""
+    admin = _make_admin()
+    user = auth.create_user("absolute@example.com", "secret123")
+    wallet = WalletService()
+    wallet.credit(user["id"], 5000, "admin_adjustment")
+    assert wallet.get_balance(user["id"]) == WELCOME_BONUS + 5000
+
+    updated = fresh_db.set_balance(user["id"], 1500, admin_id=admin["id"])
+    assert updated["balance"] == 1500
+    assert wallet.get_balance(user["id"]) == 1500
+
+
+def test_set_balance_rejects_appended_digits(fresh_db):
+    admin = _make_admin()
+    user = auth.create_user("concat@example.com", "secret123")
+    wallet = WalletService()
+    wallet.set_balance(user["id"], 505050110, feature="admin_set")
+
+    with pytest.raises(AdminError, match="appended"):
+        fresh_db.set_balance(user["id"], 505050110500, admin_id=admin["id"])
+
+    assert wallet.get_balance(user["id"]) == 505050110
 
 
 def test_set_balance_rejects_negative(fresh_db):
@@ -73,8 +101,10 @@ def test_get_ledger_for_user(fresh_db):
     assert payload["balance"] == WELCOME_BONUS + 100
     assert payload["total"] >= 2
     types = {e["type"] for e in payload["entries"]}
-    assert "BONUS" in types or "ADMIN_ADD" in types
-    assert any(e["type"] == "ADMIN_ADD" for e in payload["entries"])
+    assert "BONUS" in types or "ADMIN_SET" in types
+    assert any(e["type"] == "ADMIN_SET" for e in payload["entries"])
+    set_entry = next(e for e in payload["entries"] if e["type"] == "ADMIN_SET")
+    assert set_entry["balance_after"] == WELCOME_BONUS + 100
 
 
 def test_get_ledger_unknown_user(fresh_db):
