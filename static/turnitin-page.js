@@ -43,10 +43,97 @@
     filename: root.querySelector("[data-tt-filename]"),
     submitBtn: root.querySelector("[data-tt-submit]"),
     submitStatus: root.querySelector("[data-tt-submit-status]"),
+    feedback: root.querySelector("[data-tt-feedback]"),
     reportsBody: root.querySelector("[data-tt-reports-body]"),
     search: root.querySelector("[data-tt-search]"),
     empty: root.querySelector("[data-tt-empty]"),
+    emptyZero: root.querySelector(".tt-empty-zero"),
+    optionsRow: root.querySelector("[data-tour='tt-options']"),
+    submitToolbar: root.querySelector(".tt-submit-toolbar"),
+    table: root.querySelector(".tt-table"),
+    footnote: root.querySelector(".tt-ai-footnote"),
   };
+
+  function setStatusText(text) {
+    if (els.submitStatus) els.submitStatus.textContent = text || "";
+  }
+
+  function clearFeedback() {
+    if (!els.feedback) return;
+    els.feedback.hidden = true;
+    els.feedback.innerHTML = "";
+  }
+
+  function showCreditsNeeded(required, balance) {
+    setStatusText("");
+    if (!els.feedback || !window.dmStates) {
+      setStatusText(
+        "Not enough credits. Need " + required + ", have " + balance + "."
+      );
+      return;
+    }
+    els.feedback.hidden = false;
+    els.feedback.innerHTML = window.dmStates.creditsWarn({
+      required: required,
+      balance: balance,
+      topupHref: "/pricing",
+    });
+  }
+
+  function humanizeServiceError(code, message) {
+    var c = String(code || "");
+    if (c === "STALE_PAGE") {
+      return {
+        body: "The checker session closed before your file was sent. Your credits weren’t charged. Try again.",
+        detail: c,
+      };
+    }
+    if (c === "LOGIN_REQUIRED") {
+      return {
+        body: "The checking service isn’t signed in right now. Your credits weren’t charged. Try again in a moment.",
+        detail: c,
+      };
+    }
+    var msg = String(message || "");
+    if (/INSUFFICIENT|not enough/i.test(msg) || c === "INSUFFICIENT_COINS") {
+      return null;
+    }
+    if (/Target page, context or browser has been closed/i.test(msg)) {
+      return {
+        body: "The checker session closed before your file was sent. Your credits weren’t charged. Try again.",
+        detail: c || "STALE_PAGE",
+      };
+    }
+    return {
+      body: msg && !/^[A-Z][A-Z0-9_]+$/.test(msg)
+        ? msg
+        : "We couldn’t finish this check. Your credits weren’t charged if the upload never started. Try again.",
+      detail: c && c !== msg ? c : (/^[A-Z][A-Z0-9_]+$/.test(msg) ? msg : ""),
+    };
+  }
+
+  function showSubmitError(body, detail, onRetry) {
+    setStatusText("");
+    if (!els.feedback || !window.dmStates) {
+      setStatusText(body);
+      return;
+    }
+    els.feedback.hidden = false;
+    els.feedback.innerHTML = window.dmStates.error({
+      title: "Something went wrong",
+      body: body,
+      detail: detail || "",
+      retryAttrs: "data-tt-feedback-retry",
+    });
+    var btn = els.feedback.querySelector("[data-tt-feedback-retry]");
+    if (btn) {
+      btn.addEventListener("click", function () {
+        clearFeedback();
+        if (typeof onRetry === "function") onRetry();
+        else if (els.fileInput) els.fileInput.click();
+      });
+    }
+  }
 
   function formatDate(iso) {
     try {
@@ -191,11 +278,14 @@
       return;
     }
     var els2 = document.querySelectorAll("[data-coin-balance]");
+    var formatted = typeof window.formatCoinBalance === "function"
+      ? window.formatCoinBalance(state.credits)
+      : state.credits.toLocaleString("en-US");
     Array.prototype.forEach.call(els2, function (el) {
-      el.textContent = String(state.credits);
+      el.textContent = formatted;
     });
     if (els.credits && !els.credits.hasAttribute("data-coin-balance")) {
-      els.credits.textContent = String(state.credits);
+      els.credits.textContent = formatted;
     }
   }
 
@@ -227,10 +317,51 @@
     if (!els.reportsBody) {
       return;
     }
+    var hasReports = state.reports.length > 0;
     var rows = filteredReports();
-    if (els.empty) {
-      els.empty.hidden = rows.length > 0;
+    var searchMiss = hasReports && rows.length === 0;
+
+    if (els.emptyZero) {
+      els.emptyZero.hidden = hasReports;
     }
+    if (els.submitToolbar) {
+      els.submitToolbar.hidden = !hasReports;
+    }
+    if (els.optionsRow) {
+      els.optionsRow.hidden = !hasReports;
+    }
+    if (els.submitBtn) {
+      els.submitBtn.hidden = !hasReports;
+    }
+    if (els.search) {
+      var searchWrap = els.search.closest(".tt-search-wrap");
+      if (searchWrap) {
+        searchWrap.hidden = !hasReports;
+      }
+    }
+    if (els.table) {
+      els.table.hidden = !hasReports;
+    }
+    if (els.empty) {
+      els.empty.hidden = !searchMiss;
+    }
+    if (els.footnote) {
+      els.footnote.hidden = !hasReports;
+    }
+    var stillPending = state.reports.some(function (report) {
+      if (report.status === "queued" || report.status === "running") return true;
+      var hs = report.highlightsStatus;
+      if (hs === "queued" || hs === "running" || !!state.highlightsPending[report.id]) return true;
+      if (report.status === "completed" && (!report.hasSimilarityReport || !report.hasAiReport)) return true;
+      return false;
+    });
+    if (!stillPending && els.submitStatus) {
+      var st = els.submitStatus.textContent || "";
+      if (/Queued\. Checking/i.test(st) || /files queued\. Checking/i.test(st)) {
+        setStatusText("");
+      }
+    }
+
     els.reportsBody.innerHTML = rows
       .map(function (report) {
         return (
@@ -297,7 +428,7 @@
       }
     }
     if (els.submitStatus && !state.selectedFiles.length) {
-      els.submitStatus.textContent = "";
+      setStatusText("");
     }
   }
 
@@ -323,6 +454,9 @@
   }
 
   function upsertReport(report) {
+    var prev = state.reports.find(function (r) {
+      return r.id === report.id;
+    });
     var idx = state.reports.findIndex(function (r) {
       return r.id === report.id;
     });
@@ -339,6 +473,16 @@
       delete state.highlightsPending[report.id];
     }
     renderTable();
+    if (report.status === "failed" && (!prev || prev.status !== "failed")) {
+      var meta = report.meta || {};
+      var human = humanizeServiceError(
+        meta.error_code || meta.error || "",
+        report.errorMessage || ""
+      );
+      if (human) {
+        showSubmitError(human.body, human.detail);
+      }
+    }
   }
 
   function submitOneFile(file, options) {
@@ -358,18 +502,35 @@
   function handleSubmitResult(r, acc) {
     if (r.status === 402 || (r.data && r.data.error === "INSUFFICIENT_COINS")) {
       acc.failCount += 1;
-      if (els.submitStatus) {
-        els.submitStatus.textContent =
-          (r.data && r.data.message) || "Not enough coins. Buy coins to continue.";
-      }
+      var amounts = window.dmStates
+        ? window.dmStates.parseCreditAmounts(
+            r.data && r.data.message,
+            CREDITS_PER_CHECK,
+            typeof state.credits === "number" ? state.credits : "—"
+          )
+        : {
+            required: CREDITS_PER_CHECK,
+            balance: typeof state.credits === "number" ? state.credits : "—",
+          };
+      if (r.data && typeof r.data.required === "number") amounts.required = r.data.required;
+      if (r.data && typeof r.data.balance === "number") amounts.balance = r.data.balance;
+      showCreditsNeeded(amounts.required, amounts.balance);
       return acc;
     }
     if (!r.ok || !r.data || !r.data.success) {
       acc.failCount += 1;
-      if (els.submitStatus) {
-        els.submitStatus.textContent =
-          (r.data && (r.data.error || r.data.message)) ||
-          ("Submission failed (HTTP " + r.status + "). Please try again.");
+      var code = r.data && r.data.error;
+      var metaCode =
+        r.data && r.data.meta && (r.data.meta.error_code || r.data.meta.error);
+      var rawMsg = (r.data && (r.data.message || r.data.error_message)) || "";
+      var human = humanizeServiceError(metaCode || code, rawMsg || code);
+      if (human) {
+        acc.lastError = human;
+      } else {
+        acc.lastError = {
+          body: "Submission failed. Please try again.",
+          detail: code || ("HTTP " + r.status),
+        };
       }
       return acc;
     }
@@ -403,20 +564,24 @@
     if (els.fileInput) els.fileInput.value = "";
     setFiles([]);
     schedulePoll();
-    if (els.submitStatus) {
-      if (acc.okCount && !acc.failCount) {
-        els.submitStatus.textContent =
-          acc.okCount === 1
-            ? "Queued. Checking on PlagDetect…"
-            : acc.okCount + " files queued. Checking on PlagDetect…";
-      } else if (acc.okCount && acc.failCount) {
-        els.submitStatus.textContent =
-          acc.okCount + " queued, " + acc.failCount + " failed.";
-      } else if (acc.failCount) {
-        /* keep existing error text if already set */
-        if (!els.submitStatus.textContent) {
-          els.submitStatus.textContent = "Submission failed. Please try again.";
-        }
+    if (acc.okCount && !acc.failCount) {
+      clearFeedback();
+      setStatusText(
+        acc.okCount === 1
+          ? "Queued. Checking on PlagDetect…"
+          : acc.okCount + " files queued. Checking on PlagDetect…"
+      );
+    } else if (acc.okCount && acc.failCount) {
+      clearFeedback();
+      setStatusText(acc.okCount + " queued, " + acc.failCount + " failed.");
+    } else if (acc.failCount) {
+      if (acc.lastError) {
+        showSubmitError(acc.lastError.body, acc.lastError.detail);
+      } else if (!els.feedback || els.feedback.hidden) {
+        showSubmitError(
+          "We couldn’t submit your file. Your credits weren’t charged. Try again.",
+          ""
+        );
       }
     }
     return acc;
@@ -424,6 +589,9 @@
 
   function submitCheck() {
     if (!state.selectedFiles.length) {
+      showSubmitError("Choose a DOC, DOCX, PDF, or TXT file to check.", "", function () {
+        if (els.fileInput) els.fileInput.click();
+      });
       return;
     }
     var files = state.selectedFiles.slice();
@@ -431,33 +599,29 @@
 
     function runWithCredits() {
       if (typeof state.credits !== "number" || state.credits < needed) {
-        if (els.submitStatus) {
-          els.submitStatus.textContent =
-            "Not enough coins. Need " +
-            needed +
-            ", have " +
-            (typeof state.credits === "number" ? state.credits : "—") +
-            ".";
-        }
+        showCreditsNeeded(
+          needed,
+          typeof state.credits === "number" ? state.credits : "—"
+        );
         return;
       }
-
-      var options = getOptions();
+      clearFeedback();
       if (els.submitBtn) {
         els.submitBtn.disabled = true;
       }
-      if (els.submitStatus) {
-        els.submitStatus.textContent =
-          files.length === 1 ? "Submitting…" : "Submitting " + files.length + " files…";
-      }
-
-      var chain = Promise.resolve({ okCount: 0, failCount: 0, lastBalance: state.credits });
+      setStatusText(
+        files.length === 1
+          ? "Uploading…"
+          : "Uploading " + files.length + " files…"
+      );
+      var options = getOptions();
+      var chain = Promise.resolve({ okCount: 0, failCount: 0, lastBalance: state.credits, lastError: null });
       files.forEach(function (file) {
         chain = chain.then(function (acc) {
           return submitOneFile(file, options).then(function (r) {
             if (
-              (r.data &&
-                (r.data.error === "AUTH_REQUIRED" || r.data.error === "REGISTER_REQUIRED")) &&
+              r.data &&
+              (r.data.error === "AUTH_REQUIRED" || r.data.error === "REGISTER_REQUIRED") &&
               window.DMAuth
             ) {
               return window.DMAuth.require({
@@ -473,6 +637,10 @@
                 })
                 .catch(function () {
                   acc.failCount += 1;
+                  showSubmitError(
+                    "Sign in to run a Turnitin check. Nothing was charged.",
+                    "AUTH_REQUIRED"
+                  );
                   return acc;
                 });
             }
@@ -480,21 +648,22 @@
           });
         });
       });
-
-      return chain
+      chain
         .then(finishSubmitBatch)
         .catch(function () {
           if (els.submitBtn) els.submitBtn.disabled = false;
-          if (els.submitStatus) {
-            els.submitStatus.textContent = "Network error. Please try again.";
-          }
+          showSubmitError(
+            "Network error. Check your connection and try again. Your credits weren’t charged if the upload didn’t start.",
+            ""
+          );
         });
     }
 
     if (typeof state.credits !== "number") {
-      return syncCreditsFromServer().then(runWithCredits);
+      syncCreditsFromServer().then(runWithCredits);
+    } else {
+      runWithCredits();
     }
-    return runWithCredits();
   }
 
   function needsPolling() {
@@ -578,10 +747,13 @@
         if (!r.ok || !r.data || !r.data.success) {
           delete state.highlightsPending[id];
           renderTable();
-          if (els.submitStatus) {
-            els.submitStatus.textContent =
-              (r.data && r.data.error) || "Could not request AI Highlights.";
-          }
+          var code = r.data && r.data.error;
+          var human = humanizeServiceError(code, (r.data && r.data.message) || "");
+          showSubmitError(
+            (human && human.body) ||
+              "Couldn’t start AI Highlights. Nothing extra was charged.",
+            (human && human.detail) || code || ""
+          );
           return;
         }
         if (r.data.report) {
@@ -594,9 +766,10 @@
       .catch(function () {
         delete state.highlightsPending[id];
         renderTable();
-        if (els.submitStatus) {
-          els.submitStatus.textContent = "Network error while requesting AI Highlights.";
-        }
+        showSubmitError(
+          "Network error while requesting AI Highlights. Try again.",
+          ""
+        );
       });
   }
 
@@ -643,6 +816,13 @@
       }
       setFiles(list);
       submitCheck();
+    });
+  }
+
+  var emptyCta = root.querySelector("[data-tt-empty-cta]") || root.querySelector(".tt-empty-cta");
+  if (emptyCta && els.fileInput) {
+    emptyCta.addEventListener("click", function () {
+      els.fileInput.click();
     });
   }
 

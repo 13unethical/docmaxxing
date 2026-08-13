@@ -4,21 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}DocMaxxing{% endblock %}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260805-otp" />
     <script>
       (function () {
         try {
-          var t = localStorage.getItem("theme");
-          if (t === "dark" || t === "light") {
-            document.documentElement.setAttribute("data-theme", t);
+          var t = localStorage.getItem("dm-theme");
+          if (!t) {
+            var legacy = localStorage.getItem("theme");
+            if (legacy === "dark" || legacy === "light") {
+              t = legacy;
+              localStorage.setItem("dm-theme", t);
+              localStorage.removeItem("theme");
+            }
           }
-        } catch (e) {}
+          if (!t) {
+            t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          document.documentElement.setAttribute("data-theme", t);
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
       })();
     </script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='tokens.css') }}?v=20260813-dm-states" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='components.css') }}?v=20260813-dm-states2" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260813-accent-dedupe" />
     {% block head_extra %}{% endblock %}
   </head>
-  <body class="app-shell-body">
+  <body class="{% block body_class %}app-shell-body{% endblock %}">
+    {% import "macros/ui.html" as ui %}
     {% set _nav = nav_active|default('home') %}
+    {% block shell %}
     <div class="app-shell" data-app-shell>
       <div class="app-sidebar-backdrop" data-sidebar-close hidden></div>
       <aside class="app-sidebar" id="app-sidebar" data-app-sidebar aria-label="App navigation">
@@ -63,23 +79,17 @@
           </button>
         </div>
 
-        {% if _nav in ['assignment', 'humanizer', 'home'] %}
+        {# One shell chrome for all working tool pages (same New chat + history set). #}
+        {% set _shell_tools = ['home', 'humanizer', 'turnitin', 'assignment', 'check', 'workspace', 'presentation'] %}
+        {% if _nav in _shell_tools %}
         {% set _new_tool = 'format' if _nav == 'home' else _nav %}
         <button type="button" class="app-new-chat" data-tool-new-chat data-tool="{{ _new_tool }}">
           <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M7 4.75h7.5L19 9.25V19a1.25 1.25 0 0 1-1.25 1.25H7A1.25 1.25 0 0 1 5.75 19V6A1.25 1.25 0 0 1 7 4.75Z"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linejoin="round"
-            />
-            <path d="M14.5 4.75V9.25H19" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
-            <path
-              d="M14.75 14.25 19.5 9.5l1.75 1.75-4.75 4.75-2.15.4.4-2.15Z"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linejoin="round"
-            />
+            <path d="M8 9h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M8 13h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M12.01 18.594 8 21v-3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v5.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M16 19h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            <path d="M19 16v6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
           </svg>
           <span class="app-sidebar-label">New chat</span>
         </button>
@@ -88,66 +98,74 @@
         <nav class="app-sidebar-nav" aria-label="Main navigation">
           <a href="{{ url_for('humanizer') }}" class="app-nav-link{% if _nav == 'humanizer' %} is-active{% endif %}" title="Humanizer"{% if _nav == 'humanizer' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M14.5 5.5 18.5 9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M5.75 19.25 6.9 14.85 16.75 5a1.75 1.75 0 0 1 2.475 0l.025.025A1.75 1.75 0 0 1 19.25 7.5L9.4 17.35 5.75 19.25Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-              <path d="M5.75 19.25 8.15 18.65" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M6 21 21 6l-3-3L3 18l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M15 6l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M9 3a2 2 0 0 0 2 2 2 2 0 0 0-2 2 2 2 0 0 0-2-2 2 2 0 0 0 2-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M19 13a2 2 0 0 0 2 2 2 2 0 0 0-2 2 2 2 0 0 0-2-2 2 2 0 0 0 2-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <span class="app-sidebar-label">Humanizer</span>
             {% if is_humanizer_discount_active and humanizer_discount_percent > 0 %}
-            <span class="nav-discount-badge">-{{ humanizer_discount_percent }}% OFF</span>
+            <span class="nav-discount-badge">−{{ humanizer_discount_percent }}%</span>
             {% endif %}
           </a>
           <a href="{{ url_for('turnitin') }}" class="app-nav-link{% if _nav == 'turnitin' %} is-active{% endif %}" title="Turnitin"{% if _nav == 'turnitin' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="10.5" cy="10.5" r="5.75" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M15.25 15.25 20 20" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M8.25 10.5h4.5M10.5 8.25v4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M14 3v4a1 1 0 0 0 1 1h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M16.5 17.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M18.5 19.5 21 22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <span class="app-sidebar-label">Turnitin</span>
           </a>
           <a href="{{ url_for('assignment') }}" class="app-nav-link{% if _nav == 'assignment' %} is-active{% endif %}" title="Assignment"{% if _nav == 'assignment' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M8.5 4.75h7a2 2 0 0 1 2 2v12.5a1.5 1.5 0 0 1-1.5 1.5h-8a1.5 1.5 0 0 1-1.5-1.5V6.75a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-              <path d="M9.5 3.75h5v2.5h-5v-2.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-              <path d="M9.5 11h5M9.5 14.5h5M9.5 18h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M9 12h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M9 16h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
             <span class="app-sidebar-label">Assignment</span>
           </a>
           <a href="{{ url_for('index') }}" class="app-nav-link{% if _nav == 'home' %} is-active{% endif %}" title="Format"{% if _nav == 'home' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M7.5 3.75h6.5L19 8.75V20a1.25 1.25 0 0 1-1.25 1.25h-10.5A1.25 1.25 0 0 1 6 20V5a1.25 1.25 0 0 1 1.5-1.25Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-              <path d="M14 3.75V8.75H19" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+              <path d="M4 6h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M4 12h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M4 18h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
             </svg>
             <span class="app-sidebar-label">Format</span>
           </a>
           <a href="{{ url_for('check') }}" class="app-nav-link{% if _nav == 'check' %} is-active{% endif %}" title="Check"{% if _nav == 'check' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M8.5 12.25 10.75 14.5 15.5 9.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M11.46 20.846a12 12 0 0 1-7.96-14.846 12 12 0 0 0 8.5-3 12 12 0 0 0 8.5 3 12 12 0 0 1-.09 7.06" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M15 19l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <span class="app-sidebar-label">Check</span>
           </a>
           <a href="{{ url_for('workspace') }}" class="app-nav-link{% if _nav == 'workspace' %} is-active{% endif %}" title="Workspace"{% if _nav == 'workspace' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3.75" y="4.75" width="16.5" height="14.5" rx="2" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M9.5 5v14M3.75 10h16.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M20 17V5a2 2 0 0 0-4 0v12l2 2 2-2z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M16 7h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M18 19H5a2 2 0 1 1 0-4h4a2 2 0 1 0 0-4H6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <span class="app-sidebar-label">Workspace</span>
           </a>
           <a href="{{ url_for('presentation') }}" class="app-nav-link{% if _nav == 'presentation' %} is-active{% endif %}" title="Presentation"{% if _nav == 'presentation' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <rect x="3.75" y="5.25" width="16.5" height="11.5" rx="1.75" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M12 16.75v3.5M8.5 20.25h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M7.5 9.5h4M7.5 12.25h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M3 4h18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M4 4v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 16v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M9 20h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M8 12l3-3 2 2 3-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <span class="app-sidebar-label">Presentation</span>
           </a>
           {% if current_user %}
           <a href="{{ url_for('earn_share') }}" class="app-nav-link{% if _nav == 'earn' %} is-active{% endif %}" title="Earn & Share"{% if _nav == 'earn' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 3.75v16.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M7.5 8.5c0-1.8 2-3.25 4.5-3.25S16.5 6.7 16.5 8.5 14.5 11.75 12 11.75 7.5 10.3 7.5 8.5Z" stroke="currentColor" stroke-width="1.6"/>
-              <path d="M7.5 15.5c0-1.8 2-3.25 4.5-3.25s4.5 1.45 4.5 3.25S14.5 18.75 12 18.75 7.5 17.3 7.5 15.5Z" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M3 9a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M12 8v13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
             <span class="app-sidebar-label">Earn & Share</span>
           </a>
@@ -165,7 +183,7 @@
           {% endif %}
         </nav>
 
-        {% if _nav in ['assignment', 'humanizer', 'home', 'check', 'workspace'] %}
+        {% if _nav in _shell_tools %}
         {% set _hist_tool = 'format' if _nav == 'home' else _nav %}
         <div class="app-sidebar-history" data-tool-history data-tool="{{ _hist_tool }}">
           <p class="app-sidebar-section-label app-sidebar-label">
@@ -173,16 +191,20 @@
             {% elif _hist_tool == 'humanizer' %}Your humanizer
             {% elif _hist_tool == 'format' %}Your formats
             {% elif _hist_tool == 'check' %}Your checks
+            {% elif _hist_tool == 'turnitin' %}Your Turnitin
+            {% elif _hist_tool == 'presentation' %}Your presentations
             {% else %}Your workspace{% endif %}
           </p>
           <div class="app-sidebar-history-list" data-tool-history-list>
-            <p class="app-sidebar-history-empty">
+            <div class="dm-empty dm-empty--sidebar app-sidebar-history-empty">
+              <h2 class="dm-empty__title">
               {% if _hist_tool == 'assignment' %}
                 {% if current_user %}No assignments yet.{% else %}Sign in to see history.{% endif %}
               {% else %}
                 No history yet.
               {% endif %}
-            </p>
+              </h2>
+            </div>
           </div>
         </div>
         {% endif %}
@@ -191,6 +213,20 @@
           {% if current_user %}
           {% set _display_name = current_user.name or current_user.email.split('@')[0] %}
           {% set _initial = (_display_name[0] if _display_name else 'U')|upper %}
+          <div class="app-sidebar-account-stack">
+            <a href="{{ url_for('pricing') }}" class="app-sidebar-credits" data-tour="coins" title="Top up credits">
+              <span class="app-sidebar-credits-main">
+                <svg class="app-sidebar-credits-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6"/>
+                  <path d="M12 8.5v7M9.75 10.25h3.5a1.5 1.5 0 0 1 0 3h-2.5a1.5 1.5 0 0 0 0 3h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+                <span class="app-sidebar-credits-balance">
+                  <span class="app-sidebar-credits-amount" data-coin-balance>{{ "{:,}".format(coin_balance|int) }}</span>
+                  <span class="app-sidebar-credits-label">credits</span>
+                </span>
+              </span>
+              <span class="app-sidebar-credits-action">Top up</span>
+            </a>
           <div class="nav-user-menu app-sidebar-user" data-user-menu>
             <button
               type="button"
@@ -218,19 +254,7 @@
                   <span class="nav-user-dropdown-email">{{ current_user.email }}</span>
                 </div>
               </div>
-              <div class="nav-theme-switch" role="group" aria-label="Color theme">
-                <button type="button" class="nav-theme-option" data-theme-set="light" aria-pressed="true" aria-label="Light mode">
-                  <svg class="theme-toggle-icon theme-toggle-icon--sun" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <circle cx="12" cy="12" r="3.75" stroke="currentColor" stroke-width="1.6"/>
-                    <path d="M12 2.75v2.1M12 19.15v2.1M2.75 12h2.1M19.15 12h2.1M5.22 5.22l1.48 1.48M17.3 17.3l1.48 1.48M5.22 18.78l1.48-1.48M17.3 6.7l1.48-1.48" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-                  </svg>
-                </button>
-                <button type="button" class="nav-theme-option" data-theme-set="dark" aria-pressed="false" aria-label="Dark mode">
-                  <svg class="theme-toggle-icon theme-toggle-icon--moon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M20.5 14.2A8.2 8.2 0 1 1 9.8 3.5 6.7 6.7 0 0 0 20.5 14.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-                  </svg>
-                </button>
-              </div>
+              {{ ui.theme_toggle() }}
               <div class="nav-user-dropdown-links">
                 <a href="{{ url_for('account') }}" class="nav-user-dropdown-link">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -258,18 +282,11 @@
               </div>
             </div>
           </div>
+          </div>
           {% else %}
           <div class="app-sidebar-guest">
             <a href="{{ url_for('register') }}" class="nav-auth-cta app-sidebar-signup">Sign up</a>
-            <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch to dark mode">
-              <svg class="theme-toggle-icon theme-toggle-icon--moon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path d="M20.5 14.2A8.2 8.2 0 1 1 9.8 3.5 6.7 6.7 0 0 0 20.5 14.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
-              </svg>
-              <svg class="theme-toggle-icon theme-toggle-icon--sun" viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden>
-                <circle cx="12" cy="12" r="3.75" stroke="currentColor" stroke-width="1.6"/>
-                <path d="M12 2.75v2.1M12 19.15v2.1M2.75 12h2.1M19.15 12h2.1M5.22 5.22l1.48 1.48M17.3 17.3l1.48 1.48M5.22 18.78l1.48-1.48M17.3 6.7l1.48-1.48" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              </svg>
-            </button>
+            {{ ui.theme_toggle() }}
           </div>
           {% endif %}
         </div>
@@ -283,26 +300,6 @@
                 <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
               </svg>
             </button>
-            <div class="nav-account app-topbar-account">
-              {% if current_user %}
-              <a href="{{ url_for('pricing') }}" class="coin-pill" title="Credits & pricing">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6"/>
-                  <path d="M12 8.5v7M9.75 10.25h3.5a1.5 1.5 0 0 1 0 3h-2.5a1.5 1.5 0 0 0 0 3h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-                </svg>
-                <span data-coin-balance>{{ coin_balance }}</span>
-                <span class="coin-pill-label">Credits</span>
-              </a>
-              {% else %}
-              <a href="{{ url_for('pricing') }}" class="coin-pill" title="Credits & pricing">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6"/>
-                  <path d="M12 8.5v7M9.75 10.25h3.5a1.5 1.5 0 0 1 0 3h-2.5a1.5 1.5 0 0 0 0 3h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
-                </svg>
-                <span>Credits</span>
-              </a>
-              {% endif %}
-            </div>
           </div>
         </header>
 
@@ -314,7 +311,9 @@
         </div>
       </div>
     </div>
+    {% endblock %}
 
+    {% block chrome_extras %}
     {% include "_site_footer.html" %}
 
     <div
@@ -373,17 +372,20 @@
     </button>
 
     {% include "_register_wall.html" %}
+    {% endblock %}
 
     <script>
       window.DM_AUTH = { authenticated: {{ 'true' if current_user else 'false' }} };
     </script>
     <script src="{{ url_for('static', filename='ui.js') }}"></script>
-    <script src="{{ url_for('static', filename='common.js') }}?v=20260802-fmt-drop"></script>
+    <script src="{{ url_for('static', filename='dm-states.js') }}?v=20260813-dm-states2"></script>
+    <script src="{{ url_for('static', filename='common.js') }}?v=20260805-sidebar-credits"></script>
     <script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
-    <script src="{{ url_for('static', filename='auth-modal.js') }}?v=20260805-otp"></script>
+    <script src="{{ url_for('static', filename='auth-modal.js') }}?v=20260805-sidebar-credits"></script>
     <script src="{{ url_for('static', filename='support-chat.js') }}?v=20260806-helpdesk"></script>
     <script src="{{ url_for('static', filename='tool-history.js') }}?v=20260802-newchat-tools"></script>
-    <script src="{{ url_for('static', filename='app-shell.js') }}?v=20260802-open-sidebar"></script>
+    <script src="{{ url_for('static', filename='app-shell.js') }}?v=20260813-dm-states"></script>
     {% block scripts %}{% endblock %}
+    <script src="{{ url_for('static', filename='theme.js') }}"></script>
   </body>
 </html>

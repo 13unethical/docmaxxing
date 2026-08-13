@@ -541,11 +541,16 @@
   };
 })(typeof window !== "undefined" ? window : this);
 
-/* Coin balance: keep every header pill in sync from the server. */
+/* Coin balance: keep every sidebar amount in sync from the server. */
 (function (global) {
+  function formatCoinBalance(n) {
+    if (typeof n !== "number" || isNaN(n)) return String(n == null ? "" : n);
+    return n.toLocaleString("en-US");
+  }
   function setBalance(n) {
+    var text = formatCoinBalance(n);
     var els = document.querySelectorAll("[data-coin-balance]");
-    Array.prototype.forEach.call(els, function (el) { el.textContent = n; });
+    Array.prototype.forEach.call(els, function (el) { el.textContent = text; });
   }
   function refreshCoinBalance() {
     return fetch("/api/economy/balance", { headers: { Accept: "application/json" } })
@@ -556,64 +561,60 @@
       })
       .catch(function () {});
   }
+  global.formatCoinBalance = formatCoinBalance;
   global.refreshCoinBalance = refreshCoinBalance;
 })(typeof window !== "undefined" ? window : this);
 
-/* Theme toggle: moon/sun + data-theme + localStorage. */
+/* Theme toggle: owned by static/theme.js (localStorage key dm-theme).
+   Keep DMThemeApply + data-theme-set for auth-modal; do not re-handle
+   data-theme-toggle (would double-flip with theme.js). */
 (function (global) {
-  var STORAGE_KEY = "theme";
-
-  function getStoredTheme() {
-    try {
-      var t = localStorage.getItem(STORAGE_KEY);
-      if (t === "dark" || t === "light") return t;
-    } catch (e) {}
-    return null;
-  }
-
   function currentTheme() {
     var attr = document.documentElement.getAttribute("data-theme");
     if (attr === "dark" || attr === "light") return attr;
-    return getStoredTheme() || "light";
+    try {
+      var t = localStorage.getItem("dm-theme") || localStorage.getItem("theme");
+      if (t === "dark" || t === "light") return t;
+    } catch (e) {}
+    return "light";
   }
 
   function applyTheme(theme) {
     var next = theme === "dark" ? "dark" : "light";
-    document.documentElement.setAttribute("data-theme", next);
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch (e) {}
-    var isDark = next === "dark";
-    document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
-      var moon = btn.querySelector(".theme-toggle-icon--moon");
-      var sun = btn.querySelector(".theme-toggle-icon--sun");
-      if (moon) moon.hidden = isDark;
-      if (sun) sun.hidden = !isDark;
-      btn.setAttribute(
-        "aria-label",
-        isDark ? "Switch to light mode" : "Switch to dark mode"
-      );
-    });
+    if (global.dmTheme && typeof global.dmTheme.set === "function") {
+      global.dmTheme.set(next);
+    } else {
+      document.documentElement.setAttribute("data-theme", next);
+      document.documentElement.style.colorScheme = next;
+      try {
+        localStorage.setItem("dm-theme", next);
+      } catch (e) {}
+    }
     document.querySelectorAll("[data-theme-set]").forEach(function (btn) {
       var value = btn.getAttribute("data-theme-set");
       btn.setAttribute("aria-pressed", value === next ? "true" : "false");
     });
+    document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
+      btn.setAttribute("aria-pressed", next === "dark" ? "true" : "false");
+    });
   }
 
-  function initThemeToggle() {
-    applyTheme(currentTheme());
+  function initThemeBridge() {
+    var cur = currentTheme();
+    document.querySelectorAll("[data-theme-set]").forEach(function (btn) {
+      btn.setAttribute("aria-pressed", btn.getAttribute("data-theme-set") === cur ? "true" : "false");
+    });
+    document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
+      btn.setAttribute("aria-pressed", cur === "dark" ? "true" : "false");
+    });
     if (document.documentElement.dataset.themeDelegated) return;
     document.documentElement.dataset.themeDelegated = "1";
     document.addEventListener("click", function (e) {
       var setBtn = e.target.closest("[data-theme-set]");
       if (setBtn) {
         applyTheme(setBtn.getAttribute("data-theme-set"));
-        return;
       }
-      var toggle = e.target.closest("[data-theme-toggle]");
-      if (toggle) {
-        applyTheme(currentTheme() === "dark" ? "light" : "dark");
-      }
+      // data-theme-toggle: static/theme.js
     });
   }
 
@@ -622,9 +623,9 @@
   };
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initThemeToggle);
+    document.addEventListener("DOMContentLoaded", initThemeBridge);
   } else {
-    initThemeToggle();
+    initThemeBridge();
   }
 })(typeof window !== "undefined" ? window : this);
 

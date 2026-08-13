@@ -18,6 +18,8 @@
   var HUMANIZE_URL = "/api/browser/providers/stealthwriter/humanize";
   var MAX_WORDS_PER_CALL = 5000;
   var HUMANIZE_COST = Mock.HUMANIZE_COST || 10;
+  var DETECT_CREDITS_PER_100 = Mock.DETECT_CREDITS_PER_100 || 1;
+  var DETECT_WORDS_UNIT = Mock.DETECT_WORDS_UNIT || 100;
   var MARK_TOKEN = function (i) { return "⟦WS:" + i + "⟧"; };
 
   var $ = function (sel, ctx) { return (ctx || root).querySelector(sel); };
@@ -67,9 +69,12 @@
 
   /* --------------------------------------------------------------- coins */
   function setCoinDisplays(n) {
-    $all("[data-ws-coins], [data-ws-coins-landing]").forEach(function (el) { el.textContent = n; });
+    var text = typeof window.formatCoinBalance === "function"
+      ? window.formatCoinBalance(n)
+      : (typeof n === "number" ? n.toLocaleString("en-US") : String(n));
+    $all("[data-ws-coins], [data-ws-coins-landing]").forEach(function (el) { el.textContent = text; });
     Array.prototype.forEach.call(document.querySelectorAll("[data-coin-balance]"), function (el) {
-      el.textContent = n;
+      el.textContent = text;
     });
   }
   function refreshCoins() {
@@ -108,11 +113,17 @@
   }
 
   /* ----------------------------------------------------------- view switch */
+  function syncScrollLock() {
+    var locked = !!(editorView && !editorView.hidden);
+    document.body.classList.toggle("app-shell-scroll-locked", locked);
+  }
+
   function openEditor(doc) {
     if (doc && surface) surface.innerHTML = doc.html || "";
     if (doc && titleInput && doc.title) titleInput.value = doc.title;
     if (landing) landing.hidden = true;
     if (editorView) editorView.hidden = false;
+    syncScrollLock();
     refreshCounts();
     refreshAiHighlights();
     refreshPending();
@@ -120,6 +131,7 @@
   function showLanding() {
     if (editorView) editorView.hidden = true;
     if (landing) landing.hidden = false;
+    syncScrollLock();
     refreshCoins();
   }
 
@@ -359,6 +371,37 @@
   }
   function setText(sel, v) { var el = $(sel); if (el) el.textContent = v; }
 
+  function initCostBadges() {
+    setText("[data-ws-mark-cost]", HUMANIZE_COST + " credits");
+    var detectRate = DETECT_CREDITS_PER_100 === 1 ? "1 credit" : DETECT_CREDITS_PER_100 + " credits";
+    setText("[data-ws-detect-cost]", detectRate + " / " + DETECT_WORDS_UNIT + " words");
+  }
+
+  function bindHelpTips() {
+    $all("[data-ws-help-toggle]").forEach(function (btn) {
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var panelId = btn.getAttribute("aria-controls");
+        var panel = panelId ? document.getElementById(panelId) : null;
+        if (!panel) return;
+        var willOpen = panel.hidden;
+        $all(".ws-help-detail").forEach(function (p) { p.hidden = true; });
+        $all("[data-ws-help-toggle]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+        if (willOpen) {
+          panel.hidden = false;
+          btn.setAttribute("aria-expanded", "true");
+        }
+      });
+    });
+    document.addEventListener("click", function () {
+      $all(".ws-help-detail").forEach(function (p) { p.hidden = true; });
+      $all("[data-ws-help-toggle]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+    });
+    $all(".ws-help-detail").forEach(function (p) {
+      p.addEventListener("click", function (e) { e.stopPropagation(); });
+    });
+  }
+
   /* ===================== AI DETECTION — REAL ZeroGPT ===================== */
   var DETECT_URL = "/api/workspace/detect";
 
@@ -430,7 +473,18 @@
       .then(function (r) {
         if (r.p && r.p.error === "AUTH_REQUIRED") { throw new Error("AUTH_REQUIRED"); }
         if (r.status === 402 || (r.p && r.p.error === "INSUFFICIENT_COINS")) {
-          throw new Error((r.p && r.p.message) || "INSUFFICIENT_COINS");
+          var msg402 = (r.p && r.p.message) || "";
+          var am = window.dmStates
+            ? window.dmStates.parseCreditAmounts(msg402, null, null)
+            : null;
+          if (am && am.required != null && am.balance != null && window.dmStates) {
+            showToast(
+              "Not enough credits — need " + am.required + ", have " + am.balance + ". Top up to continue."
+            );
+          } else {
+            showToast(msg402 || "Not enough credits. Top up to continue.");
+          }
+          return;
         }
         if (!r.ok) throw new Error(r.p && r.p.error ? r.p.error : "detection failed");
         applyDetection(r.p.flagged_sentences || [], r.p);
@@ -1182,6 +1236,7 @@
   function openEditorSilently() {
     if (landing) landing.hidden = true;
     if (editorView) editorView.hidden = false;
+    syncScrollLock();
   }
   function endTour(complete) {
     if (tourEl) tourEl.hidden = true;
@@ -1217,6 +1272,8 @@
     bindComments();
     bindFloatbar();
     bindTour();
+    bindHelpTips();
+    initCostBadges();
 
     if (surface) {
       // Anonymous users can open/preview a document, but the first real edit

@@ -3,6 +3,10 @@
 {% block head_extra %}
 <style>
   .v2-layout { width: 100%; min-width: 0; }
+  .v2-layout .card {
+    background: var(--surface-1);
+    border-color: var(--border);
+  }
   .v2-layout .v2-column { gap: 0.5rem; }
   .v2-grid {
     display: grid;
@@ -21,7 +25,7 @@
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .v2-document-card {
     border-top: 3px solid var(--accent);
@@ -33,9 +37,9 @@
     min-height: 8rem;
     width: 100%;
     resize: vertical;
-    border: 1px solid var(--line);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--surface);
+    background: var(--surface-1);
     padding: 0.75rem 0.85rem;
     font: inherit;
     box-sizing: border-box;
@@ -50,17 +54,18 @@
     max-height: 140px;
     min-height: 0;
     padding: 0.75rem 0.85rem;
-    border: 2px dashed color-mix(in srgb, var(--primary) 35%, var(--border-muted));
+    border: 2px dashed color-mix(in srgb, var(--accent) 35%, var(--border));
     border-radius: var(--radius-sm);
-    color: var(--muted);
+    color: var(--text-muted);
+    background: var(--surface-2);
     text-align: center;
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s;
   }
   .v2-drop-placeholder:hover,
   .v2-document-card.is-drop-active .v2-drop-placeholder {
-    border-color: var(--primary);
-    background: color-mix(in srgb, var(--primary) 6%, transparent);
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 6%, var(--surface-2));
   }
   .v2-drop-placeholder-icon { opacity: 0.7; }
   .v2-drop-placeholder-title { margin: 0; font-weight: 700; color: var(--text); }
@@ -87,19 +92,24 @@
     flex: 0 0 auto;
     padding: 0.38rem 0.85rem;
     font-size: 0.85rem;
+    border-color: var(--border);
+    background: var(--surface-1);
+    color: var(--text);
+    box-shadow: none;
   }
-  .v2-style-hint {
-    margin: 0.35rem 0 0;
-    min-height: 1.1rem;
-    font-size: 0.78rem;
-    color: var(--muted);
-    line-height: 1.3;
+  .v2-style-row .preset-chip.is-active {
+    background: var(--accent-soft);
+    border-color: var(--accent-border);
+    color: var(--accent-text);
+    box-shadow: none;
   }
-  .v2-style-hint:empty { display: none; }
+  .v2-requirements-accordion .settings-summary-title {
+    color: var(--accent-text);
+  }
   .v2-profile-summary {
     margin: 0.45rem 0 0;
     font-size: 0.85rem;
-    color: var(--muted);
+    color: var(--text);
     line-height: 1.45;
   }
   .v2-requirements-accordion { padding: 0; overflow: hidden; }
@@ -107,25 +117,32 @@
   .v2-requirements-accordion .settings-body { padding: 0 0.85rem 0.85rem; }
   .v2-requirements-wand { margin-right: 0.35rem; }
   .v2-format-actions { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.15rem; }
-  .v2-format-actions .cta { width: 100%; }
+  .v2-format-actions .cta {
+    width: 100%;
+    background: var(--accent);
+    color: var(--text-inverse);
+  }
+  .v2-format-actions .cta:hover {
+    background: var(--accent-hover);
+  }
   .v2-advanced-label {
     margin: 0.35rem 0 0.25rem;
     font-size: 0.78rem;
     font-weight: 600;
-    color: var(--muted);
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
   .v2-advanced-block {
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--border-muted);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     overflow: hidden;
-    background: var(--bg-light);
+    background: var(--surface-2);
   }
   .v2-advanced-row {
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--border);
   }
   .v2-advanced-row:last-child { border-bottom: none; }
   .v2-advanced-row > summary {
@@ -143,7 +160,7 @@
   .v2-advanced-row > summary::-webkit-details-marker { display: none; }
   .v2-advanced-row > summary::after {
     content: "▾";
-    color: var(--muted);
+    color: var(--text-muted);
     font-size: 0.9rem;
     flex-shrink: 0;
     transition: transform 0.15s ease;
@@ -151,7 +168,7 @@
   .v2-advanced-row[open] > summary::after { transform: rotate(180deg); }
   .v2-advanced-row .settings-body {
     padding: 0 0.85rem 0.85rem;
-    border-top: 1px solid var(--line);
+    border-top: 1px solid var(--border);
   }
   .v2-advanced-row .field.is-disabled,
   .v2-advanced-row .check.is-disabled {
@@ -166,8 +183,8 @@
     height: 1.1rem;
     margin-left: 0.35rem;
     border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--accent, #2f6fed) 45%, transparent);
-    color: var(--accent, #2f6fed);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--accent);
     font-size: 0.7rem;
     font-weight: 700;
     cursor: help;
@@ -180,10 +197,10 @@
     aspect-ratio: 8.5 / 11;
     max-height: 22rem;
     margin: 0 auto;
-    background: #fff;
-    border: 1px solid var(--line);
+    background: var(--surface-1);
+    border: 1px solid var(--border);
     border-radius: 6px;
-    box-shadow: 0 2px 12px color-mix(in srgb, #000 8%, transparent);
+    box-shadow: var(--shadow-2);
     overflow: hidden;
   }
   .v2-page-preview__inner {
@@ -202,9 +219,9 @@
     gap: 4px;
     padding: 8% 10%;
     margin-bottom: 6px;
-    border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--line));
+    border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--border));
     border-radius: 4px;
-    background: color-mix(in srgb, var(--accent) 4%, #fff);
+    background: color-mix(in srgb, var(--accent) 4%, var(--surface-1));
   }
   .v2-page-preview__cover[hidden] { display: none; }
   .v2-page-preview__cover-line {
@@ -238,7 +255,7 @@
   .v2-preview-summary {
     margin: 0.75rem 0 0;
     font-size: 0.85rem;
-    color: var(--muted);
+    color: var(--text);
     text-align: center;
     line-height: 1.4;
   }
@@ -248,7 +265,7 @@
     margin: 0;
     font-size: 0.82rem;
     font-weight: 700;
-    color: var(--muted);
+    color: var(--text-muted);
   }
   .v2-notice {
     display: flex;
@@ -260,14 +277,14 @@
     line-height: 1.35;
   }
   .v2-notice--deviation {
-    background: color-mix(in srgb, #e2a100 16%, transparent);
-    border: 1px solid color-mix(in srgb, #e2a100 40%, transparent);
-    color: color-mix(in srgb, #8a5a00 70%, var(--text, #1a1a1a));
+    background: var(--warn-soft);
+    border: 1px solid var(--warn-border);
+    color: var(--warn-text);
   }
   .v2-notice--info {
-    background: color-mix(in srgb, #8a8a8a 12%, transparent);
-    border: 1px solid color-mix(in srgb, #8a8a8a 28%, transparent);
-    color: color-mix(in srgb, #555 55%, var(--text, #1a1a1a));
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
   }
   .v2-notice-icon { flex: 0 0 auto; margin-top: 0.1rem; opacity: 0.9; }
   .v2-chat-panel {
@@ -275,9 +292,9 @@
     flex-direction: column;
     gap: 0.55rem;
     padding: clamp(0.85rem, 2vw, 1rem);
-    border: 1px solid var(--border-muted);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--bg-light);
+    background: var(--surface-2);
   }
   .v2-chat-panel[hidden] { display: none; }
   .v2-chat-title {
@@ -290,9 +307,9 @@
   .v2-chat-input {
     flex: 1;
     min-width: 0;
-    border: 1px solid var(--line);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--surface);
+    background: var(--surface-1);
     padding: 0.55rem 0.7rem;
     font: inherit;
     font-size: 0.9rem;
@@ -301,7 +318,7 @@
   .v2-chat-pending {
     margin: 0;
     font-size: 0.84rem;
-    color: var(--muted);
+    color: var(--text-muted);
     line-height: 1.3;
   }
   .v2-chat-pending[hidden] { display: none; }
@@ -311,7 +328,7 @@
     color: var(--text);
     line-height: 1.4;
   }
-  .v2-chat-summary--error { color: #a23a2d; }
+  .v2-chat-summary--error { color: var(--danger-text); }
   .v2-chat-rejected {
     margin: 0;
     padding: 0;
@@ -319,7 +336,7 @@
     display: grid;
     gap: 0.25rem;
     font-size: 0.84rem;
-    color: var(--muted);
+    color: var(--text-muted);
     line-height: 1.35;
   }
   .v2-chat-rejected:empty { display: none; }
@@ -332,14 +349,14 @@
     margin: 0;
     font-size: 0.82rem;
     font-weight: 600;
-    color: var(--muted);
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
   .v2-chat-history-empty {
     margin: 0;
     font-size: 0.84rem;
-    color: var(--muted);
+    color: var(--text-muted);
     line-height: 1.35;
   }
   .v2-chat-history-empty[hidden] { display: none; }
@@ -354,8 +371,8 @@
   }
   .v2-chat-history:empty { display: none; }
   .v2-download-link[hidden] { display: none; }
-  .v2-expert-only { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--line); }
-  .v2-expert-only .label { font-size: 0.82rem; color: var(--muted); }
+  .v2-expert-only { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+  .v2-expert-only .label { font-size: 0.82rem; color: var(--text-muted); }
 </style>
 {% endblock %}
 {% block content %}
@@ -381,10 +398,10 @@
                   <h2 class="card-title" id="v2-doc-label">Your document</h2>
                 </div>
                 <div class="home-doc-toolbar">
-                  <div class="home-doc-segment" role="tablist" aria-label="How to add your document" data-v2-doc-segment>
-                    <span class="home-doc-segment-thumb" aria-hidden="true"></span>
-                    <button type="button" class="home-doc-segment-btn is-active" role="tab" aria-selected="true" data-v2-doc-source="drop">File</button>
-                    <button type="button" class="home-doc-segment-btn" role="tab" aria-selected="false" data-v2-doc-source="paste">Paste text</button>
+                  <div class="dm-segment" role="tablist" aria-label="How to add your document" data-v2-doc-segment>
+                    <span class="dm-segment-thumb" aria-hidden="true"></span>
+                    <button type="button" class="dm-segment-btn is-active" role="tab" aria-selected="true" data-v2-doc-source="drop">File</button>
+                    <button type="button" class="dm-segment-btn" role="tab" aria-selected="false" data-v2-doc-source="paste">Paste text</button>
                   </div>
                   <input type="file" id="v2_file" hidden accept=".docx,.pdf,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" />
                 </div>
@@ -417,7 +434,6 @@
                 <button type="button" class="preset-chip" data-v2-style="chicago17" title="Chicago 17">Chicago 17</button>
                 <button type="button" class="preset-chip" data-v2-style="ieee" title="IEEE">IEEE</button>
               </div>
-              <p class="v2-style-hint" id="v2_style_hint">Cite Them Right</p>
               <p class="v2-profile-summary" id="v2_profile_summary" aria-live="polite"></p>
             </section>
 

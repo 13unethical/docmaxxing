@@ -12,6 +12,8 @@ from services.economy.pricing import (
     detect_cost_credits,
     feature_cost,
     package,
+    package_credits_per_usd,
+    pro_savings_pct_vs_starter,
 )
 from services.assignment_project.pricing import calculate_project_price
 
@@ -21,6 +23,10 @@ def test_flat_feature_costs_match_table():
         if feature == "detect":
             # Detect is dynamic; FEATURE_COSTS holds the min/default only.
             assert feature_cost("detect", word_count=0) == detect_cost_credits(0)
+            continue
+        if feature == "humanize":
+            # Site discount may reduce the live humanize price below FEATURE_COSTS.
+            assert feature_cost(feature) <= cost
             continue
         assert feature_cost(feature) == cost
 
@@ -89,3 +95,39 @@ def test_catalog_is_starter_and_pro_only():
         assert info["usd"] == usd
         assert info["name"] == name
         assert "price_id" in info
+
+
+def test_package_credits_per_usd():
+    assert package_credits_per_usd(1000, 10.0) == 100.0
+    assert package_credits_per_usd(2200, 20.0) == 110.0
+
+
+def test_pro_savings_pct_vs_starter():
+    assert pro_savings_pct_vs_starter() == 10
+
+
+def test_pricing_page_packages_derive_usage():
+    from services.economy.pricing import pricing_page_packages
+
+    rows = pricing_page_packages(user_id=42)
+    assert len(rows) == 2
+    starter, pro = rows
+    humanize_cost = feature_cost("humanize")
+    turnitin_cost = feature_cost("turnitin")
+    assert starter["humanize_passes"] == 1000 // humanize_cost
+    assert starter["turnitin_checks"] == 1000 // turnitin_cost
+    assert starter["credits_per_usd_display"] == "100"
+    assert pro["credits_per_usd_display"] == "110"
+    assert pro["savings_pct"] == 10
+    assert starter["savings_pct"] is None
+    assert "checkout[custom][user_id]=42" in (starter["lemon_checkout_url"] or "")
+
+
+def test_pricing_cost_rows_use_feature_costs():
+    from services.economy.pricing import pricing_cost_rows
+
+    rows = {r["label"]: r["value"] for r in pricing_cost_rows()}
+    humanize = feature_cost("humanize")
+    assert str(humanize) in rows["Humanize marked selections"]
+    assert str(FEATURE_COSTS["turnitin"]) in rows["Turnitin similarity check"]
+    assert str(detect_cost_credits(100)) in rows["AI detect in editor"]

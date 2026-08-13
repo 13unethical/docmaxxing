@@ -3,122 +3,71 @@
 {% block page_header %}
       <header class="top pricing-hero">
         <h1>Simple credit pricing</h1>
-        <p class="lede">
-          Buy credits once. Use them for Humanize, Turnitin, citations, and more —
-          only when you need them.
-        </p>
+        <p class="lede">No subscription. Buy credits when you need them.</p>
       </header>
 {% endblock %}
 {% block content %}
       <section class="pricing-plans" aria-label="Credit packages" data-pricing-grid>
-        <article class="pricing-plan" data-plan="starter">
-          <h2 class="pricing-plan-title">Starter</h2>
-          <p class="pricing-plan-price"><span class="pricing-plan-amount">$10</span></p>
-          <p class="pricing-plan-credits">1,000 Credits</p>
+        {% for pkg in pricing_packages %}
+        <article
+          class="pricing-plan{% if pkg.featured %} pricing-plan--featured{% endif %}"
+          data-plan="{{ pkg.id }}"
+        >
+          {% if pkg.badge %}
+          <p class="pricing-plan-badge">{{ pkg.badge }}</p>
+          {% endif %}
+          <h2 class="pricing-plan-title">{{ pkg.name }}</h2>
+          <p class="pricing-plan-price">
+            <span class="pricing-plan-amount">${{ pkg.usd_display }}</span>
+          </p>
+          <p class="pricing-plan-credits">
+            <span>{{ pkg.coins_formatted }} Credits</span>
+            {% if pkg.savings_pct %}
+            <span class="pricing-plan-savings">+{{ pkg.savings_pct }}%</span>
+            {% endif %}
+          </p>
+          <ul class="pricing-plan-usage" aria-label="What this package covers">
+            <li>≈ {{ pkg.humanize_passes }} Humanize passes</li>
+            <li>≈ {{ pkg.turnitin_checks }} Turnitin checks</li>
+            <li class="pricing-plan-usage-ref">{{ pkg.credits_per_usd_display }} credits per $1</li>
+          </ul>
           <div class="pricing-plan-actions">
-            {% if current_user %}
+            {% if current_user and pkg.lemon_checkout_url %}
             <a
               class="pricing-plan-btn pricing-plan-btn--primary"
-              href="https://docmaxxing.lemonsqueezy.com/checkout/buy/5074ed4e-a06f-4860-acb0-d6044357d549?checkout[custom][user_id]={{ current_user.id }}"
+              href="{{ pkg.lemon_checkout_url }}"
               target="_blank"
               rel="noopener noreferrer"
             >
-              Buy with Card / Apple Pay
+              Buy {{ pkg.name }}
             </a>
+            {% elif current_user %}
+            <span class="pricing-plan-btn pricing-plan-btn--primary pricing-plan-btn--disabled" aria-disabled="true">
+              Buy {{ pkg.name }}
+            </span>
             {% else %}
             <a
               class="pricing-plan-btn pricing-plan-btn--primary"
               href="{{ url_for('login', next=url_for('pricing')) }}"
             >
-              Sign in · Buy with Card / Apple Pay
+              Sign in · Buy {{ pkg.name }}
             </a>
             {% endif %}
             <button
               type="button"
-              class="pricing-plan-btn"
-              data-topup="credits_1000"
+              class="pricing-plan-alt-pay"
+              data-topup="{{ pkg.id }}"
             >
-              Buy with Crypto
+              or pay with crypto
             </button>
-            {# Gumroad emergency fallback — kept disabled
-            {% if current_user %}
-            <a
-              class="pricing-plan-btn pricing-plan-btn--gumroad"
-              href="https://abdurakhim6.gumroad.com/l/1000?url_params[user_id]={{ current_user.id }}"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Buy with Card (Gumroad)
-            </a>
-            {% else %}
-            <a
-              class="pricing-plan-btn pricing-plan-btn--gumroad"
-              href="{{ url_for('login', next=url_for('pricing')) }}"
-            >
-              Sign in · Buy with Card
-            </a>
-            {% endif %}
-            #}
           </div>
         </article>
-
-        <article class="pricing-plan pricing-plan--featured" data-plan="pro">
-          <p class="pricing-plan-badge">Most Popular</p>
-          <h2 class="pricing-plan-title">Pro</h2>
-          <p class="pricing-plan-price"><span class="pricing-plan-amount">$20</span></p>
-          <p class="pricing-plan-credits">2,200 Credits</p>
-          <div class="pricing-plan-actions">
-            {% if current_user %}
-            <a
-              class="pricing-plan-btn pricing-plan-btn--primary"
-              href="https://docmaxxing.lemonsqueezy.com/checkout/buy/8bd0501d-302f-4054-a905-302112b8e267?checkout[custom][user_id]={{ current_user.id }}"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Buy with Card / Apple Pay
-            </a>
-            {% else %}
-            <a
-              class="pricing-plan-btn pricing-plan-btn--primary"
-              href="{{ url_for('login', next=url_for('pricing')) }}"
-            >
-              Sign in · Buy with Card / Apple Pay
-            </a>
-            {% endif %}
-            <button
-              type="button"
-              class="pricing-plan-btn"
-              data-topup="credits_2500"
-            >
-              Buy with Crypto
-            </button>
-            {# Gumroad emergency fallback — kept disabled
-            {% if current_user %}
-            <a
-              class="pricing-plan-btn pricing-plan-btn--gumroad pricing-plan-btn--gumroad-primary"
-              href="https://abdurakhim6.gumroad.com/l/2500?url_params[user_id]={{ current_user.id }}"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Buy with Card (Gumroad)
-            </a>
-            {% else %}
-            <a
-              class="pricing-plan-btn pricing-plan-btn--gumroad pricing-plan-btn--gumroad-primary"
-              href="{{ url_for('login', next=url_for('pricing')) }}"
-            >
-              Sign in · Buy with Card
-            </a>
-            {% endif %}
-            #}
-          </div>
-        </article>
+        {% endfor %}
 
         <article class="pricing-plan pricing-plan--custom" data-plan="custom">
-          <h2 class="pricing-plan-title">Need More?</h2>
-          <p class="pricing-plan-lead">Need more than 2,200 credits?</p>
+          <h2 class="pricing-plan-title">Need more?</h2>
           <p class="pricing-plan-copy">
-            We offer custom credit packages for power users, universities and teams.
+            Custom credit packages for power users, universities, and teams.
           </p>
           <ul class="pricing-plan-benefits">
             <li>Any credit amount</li>
@@ -127,12 +76,12 @@
             <li>Priority support</li>
           </ul>
           <a
-            class="pricing-plan-btn pricing-plan-btn--ghost"
+            class="pricing-plan-btn pricing-plan-btn--outline"
             href="https://wa.me/998990779909"
             target="_blank"
             rel="noopener noreferrer"
           >
-            Contact Sales
+            Contact sales
           </a>
         </article>
       </section>
@@ -142,18 +91,15 @@
       <section class="pricing-explainer" aria-label="What credits pay for">
         <h2 class="pricing-explainer-title">What credits pay for</h2>
         <dl class="pricing-costs">
-          <div><dt>Home Format &amp; Academic Check</dt><dd>Free</dd></div>
-          <div><dt>Humanize marked selections</dt><dd>10 credits / call</dd></div>
-          <div><dt>AI detect in editor</dt><dd>1 credit / 100 words</dd></div>
-          <div><dt>Citation insert</dt><dd>2 credits</dd></div>
-          <div><dt>Turnitin similarity check</dt><dd>300 credits</dd></div>
-          <div><dt>Failed paid action</dt><dd>Refunded</dd></div>
+          {% for row in pricing_cost_rows %}
+          <div><dt>{{ row.label }}</dt><dd>{{ row.value }}</dd></div>
+          {% endfor %}
         </dl>
         <p class="pricing-note">
-          New accounts get <strong>{{ welcome_bonus }} welcome credits</strong> to try Workspace before buying.
+          New accounts get <strong>{{ "{:,}".format(welcome_bonus|int) }} welcome credits</strong> to try Workspace before buying.
         </p>
       </section>
 {% endblock %}
 {% block scripts %}
-    <script src="{{ url_for('static', filename='pricing.js') }}?v=20260807-crypto-lemon"></script>
+    <script src="{{ url_for('static', filename='pricing.js') }}?v=20260813-pricing-dynamic"></script>
 {% endblock %}

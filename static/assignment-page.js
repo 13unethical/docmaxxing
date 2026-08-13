@@ -236,7 +236,7 @@
       if (responseMeansProjectMissing(res, payload)) {
         resetProjectState();
       }
-      var msg = payload.error || "";
+      var msg = payload.message || payload.error || "";
       if (res.status === 404 && !responseMeansProjectMissing(res, payload)) {
         throw new Error(
           msg ||
@@ -254,7 +254,11 @@
             : ("Server error (" + res.status + "). Please click Retry."))
         );
       }
-      throw new Error(msg || ("HTTP " + res.status));
+      var err = new Error(msg || ("HTTP " + res.status));
+      err.code = payload.error || "";
+      err.status = res.status;
+      err.payload = payload;
+      throw err;
     }
     return payload;
   }
@@ -444,7 +448,7 @@
           '<div class="asg-complete-card">' +
           "<h3>Your assignment is ready</h3>" +
           "<p>Download the file, or describe changes below for a free revision.</p>" +
-          '<button type="button" class="asg-btn asg-btn--primary" data-asg-thread-download>Download</button>' +
+          '<button type="button" class="asg-btn btn-outline-secondary" data-asg-thread-download>Download</button>' +
           "</div>";
         var cdiv = document.createElement("div");
         cdiv.className = "asg-bubble asg-bubble--assistant asg-bubble--card";
@@ -789,7 +793,7 @@
       '<div class="asg-complete-card">' +
         "<h3>Your assignment is ready</h3>" +
         "<p>Download the file, or describe changes below for a free revision.</p>" +
-        '<button type="button" class="asg-btn asg-btn--primary" data-asg-thread-download>Download</button>' +
+        '<button type="button" class="asg-btn btn-outline-secondary" data-asg-thread-download>Download</button>' +
         "</div>"
     );
     loadRevisionChat();
@@ -825,16 +829,44 @@
     if (el) el.textContent = text || "";
   }
 
-  function showError(msg) {
+  function showError(msg, opts) {
+    opts = opts || {};
     var el = $("[data-asg-page-error]") || $("[data-asg-wizard-error]");
     if (!el) return;
-    if (msg) {
-      el.textContent = msg;
-      el.hidden = false;
-    } else {
+    if (!msg && !opts.credits) {
       el.textContent = "";
+      el.innerHTML = "";
       el.hidden = true;
+      return;
     }
+    el.hidden = false;
+    if (window.dmStates && opts.credits) {
+      el.innerHTML = window.dmStates.creditsWarn({
+        required: opts.required,
+        balance: opts.balance,
+        topupHref: "/pricing",
+      });
+      return;
+    }
+    if (window.dmStates) {
+      el.innerHTML = window.dmStates.error({
+        title: opts.title || "Something went wrong",
+        body: msg,
+        detail: opts.detail || "",
+        retryAttrs: state.retryAction ? "data-asg-inline-retry" : "",
+        hideRetry: !state.retryAction,
+      });
+      var retry = el.querySelector("[data-asg-inline-retry]");
+      if (retry && state.retryAction) {
+        retry.addEventListener("click", function () {
+          var fn = state.retryAction;
+          clearError();
+          if (typeof fn === "function") fn();
+        });
+      }
+      return;
+    }
+    el.textContent = msg;
   }
 
   function clearError() {
@@ -880,8 +912,37 @@
     root.classList.remove("asg-page--production");
     show($("[data-asg-production]"), false);
     show($("[data-asg-wizard]"), false);
-    showError(message);
-    upsertBubble("error", "assistant", "<p>" + esc(message) + "</p>");
+
+    var code = err && err.code;
+    var payload = err && err.payload;
+    if (
+      code === "INSUFFICIENT_COINS" ||
+      (window.dmStates && window.dmStates.isCreditError(code, message))
+    ) {
+      var amounts = window.dmStates
+        ? window.dmStates.parseCreditAmounts(
+            (payload && payload.message) || message,
+            payload && payload.required,
+            payload && payload.balance
+          )
+        : { required: "—", balance: "—" };
+      if (payload && typeof payload.required === "number") amounts.required = payload.required;
+      if (payload && typeof payload.balance === "number") amounts.balance = payload.balance;
+      showError("", { credits: true, required: amounts.required, balance: amounts.balance });
+      upsertBubble(
+        "error",
+        "assistant",
+        "<p>Not enough credits for this step. Top up to continue — nothing else was started.</p>"
+      );
+    } else {
+      var detail = code && /^[A-Z][A-Z0-9_]+$/.test(String(code)) ? String(code) : "";
+      if (message && /^[A-Z][A-Z0-9_]+$/.test(message)) {
+        detail = message;
+        message = "We couldn’t finish this step. Please try again.";
+      }
+      showError(message, { detail: detail });
+      upsertBubble("error", "assistant", "<p>" + esc(message) + "</p>");
+    }
     var primary = $("[data-asg-wizard-primary]");
     if (primary) {
       primary.textContent = retryFn ? "Retry" : primary.dataset.defaultLabel || "Continue";

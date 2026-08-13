@@ -5111,10 +5111,16 @@ def api_browser_plagdetect_login():
 @app.route("/pricing")
 def pricing():
     """Coin packages — clear pricing without subscription pressure."""
+    from services.economy.pricing import pricing_cost_rows, pricing_page_packages
+
+    user = economy_auth.current_user()
+    user_id = int(user["id"]) if user else None
     return render_template(
         "pricing.html",
         nav_active="pricing",
         welcome_bonus=WELCOME_BONUS,
+        pricing_packages=pricing_page_packages(user_id=user_id),
+        pricing_cost_rows=pricing_cost_rows(),
         paddle_configured=paddle_configured(),
         paddle_client_token=paddle_client_token(),
         paddle_environment=paddle_environment(),

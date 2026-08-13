@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Account — DocMaxxing{% endblock %}
 {% block content %}
+{% set _display_name = current_user.name or current_user.email.split('@')[0] %}
+{% set _initial = (_display_name[0] if _display_name else 'U')|upper %}
 <section class="acct-page">
   <header class="acct-header">
     <h1 class="acct-title">Account</h1>
@@ -30,46 +32,57 @@
         </div>
         <div>
           <dt>Email</dt>
-          <dd>
-            {{ current_user.email }}
-            {% if current_user.is_verified %}
-            <span class="acct-badge">Verified</span>
-            {% else %}
-            <span class="acct-badge acct-badge--warn">Unverified</span>
-            <a href="{{ url_for('verify_email_code') }}">Verify now</a>
+          <dd class="acct-email-row">
+            <span class="acct-email-group">
+              <span class="acct-email-value">{{ current_user.email }}</span>{% if current_user.is_verified %}<span class="acct-badge acct-badge--ok">Verified</span>{% else %}<span class="acct-badge acct-badge--warn">Unverified</span>{% endif %}
+            </span>
+            {% if not current_user.is_verified %}
+            <a class="acct-verify-link" href="{{ url_for('verify_email_code') }}">Verify now</a>
             {% endif %}
           </dd>
         </div>
       </dl>
 
-      <div class="acct-avatar-block">
-        {% if current_user.avatar_file %}
-        <img
-          class="acct-avatar-img"
-          src="{{ url_for('static', filename=current_user.avatar_file) }}"
-          alt="Avatar"
-          width="72"
-          height="72"
-        />
-        {% endif %}
-        <form
-          class="acct-form"
-          action="{{ url_for('api_upload_avatar') }}"
-          method="post"
-          enctype="multipart/form-data"
-          data-avatar-form
-        >
-          <label class="acct-field">
-            <span class="acct-label">Avatar (PNG/JPG/WebP, max 2 MB)</span>
-            <input type="file" name="avatar" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" required />
-          </label>
-          <button type="submit" class="acct-btn">Upload avatar</button>
-          <p class="acct-hint" data-avatar-status hidden></p>
-        </form>
-      </div>
-
-      <form method="post" action="{{ url_for('account') }}" class="acct-form">
+      <form
+        method="post"
+        action="{{ url_for('account') }}"
+        class="acct-form"
+        data-profile-form
+        data-avatar-upload-url="{{ url_for('api_upload_avatar') }}"
+      >
         <input type="hidden" name="action" value="profile" />
+
+        <div class="acct-avatar-row">
+          <div class="acct-avatar-preview" aria-hidden="true" data-avatar-preview>
+            {% if current_user.avatar_file %}
+            <img
+              class="acct-avatar-img"
+              src="{{ url_for('static', filename=current_user.avatar_file) }}"
+              alt=""
+              width="40"
+              height="40"
+              data-avatar-img
+            />
+            {% else %}
+            <span class="acct-avatar-fallback" data-avatar-fallback>{{ _initial }}</span>
+            {% endif %}
+          </div>
+          <div class="acct-avatar-actions">
+            <button type="button" class="acct-btn acct-btn--outline" data-avatar-trigger>
+              Change avatar
+            </button>
+            <p class="acct-hint">PNG, JPG or WebP · up to 2 MB</p>
+            <input
+              type="file"
+              name="avatar"
+              class="acct-file-input"
+              accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+              data-avatar-input
+            />
+            <p class="acct-hint acct-hint--status" data-avatar-status hidden></p>
+          </div>
+        </div>
+
         <label class="acct-field">
           <span class="acct-label">Displayed name</span>
           <input
@@ -81,7 +94,8 @@
             autocomplete="name"
           />
         </label>
-        <button type="submit" class="acct-btn">Save name</button>
+
+        <button type="submit" class="acct-btn" data-profile-save>Save changes</button>
       </form>
     </section>
 
@@ -101,7 +115,7 @@
           <span class="acct-label">Confirm new password</span>
           <input type="password" name="confirm_password" required minlength="6" autocomplete="new-password" />
         </label>
-        <button type="submit" class="acct-btn">Update password</button>
+        <button type="submit" class="acct-btn acct-btn--outline">Update password</button>
       </form>
     </section>
   </div>
@@ -110,28 +124,117 @@
 {% block scripts %}
 <script>
 (function () {
-  var form = document.querySelector("[data-avatar-form]");
+  var form = document.querySelector("[data-profile-form]");
   if (!form) return;
+
+  var fileInput = form.querySelector("[data-avatar-input]");
+  var trigger = form.querySelector("[data-avatar-trigger]");
   var status = form.querySelector("[data-avatar-status]");
+  var preview = form.querySelector("[data-avatar-preview]");
+  var saveBtn = form.querySelector("[data-profile-save]");
+  var uploadUrl = form.getAttribute("data-avatar-upload-url") || "/api/upload_avatar";
+
+  function setStatus(msg, isError) {
+    if (!status) return;
+    if (!msg) {
+      status.hidden = true;
+      status.textContent = "";
+      status.classList.remove("is-error");
+      return;
+    }
+    status.hidden = false;
+    status.textContent = msg;
+    status.classList.toggle("is-error", !!isError);
+  }
+
+  function showLocalPreview(file) {
+    if (!preview || !file || !file.type || file.type.indexOf("image/") !== 0) return;
+    var url = URL.createObjectURL(file);
+    var img = preview.querySelector("[data-avatar-img]");
+    var fallback = preview.querySelector("[data-avatar-fallback]");
+    if (!img) {
+      img = document.createElement("img");
+      img.className = "acct-avatar-img";
+      img.setAttribute("data-avatar-img", "");
+      img.alt = "";
+      img.width = 40;
+      img.height = 40;
+      preview.innerHTML = "";
+      preview.appendChild(img);
+    }
+    if (fallback) fallback.remove();
+    img.onload = function () {
+      try { URL.revokeObjectURL(url); } catch (e) {}
+    };
+    img.src = url;
+  }
+
+  if (trigger && fileInput) {
+    trigger.addEventListener("click", function () {
+      fileInput.click();
+    });
+  }
+
+  if (fileInput) {
+    fileInput.addEventListener("change", function () {
+      var file = fileInput.files && fileInput.files[0];
+      if (file) {
+        showLocalPreview(file);
+        setStatus(file.name);
+      } else {
+        setStatus("");
+      }
+    });
+  }
+
+  function uploadAvatar(file) {
+    var fd = new FormData();
+    fd.append("avatar", file);
+    return fetch(uploadUrl, { method: "POST", body: fd, credentials: "same-origin" })
+      .then(function (r) {
+        return r.json().then(function (d) {
+          return { ok: r.ok, d: d };
+        });
+      })
+      .then(function (res) {
+        if (!res.ok || !res.d || !res.d.success) {
+          throw new Error((res.d && res.d.error) || "Upload failed");
+        }
+        return res.d;
+      });
+  }
+
+  function saveNameNative() {
+    if (fileInput) fileInput.value = "";
+    HTMLFormElement.prototype.submit.call(form);
+  }
+
   form.addEventListener("submit", function (e) {
     e.preventDefault();
-    var fd = new FormData(form);
-    if (status) {
-      status.hidden = false;
-      status.textContent = "Uploading…";
+    var file = fileInput && fileInput.files && fileInput.files[0];
+    var original = saveBtn ? saveBtn.textContent : "Save changes";
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving…";
     }
-    fetch(form.action, { method: "POST", body: fd, credentials: "same-origin" })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-      .then(function (res) {
-        if (!res.ok) {
-          if (status) status.textContent = (res.d && res.d.error) || "Upload failed";
-          return;
-        }
-        if (status) status.textContent = "Avatar updated.";
-        window.location.reload();
+
+    if (!file) {
+      saveNameNative();
+      return;
+    }
+
+    setStatus("Uploading avatar…");
+    uploadAvatar(file)
+      .then(function () {
+        setStatus("Saving…");
+        saveNameNative();
       })
-      .catch(function () {
-        if (status) status.textContent = "Network error";
+      .catch(function (err) {
+        setStatus((err && err.message) || "Save failed", true);
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = original;
+        }
       });
   });
 })();

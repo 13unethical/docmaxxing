@@ -41,7 +41,7 @@
   var loadingEl = $("[data-hz-loading]", root);
   var resultEl = $("[data-hz-result]", root);
   var errorPanel = $("[data-hz-error]", root);
-  var errorMsg = $("[data-hz-error-msg]", root);
+  var errorMsg = null;
 
   var outputReady = false;
   var origCopyIcon = copyIcon ? copyIcon.innerHTML : "";
@@ -97,9 +97,44 @@
     editorOut.classList.add("hz-reveal");
   }
 
-  function showError(message) {
-    if (errorMsg) errorMsg.textContent = message || "Something went wrong.";
+  function showError(message, opts) {
+    opts = opts || {};
     setStage("error");
+    if (!errorPanel) return;
+    errorPanel.hidden = false;
+    if (window.dmStates && opts.credits) {
+      errorPanel.innerHTML = window.dmStates.creditsWarn({
+        required: opts.required,
+        balance: opts.balance,
+        topupHref: "/pricing",
+      });
+      return;
+    }
+    if (window.dmStates) {
+      errorPanel.innerHTML = window.dmStates.error({
+        title: opts.title || "Something went wrong",
+        body: message || "Please try again.",
+        detail: opts.detail || "",
+        retryAttrs: "data-hz-retry",
+        hideRetry: !!opts.hideRetry,
+      });
+      var retry = errorPanel.querySelector("[data-hz-retry]");
+      if (retry) {
+        retry.addEventListener("click", function () {
+          errorPanel.hidden = true;
+          errorPanel.innerHTML = "";
+          runHumanize();
+        });
+      }
+      return;
+    }
+    errorPanel.textContent = message || "Something went wrong.";
+  }
+
+  function clearErrorPanel() {
+    if (!errorPanel) return;
+    errorPanel.hidden = true;
+    errorPanel.innerHTML = "";
   }
 
   /* ----------------------------------------------------------- word counts */
@@ -150,6 +185,9 @@
 
     var source = plainText(editorIn);
     if (!source) {
+      showError("Paste or upload some text first.", {
+        title: "Nothing to humanize",
+      });
       editorIn.focus();
       return;
     }
@@ -163,6 +201,7 @@
     editorOut.classList.remove("hz-reveal");
     editorOut.textContent = "";
     refreshOutputCount();
+    clearErrorPanel();
     setStage("loading");
 
     fetch("/api/browser/providers/stealthwriter/humanize", {
@@ -196,17 +235,21 @@
         var code = err && err.code;
         if (code === "LOGIN_REQUIRED") {
           showError(
-            (err && err.message) ||
-              "StealthWriter is not logged in on the server. Export storageState on Mac and upload browser_profiles/sessions/stealthwriter.json to the VPS."
+            "The humanizer service isn’t signed in on the server right now. Your credits weren’t charged. Try again in a moment.",
+            { detail: "LOGIN_REQUIRED" }
           );
           return;
         }
         if (code === "NO_CHANGE") {
-          showError((err && err.message) || "StealthWriter did not rewrite the text (daily limit or same output).");
+          showError(
+            "The text came back unchanged — often a daily limit. Your credits may have been charged for the attempt.",
+            { detail: "NO_CHANGE" }
+          );
           return;
         }
         if ((code === "REGISTER_REQUIRED" || code === "AUTH_REQUIRED") && window.DMAuth) {
           setStage("idle");
+          clearErrorPanel();
           window.DMAuth.require({
             reason: (err && err.message) || "Create a free account to keep humanizing.",
           })
@@ -216,11 +259,23 @@
             .catch(function () {});
           return;
         }
-        if (code === "INSUFFICIENT_COINS") {
-          showError((err && err.message ? err.message : "Not enough coins.") + " Add coins on the Pricing page.");
+        if (code === "INSUFFICIENT_COINS" || (window.dmStates && window.dmStates.isCreditError(code, err && err.message))) {
+          var amounts = window.dmStates
+            ? window.dmStates.parseCreditAmounts(err && err.message, null, null)
+            : { required: "—", balance: "—" };
+          showError("", {
+            credits: true,
+            required: amounts.required != null ? amounts.required : "—",
+            balance: amounts.balance != null ? amounts.balance : "—",
+          });
           return;
         }
-        showError(err && err.message ? err.message : String(err));
+        var detail = code && /^[A-Z][A-Z0-9_]+$/.test(code) ? code : "";
+        var body =
+          err && err.message && !/^[A-Z][A-Z0-9_]+$/.test(err.message)
+            ? err.message
+            : "Humanize failed. If nothing changed, your credits weren’t kept for a failed run — try again.";
+        showError(body, { detail: detail });
       });
   }
 

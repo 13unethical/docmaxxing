@@ -1,0 +1,347 @@
+/* ============================================================
+   DocMaxxing — design tokens
+   Подключать ПЕРВЫМ, до components.css и до любого фичевого CSS.
+
+   Правило: ни один компонент не содержит hex/rgb напрямую.
+   Только var(--...). Если нужного токена нет — добавь его сюда,
+   а не хардкод в компоненте.
+
+   Темы переключаются атрибутом на <html>:
+     <html data-theme="dark">  /  <html data-theme="light">
+   Атрибут ставит theme.js синхронно в <head> (см. no-flash сниппет).
+   :root = светлая тема — это же фолбэк, если JS отключён.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  /* --- Поверхности ------------------------------------------------ */
+  --bg:            #F6F7F9;  /* фон страницы */
+  --surface-1:     #FFFFFF;  /* карточка */
+  --surface-2:     #F1F3F6;  /* вложенный блок внутри карточки */
+  --surface-3:     #E6EAEF;  /* hover / выделенная строка */
+  --surface-inset: #F1F3F6;  /* поля ввода, dropzone */
+
+  /* --- Границы ----------------------------------------------------- */
+  --border:        #E2E6EC;  /* обычная граница карточки */
+  --border-strong: #C7CED8;  /* граница инпута, акцентная линия */
+  --border-dashed: #CFCFCA;  /* пунктир dropzone */
+
+  /* --- Текст ------------------------------------------------------- */
+  --text:          #111827;  /* заголовки, основной текст */
+  --text-secondary:#5A6472;  /* подписи, описания */
+  --text-muted:    #8A93A1;  /* плейсхолдеры, лейблы шагов */
+  --text-inverse:  #FFFFFF;  /* текст на тёмной заливке */
+
+  /* --- Акцент (выбранный стиль, ссылки, фокус) --------------------- */
+  --accent:        #2563EB;
+  --accent-hover:  #1D4ED8;
+  --accent-text:   #1D4ED8;  /* акцентный текст на светлой подложке */
+  --accent-soft:   #E7F0FD;  /* заливка выбранного чипа */
+  --accent-border: #BBD6F7;
+
+  /* --- Предупреждение (блок «Отступления» / нехватка кредитов) --- */
+  --warn:          #B45309;
+  --warn-text:     #9A6206;
+  --warn-soft:     #FDF3E2;
+  --warn-border:   #EBD3A6;
+
+  /* --- Ошибка / успех ---------------------------------------------- */
+  --danger:        #DC2626;
+  --danger-text:   #A32020;
+  --danger-soft:   #FDECEC;
+  --danger-border: #F3C7C7;
+
+  --success:       #15803D;
+  --success-text:  #126B33;
+  --success-soft:  #D5F0DF;
+  --success-border:#A9DCBB;
+
+  /* --- AI-функции (humanizer, детекция, workspace) ------------------ */
+  --ai:        #7C3AED;
+  --ai-text:   #5B21B6;
+  --ai-soft:   #F4F1FE;
+  --ai-border: #C9BAF8;
+
+  /* --- Workspace editor — подсветка фрагментов --------------------- */
+  --ws-mark-bg:      #E4F7EC;
+  --ws-mark-line:    #35A46A;
+  --ws-ai-mark-bg:   #EFE9FB;
+  --ws-ai-mark-line: #7C5CD6;
+
+  /* --- Workspace panel — семантические кнопки ---------------------- */
+  --ws-btn-ai-bg:           #F3EFFC;
+  --ws-btn-ai-bg-hover:     color-mix(in srgb, var(--ws-btn-ai-bg) 84%, var(--ws-ai-mark-line));
+  --ws-btn-ai-border:       #D3C4F2;
+  --ws-btn-ai-text:         #5B3FB0;
+  --ws-btn-ai-badge-bg:     #E7DEFA;
+  --ws-btn-ai-badge-text:   #5B3FB0;
+
+  --ws-btn-mark-bg:         #E9F6EE;
+  --ws-btn-mark-bg-hover:   color-mix(in srgb, var(--ws-btn-mark-bg) 84%, var(--ws-mark-line));
+  --ws-btn-mark-border:     #B4E0C6;
+  --ws-btn-mark-text:       #0F6135;
+
+  --ws-btn-warn-bg:         #FDF3E2;
+  --ws-btn-warn-bg-hover:   color-mix(in srgb, var(--ws-btn-warn-bg) 84%, var(--ws-btn-warn-text));
+  --ws-btn-warn-border:     #EBD3A6;
+  --ws-btn-warn-text:       #9A6206;
+
+  /* --- Workspace editor — полотно и лист документа --------------- */
+  --ws-doc-canvas:        #EDEFF3;
+  --ws-doc-sheet:         #FFFFFF;
+  --ws-doc-sheet-border:  transparent;
+  --ws-doc-sheet-shadow:  var(--shadow-2);
+
+  /* --- Кнопка primary (инвертированная относительно фона) ---------- */
+  --btn-primary-bg:       #141414;
+  --btn-primary-bg-hover: #2A2A2A;
+  --btn-primary-text:     #FFFFFF;
+
+  /* --- Кнопка neutral (Download и т.п.) ----------------------------- */
+  --btn-neutral-bg:       #F6F7F9;
+  --btn-neutral-bg-hover: #EBEDF1;
+  --btn-neutral-border:   #C7CED8;
+  --btn-neutral-text:     #111827;
+
+  /* --- Тени -------------------------------------------------------- */
+  --shadow-1: 0 1px 2px rgba(20, 20, 20, .06);
+  --shadow-2: 0 4px 16px rgba(20, 20, 20, .08);
+  --shadow-3: 0 12px 40px rgba(20, 20, 20, .12);
+
+  /* --- Оверлей модалок --------------------------------------------- */
+  --overlay: rgba(20, 20, 20, .45);
+
+  /* ================================================================
+     Ниже — токены, не зависящие от темы
+     ================================================================ */
+
+  /* --- Радиусы ----------------------------------------------------- */
+  --radius-xs:   6px;
+  --radius-sm:   10px;
+  --radius-md:   14px;   /* инпуты, чипы, кнопки */
+  --radius-lg:   18px;   /* карточки */
+  --radius-xl:   24px;
+  --radius-pill: 999px;
+
+  /* --- Отступы (шаг 4px) ------------------------------------------- */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* --- Типографика -------------------------------------------------- */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo,
+               Consolas, monospace;
+
+  --text-xs:   12px;
+  --text-sm:   13px;
+  --text-base: 15px;
+  --text-md:   17px;
+  --text-lg:   20px;
+  --text-xl:   24px;
+  --text-2xl:  30px;
+  --text-3xl:  38px;
+
+  --leading-tight:   1.2;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.65;
+
+  --weight-normal:   400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  --tracking-tight: -0.02em;
+  --tracking-wide:   0.04em;  /* для лейблов «Шаг 1», «Предпросмотр» */
+
+  /* --- Движение ----------------------------------------------------- */
+  --ease:      cubic-bezier(.2, .6, .3, 1);
+  --dur-fast:  120ms;
+  --dur:       200ms;
+  --dur-slow:  320ms;
+
+  /* --- Слои --------------------------------------------------------- */
+  --z-dropdown: 100;
+  --z-sticky:   200;
+  --z-overlay:  900;
+  --z-modal:    1000;
+  --z-toast:    1100;
+
+  /* --- Раскладка ----------------------------------------------------- */
+  --container:      1180px;
+  --container-narrow: 760px;
+  --header-height:  64px;
+}
+
+/* ============================================================
+   ТЁМНАЯ ТЕМА
+   ============================================================ */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:            #101318;
+  --surface-1:     #181C22;
+  --surface-2:     #20252C;
+  --surface-3:     #2A3038;
+  --surface-inset: #14181D;
+
+  --border:        #2A313B;
+  --border-strong: #3A424D;
+  --border-dashed: #3A3A3A;
+
+  --text:          #EAEEF3;
+  --text-secondary:#8B95A3;
+  --text-muted:    #6B7480;
+  --text-inverse:  #141414;
+
+  --accent:        #3B82F6;
+  --accent-hover:  #60A5FA;
+  --accent-text:   #7CB0FF;
+  --accent-soft:   #12294A;
+  --accent-border: #1E4272;
+
+  --warn:          #F0A63C;
+  --warn-text:     #E8B45C;
+  --warn-soft:     #33260F;
+  --warn-border:   #5C4620;
+
+  --danger:        #F87171;
+  --danger-text:   #F87171;
+  --danger-soft:   #3A1616;
+  --danger-border: #5C2222;
+
+  --success:       #4ADE80;
+  --success-text:  #4ADE80;
+  --success-soft:  #12301E;
+  --success-border:#1E4A30;
+
+  --ai:        #A78BFA;
+  --ai-text:   #C4B5FD;
+  --ai-soft:   #241B3D;
+  --ai-border: #4A3A78;
+
+  --ws-mark-bg:      #17331F;
+  --ws-mark-line:    #4ADE80;
+  --ws-ai-mark-bg:   #241E3D;
+  --ws-ai-mark-line: #A78BFA;
+
+  --ws-btn-ai-bg:           var(--ws-ai-mark-bg);
+  --ws-btn-ai-bg-hover:     color-mix(in srgb, var(--ws-btn-ai-bg) 78%, var(--ws-ai-mark-line));
+  --ws-btn-ai-border:       #453A6E;
+  --ws-btn-ai-text:         #B49CF5;
+  --ws-btn-ai-badge-bg:     #312754;
+  --ws-btn-ai-badge-text:   #B49CF5;
+
+  --ws-btn-mark-bg:         var(--ws-mark-bg);
+  --ws-btn-mark-bg-hover:   color-mix(in srgb, var(--ws-btn-mark-bg) 78%, var(--ws-mark-line));
+  --ws-btn-mark-border:     #2C5C3B;
+  --ws-btn-mark-text:       #5BD98A;
+
+  --ws-btn-warn-bg:         #33260F;
+  --ws-btn-warn-bg-hover:   color-mix(in srgb, var(--ws-btn-warn-bg) 78%, var(--ws-btn-warn-text));
+  --ws-btn-warn-border:     #5C4620;
+  --ws-btn-warn-text:       #E8B45C;
+
+  --ws-doc-canvas:        #0D1014;
+  --ws-doc-sheet:         #1C2026;
+  --ws-doc-sheet-border:  #2A313B;
+  --ws-doc-sheet-shadow:  var(--shadow-1);
+
+  --btn-primary-bg:       #FFFFFF;
+  --btn-primary-bg-hover: #E4E4E2;
+  --btn-primary-text:     #141414;
+
+  --btn-neutral-bg:       #20252C;
+  --btn-neutral-bg-hover: #2A3038;
+  --btn-neutral-border:   #3A424D;
+  --btn-neutral-text:     #EAEEF3;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .5);
+  --shadow-2: 0 4px 16px rgba(0, 0, 0, .55);
+  --shadow-3: 0 12px 40px rgba(0, 0, 0, .65);
+
+  --overlay: rgba(0, 0, 0, .65);
+}
+
+/* ============================================================
+   БАЗА
+   ============================================================ */
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Плавный переход при смене темы — только цвета, не всё подряд */
+body,
+.card, .btn, .chip, .input, .alert, .dropzone, .panel {
+  transition: background-color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease),
+              color var(--dur) var(--ease);
+}
+
+/* Во время переключения темы отключаем переходы, чтобы не «плыло» */
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after { transition: none !important; }
+
+h1, h2, h3, h4 {
+  margin: 0;
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  font-weight: var(--weight-semibold);
+}
+
+p { margin: 0; }
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+::placeholder { color: var(--text-muted); opacity: 1; }
+
+/* Единый фокус на весь сайт */
+:where(a, button, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

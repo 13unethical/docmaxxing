@@ -1,0 +1,37 @@
+{# Minimal chrome for register / login / verify-email.
+   Extends base.html so head, tokens, theme.js stay shared.
+   Overrides shell + chrome_extras — no sidebar, topbar, support FAB. #}
+{% extends "base.html" %}
+
+{% block body_class %}auth-shell-body{% endblock %}
+
+{% block shell %}
+<div class="auth-shell">
+  <header class="auth-shell-top">
+    <a
+      href="{{ url_for('index') }}"
+      class="auth-shell-brand"
+      aria-label="DocMaxxing Home"
+      title="DocMaxxing"
+    >
+      <svg class="nav-brand-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path
+          d="M7 3.75h7l4.25 4.25V20.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5V5.25A1.5 1.5 0 0 1 7 3.75Z"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linejoin="round"
+        />
+        <path d="M14 3.75V8h4.25" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+        <path d="M8.75 11h6.5M8.75 14.5h6.5M8.75 18h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+      </svg>
+      <span class="auth-shell-brand-label">DocMaxxing</span>
+    </a>
+    {{ ui.theme_toggle() }}
+  </header>
+  <main class="auth-shell-main">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% endblock %}
+
+{% block chrome_extras %}{% endblock %}

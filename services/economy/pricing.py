@@ -70,7 +70,10 @@ TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
         "featured": False,
         "price_id": _env_str("PADDLE_PRICE_CREDITS_1000"),
         "gumroad_product_id": _env_str("GUMROAD_PRODUCT_CREDITS_1000"),
-        "lemon_variant_id": _env_str("LEMON_VARIANT_CREDITS_1000"),
+        "lemon_variant_id": _env_str(
+            "LEMON_VARIANT_CREDITS_1000",
+            "5074ed4e-a06f-4860-acb0-d6044357d549",
+        ),
         "lemon_checkout_url": _env_str("LEMON_CHECKOUT_CREDITS_1000"),
     },
     "credits_2500": {
@@ -84,7 +87,10 @@ TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
         # Prefer new env key; fall back to legacy _2500 product id mapping.
         "gumroad_product_id": _env_str("GUMROAD_PRODUCT_CREDITS_2200")
         or _env_str("GUMROAD_PRODUCT_CREDITS_2500"),
-        "lemon_variant_id": _env_str("LEMON_VARIANT_CREDITS_2200")
+        "lemon_variant_id": _env_str(
+            "LEMON_VARIANT_CREDITS_2200",
+            "8bd0501d-302f-4054-a905-302112b8e267",
+        )
         or _env_str("LEMON_VARIANT_CREDITS_2500"),
         "lemon_checkout_url": _env_str("LEMON_CHECKOUT_CREDITS_2200")
         or _env_str("LEMON_CHECKOUT_CREDITS_2500"),
@@ -168,3 +174,105 @@ def assignment_cost_coins(
 def package(package_id: str) -> dict[str, Any] | None:
     """Return a top-up package definition by id, or None."""
     return TOPUP_PACKAGES.get((package_id or "").strip().lower())
+
+
+def package_credits_per_usd(coins: int, usd: float) -> float:
+    """Credits granted per USD spent (e.g. 1000 coins / $10 → 100)."""
+    amount = float(usd or 0)
+    if amount <= 0:
+        return 0.0
+    return int(coins) / amount
+
+
+def package_usage_floor(coins: int, unit_cost: int) -> int:
+    """How many times a feature can run with ``coins`` (round down)."""
+    cost = int(unit_cost or 0)
+    if cost <= 0:
+        return 0
+    return int(coins) // cost
+
+
+def pro_savings_pct_vs_starter() -> int | None:
+    """Pro % more credits per dollar vs Starter; None if not better."""
+    starter = TOPUP_PACKAGES.get("credits_1000")
+    pro = TOPUP_PACKAGES.get("credits_2500")
+    if not starter or not pro:
+        return None
+    starter_rate = package_credits_per_usd(int(starter["coins"]), float(starter["usd"]))
+    pro_rate = package_credits_per_usd(int(pro["coins"]), float(pro["usd"]))
+    if starter_rate <= 0 or pro_rate <= starter_rate:
+        return None
+    return int(math.floor((pro_rate / starter_rate - 1) * 100))
+
+
+def _format_usd(usd: float) -> str:
+    if float(usd) == int(usd):
+        return str(int(usd))
+    text = f"{float(usd):.2f}".rstrip("0").rstrip(".")
+    return text
+
+
+def _format_rate_number(value: float) -> str:
+    if float(value) == int(value):
+        return str(int(value))
+    return f"{float(value):.1f}".rstrip("0").rstrip(".")
+
+
+def _credit_word(n: int) -> str:
+    return "credit" if int(n) == 1 else "credits"
+
+
+def pricing_page_packages(*, user_id: int | None = None) -> list[dict[str, Any]]:
+    """Enriched Starter/Pro rows for ``/pricing`` (all amounts derived from catalog)."""
+    humanize_cost = feature_cost("humanize")
+    turnitin_cost = feature_cost("turnitin")
+    savings_pct = pro_savings_pct_vs_starter()
+    rows: list[dict[str, Any]] = []
+    for pkg_id in ("credits_1000", "credits_2500"):
+        raw = TOPUP_PACKAGES[pkg_id]
+        coins = int(raw["coins"])
+        usd = float(raw["usd"])
+        credits_per_usd = package_credits_per_usd(coins, usd)
+        rows.append(
+            {
+                **raw,
+                "usd_display": _format_usd(usd),
+                "coins_formatted": f"{coins:,}",
+                "humanize_passes": package_usage_floor(coins, humanize_cost),
+                "turnitin_checks": package_usage_floor(coins, turnitin_cost),
+                "credits_per_usd_display": _format_rate_number(credits_per_usd),
+                "lemon_checkout_url": lemon_checkout_url_for_package(
+                    pkg_id, user_id=user_id
+                ),
+                "savings_pct": savings_pct if raw.get("featured") else None,
+            }
+        )
+    return rows
+
+
+def pricing_cost_rows() -> list[dict[str, str]]:
+    """Credit cost table for the pricing explainer."""
+    humanize = feature_cost("humanize")
+    cite = int(FEATURE_COSTS["cite"])
+    turnitin = int(FEATURE_COSTS["turnitin"])
+    detect_per_100 = detect_cost_credits(100)
+    return [
+        {"label": "Home Format & Academic Check", "value": "Free"},
+        {
+            "label": "Humanize marked selections",
+            "value": f"{humanize} {_credit_word(humanize)} / call",
+        },
+        {
+            "label": "AI detect in editor",
+            "value": f"{detect_per_100} {_credit_word(detect_per_100)} / 100 words",
+        },
+        {
+            "label": "Citation insert",
+            "value": f"{cite} {_credit_word(cite)}",
+        },
+        {
+            "label": "Turnitin similarity check",
+            "value": f"{turnitin} credits",
+        },
+        {"label": "Failed paid action", "value": "Refunded"},
+    ]
