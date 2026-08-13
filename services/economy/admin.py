@@ -10,7 +10,7 @@ from .auth import normalize_email
 from .db import connect
 from .paddle_purchases import PaddlePurchaseService
 from .usage import UsageService
-from .wallet import InsufficientCoins, WalletService
+from .wallet import WalletError, WalletService
 
 
 class AdminError(Exception):
@@ -89,30 +89,47 @@ class AdminService:
         admin_id: int,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        new_balance = int(new_balance)
+        # Absolute assign — never treat new_balance as an increment.
+        if isinstance(new_balance, bool) or not isinstance(new_balance, int):
+            raise AdminError("Balance must be an integer.")
         if new_balance < 0:
             raise AdminError("Balance cannot be negative.")
 
         current = self.wallet.get_balance(user_id)
-        delta = new_balance - current
-        meta = {"admin_id": admin_id, "reason": reason or "Admin adjustment"}
-        if delta > 0:
-            tx = self.wallet.credit(user_id, delta, "admin_adjustment", meta=meta)
-        elif delta < 0:
-            try:
-                tx = self.wallet.debit(user_id, -delta, "admin_adjustment", meta=meta)
-            except InsufficientCoins as exc:
-                raise AdminError(
-                    f"Cannot set balance to {new_balance}: user has {exc.balance} coins."
-                ) from exc
-        else:
-            tx = {"balance": current, "balance_after": current, "amount": 0}
+        current_str = str(int(current))
+        new_str = str(int(new_balance))
+        if (
+            new_balance != current
+            and len(new_str) > len(current_str)
+            and new_str.startswith(current_str)
+        ):
+            raise AdminError(
+                f"Balance looks like digits appended to the current balance ({current}). "
+                "Send the exact new total only."
+            )
 
+        meta = {
+            "admin_id": int(admin_id),
+            "reason": reason or "Admin set balance",
+            "previous_balance": current,
+            "new_balance": new_balance,
+        }
+        try:
+            tx = self.wallet.set_balance(
+                user_id,
+                new_balance,
+                feature="admin_set",
+                meta=meta,
+            )
+        except WalletError as exc:
+            raise AdminError(str(exc)) from exc
+
+        balance_after = int(tx.get("balance_after", tx.get("balance", new_balance)))
         return {
             "userId": user_id,
-            "balance": int(tx.get("balance_after", tx.get("balance", new_balance))),
+            "balance": balance_after,
             "previousBalance": current,
-            "delta": delta,
+            "delta": balance_after - current,
         }
 
     def count_admins(self) -> int:

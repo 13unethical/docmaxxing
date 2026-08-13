@@ -12,7 +12,13 @@ import sqlite3
 from typing import Any
 
 from .db import connect
-from .ledger import classify_transaction, row_to_credit_transaction, signed_credits
+from .ledger import (
+    REF_ADMIN,
+    TYPE_ADMIN_SET,
+    classify_transaction,
+    row_to_credit_transaction,
+    signed_credits,
+)
 
 
 class WalletError(Exception):
@@ -136,6 +142,104 @@ class WalletService:
             "balance_before": balance_before,
             "balance_after": balance_after,
             "reference_type": reference_type,
+            "reference_id": ref_id,
+            "status": "completed",
+            "kind": kind,
+            "feature": feature,
+            "amount": amount,
+            "balance": balance_after,
+            "ref_id": ref_id,
+        }
+
+    def set_balance(
+        self,
+        user_id: int,
+        new_balance: int,
+        *,
+        feature: str = "admin_set",
+        ref_id: str | None = None,
+        meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Absolutely assign wallet balance (not an increment).
+
+        Writes a single ledger row with type ADMIN_SET. ``amount`` is the
+        absolute delta; ``kind`` is credit/debit for sign helpers.
+        """
+        new_balance = int(new_balance)
+        if new_balance < 0:
+            raise WalletError("balance cannot be negative")
+
+        with connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._ensure_wallet(conn, user_id)
+            row = conn.execute(
+                "SELECT balance FROM wallets WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            balance_before = int(row["balance"]) if row else 0
+            delta = new_balance - balance_before
+            if delta == 0:
+                return {
+                    "id": None,
+                    "user_id": user_id,
+                    "type": TYPE_ADMIN_SET,
+                    "credits": 0,
+                    "balance_before": balance_before,
+                    "balance_after": new_balance,
+                    "reference_type": REF_ADMIN,
+                    "reference_id": ref_id,
+                    "status": "completed",
+                    "kind": "credit",
+                    "feature": feature,
+                    "amount": 0,
+                    "balance": new_balance,
+                    "ref_id": ref_id,
+                }
+
+            kind = "credit" if delta > 0 else "debit"
+            amount = abs(delta)
+            conn.execute(
+                "UPDATE wallets SET balance = ?, updated_at = datetime('now') "
+                "WHERE user_id = ?",
+                (new_balance, user_id),
+            )
+            # Re-read to confirm the absolute write (guards against bad drivers).
+            confirm = conn.execute(
+                "SELECT balance FROM wallets WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            balance_after = int(confirm["balance"]) if confirm else new_balance
+            if balance_after != new_balance:
+                raise WalletError(
+                    f"balance write failed: expected {new_balance}, got {balance_after}"
+                )
+
+            cur = conn.execute(
+                "INSERT INTO transactions "
+                "(user_id, kind, feature, amount, balance_before, balance_after, "
+                " type, reference_type, status, ref_id, meta_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?)",
+                (
+                    user_id,
+                    kind,
+                    feature,
+                    amount,
+                    balance_before,
+                    balance_after,
+                    TYPE_ADMIN_SET,
+                    REF_ADMIN,
+                    ref_id,
+                    json.dumps(meta) if meta else None,
+                ),
+            )
+            tx_id = cur.lastrowid
+
+        return {
+            "id": tx_id,
+            "user_id": user_id,
+            "type": TYPE_ADMIN_SET,
+            "credits": delta,
+            "balance_before": balance_before,
+            "balance_after": balance_after,
+            "reference_type": REF_ADMIN,
             "reference_id": ref_id,
             "status": "completed",
             "kind": kind,

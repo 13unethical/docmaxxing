@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     amount        INTEGER NOT NULL,         -- always positive; sign implied by kind/type
     balance_before INTEGER,                 -- balance before this movement
     balance_after INTEGER NOT NULL,
-    type          TEXT,                     -- PURCHASE | USAGE | REFUND | ADMIN_ADD | ADMIN_REMOVE | BONUS
+    type          TEXT,                     -- PURCHASE | USAGE | REFUND | ADMIN_ADD | ADMIN_REMOVE | ADMIN_SET | BONUS
     reference_type TEXT,                    -- Paddle | Humanizer | Turnitin | Assignment | Admin | …
     status        TEXT NOT NULL DEFAULT 'completed',
     ref_id        TEXT,                     -- reference_id (job/project/package/…)

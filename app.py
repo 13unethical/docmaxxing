@@ -1159,13 +1159,36 @@ def api_admin_users():
 @app.patch("/api/admin/users/<int:user_id>/balance")
 @economy_auth.admin_required
 def api_admin_set_balance(user_id: int):
+    """Set the user's wallet to an exact balance (absolute assign, not add)."""
     body = request.get_json(silent=True) or {}
     if "balance" not in body:
         return jsonify({"success": False, "error": "balance is required."}), 400
-    try:
-        new_balance = int(body["balance"])
-    except (TypeError, ValueError):
+
+    raw = body["balance"]
+    # Reject bool (int subclass), non-numeric types, and non-integer floats.
+    if isinstance(raw, bool):
         return jsonify({"success": False, "error": "balance must be an integer."}), 400
+    if isinstance(raw, int):
+        new_balance = raw
+    elif isinstance(raw, float):
+        if not raw.is_integer():
+            return jsonify({"success": False, "error": "balance must be an integer."}), 400
+        new_balance = int(raw)
+    elif isinstance(raw, str):
+        s = raw.strip().replace(",", "").replace(" ", "")
+        if not s or s.startswith("+"):
+            # Disallow "+1500" to avoid ambiguous / concatenated payloads.
+            return jsonify({"success": False, "error": "balance must be an integer."}), 400
+        try:
+            new_balance = int(s, 10)
+        except ValueError:
+            return jsonify({"success": False, "error": "balance must be an integer."}), 400
+    else:
+        return jsonify({"success": False, "error": "balance must be an integer."}), 400
+
+    if new_balance < 0:
+        return jsonify({"success": False, "error": "balance cannot be negative."}), 400
+
     reason = (body.get("reason") or "").strip() or None
     admin_id = economy_auth.current_user_id()
     try:

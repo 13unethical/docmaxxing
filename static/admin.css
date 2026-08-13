@@ -414,17 +414,42 @@
 
 .adm-balance-form {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  min-width: 9rem;
+}
+
+.adm-balance-current {
+  font-size: 0.84rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.adm-balance-current-label {
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.adm-balance-input-row {
+  display: flex;
   align-items: center;
   gap: 0.35rem;
+  width: 100%;
 }
 
 .adm-balance-input {
-  width: 5.5rem;
+  width: 6.5rem;
+  min-width: 0;
+  flex: 1 1 auto;
   padding: 0.35rem 0.45rem;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   font: inherit;
   font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .adm-balance-input:focus {
@@ -760,6 +785,7 @@
 .adm-type--PURCHASE,
 .adm-type--BONUS,
 .adm-type--ADMIN_ADD,
+.adm-type--ADMIN_SET,
 .adm-type--REFUND {
   background: #ecfdf5;
   color: #047857;
