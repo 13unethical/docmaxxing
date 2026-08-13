@@ -8,7 +8,7 @@
   href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="{{ url_for('static', filename='humanizer.css') }}?v=20260803-hz-price-fix" />
+<link rel="stylesheet" href="{{ url_for('static', filename='humanizer.css') }}?v=20260813-dm-segment" />
 
 <div class="hz" data-humanizer-page data-dm-tour-page="humanizer" data-tour="hz-page">
   <div class="hz-drop-overlay" data-hz-drop-overlay hidden>
@@ -27,21 +27,21 @@
       </div>
 
       <div class="hz-source-row" data-tour="hz-source">
-        <div class="hz-segment" role="tablist" data-hz-segment>
-          <span class="hz-segment-thumb" aria-hidden="true"></span>
+        <div class="dm-segment" role="tablist" data-hz-segment>
+          <span class="dm-segment-thumb" aria-hidden="true"></span>
           <button
             type="button"
-            class="hz-segment-btn is-active"
+            class="dm-segment-btn is-active"
             role="tab"
             aria-selected="true"
             data-hz-source="paste"
             data-hz-paste-focus
           >
-            Paste Text
+            Paste text
           </button>
           <button
             type="button"
-            class="hz-segment-btn"
+            class="dm-segment-btn"
             role="tab"
             aria-selected="false"
             data-hz-source="upload"
@@ -51,7 +51,7 @@
               <path d="M17 8l-5-5-5 5" />
               <path d="M12 3v12" />
             </svg>
-            Upload DOC
+            File
           </button>
         </div>
 
@@ -68,37 +68,40 @@
         data-placeholder="Paste your text here..."
       ></div>
 
-      <footer class="hz-editor-foot">
-        <span class="hz-wordcount" data-hz-wordcount>0 / 5000 words</span>
-        <button type="button" class="hz-clear" data-hz-clear hidden>
-          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
-          Clear
-        </button>
+      <footer class="hz-card-foot" data-tour="hz-run">
+        <div class="hz-card-foot-meta">
+          <div class="hz-card-foot-count-row">
+            <span class="hz-wordcount" data-hz-wordcount>0 / 5,000 words</span>
+            <button type="button" class="hz-clear" data-hz-clear hidden>
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+              Clear
+            </button>
+          </div>
+          {% if is_discount_active %}
+          <div class="hz-cost hz-cost--discount" aria-label="Humanize cost">
+            <span class="hz-cost-label">Cost</span>
+            <span class="hz-cost-strike">{{ base_cost }}</span>
+            <span class="hz-cost-sale">{{ discounted_cost }} Credits</span>
+          </div>
+          {% else %}
+          <div class="hz-cost" aria-label="Humanize cost">
+            <span class="hz-cost-label">Cost</span>
+            <span class="hz-cost-sale">{{ base_cost }} Credits</span>
+          </div>
+          {% endif %}
+        </div>
+        <div class="hz-card-foot-actions">
+          <button type="button" class="hz-run" data-hz-run>
+            <svg class="hz-run-icon" data-hz-run-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
+            <svg class="hz-run-spinner" data-hz-run-spinner viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" stroke-opacity="0.25"/>
+              <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+            <span data-hz-run-label>Humanize</span>
+          </button>
+        </div>
       </footer>
     </section>
-
-    <!-- ============================ ACTION ============================ -->
-    <div class="hz-action" data-tour="hz-run">
-      <div class="hz-action-bar">
-        {% if is_discount_active %}
-        <div class="hz-cost hz-cost--discount" aria-label="Humanize cost">
-          <span class="hz-cost-label">Cost:</span>
-          <span class="hz-cost-strike">{{ base_cost }}</span>
-          <span class="hz-cost-sale">{{ discounted_cost }} Credits</span>
-        </div>
-        {% else %}
-        <span class="hz-cost" aria-label="Humanize cost">Cost: {{ base_cost }} Credits</span>
-        {% endif %}
-        <button type="button" class="hz-run" data-hz-run>
-          <svg class="hz-run-icon" data-hz-run-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
-          <svg class="hz-run-spinner" data-hz-run-spinner viewBox="0 0 24 24" fill="none" aria-hidden="true" hidden>
-            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2.5" stroke-opacity="0.25"/>
-            <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-          </svg>
-          <span data-hz-run-label>Humanize</span>
-        </button>
-      </div>
-    </div>
 
     <!-- ============================ STAGE ============================ -->
     <div class="hz-stage" data-hz-stage data-stage="idle" aria-live="polite">
@@ -169,13 +172,11 @@
         </footer>
       </section>
 
-      <div class="hz-error-panel" data-hz-error hidden>
-        <p class="hz-error" data-hz-error-msg></p>
-      </div>
+      <div class="hz-feedback" data-hz-error hidden></div>
     </div>
   </div>
 </div>
 {% endblock %}
 {% block tools_scripts %}
-<script src="{{ url_for('static', filename='humanizer-page.js') }}?v=20260802-hz-drop"></script>
+<script src="{{ url_for('static', filename='humanizer-page.js') }}?v=20260813-dm-states"></script>
 {% endblock %}

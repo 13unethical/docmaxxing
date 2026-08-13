@@ -94,24 +94,37 @@
     }
   }
 
+  function buildSidebarCreditsHtml(balance) {
+    var bal = typeof global.formatCoinBalance === "function"
+      ? global.formatCoinBalance(typeof balance === "number" ? balance : 0)
+      : (typeof balance === "number" ? balance.toLocaleString("en-US") : "0");
+    return (
+      '<a href="/pricing" class="app-sidebar-credits" data-tour="coins" title="Top up credits">' +
+      '<span class="app-sidebar-credits-main">' +
+      '<svg class="app-sidebar-credits-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+      '<circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6" />' +
+      '<path d="M12 8.5v7M9.75 10.25h3.5a1.5 1.5 0 0 1 0 3h-2.5a1.5 1.5 0 0 0 0 3h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />' +
+      "</svg>" +
+      '<span class="app-sidebar-credits-balance">' +
+      '<span class="app-sidebar-credits-amount" data-coin-balance>' +
+      bal +
+      '</span><span class="app-sidebar-credits-label">credits</span></span></span>' +
+      '<span class="app-sidebar-credits-action">Top up</span></a>'
+    );
+  }
+
   function buildLoggedInHeader(user, balance) {
     var account = q(".app-topbar-account") || q(".nav-account");
-    if (!account) return;
+    if (account) account.innerHTML = "";
     var email = (user && user.email) || "";
     var name = (user && (user.name || email.split("@")[0])) || "Account";
     var initial = (name.charAt(0) || "U").toUpperCase();
-    account.innerHTML =
-      '<a href="/pricing" class="coin-pill" title="Credits & pricing">' +
-      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<circle cx="12" cy="12" r="8.25" stroke="currentColor" stroke-width="1.6" />' +
-      '<path d="M12 8.5v7M9.75 10.25h3.5a1.5 1.5 0 0 1 0 3h-2.5a1.5 1.5 0 0 0 0 3h3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />' +
-      '</svg><span data-coin-balance>' +
-      (typeof balance === "number" ? balance : 0) +
-      '</span><span class="coin-pill-label">Credits</span></a>';
 
     var footer = q(".app-sidebar-footer");
     if (footer) {
       footer.innerHTML =
+        '<div class="app-sidebar-account-stack">' +
+        buildSidebarCreditsHtml(balance) +
         '<div class="nav-user-menu app-sidebar-user" data-user-menu>' +
         '<button type="button" class="nav-user-trigger app-sidebar-user-trigger" data-user-menu-toggle aria-label="' +
         escapeHtml(name) +
@@ -119,7 +132,7 @@
         '<span class="nav-user-avatar" aria-hidden="true">' +
         escapeHtml(initial) +
         "</span>" +
-        '<span class="app-sidebar-user-meta"><span class="app-sidebar-user-name">' +
+        '<span class="app-sidebar-user-meta app-sidebar-label"><span class="app-sidebar-user-name">' +
         escapeHtml(name) +
         '</span><span class="app-sidebar-user-sub">Account</span></span>' +
         '<svg class="nav-user-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
@@ -150,7 +163,7 @@
         '<a href="/pricing" class="nav-user-dropdown-link">Billing</a>' +
         '<form method="post" action="/logout" class="nav-user-dropdown-form">' +
         '<button type="submit" class="nav-user-dropdown-link nav-user-dropdown-link--btn">Log out</button></form>' +
-        "</div></div></div>";
+        "</div></div></div></div>";
     }
     if (typeof global.DMThemeApply === "function") {
       global.DMThemeApply();

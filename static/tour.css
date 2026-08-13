@@ -18,10 +18,10 @@
   gap: 0.4rem;
   margin: 0;
   padding: 0.28rem 0.7rem 0.28rem 0.45rem;
-  border: 1.5px solid #2563eb;
+  border: 1.5px solid var(--accent);
   border-radius: 999px;
   background: #fff;
-  color: #2563eb;
+  color: var(--accent-text);
   font-size: 0.82rem;
   font-weight: 650;
   letter-spacing: -0.01em;
@@ -33,12 +33,12 @@
 }
 
 .dm-tutorial-btn:hover {
-  background: color-mix(in srgb, #2563eb 8%, #fff);
-  box-shadow: 0 0 0 3px color-mix(in srgb, #2563eb 16%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, #fff);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .dm-tutorial-btn:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -195,13 +195,13 @@
 }
 
 .dm-tour-btn--primary {
-  border-color: #2563eb;
-  background: #2563eb;
+  border-color: var(--accent);
+  background: var(--accent);
   color: #fff;
 }
 
 .dm-tour-btn--primary:hover {
-  background: #1d4ed8;
+  background: var(--accent-hover);
 }
 
 .dm-tour-btn[hidden] {
@@ -243,7 +243,7 @@
 }
 
 [data-theme="dark"] .dm-tour-btn--primary {
-  background: #2563eb;
-  border-color: #2563eb;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }

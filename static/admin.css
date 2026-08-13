@@ -30,16 +30,14 @@
 }
 
 .adm-today-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 0.75rem;
   padding: 1.35rem 1.5rem;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 [data-theme="dark"] .adm-today-card {
-  background: var(--surface);
-  border-color: var(--border-muted);
   box-shadow: none;
 }
 
@@ -245,9 +243,9 @@
 
 .adm-kpi {
   padding: 0.85rem 0.95rem;
-  border: 1px solid #e8ecf2;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+  background: var(--surface-1);
 }
 
 .adm-kpi-label {
@@ -300,8 +298,8 @@
 }
 
 .adm-card {
-  background: var(--bg-light);
-  border: 1px solid var(--border-muted);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
   border-radius: 14px;
   box-shadow: var(--shadow);
   padding: 1.1rem 1.15rem 1.25rem;
@@ -340,9 +338,9 @@
 
 .adm-search:focus {
   outline: none;
-  border-color: var(--primary);
+  border-color: var(--accent);
   background: var(--bg-light);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .adm-status {
@@ -374,13 +372,13 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
-  border-bottom: 1px solid #eef2f7;
+  border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
 
 .adm-table td {
   padding: 0.75rem 0.65rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
 
@@ -445,17 +443,19 @@
   min-width: 0;
   flex: 1 1 auto;
   padding: 0.35rem 0.45rem;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--border);
   border-radius: 8px;
   font: inherit;
   font-size: 0.84rem;
   font-variant-numeric: tabular-nums;
+  background: var(--surface-1);
+  color: var(--text);
 }
 
 .adm-balance-input:focus {
   outline: none;
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.12);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .adm-btn {
@@ -472,7 +472,7 @@
 }
 
 .adm-btn--save {
-  background: var(--primary);
+  background: var(--accent);
   color: var(--on-primary);
 }
 
@@ -521,7 +521,7 @@
 }
 
 .adm-admin-toggle input:checked + .adm-admin-toggle-ui {
-  background: var(--primary);
+  background: var(--accent);
 }
 
 .adm-admin-toggle input:checked + .adm-admin-toggle-ui::after {
@@ -543,13 +543,14 @@
 }
 
 .adm-badge--admin {
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .adm-badge--user {
-  background: #f1f5f9;
+  background: var(--surface-2);
   color: var(--text-muted);
+  border: 1px solid var(--border);
 }
 
 .adm-empty {
@@ -565,7 +566,7 @@
 }
 
 .adm-btn--ghost:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--primary) 12%, var(--bg));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
 }
 
 .adm-btn--ledger {
@@ -579,7 +580,7 @@
 }
 
 .adm-btn--purchases {
-  background: var(--primary);
+  background: var(--accent);
   color: var(--on-primary);
   margin-right: 0.35rem;
 }
@@ -657,8 +658,9 @@
   font-size: 0.65rem;
   font-weight: 700;
   letter-spacing: 0.03em;
-  background: #f1f5f9;
+  background: var(--surface-2);
   color: var(--text-muted);
+  border: 1px solid var(--border);
 }
 
 .adm-pay-status--Paid {
@@ -677,8 +679,8 @@
 }
 
 .adm-pay-status--Refunded {
-  background: #eff6ff;
-  color: #1d4ed8;
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .adm-cell-actions {
@@ -749,7 +751,7 @@
 .adm-ledger-table-wrap {
   flex: 1;
   overflow: auto;
-  border: 1px solid #eef2f7;
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 
@@ -778,8 +780,9 @@
   font-size: 0.65rem;
   font-weight: 700;
   letter-spacing: 0.03em;
-  background: #f1f5f9;
+  background: var(--surface-2);
   color: var(--text-muted);
+  border: 1px solid var(--border);
 }
 
 .adm-type--PURCHASE,

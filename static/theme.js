@@ -11,7 +11,19 @@
   'use strict';
 
   var STORAGE_KEY = 'dm-theme';
+  var LEGACY_STORAGE_KEY = 'theme';
   var root = document.documentElement;
+
+  // Одноразовая миграция старого ключа localStorage → dm-theme
+  try {
+    var legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if ((legacy === 'dark' || legacy === 'light') && !localStorage.getItem(STORAGE_KEY)) {
+      localStorage.setItem(STORAGE_KEY, legacy);
+    }
+    if (localStorage.getItem(STORAGE_KEY) && localStorage.getItem(LEGACY_STORAGE_KEY)) {
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+    }
+  } catch (e) {}
 
   function systemTheme() {
     return window.matchMedia &&
@@ -44,6 +56,9 @@
 
   // Текущее значение уже проставлено сниппетом в <head>.
   // Здесь только вешаем обработчики и следим за системной темой.
+  // Помечаем, чтобы legacy-код в common.js не вешал второй click-handler.
+  root.dataset.themeDelegated = '1';
+
   document.addEventListener('click', function (e) {
     var btn = e.target.closest && e.target.closest('[data-theme-toggle]');
     if (!btn) return;
@@ -79,6 +94,7 @@
 <script>
 (function(){try{
   var t=localStorage.getItem('dm-theme');
+  if(!t){var legacy=localStorage.getItem('theme');if(legacy==='dark'||legacy==='light'){t=legacy;localStorage.setItem('dm-theme',t);localStorage.removeItem('theme');}}
   if(!t){t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}
   document.documentElement.setAttribute('data-theme',t);
   document.documentElement.style.colorScheme=t;

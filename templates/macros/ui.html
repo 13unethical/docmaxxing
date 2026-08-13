@@ -159,3 +159,91 @@
   </svg>
 </button>
 {%- endmacro %}
+
+
+{# --- Пустое состояние ----------------------------------------
+   {{ ui.empty_state(
+        title="Nothing here yet",
+        lede="One line saying what appears here.",
+        hint="DOCX or PDF",
+        action_label="Submit files",
+        cost="300 credits",
+        action_attrs='data-tt-submit type="button"',
+      ) }}
+   Или с кастомной иконкой через call:
+   {% call ui.empty_state(title="…", lede="…") %}…svg…{% endcall %}
+------------------------------------------------------------- #}
+{% macro empty_state(title, lede="", hint="", action_label="", action_href="", action_attrs="", cost="", classes="", attrs="", hidden=False) -%}
+<div class="dm-empty{% if classes %} {{ classes }}{% endif %}"{% if hidden %} hidden{% endif %} {{ attrs|safe }}>
+  <div class="dm-empty__icon" aria-hidden="true">
+    {% if caller %}
+      {{ caller() }}
+    {% else %}
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/>
+        <path d="M14 3v5h5"/>
+        <circle cx="11.5" cy="14.5" r="2.5"/>
+        <path d="M13.3 16.3 15.5 18.5"/>
+      </svg>
+    {% endif %}
+  </div>
+  <h2 class="dm-empty__title">{{ title }}</h2>
+  {% if lede %}<p class="dm-empty__lede">{{ lede }}</p>{% endif %}
+  {% if action_label %}
+  <div class="dm-empty__action">
+    {% if action_href %}
+    <a href="{{ action_href }}" class="dm-btn dm-btn--accent"{% if action_attrs %} {{ action_attrs|safe }}{% endif %}>
+      <span>{{ action_label }}</span>
+      {% if cost %}<span class="dm-empty__cost">{{ cost }}</span>{% endif %}
+    </a>
+    {% else %}
+    <button type="button" class="dm-btn dm-btn--accent"{% if action_attrs %} {{ action_attrs|safe }}{% endif %}>
+      <span>{{ action_label }}</span>
+      {% if cost %}<span class="dm-empty__cost">{{ cost }}</span>{% endif %}
+    </button>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if hint %}<p class="dm-empty__hint">{{ hint }}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+
+{# --- Нехватка кредитов (предупреждение) ----------------------
+   {{ ui.credits_warn(required=300, balance=120, topup_href=url_for('pricing')) }}
+   required/balance — реальные числа с сервера или data-атрибуты для JS.
+------------------------------------------------------------- #}
+{% macro credits_warn(required, balance, topup_href="/pricing", topup_label="Top up", classes="", attrs="", hidden=False) -%}
+<div class="dm-credits-warn{% if classes %} {{ classes }}{% endif %}"{% if hidden %} hidden{% endif %} role="status" {{ attrs|safe }}>
+  <h3 class="dm-credits-warn__title">Not enough credits</h3>
+  <p class="dm-credits-warn__body">
+    This needs <span class="dm-num" data-dm-credits-required>{{ required }}</span> credits,
+    you have <span class="dm-num" data-dm-credits-balance>{{ balance }}</span>.
+  </p>
+  <div class="dm-credits-warn__actions">
+    <a href="{{ topup_href }}" class="dm-btn dm-btn--accent dm-btn--sm">{{ topup_label }}</a>
+  </div>
+</div>
+{%- endmacro %}
+
+
+{# --- Ошибка --------------------------------------------------
+   {{ ui.state_error(
+        title="Something went wrong",
+        body="Your credits weren’t charged. Try again in a moment.",
+        detail="STALE_PAGE",
+        retry_attrs='data-retry',
+      ) }}
+------------------------------------------------------------- #}
+{% macro state_error(title="Something went wrong", body="", detail="", retry_label="Retry", retry_attrs="", classes="", attrs="", hidden=False) -%}
+<div class="dm-state-error{% if classes %} {{ classes }}{% endif %}"{% if hidden %} hidden{% endif %} role="alert" {{ attrs|safe }}>
+  <h3 class="dm-state-error__title">{{ title }}</h3>
+  {% if body %}<p class="dm-state-error__body">{{ body }}</p>{% endif %}
+  {% if detail %}<p class="dm-state-error__detail">{{ detail }}</p>{% endif %}
+  {% if retry_label %}
+  <div class="dm-state-error__actions">
+    <button type="button" class="dm-btn dm-btn--outline-danger dm-btn--sm"{% if retry_attrs %} {{ retry_attrs|safe }}{% endif %}>{{ retry_label }}</button>
+  </div>
+  {% endif %}
+</div>
+{%- endmacro %}

@@ -100,18 +100,25 @@
     }
   }
 
+  function historyEmpty(title) {
+    return (
+      '<div class="dm-empty dm-empty--sidebar app-sidebar-history-empty">' +
+      '<h2 class="dm-empty__title">' +
+      esc(title) +
+      "</h2></div>"
+    );
+  }
+
   function renderAssignmentHistory(items) {
     var list = document.querySelector("[data-tool-history-list]");
     if (!list) return;
     var auth = window.DM_AUTH && window.DM_AUTH.authenticated;
     if (!auth) {
-      list.innerHTML =
-        '<p class="app-sidebar-history-empty">Sign in to see history.</p>';
+      list.innerHTML = historyEmpty("Sign in to see history.");
       return;
     }
     if (!items || !items.length) {
-      list.innerHTML =
-        '<p class="app-sidebar-history-empty">No assignments yet.</p>';
+      list.innerHTML = historyEmpty("No assignments yet.");
       return;
     }
     var current = activeProjectId();
@@ -146,8 +153,7 @@
     if (!list || !window.DMToolHistory) return;
     var items = window.DMToolHistory.list(tool);
     if (!items.length) {
-      list.innerHTML =
-        '<p class="app-sidebar-history-empty">No history yet.</p>';
+      list.innerHTML = historyEmpty("No history yet.");
       return;
     }
     var current = activeLocalHistoryId();
@@ -187,8 +193,7 @@
       var items = Array.isArray(data) ? data : data.projects || data.items || [];
       renderAssignmentHistory(items);
     } catch (err) {
-      list.innerHTML =
-        '<p class="app-sidebar-history-empty">Could not load history.</p>';
+      list.innerHTML = historyEmpty("Could not load history.");
     }
   }
 
@@ -228,6 +233,18 @@
     }
     if (t === "check") {
       window.location.href = "/check";
+      return;
+    }
+    if (t === "workspace") {
+      window.location.href = "/workspace";
+      return;
+    }
+    if (t === "turnitin") {
+      window.location.href = "/turnitin";
+      return;
+    }
+    if (t === "presentation") {
+      window.location.href = "/presentation";
       return;
     }
   }
@@ -272,6 +289,7 @@
   });
 
   function boot() {
+    if (!document.querySelector("[data-app-shell]")) return;
     restoreCollapsed();
     refreshToolHistory();
   }

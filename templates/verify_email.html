@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "auth_base.html" %}
 {% block title %}Verify email — DocMaxxing{% endblock %}
 {% block content %}
 <section class="auth-wrap">
@@ -45,8 +45,8 @@
 
     <p class="auth-alt">
       Wrong account?
-      <form method="post" action="{{ url_for('logout') }}" style="display:inline">
-        <button type="submit" class="linkish">Log out</button>
+      <form method="post" action="{{ url_for('logout') }}" class="auth-inline-form">
+        <button type="submit" class="auth-text-link">Log out</button>
       </form>
     </p>
   </div>

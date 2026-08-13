@@ -13,19 +13,8 @@
     1: "Free Turnitin",
     3: "1,000 credits",
     5: "3,000 credits",
-    10: "Pro Status",
+    10: "Pro status",
   };
-
-  var LOCK_SVG =
-    '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-    '<path d="M8 10.5V8.25a4 4 0 0 1 8 0V10.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>' +
-    '<rect x="6.75" y="10.5" width="10.5" height="8.25" rx="1.75" stroke="currentColor" stroke-width="1.7"/>' +
-    "</svg>";
-
-  var CHECK_SVG =
-    '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-    '<path d="M6.5 12.25 10 15.75 17.5 8.25" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
-    "</svg>";
 
   var els = {
     status: root.querySelector("[data-earn-status]"),
@@ -33,8 +22,8 @@
     code: root.querySelector("[data-earn-code]"),
     totalRefs: root.querySelector("[data-earn-total-refs]"),
     qualifying: root.querySelector("[data-earn-qualifying]"),
-    fill: root.querySelector("[data-earn-progress-fill]"),
     barFill: root.querySelector("[data-earn-progress-bar]"),
+    barWrap: root.querySelector("[data-earn-progress-bar-wrap]"),
     steps: root.querySelector("[data-earn-steps]"),
     balance: root.querySelector("[data-earn-balance]"),
     copy: root.querySelector("[data-earn-copy]"),
@@ -45,6 +34,7 @@
     refs: root.querySelector("[data-earn-refs]"),
     refsEmpty: root.querySelector("[data-earn-refs-empty]"),
     refsCount: root.querySelector("[data-earn-refs-count]"),
+    refsCountWrap: root.querySelector("[data-earn-refs-count-wrap]"),
     modal: root.querySelector("[data-earn-withdraw-modal]"),
     form: root.querySelector("[data-earn-withdraw-form]"),
     amount: root.querySelector("[data-earn-withdraw-amount]"),
@@ -93,6 +83,7 @@
   function renderReferrals(list) {
     var items = Array.isArray(list) ? list : [];
     if (els.refsCount) els.refsCount.textContent = String(items.length);
+    if (els.refsCountWrap) els.refsCountWrap.hidden = items.length === 0;
     if (els.refsEmpty) els.refsEmpty.hidden = items.length > 0;
     if (!els.refs) return;
     if (!items.length) {
@@ -177,31 +168,35 @@
 
     var q = Number(profile.qualifying_referrals_count) || 0;
     var pct = Math.max(0, Math.min(100, (q / 10) * 100));
-    if (els.fill) els.fill.style.width = pct + "%";
     if (els.barFill) els.barFill.style.width = pct + "%";
+    if (els.barWrap) els.barWrap.setAttribute("aria-valuenow", String(q));
 
     if (els.steps) {
-      els.steps.innerHTML = (profile.milestones || [])
+      var milestones = profile.milestones || [];
+      if (!milestones.length) {
+        milestones = [
+          { threshold: 1 },
+          { threshold: 3 },
+          { threshold: 5 },
+          { threshold: 10 },
+        ];
+      }
+      els.steps.innerHTML = milestones
         .map(function (m) {
-          var unlocked = !!m.unlocked;
+          var t = Number(m.threshold) || 0;
+          var unlocked = !!m.unlocked || q >= t;
           return (
-            '<div class="earn-node' +
+            '<li class="earn-milestone-label' +
             (unlocked ? " is-unlocked" : "") +
-            '" title="' +
-            (unlocked
-              ? "Unlocked — friend deposited $10+"
-              : "Locked until a referred friend deposits $10+") +
             '">' +
-            '<div class="earn-node-dot">' +
-            (unlocked ? CHECK_SVG : LOCK_SVG) +
-            "</div>" +
-            '<p class="earn-node-label">' +
-            (m.label || "") +
-            "</p>" +
-            '<p class="earn-node-reward">' +
-            shortReward(m) +
-            "</p>" +
-            "</div>"
+            '<span class="earn-milestone-n">' +
+            escapeHtml(String(t)) +
+            "</span>" +
+            '<span class="earn-milestone-sep" aria-hidden="true">·</span>' +
+            '<span class="earn-milestone-reward">' +
+            escapeHtml(shortReward(m)) +
+            "</span>" +
+            "</li>"
           );
         })
         .join("");

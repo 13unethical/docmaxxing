@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Earn & Share — DocMaxxing{% endblock %}
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('static', filename='earn.css') }}?v=20260803-earn-refs" />
+<link rel="stylesheet" href="{{ url_for('static', filename='earn.css') }}?v=20260813-dm-states" />
 {% endblock %}
 {% block content %}
 <div class="earn-page" data-earn-page>
@@ -30,7 +30,8 @@
         </div>
         <div class="earn-tags">
           <span class="earn-tag">Code: <code data-earn-code>—</code></span>
-          <span class="earn-tag">Total Referred: <strong data-earn-total-refs>0</strong></span>
+          <span class="earn-tag">Referred: <strong data-earn-total-refs>0</strong></span>
+          <span class="earn-tag">Free Turnitin reports: <strong data-earn-free-tt>0</strong></span>
         </div>
       </section>
 
@@ -41,11 +42,11 @@
         <p class="earn-pro" data-earn-pro-badge hidden>Pro active — 10% off platform checks</p>
         <div class="earn-finance-actions">
           <button type="button" class="earn-btn earn-btn--primary" data-earn-convert>
-            Convert to Credits (1.2×)
+            Convert to credits · 1.2×
           </button>
           <button
             type="button"
-            class="earn-btn earn-btn--secondary"
+            class="earn-btn earn-btn--outline"
             data-earn-withdraw
             disabled
             title="Minimum $50"
@@ -66,24 +67,15 @@
               <span class="earn-tip" title="Qualifying referrals: friends who deposited at least $10 once.">ⓘ</span>
             </p>
           </div>
-          <span class="earn-badge-free">
-            Free Turnitin reports: <strong data-earn-free-tt>0</strong>
-          </span>
         </div>
 
-        <div class="earn-track" data-earn-progress>
-          <div class="earn-track-line" aria-hidden="true">
-            <div class="earn-track-fill" data-earn-progress-fill style="width:0%"></div>
-          </div>
-          <div class="earn-nodes" data-earn-steps></div>
-        </div>
-
-        <div class="earn-progress-foot">
-          <div class="earn-progress-bar" aria-hidden="true">
+        <div class="earn-progress" data-earn-progress>
+          <div class="earn-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0" data-earn-progress-bar-wrap>
             <div class="earn-progress-bar-fill" data-earn-progress-bar style="width:0%"></div>
           </div>
+          <ol class="earn-milestone-labels" data-earn-steps></ol>
           <p class="earn-progress-label">
-            Progress: <strong data-earn-qualifying>0</strong> / 10 qualifying friends
+            <strong data-earn-qualifying>0</strong> of 10 qualifying friends
           </p>
         </div>
       </section>
@@ -96,10 +88,20 @@
               IDs only — no emails. Expand a row to see deposit history.
             </p>
           </div>
-          <span class="earn-tag">Showing <strong data-earn-refs-count>0</strong></span>
+          <span class="earn-tag" data-earn-refs-count-wrap hidden>Showing <strong data-earn-refs-count>0</strong></span>
         </div>
         <div class="earn-refs" data-earn-refs></div>
-        <p class="earn-refs-empty" data-earn-refs-empty>No referrals yet. Share your link to get started.</p>
+        <div class="dm-empty dm-empty--compact" data-earn-refs-empty>
+          <div class="dm-empty__icon" aria-hidden="true">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+          </div>
+          <h2 class="dm-empty__title">No referrals yet</h2>
+          <p class="dm-empty__lede">Share your link to invite friends and start earning cashback.</p>
+        </div>
       </section>
     </div>
   </div>
@@ -134,5 +136,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='earn-page.js') }}?v=20260803-earn-refs"></script>
+<script src="{{ url_for('static', filename='earn-page.js') }}?v=20260813-earn-showing"></script>
 {% endblock %}

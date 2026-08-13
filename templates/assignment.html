@@ -7,7 +7,7 @@
     <div class="asg-drop-overlay-inner">
       <div class="asg-drop-overlay-icons" aria-hidden="true">
         <svg class="asg-drop-ico asg-drop-ico--doc" viewBox="0 0 48 56" fill="none">
-          <rect x="4" y="2" width="40" height="52" rx="6" fill="#3b82f6"/>
+          <rect x="4" y="2" width="40" height="52" rx="6" fill="currentColor"/>
           <path d="M14 18h20M14 26h16M14 34h12" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
         </svg>
       </div>
@@ -17,9 +17,17 @@
   </div>
 
   <div class="asg-chat-scroll" data-asg-chat-scroll>
-    <div class="asg-chat-empty" data-asg-empty>
-      <h1 class="asg-chat-empty-title">Ready when you are</h1>
-      <p class="asg-chat-empty-lede">Attach your brief and materials to get a price.</p>
+    <div class="asg-chat-empty dm-empty" data-asg-empty>
+      <div class="dm-empty__icon" aria-hidden="true">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/>
+          <path d="M14 3v5h5"/>
+          <path d="M8 13h8M8 17h5"/>
+        </svg>
+      </div>
+      <h1 class="dm-empty__title asg-chat-empty-title">Ready when you are</h1>
+      <p class="dm-empty__lede asg-chat-empty-lede">Attach your brief and materials to get a price.</p>
+      <p class="dm-empty__hint">PDF, DOC, DOCX, TXT, and images</p>
     </div>
     <div class="asg-chat-thread" data-asg-thread aria-live="polite"></div>
   </div>
@@ -97,5 +105,5 @@
 </div>
 {% endblock %}
 {% block tools_scripts %}
-<script src="{{ url_for('static', filename='assignment-page.js') }}?v=20260806-no-aidetect"></script>
+<script src="{{ url_for('static', filename='assignment-page.js') }}?v=20260813-dm-states"></script>
 {% endblock %}

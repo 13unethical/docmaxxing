@@ -123,7 +123,8 @@ window.WSMock = (function () {
     searchCitations: searchCitations,
     scanCitations: scanCitations,
     HUMANIZE_COST: 10,
-    DETECT_COST: 10,
+    DETECT_CREDITS_PER_100: 1,
+    DETECT_WORDS_UNIT: 100,
     AI_COST_PER_500: 0.1,
   };
 })();
