@@ -120,7 +120,7 @@
     }
     els.feedback.hidden = false;
     els.feedback.innerHTML = window.dmStates.error({
-      title: "Something went wrong",
+      title: "Check didn’t finish",
       body: body,
       detail: detail || "",
       retryAttrs: "data-tt-feedback-retry",
@@ -473,6 +473,16 @@
       delete state.highlightsPending[report.id];
     }
     renderTable();
+    if (
+      report.status === "queued" ||
+      report.status === "running" ||
+      report.status === "processing"
+    ) {
+      if (prev && prev.status === "failed") {
+        clearFeedback();
+        setStatusText("Retrying your check automatically…");
+      }
+    }
     if (report.status === "failed" && (!prev || prev.status !== "failed")) {
       var meta = report.meta || {};
       var human = humanizeServiceError(
@@ -480,7 +490,10 @@
         report.errorMessage || ""
       );
       if (human) {
-        showSubmitError(human.body, human.detail);
+        setStatusText(human.body + " Credits were refunded if the check did not finish.");
+        showSubmitError(human.body, human.detail, function () {
+          if (els.fileInput) els.fileInput.click();
+        });
       }
     }
   }

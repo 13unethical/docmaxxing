@@ -34,6 +34,7 @@
     var code = String(payload.error || payload.code || "");
     var message = String(payload.message || "");
     if (message && !isInternalCode(message)) return message;
+    if (code && !isInternalCode(code)) return code;
     if (MESSAGES[code]) return MESSAGES[code];
     if (message && isInternalCode(message) && MESSAGES[message]) return MESSAGES[message];
     return fallback || "Something went wrong. Please try again.";

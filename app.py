@@ -5082,6 +5082,8 @@ def api_turnitin_check():
         upload_path = turnitin_service.save_upload(submission_id, filename, f.read())
         report_dir = str(turnitin_service.report_dir(submission_id))
         ensure_engine_started()
+        from services.browser.jobs.retry import MAX_RETRIES
+
         job = job_manager.create(
             "plagdetect",
             "check",
@@ -5092,7 +5094,7 @@ def api_turnitin_check():
                 "report_dir": report_dir,
                 "submission_id": submission_id,
             },
-            max_retries=0,
+            max_retries=MAX_RETRIES,
         )
         turnitin_service.store.create(
             submission_id=submission_id,

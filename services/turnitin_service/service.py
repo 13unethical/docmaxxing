@@ -10,6 +10,16 @@ from typing import Any, Callable
 
 from .store import REPORT_ROOT, TurnitinStore, UPLOAD_ROOT
 
+_TRANSIENT_JOB_CODES = frozenset(
+    {
+        "STALE_PAGE",
+        "TIMEOUT",
+        "AUTOMATION_ERROR",
+        "SELECTOR_NOT_FOUND",
+        "NAVIGATION_FAILED",
+    }
+)
+
 
 class TurnitinService:
     def __init__(self, store: TurnitinStore | None = None) -> None:
@@ -119,6 +129,58 @@ class TurnitinService:
             "externalId": row.get("external_id"),
         }
 
+    def _requeue_check_job(
+        self,
+        *,
+        submission_id: str,
+        user_id: int,
+        cost: int,
+        job_manager: Any,
+        wallet: Any,
+        refund_fn: Callable[..., None],
+    ) -> bool:
+        """One automatic re-submit for transient PlagDetect failures (no extra charge)."""
+        from services.browser.jobs.retry import MAX_RETRIES
+
+        row = self.store.get(submission_id) or {}
+        upload_path = (row.get("upload_path") or "").strip()
+        if not upload_path or not Path(upload_path).is_file():
+            return False
+        meta = dict(row.get("meta") or {})
+        if int(meta.get("service_requeue_count") or 0) >= 1:
+            return False
+        meta["service_requeue_count"] = 1
+        report_dir = str(self.report_dir(submission_id))
+        job = job_manager.create(
+            "plagdetect",
+            "check",
+            {
+                "file_path": upload_path,
+                "exclude_bibliography": bool(row.get("exclude_bibliography")),
+                "exclude_quotes": bool(row.get("exclude_quotes")),
+                "report_dir": report_dir,
+                "submission_id": submission_id,
+            },
+            max_retries=MAX_RETRIES,
+        )
+        self.store.update(
+            submission_id,
+            status="queued",
+            job_id=job.id,
+            error_message=None,
+            meta_json=json.dumps(meta),
+        )
+        self.watch_job(
+            submission_id=submission_id,
+            job_id=job.id,
+            user_id=user_id,
+            cost=cost,
+            job_manager=job_manager,
+            wallet=wallet,
+            refund_fn=refund_fn,
+        )
+        return True
+
     def watch_job(
         self,
         *,
@@ -208,6 +270,15 @@ class TurnitinService:
                 return
 
             if status not in ("FAILED", "CANCELLED"):
+                if self._requeue_check_job(
+                    submission_id=submission_id,
+                    user_id=user_id,
+                    cost=cost,
+                    job_manager=job_manager,
+                    wallet=wallet,
+                    refund_fn=refund_fn,
+                ):
+                    return
                 self.store.update(
                     submission_id,
                     status="failed",
@@ -219,6 +290,16 @@ class TurnitinService:
 
             code = job.error_code or "ERROR"
             message = job.error or code
+            if code in _TRANSIENT_JOB_CODES and code not in ("LOGIN_REQUIRED",):
+                if self._requeue_check_job(
+                    submission_id=submission_id,
+                    user_id=user_id,
+                    cost=cost,
+                    job_manager=job_manager,
+                    wallet=wallet,
+                    refund_fn=refund_fn,
+                ):
+                    return
             self.store.update(
                 submission_id,
                 status="failed",

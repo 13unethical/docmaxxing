@@ -89,6 +89,7 @@
     retryAction: null,
     forceContinue: false,
     productionPeakPct: 0,
+    productionNotice: "",
     composerMode: "brief", /* brief | revision */
   };
 
@@ -195,15 +196,74 @@
   }
 
   var LLM_REQUEST_TIMEOUT_MS = 600000;
+  var LLM_MAX_ATTEMPTS = 3;
 
   function isLongRunningStageUrl(url) {
     return /\/(research|blueprint|writer|citations|humanizer|format|validate-requirements|review|revision|ai-detection|delivery)\b/.test(url || "");
   }
 
-  function apiLlm(url, options) {
+  function sleep(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, ms);
+    });
+  }
+
+  function inProductionFlow() {
+    return !!(state.paymentConfirmed && !state.deliveryPackage);
+  }
+
+  function isTransientApiError(err) {
+    if (!err || isAuthError(err)) return false;
+    var code = String(err.code || "").toUpperCase();
+    if (code === "INSUFFICIENT_COINS" || code === "EMAIL_NOT_VERIFIED") return false;
+    var msg = String(err.message || "").toLowerCase();
+    if (msg.indexOf("payment") >= 0 || msg.indexOf("not enough credit") >= 0) return false;
+    if (msg.indexOf("project not found") >= 0 || msg.indexOf("stale session") >= 0) return false;
+    return (
+      msg.indexOf("network error") >= 0 ||
+      msg.indexOf("timed out") >= 0 ||
+      msg.indexOf("try again") >= 0 ||
+      msg.indexOf("failed on the server") >= 0 ||
+      msg.indexOf("writing step failed") >= 0 ||
+      msg.indexOf("server error") >= 0 ||
+      msg.indexOf("502") >= 0 ||
+      msg.indexOf("503") >= 0 ||
+      msg.indexOf("504") >= 0 ||
+      msg.indexOf("detection step failed") >= 0 ||
+      msg.indexOf("temporary") >= 0
+    );
+  }
+
+  function setProductionNotice(text) {
+    state.productionNotice = text || "";
+    var eta = document.querySelector(".asg-production-eta");
+    if (eta) {
+      eta.textContent = state.productionNotice || "Estimated time: 3–5 minutes";
+    }
+  }
+
+  async function apiLlm(url, options) {
     var opts = options || {};
-    opts.timeoutMs = LLM_REQUEST_TIMEOUT_MS;
-    return api(url, opts);
+    opts.timeoutMs = opts.timeoutMs || LLM_REQUEST_TIMEOUT_MS;
+    var maxAttempts = opts.maxAttempts != null ? opts.maxAttempts : LLM_MAX_ATTEMPTS;
+    var lastErr;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        var result = await api(url, opts);
+        if (attempt > 1) setProductionNotice("");
+        return result;
+      } catch (err) {
+        lastErr = err;
+        if (!isTransientApiError(err) || attempt >= maxAttempts) throw err;
+        if (inProductionFlow()) {
+          setProductionNotice(
+            "Brief connection hiccup — retrying (" + attempt + "/" + maxAttempts + ")…"
+          );
+        }
+        await sleep(700 * attempt + Math.floor(Math.random() * 300));
+      }
+    }
+    throw lastErr;
   }
 
   function isAuthed() {
@@ -280,8 +340,8 @@
         throw new Error(
           msg ||
           (isLongRunningStageUrl(url)
-            ? "This AI step failed on the server. Please click Retry."
-            : ("Server error (" + res.status + "). Please click Retry."))
+            ? "This step hit a temporary server issue. Retrying usually fixes it."
+            : ("Server error (" + res.status + "). Please try again."))
         );
       }
       var err = new Error(msg || ("HTTP " + res.status));
@@ -790,7 +850,9 @@
         '<p class="asg-production-pct">' +
         pct +
         "%</p>" +
-        '<p class="asg-production-eta">Estimated time: 3–5 minutes</p>' +
+        '<p class="asg-production-eta">' +
+        (state.productionNotice || "Estimated time: 3–5 minutes") +
+        "</p>" +
         "</div>"
     );
   }
@@ -956,12 +1018,30 @@
       setBusy(false);
       return;
     }
-    root.classList.remove("asg-page--production");
-    show($("[data-asg-production]"), false);
-    show($("[data-asg-wizard]"), false);
 
     var code = err && err.code;
     var payload = err && err.payload;
+    var productionPause = inProductionFlow();
+    if (productionPause) {
+      message =
+        userFacingError(
+          err,
+          "A brief connection issue paused this step. Tap Retry to continue — your progress is saved."
+        ) || message;
+    }
+
+    if (!productionPause) {
+      root.classList.remove("asg-page--production");
+      show($("[data-asg-production]"), false);
+      show($("[data-asg-wizard]"), false);
+    } else {
+      root.classList.add("asg-page--production");
+      show($("[data-asg-production]"), true);
+      show($("[data-asg-wizard]"), false);
+      setProductionNotice("");
+      updateProductionProgress(state.stage);
+    }
+
     if (
       code === "INSUFFICIENT_COINS" ||
       (window.dmStates && window.dmStates.isCreditError(code, message))
@@ -982,8 +1062,33 @@
         "<p>Not enough credits for this step. Top up to continue — nothing else was started.</p>"
       );
     } else {
-      showError(message, { detail: "" });
-      upsertBubble("error", "assistant", "<p>" + esc(message) + "</p>");
+      showError(message, {
+        title: productionPause ? "Paused briefly" : "Something went wrong",
+        detail: "",
+      });
+      if (productionPause) {
+        var pausePct = Math.max(
+          Number(state.productionPeakPct) || 0,
+          productionPercent(state.stage)
+        );
+        upsertBubble(
+          "production",
+          "assistant",
+          '<div class="asg-prod-card">' +
+            "<h3>Generating your assignment</h3>" +
+            '<div class="asg-production-bar" aria-hidden="true"><div class="asg-production-bar-fill" style="width:' +
+            pausePct +
+            '%"></div></div>' +
+            '<p class="asg-production-pct">' +
+            pausePct +
+            "%</p>" +
+            '<p class="asg-production-pause">' +
+            esc(message) +
+            "</p></div>"
+        );
+      } else {
+        upsertBubble("error", "assistant", "<p>" + esc(message) + "</p>");
+      }
     }
     var primary = $("[data-asg-wizard-primary]");
     if (primary) {
