@@ -9,6 +9,8 @@ pip install -r requirements.txt
 python -c "import playwright"
 playwright install chromium
 mkdir -p /root/docmaxxing/data/projects /root/docmaxxing/data/project_engine
+mkdir -p /root/docmaxxing/data/tmp/format_v2_documents
+chmod 700 /root/docmaxxing/data/tmp/format_v2_documents
 touch /root/docmaxxing/data/assignment-trace.log
 install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service
 bash scripts/install_backup_timers.sh

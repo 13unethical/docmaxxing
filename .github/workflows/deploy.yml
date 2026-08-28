@@ -27,6 +27,8 @@ jobs:
             git reset --hard origin/main
             mkdir -p /root/docmaxxing/data/projects
             mkdir -p /root/docmaxxing/data/project_engine
+            mkdir -p /root/docmaxxing/data/tmp/format_v2_documents
+            chmod 700 /root/docmaxxing/data/tmp/format_v2_documents
             touch /root/docmaxxing/data/assignment-trace.log
             if ! grep -q '^PROJECT_STORAGE_DIR=' .env 2>/dev/null; then
               echo 'PROJECT_STORAGE_DIR=/root/docmaxxing/data/projects' >> .env
