@@ -117,5 +117,6 @@ def test_primary_nav_sitelinks_present():
     assert ">Formatter</" in html
     assert ">Assignments</" in html
     assert ">Pricing</" in html
-    assert 'aria-label="Main navigation"' in html
-    assert "<nav" in html
+    assert 'aria-label="Products"' in html
+    assert 'site-footer-links--primary' in html
+    assert 'site-sitelinks-nav' not in html

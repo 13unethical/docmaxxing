@@ -5954,43 +5954,6 @@ body.app-shell-body--workspace.app-shell-scroll-locked .site-footer {
   flex-shrink: 0;
 }
 
-.app-nav-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.site-sitelinks-nav {
-  display: none;
-  align-items: center;
-  gap: 1rem;
-  margin-left: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.site-sitelinks-nav a {
-  color: var(--text-muted);
-  text-decoration: none;
-  font-size: 0.8125rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.site-sitelinks-nav a:hover {
-  color: var(--accent-text);
-  text-decoration: underline;
-}
-
-@media (min-width: 901px) {
-  .site-sitelinks-nav {
-    display: flex;
-    pointer-events: auto;
-  }
-}
-
 .site-footer-links--primary {
   margin-bottom: 0.35rem;
   font-weight: 600;
