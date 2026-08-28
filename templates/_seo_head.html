@@ -1,0 +1,22 @@
+{# Global SEO — defaults from services/seo.py; override per page via blocks. #}
+{% set _seo_title = seo_title|default(seo.title) %}
+{% set _seo_description = seo_description|default(seo.description) %}
+{% set _seo_keywords = seo_keywords|default(seo.keywords_csv) %}
+{% set _seo_canonical = seo_canonical|default(seo.canonical) %}
+<meta name="description" content="{{ _seo_description }}" />
+<meta name="keywords" content="{{ _seo_keywords }}" />
+<link rel="canonical" href="{{ _seo_canonical }}" />
+<meta name="robots" content="index, follow" />
+<link rel="icon" href="/icon.png" type="image/png" />
+<link rel="apple-touch-icon" href="/apple-icon.png" />
+<meta property="og:site_name" content="{{ seo.site_name }}" />
+<meta property="og:title" content="{{ seo_og_title|default(_seo_title) }}" />
+<meta property="og:description" content="{{ seo_og_description|default(_seo_description) }}" />
+<meta property="og:url" content="{{ seo_og_url|default(_seo_canonical) }}" />
+<meta property="og:type" content="{{ seo.og_type }}" />
+<meta property="og:image" content="{{ seo.og_image }}" />
+<meta name="twitter:card" content="{{ seo.twitter_card }}" />
+<meta name="twitter:title" content="{{ seo_og_title|default(_seo_title) }}" />
+<meta name="twitter:description" content="{{ seo_og_description|default(_seo_description) }}" />
+<meta name="twitter:image" content="{{ seo.og_image }}" />
+<script type="application/ld+json">{{ seo.json_ld | safe }}</script>

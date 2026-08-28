@@ -506,6 +506,7 @@ GUEST_PREVIEW_PAGE_PATHS = frozenset(
         "/humanizer",
         "/turnitin",
         "/workspace",
+        "/check",
     }
 )
 

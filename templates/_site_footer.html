@@ -1,5 +1,11 @@
 <footer class="site-footer" role="contentinfo">
   <div class="site-footer-inner">
+    <nav class="site-footer-links site-footer-links--primary" aria-label="Products">
+      <a href="{{ url_for('humanizer') }}">AI Humanizer</a>
+      <a href="{{ url_for('formatter') }}">Formatter</a>
+      <a href="{{ url_for('assignments_history') }}">Assignments</a>
+      <a href="{{ url_for('pricing') }}">Pricing</a>
+    </nav>
     <nav class="site-footer-links" aria-label="Footer">
       <a href="{{ url_for('account_info') }}">Account</a>
       <a href="{{ url_for('credits') }}">Credits</a>

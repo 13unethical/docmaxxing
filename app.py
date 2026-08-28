@@ -25,7 +25,7 @@ from typing import Any
 
 import requests
 from docx import Document
-from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 
 from formatter import FormatJob, format_document_full
 from formatter.document_reconstruction import reconstruct_document_before_format
@@ -700,6 +700,8 @@ def inject_account():
             "percent": 50,
             "source": "none",
         }
+    from services.seo import page_seo_for_path
+
     return {
         "current_user": user,
         "coin_balance": balance,
@@ -708,6 +710,7 @@ def inject_account():
         "is_humanizer_discount_active": bool(discount.get("active"))
         and int(discount.get("percent") or 0) > 0,
         "humanizer_discount_percent": int(discount.get("percent") or 0),
+        "seo": page_seo_for_path(request.path),
     }
 
 
@@ -1828,14 +1831,43 @@ def index():
     return render_template("index.html", nav_active="home")
 
 
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    from services.seo import sitemap_xml as build_sitemap
+
+    return Response(build_sitemap(), mimetype="application/xml; charset=utf-8")
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    from services.seo import robots_txt as build_robots
+
+    return Response(build_robots(), mimetype="text/plain; charset=utf-8")
+
+
+@app.route("/formatter")
+def formatter():
+    """SEO landing URL for the Format tool (same UI as home)."""
+    if formatter_v2_enabled():
+        return render_template("format_v2.html", nav_active="formatter")
+    return render_template("index.html", nav_active="formatter")
+
+
+@app.route("/icon.png")
+def site_icon():
+    return send_from_directory(app.static_folder, "icon.png", mimetype="image/png")
+
+
+@app.route("/apple-icon.png")
+def site_apple_icon():
+    return send_from_directory(app.static_folder, "apple-icon.png", mimetype="image/png")
+
+
 @app.route("/check")
+@economy_auth.email_verified_required(allow_guest_preview=True)
 def check():
-    """Academic Check UI is temporarily gated — keep templates/static intact for later."""
-    return render_template(
-        "soon.html",
-        nav_active="check",
-        feature="Academic Check",
-    )
+    """Academic Check — compare a draft to assignment requirements (free)."""
+    return render_template("check.html", nav_active="check")
 
 
 @app.route("/templates")
@@ -2016,9 +2048,10 @@ def assignment():
 
 
 @app.route("/assignments")
+@economy_auth.email_verified_required(allow_guest_preview=True)
 def assignments_history():
-    """Legacy URL — history lives on the Assignment page panel."""
-    return redirect(url_for("assignment"))
+    """SEO landing URL for the Assignment helper (same UI as /assignment)."""
+    return render_template("assignment.html", nav_active="assignment")
 
 
 def _parse_pipeline_stage(value: str) -> PipelineStage | None:

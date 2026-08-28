@@ -1,148 +1,152 @@
-{% extends "base.html" %}
-{% block title %}Check — DocMaxxing{% endblock %}
-{% block content %}
-      <div class="check-page" data-dm-tour-page="check" data-tour="check-page">
-      <div class="dm-tool-head">
-        <h1 class="card-title" style="margin:0">Academic Check</h1>
-      </div>
-      <div class="check-input-grid">
-        <section class="card check-card" aria-labelledby="check-req-label" data-tour="check-brief">
-          <h2 class="card-title" id="check-req-label">1. Requirements</h2>
-          <label class="field">
-            <span class="label">Assignment brief / rubric</span>
-            <textarea
-              id="check_requirements"
-              rows="7"
-              placeholder="Paste requirements (word limit, style, spacing, sections)..."
-            ></textarea>
-          </label>
-          <label class="field">
-            <span class="label">Upload brief (optional)</span>
-            <input
-              type="file"
-              id="check_requirements_file"
-              accept=".docx,.pdf,.txt,.md,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,image/jpeg,image/png"
-            />
-          </label>
-          <div id="detected_requirements_card" class="check-detected-card hidden">
-            <div class="check-detected-head">
-              <div>
-                <h3 class="check-section-title">Detected requirements</h3>
-                <p class="card-hint" id="detected_requirements_summary"></p>
-              </div>
-              <button type="button" class="btn-secondary check-apply-btn" id="apply_detected_requirements_btn" disabled>
-                Apply to Format page
-              </button>
-            </div>
-            <dl id="detected_requirements_list" class="check-detected-list"></dl>
+{% extends "tools_base.html" %}
+{% set tools_active = 'check' %}
+{% set guest_preview = true %}
+{% block guest_auth_title %}Run Academic Check on your draft{% endblock %}
+{% block guest_auth_reason %}Create a free account to check your document against your assignment brief and save results.{% endblock %}
+{% block title %}{{ seo.title }}{% endblock %}
+{% block tools_content %}
+<div class="check-page" data-dm-tour-page="check" data-tour="check-page">
+  <div class="dm-tool-head">
+    <h1 class="card-title" style="margin:0">Academic Check</h1>
+  </div>
+  <div class="check-input-grid">
+    <section class="card check-card" aria-labelledby="check-req-label" data-tour="check-brief">
+      <h2 class="card-title" id="check-req-label">1. Requirements</h2>
+      <label class="field">
+        <span class="label">Assignment brief / rubric</span>
+        <textarea
+          id="check_requirements"
+          rows="7"
+          placeholder="Paste requirements (word limit, style, spacing, sections)..."
+        ></textarea>
+      </label>
+      <label class="field">
+        <span class="label">Upload brief (optional)</span>
+        <input
+          type="file"
+          id="check_requirements_file"
+          accept=".docx,.pdf,.txt,.md,.jpg,.jpeg,.png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,image/jpeg,image/png"
+        />
+      </label>
+      <div id="detected_requirements_card" class="check-detected-card hidden">
+        <div class="check-detected-head">
+          <div>
+            <h3 class="check-section-title">Detected requirements</h3>
+            <p class="card-hint" id="detected_requirements_summary"></p>
           </div>
-        </section>
-
-        <section class="card check-card" aria-labelledby="check-doc-label" data-tour="check-doc">
-          <h2 class="card-title" id="check-doc-label">2. Document Input</h2>
-          <label class="field">
-            <span class="label">Document type</span>
-            <select id="check_doc_type" class="check-select">
-              <option value="essay">Essay</option>
-              <option value="report">Report</option>
-              <option value="literature_review">Literature Review</option>
-              <option value="research_paper">Research Paper</option>
-              <option value="case_study">Case Study</option>
-              <option value="reflection">Reflection</option>
-              <option value="learning_journal">Learning Journal</option>
-              <option value="dissertation_chapter">Dissertation Chapter</option>
-              <option value="thesis_chapter">Thesis chapter</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label class="field">
-            <span class="label">Paste your document text</span>
-            <textarea
-              id="check_pasted_text"
-              rows="9"
-              placeholder="Paste the full draft text (used only when no file is uploaded)..."
-            ></textarea>
-          </label>
-          <label class="field">
-            <span class="label">Upload <code>.docx</code> or <code>.pdf</code> (optional)</span>
-            <input
-              type="file"
-              id="check_file"
-              accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
-            />
-          </label>
-          <button type="button" class="btn-check" id="check_document_btn" data-tour="check-run">Check document</button>
-          <div id="check_status" class="req-status" role="status"></div>
-        </section>
+          <button type="button" class="btn-secondary check-apply-btn" id="apply_detected_requirements_btn" disabled>
+            Apply to Format page
+          </button>
+        </div>
+        <dl id="detected_requirements_list" class="check-detected-list"></dl>
       </div>
+    </section>
 
-      <section id="check_results" class="check-results hidden" aria-live="polite">
-        <div id="check_empty_report" class="card check-empty-report hidden">
-          <h2 class="card-title">No checks could run</h2>
-          <p id="check_empty_report_text" class="check-summary">
-            Paste your assignment brief and document text (or upload a .docx), then run Check again.
-          </p>
-          <div class="check-empty-actions">
-            <button type="button" class="btn-secondary" id="check_empty_goto_brief">Add assignment brief</button>
-            <button type="button" class="btn-secondary" id="check_empty_goto_docx">Upload .docx</button>
+    <section class="card check-card" aria-labelledby="check-doc-label" data-tour="check-doc">
+      <h2 class="card-title" id="check-doc-label">2. Document Input</h2>
+      <label class="field">
+        <span class="label">Document type</span>
+        <select id="check_doc_type" class="check-select">
+          <option value="essay">Essay</option>
+          <option value="report">Report</option>
+          <option value="literature_review">Literature Review</option>
+          <option value="research_paper">Research Paper</option>
+          <option value="case_study">Case Study</option>
+          <option value="reflection">Reflection</option>
+          <option value="learning_journal">Learning Journal</option>
+          <option value="dissertation_chapter">Dissertation Chapter</option>
+          <option value="thesis_chapter">Thesis chapter</option>
+          <option value="other">Other</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="label">Paste your document text</span>
+        <textarea
+          id="check_pasted_text"
+          rows="9"
+          placeholder="Paste the full draft text (used only when no file is uploaded)..."
+        ></textarea>
+      </label>
+      <label class="field">
+        <span class="label">Upload <code>.docx</code> or <code>.pdf</code> (optional)</span>
+        <input
+          type="file"
+          id="check_file"
+          accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
+        />
+      </label>
+      <button type="button" class="btn-check" id="check_document_btn" data-tour="check-run">Check document</button>
+      <div id="check_status" class="req-status" role="status"></div>
+    </section>
+  </div>
+
+  <section id="check_results" class="check-results hidden" aria-live="polite">
+    <div id="check_empty_report" class="card check-empty-report hidden">
+      <h2 class="card-title">No checks could run</h2>
+      <p id="check_empty_report_text" class="check-summary">
+        Paste your assignment brief and document text (or upload a .docx), then run Check again.
+      </p>
+      <div class="check-empty-actions">
+        <button type="button" class="btn-secondary" id="check_empty_goto_brief">Add assignment brief</button>
+        <button type="button" class="btn-secondary" id="check_empty_goto_docx">Upload .docx</button>
+      </div>
+    </div>
+
+    <div id="check_report_body">
+      <div class="card check-state-card">
+        <h2 class="card-title">3. Results</h2>
+        <p id="check_document_source" class="check-document-source"></p>
+        <div id="check_score_panel" class="check-score-panel">
+          <div class="check-score-row">
+            <div class="check-score-ring-wrap" aria-hidden="true">
+              <svg class="check-score-ring" viewBox="0 0 120 120">
+                <circle class="check-score-ring-bg" cx="60" cy="60" r="52" />
+                <circle class="check-score-ring-fill" id="check_score_ring" cx="60" cy="60" r="52" />
+              </svg>
+              <span class="check-score-value" id="check_score_value">—</span>
+            </div>
+            <div class="check-score-meta">
+              <p class="check-summary-label">Readiness score</p>
+              <p class="check-verdict" id="check_verdict">—</p>
+              <p class="check-coverage-line" id="check_coverage_line"></p>
+            </div>
           </div>
         </div>
-
-        <div id="check_report_body">
-          <div class="card check-state-card">
-            <h2 class="card-title">3. Results</h2>
-            <p id="check_document_source" class="check-document-source"></p>
-            <div id="check_score_panel" class="check-score-panel">
-              <div class="check-score-row">
-                <div class="check-score-ring-wrap" aria-hidden="true">
-                  <svg class="check-score-ring" viewBox="0 0 120 120">
-                    <circle class="check-score-ring-bg" cx="60" cy="60" r="52" />
-                    <circle class="check-score-ring-fill" id="check_score_ring" cx="60" cy="60" r="52" />
-                  </svg>
-                  <span class="check-score-value" id="check_score_value">—</span>
-                </div>
-                <div class="check-score-meta">
-                  <p class="check-summary-label">Readiness score</p>
-                  <p class="check-verdict" id="check_verdict">—</p>
-                  <p class="check-coverage-line" id="check_coverage_line"></p>
-                </div>
-              </div>
-            </div>
-            <div id="check_not_enough_panel" class="check-not-enough-panel hidden">
-              <h3 class="check-section-title" id="check_not_enough_title">Limited checks so far</h3>
-              <p id="check_not_enough_text" class="check-summary"></p>
-              <div class="check-not-enough-actions" id="check_not_enough_actions"></div>
-            </div>
-          </div>
-
-          <div class="card check-report-section">
-            <h3 class="check-section-title">What's missing</h3>
-            <div id="check_whats_missing" class="check-whats-missing"></div>
-          </div>
-
-          <div class="card check-report-section" id="check_not_checked_card">
-            <h3 class="check-section-title">Not checked</h3>
-            <ul id="check_not_checked_list" class="check-not-checked-list"></ul>
-          </div>
-
-          <div class="card check-report-section">
-            <h3 class="check-section-title">Action plan</h3>
-            <div id="check_action_plan" class="check-action-plan"></div>
-          </div>
-
-          <details class="card check-ai-review">
-            <summary class="check-ai-review-summary">AI review</summary>
-            <p class="card-hint check-ai-disclaimer">
-              This is the model's opinion based on the checks above — not your instructor's grade.
-            </p>
-            <p id="check_ai_summary" class="check-summary"></p>
-            <ul id="check_ai_risks" class="check-bullet-list"></ul>
-          </details>
+        <div id="check_not_enough_panel" class="check-not-enough-panel hidden">
+          <h3 class="check-section-title" id="check_not_enough_title">Limited checks so far</h3>
+          <p id="check_not_enough_text" class="check-summary"></p>
+          <div class="check-not-enough-actions" id="check_not_enough_actions"></div>
         </div>
-      </section>
       </div>
+
+      <div class="card check-report-section">
+        <h3 class="check-section-title">What's missing</h3>
+        <div id="check_whats_missing" class="check-whats-missing"></div>
+      </div>
+
+      <div class="card check-report-section" id="check_not_checked_card">
+        <h3 class="check-section-title">Not checked</h3>
+        <ul id="check_not_checked_list" class="check-not-checked-list"></ul>
+      </div>
+
+      <div class="card check-report-section">
+        <h3 class="check-section-title">Action plan</h3>
+        <div id="check_action_plan" class="check-action-plan"></div>
+      </div>
+
+      <details class="card check-ai-review">
+        <summary class="check-ai-review-summary">AI review</summary>
+        <p class="card-hint check-ai-disclaimer">
+          This is the model's opinion based on the checks above — not your instructor's grade.
+        </p>
+        <p id="check_ai_summary" class="check-summary"></p>
+        <ul id="check_ai_risks" class="check-bullet-list"></ul>
+      </details>
+    </div>
+  </section>
+</div>
 {% endblock %}
-{% block scripts %}
-    <script src="{{ url_for('static', filename='check_report.js') }}?v=20260817-v5"></script>
-    <script src="{{ url_for('static', filename='check.js') }}?v=20260817-v5"></script>
+{% block tools_scripts %}
+<script src="{{ url_for('static', filename='check_report.js') }}?v=20260817-v5"></script>
+<script src="{{ url_for('static', filename='check.js') }}?v=20260817-v5"></script>
 {% endblock %}

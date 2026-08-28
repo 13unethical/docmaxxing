@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{% block title %}DocMaxxing{% endblock %}</title>
+    <title>{% block title %}{{ seo.title }}{% endblock %}</title>
+    {% include "_seo_head.html" %}
     <script>
       (function () {
         try {
@@ -83,9 +84,9 @@
         </div>
 
         {# One shell chrome for all working tool pages (same New chat + history set). #}
-        {% set _shell_tools = ['home', 'humanizer', 'turnitin', 'assignment', 'check', 'workspace', 'presentation'] %}
+        {% set _shell_tools = ['home', 'formatter', 'humanizer', 'turnitin', 'assignment', 'check', 'workspace', 'presentation'] %}
         {% if _nav in _shell_tools %}
-        {% set _new_tool = 'format' if _nav == 'home' else _nav %}
+        {% set _new_tool = 'format' if _nav in ['home', 'formatter'] else _nav %}
         <button type="button" class="app-new-chat" data-tool-new-chat data-tool="{{ _new_tool }}">
           <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M8 9h8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
@@ -98,96 +99,10 @@
         </button>
         {% endif %}
 
-        <nav class="app-sidebar-nav" aria-label="Main navigation">
-          <a href="{{ url_for('humanizer') }}" class="app-nav-link{% if _nav == 'humanizer' %} is-active{% endif %}" title="Humanizer"{% if _nav == 'humanizer' %} aria-current="page"{% endif %}>
-            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M6 21 21 6l-3-3L3 18l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M15 6l3 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M9 3a2 2 0 0 0 2 2 2 2 0 0 0-2 2 2 2 0 0 0-2-2 2 2 0 0 0 2-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M19 13a2 2 0 0 0 2 2 2 2 0 0 0-2 2 2 2 0 0 0-2-2 2 2 0 0 0 2-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="app-sidebar-label">Humanizer</span>
-            {% if is_humanizer_discount_active and humanizer_discount_percent > 0 %}
-            <span class="nav-discount-badge">−{{ humanizer_discount_percent }}%</span>
-            {% endif %}
-          </a>
-          <a href="{{ url_for('turnitin') }}" class="app-nav-link{% if _nav == 'turnitin' %} is-active{% endif %}" title="Turnitin"{% if _nav == 'turnitin' %} aria-current="page"{% endif %}>
-            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M14 3v4a1 1 0 0 0 1 1h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M12 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M16.5 17.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M18.5 19.5 21 22" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="app-sidebar-label">Turnitin</span>
-          </a>
-          <a href="{{ url_for('assignment') }}" class="app-nav-link{% if _nav == 'assignment' %} is-active{% endif %}" title="Assignment"{% if _nav == 'assignment' %} aria-current="page"{% endif %}>
-            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M9 12h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M9 16h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-            </svg>
-            <span class="app-sidebar-label">Assignment</span>
-          </a>
-          <a href="{{ url_for('index') }}" class="app-nav-link{% if _nav == 'home' %} is-active{% endif %}" title="Format"{% if _nav == 'home' %} aria-current="page"{% endif %}>
-            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4 6h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M4 12h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M4 18h14" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-            </svg>
-            <span class="app-sidebar-label">Format</span>
-          </a>
-          <a href="{{ url_for('check') }}" class="app-nav-link{% if _nav == 'check' %} is-active{% endif %}" title="Check"{% if _nav == 'check' %} aria-current="page"{% endif %}>
-            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M11.46 20.846a12 12 0 0 1-7.96-14.846 12 12 0 0 0 8.5-3 12 12 0 0 0 8.5 3 12 12 0 0 1-.09 7.06" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M15 19l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="app-sidebar-label">Check</span>
-          </a>
-          <a href="{{ url_for('workspace') }}" class="app-nav-link{% if _nav == 'workspace' %} is-active{% endif %}" title="Workspace"{% if _nav == 'workspace' %} aria-current="page"{% endif %}>
-            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M20 17V5a2 2 0 0 0-4 0v12l2 2 2-2z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M16 7h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M18 19H5a2 2 0 1 1 0-4h4a2 2 0 1 0 0-4H6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="app-sidebar-label">Workspace</span>
-          </a>
-          <a href="{{ url_for('presentation') }}" class="app-nav-link{% if _nav == 'presentation' %} is-active{% endif %}" title="Presentation"{% if _nav == 'presentation' %} aria-current="page"{% endif %}>
-            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M3 4h18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M4 4v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M12 16v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M9 20h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M8 12l3-3 2 2 3-3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="app-sidebar-label">Presentation</span>
-          </a>
-          {% if current_user %}
-          <a href="{{ url_for('earn_share') }}" class="app-nav-link{% if _nav == 'earn' %} is-active{% endif %}" title="Earn & Share"{% if _nav == 'earn' %} aria-current="page"{% endif %}>
-            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M3 9a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M12 8v13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="app-sidebar-label">Earn & Share</span>
-          </a>
-          {% endif %}
-          {% if is_admin %}
-          <a href="{{ url_for('admin_panel') }}" class="app-nav-link{% if _nav == 'admin' %} is-active{% endif %}" title="Admin"{% if _nav == 'admin' %} aria-current="page"{% endif %}>
-            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M4.5 7h15M4.5 12h15M4.5 17h15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-              <circle cx="9" cy="7" r="2" stroke="currentColor" stroke-width="1.6"/>
-              <circle cx="15" cy="12" r="2" stroke="currentColor" stroke-width="1.6"/>
-              <circle cx="11" cy="17" r="2" stroke="currentColor" stroke-width="1.6"/>
-            </svg>
-            <span class="app-sidebar-label">Admin</span>
-          </a>
-          {% endif %}
-        </nav>
+        {% include "_site_nav.html" %}
 
         {% if _nav in _shell_tools %}
-        {% set _hist_tool = 'format' if _nav == 'home' else _nav %}
+        {% set _hist_tool = 'format' if _nav in ['home', 'formatter'] else _nav %}
         <div class="app-sidebar-history" data-tool-history data-tool="{{ _hist_tool }}">
           <p class="app-sidebar-section-label app-sidebar-label">
             {% if _hist_tool == 'assignment' %}Your assignments
@@ -303,6 +218,12 @@
                 <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
               </svg>
             </button>
+            <nav class="site-sitelinks-nav" aria-label="Site sections">
+              <a href="{{ url_for('humanizer') }}">AI Humanizer</a>
+              <a href="{{ url_for('formatter') }}">Formatter</a>
+              <a href="{{ url_for('assignments_history') }}">Assignments</a>
+              <a href="{{ url_for('pricing') }}">Pricing</a>
+            </nav>
           </div>
         </header>
 

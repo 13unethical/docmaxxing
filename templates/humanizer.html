@@ -4,8 +4,9 @@
 {% set guest_tools_interactive = true %}
 {% block guest_auth_title %}Humanize AI-detected phrasing{% endblock %}
 {% block guest_auth_reason %}Create a free account to run the Humanizer and spend welcome credits on your first pass.{% endblock %}
-{% block title %}Humanizer — DocMaxxing{% endblock %}
+{% block title %}{{ seo.title }}{% endblock %}
 {% block tools_content %}
+{% include "_tool_landing_hero.html" %}
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link

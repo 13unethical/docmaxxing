@@ -1,0 +1,9 @@
+{# SEO landing hero — one visible H1 per tool page. Expects seo.h1 (+ optional seo.lede). #}
+{% if seo.h1 %}
+<section class="tool-landing-hero" aria-labelledby="tool-landing-heading">
+  <h1 id="tool-landing-heading" class="tool-landing-hero__title">{{ seo.h1 }}</h1>
+  {% if seo.lede %}
+  <p class="tool-landing-hero__lede">{{ seo.lede }}</p>
+  {% endif %}
+</section>
+{% endif %}
