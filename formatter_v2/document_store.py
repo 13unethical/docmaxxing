@@ -1,79 +1,152 @@
-"""Temporary DOCX storage for Formatter V2 JSON API responses."""
+"""Temporary DOCX storage for Formatter V2 JSON API responses (disk-backed)."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
-import tempfile
+import secrets
 import threading
 import time
-import uuid
 from pathlib import Path
 
 DEFAULT_TTL_SECONDS = 3600
-CLEANUP_INTERVAL_SECONDS = 300
-_DOCUMENT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_DOCUMENT_ID_BYTES = 32
+_DOCUMENT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 _store: FormatV2DocumentStore | None = None
 _store_lock = threading.Lock()
-_scheduler_started = False
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _is_valid_document_id(document_id: str) -> bool:
+    if not document_id:
+        return False
+    if "/" in document_id or "\\" in document_id or "." in document_id:
+        return False
+    return bool(_DOCUMENT_ID_RE.fullmatch(document_id))
+
+
+def _generate_document_id() -> str:
+    for _ in range(8):
+        document_id = secrets.token_urlsafe(_DOCUMENT_ID_BYTES)
+        if _is_valid_document_id(document_id):
+            return document_id
+    raise RuntimeError("failed to generate a safe document id")
+
+
+def _sanitize_filename(name: str | None) -> str | None:
+    if not name:
+        return None
+    cleaned = Path(name).name.strip()
+    return cleaned or None
 
 
 class FormatV2DocumentStore:
     """Save formatted DOCX bytes; retrieve by opaque id until TTL expires."""
 
     def __init__(self, root: Path, *, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> None:
-        self.root = root
+        self.root = root.expanduser().resolve()
         self.ttl_seconds = max(1, int(ttl_seconds))
         self.root.mkdir(parents=True, exist_ok=True)
-        self._expires_at: dict[str, float] = {}
-        self._meta_lock = threading.Lock()
 
-    def save(self, docx_bytes: bytes) -> str:
+    def save(self, docx_bytes: bytes, *, original_filename: str | None = None) -> str:
         if not docx_bytes:
             raise ValueError("docx_bytes must not be empty")
         self.cleanup_expired()
-        document_id = uuid.uuid4().hex
-        path = self._path(document_id)
-        path.write_bytes(docx_bytes)
-        expires_at = time.time() + self.ttl_seconds
-        with self._meta_lock:
-            self._expires_at[document_id] = expires_at
+        document_id = _generate_document_id()
+        doc_path = self._docx_path(document_id)
+        meta_path = self._meta_path(document_id)
+        if doc_path is None or meta_path is None:
+            raise RuntimeError("failed to allocate document path")
+
+        created_at = time.time()
+        meta = {
+            "created_at": created_at,
+            "ttl_seconds": self.ttl_seconds,
+            "expires_at": created_at + self.ttl_seconds,
+            "original_filename": _sanitize_filename(original_filename),
+        }
+        doc_path.write_bytes(docx_bytes)
+        meta_path.write_text(json.dumps(meta, separators=(",", ":")), encoding="utf-8")
         return document_id
 
     def resolve(self, document_id: str) -> Path | None:
-        if not document_id or not _DOCUMENT_ID_RE.fullmatch(document_id):
+        if not _is_valid_document_id(document_id):
             return None
-        self.cleanup_expired()
-        with self._meta_lock:
-            expires_at = self._expires_at.get(document_id)
-        if expires_at is None or time.time() > expires_at:
+
+        meta_path = self._meta_path(document_id)
+        doc_path = self._docx_path(document_id)
+        if meta_path is None or doc_path is None:
             return None
-        path = self._path(document_id)
-        return path if path.is_file() else None
+        if not meta_path.is_file() or not doc_path.is_file():
+            return None
+
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return None
+
+        expires_at = float(meta.get("expires_at") or 0)
+        if time.time() > expires_at:
+            self._remove_document(document_id)
+            return None
+        return doc_path
 
     def cleanup_expired(self) -> int:
         now = time.time()
         removed = 0
-        with self._meta_lock:
-            expired_ids = [doc_id for doc_id, ts in self._expires_at.items() if ts <= now]
-            for doc_id in expired_ids:
-                self._expires_at.pop(doc_id, None)
-                path = self._path(doc_id)
-                if path.is_file():
-                    path.unlink(missing_ok=True)
-                    removed += 1
+        for meta_path in self.root.glob("*.json"):
+            document_id = meta_path.stem
+            if not _is_valid_document_id(document_id):
+                continue
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                expires_at = float(meta.get("expires_at") or 0)
+            except (json.JSONDecodeError, OSError):
+                expires_at = 0
+            if now > expires_at and self._remove_document(document_id):
+                removed += 1
         return removed
 
-    def _path(self, document_id: str) -> Path:
-        return self.root / f"{document_id}.docx"
+    def _remove_document(self, document_id: str) -> bool:
+        if not _is_valid_document_id(document_id):
+            return False
+        removed_any = False
+        for path in (self._docx_path(document_id), self._meta_path(document_id)):
+            if path is not None and path.is_file():
+                path.unlink(missing_ok=True)
+                removed_any = True
+        return removed_any
+
+    def _safe_child_path(self, document_id: str, suffix: str) -> Path | None:
+        if not _is_valid_document_id(document_id):
+            return None
+        candidate = (self.root / f"{document_id}{suffix}").resolve()
+        root = self.root.resolve()
+        try:
+            if not candidate.is_relative_to(root):
+                return None
+        except AttributeError:
+            if os.path.commonpath([str(root), str(candidate)]) != str(root):
+                return None
+        return candidate
+
+    def _docx_path(self, document_id: str) -> Path | None:
+        return self._safe_child_path(document_id, ".docx")
+
+    def _meta_path(self, document_id: str) -> Path | None:
+        return self._safe_child_path(document_id, ".json")
 
 
 def _store_root() -> Path:
     override = (os.environ.get("FORMAT_V2_DOCUMENT_DIR") or "").strip()
     if override:
-        return Path(override)
-    return Path(tempfile.gettempdir()) / "format_v2_documents"
+        return Path(override).expanduser()
+    return _repo_root() / "data" / "tmp" / "format_v2_documents"
 
 
 def _store_ttl_seconds() -> int:
@@ -95,37 +168,16 @@ def get_document_store() -> FormatV2DocumentStore:
 
 def reset_document_store(*, root: Path | None = None, ttl_seconds: int | None = None) -> FormatV2DocumentStore:
     """Replace the singleton (tests)."""
-    global _store, _scheduler_started
+    global _store
     with _store_lock:
-        if _store is not None:
-            _store.cleanup_expired()
         _store = FormatV2DocumentStore(
             root or (_store_root() / "test"),
             ttl_seconds=ttl_seconds or DEFAULT_TTL_SECONDS,
         )
-        _scheduler_started = False
         return _store
 
 
-def start_cleanup_scheduler(*, interval_seconds: int = CLEANUP_INTERVAL_SECONDS) -> None:
-    global _scheduler_started
-    with _store_lock:
-        if _scheduler_started:
-            return
-        _scheduler_started = True
-
-    def _loop() -> None:
-        while True:
-            time.sleep(max(30, interval_seconds))
-            try:
-                get_document_store().cleanup_expired()
-            except Exception:  # noqa: BLE001
-                pass
-
-    threading.Thread(target=_loop, name="format-v2-doc-cleanup", daemon=True).start()
-
-
 def ensure_store_started(*, testing: bool = False) -> None:
+    """Ensure the store directory exists. ``testing`` is accepted for API compatibility."""
+    del testing
     get_document_store()
-    if not testing:
-        start_cleanup_scheduler()
