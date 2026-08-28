@@ -30,6 +30,9 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='components.css') }}?v=20260813-dm-states2" />
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v=20260813-accent-dedupe" />
     {% block head_extra %}{% endblock %}
+    {% if include_umami_analytics|default(true) %}
+    <script defer src="https://cloud.umami.is/script.js" data-website-id="177e569c-f873-485d-9ba7-cb75a43be7b6"></script>
+    {% endif %}
   </head>
   <body class="{% block body_class %}app-shell-body{% endblock %}">
     {% import "macros/ui.html" as ui %}
