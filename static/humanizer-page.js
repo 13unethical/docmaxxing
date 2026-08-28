@@ -169,7 +169,11 @@
         }
       }
       if (!res.ok) {
-        var err = new Error(payload.message || payload.error || "HTTP " + res.status);
+        var err = new Error(
+          window.DMApiErrors
+            ? window.DMApiErrors.userMessage(payload, "Request failed")
+            : payload.message || payload.error || "HTTP " + res.status
+        );
         err.code = payload.error;
         err.status = res.status;
         throw err;
@@ -236,22 +240,26 @@
         if (code === "LOGIN_REQUIRED") {
           showError(
             "The humanizer service isn’t signed in on the server right now. Your credits weren’t charged. Try again in a moment.",
-            { detail: "LOGIN_REQUIRED" }
+            { detail: "" }
           );
           return;
         }
         if (code === "NO_CHANGE") {
           showError(
             "The text came back unchanged — often a daily limit. Your credits may have been charged for the attempt.",
-            { detail: "NO_CHANGE" }
+            { detail: "" }
           );
           return;
         }
         if ((code === "REGISTER_REQUIRED" || code === "AUTH_REQUIRED") && window.DMAuth) {
           setStage("idle");
           clearErrorPanel();
+          var reason = window.DMApiErrors
+            ? window.DMApiErrors.userMessage({ error: code, message: err && err.message }, "Create a free account to keep humanizing.")
+            : (err && err.message) || "Create a free account to keep humanizing.";
           window.DMAuth.require({
-            reason: (err && err.message) || "Create a free account to keep humanizing.",
+            title: "Humanize AI-detected phrasing",
+            reason: reason,
           })
             .then(function () {
               runHumanize();

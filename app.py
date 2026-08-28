@@ -386,7 +386,6 @@ _EMAIL_VERIFIED_PREFIXES = (
     "/api/humanizer",
     "/api/turnitin",
     "/api/assignment",
-    "/api/browser/providers/stealthwriter/humanize",
 )
 
 
@@ -2772,11 +2771,10 @@ def api_browser_stealthwriter_check_login():
 
 
 @app.post("/api/browser/providers/stealthwriter/humanize")
-@economy_auth.email_verified_required
 def api_browser_stealthwriter_humanize():
     """Humanize via the production job engine (retries, timeout, recovery, logs).
 
-    Backward compatible: still returns humanized_text synchronously, plus job_id.
+    Guests get one free humanize per browser session; signed-in users are charged.
     """
     from services.browser.jobs.retry import MAX_RETRIES
 
@@ -2784,6 +2782,26 @@ def api_browser_stealthwriter_humanize():
     text = payload.get("text")
     if not isinstance(text, str) or not text.strip():
         return jsonify({"success": False, "error": "text is required"}), 400
+
+    user = economy_auth.current_user()
+    guest_trial = False
+    if user is None:
+        if session.get("guest_humanize_used"):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "REGISTER_REQUIRED",
+                        "message": "Create a free account to humanize more text.",
+                    }
+                ),
+                403,
+            )
+        guest_trial = True
+    elif not economy_auth.user_email_verified(user):
+        blocked = economy_auth.email_verification_gate()
+        if blocked is not None:
+            return blocked
 
     raw_source = str(payload.get("source") or "standalone").strip().lower()
     dataset_source = (
@@ -2796,20 +2814,27 @@ def api_browser_stealthwriter_humanize():
     from services.economy.site_settings import humanize_credit_cost
 
     pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
-    cost = int(pricing["charged"])
-    charged = _charge_current_user(
-        "humanize",
-        cost,
-        meta={
-            "original_price": pricing["original_price"],
-            "discount_active": pricing["discount_active"],
-            "discount_percent": pricing["discount_percent"],
-            "discount_source": pricing["discount_source"],
-        },
-    )
-    if not isinstance(charged, tuple):
-        return charged
-    user_id, _tx = charged
+    cost = 0 if guest_trial else int(pricing["charged"])
+    user_id = 0 if guest_trial else None
+    if not guest_trial:
+        charged = _charge_current_user(
+            "humanize",
+            cost,
+            meta={
+                "original_price": pricing["original_price"],
+                "discount_active": pricing["discount_active"],
+                "discount_percent": pricing["discount_percent"],
+                "discount_source": pricing["discount_source"],
+            },
+        )
+        if not isinstance(charged, tuple):
+            return charged
+        user_id, _tx = charged
+
+    def _refund_humanize(**kwargs: Any) -> None:
+        if guest_trial or not user_id or cost <= 0:
+            return
+        _refund_safe(int(user_id), cost, "humanize", **kwargs)
 
     try:
         ensure_engine_started()
@@ -2820,7 +2845,7 @@ def api_browser_stealthwriter_humanize():
         job_manager.wait(job.id, timeout=max_wait)
         job = job_manager.get(job.id)
         if job is None:
-            _refund_safe(user_id, cost, "humanize")
+            _refund_humanize()
             return jsonify({"success": False, "error": "job not found"}), 500
 
         status = job.status.value
@@ -2829,31 +2854,35 @@ def api_browser_stealthwriter_humanize():
             elapsed = res.get("elapsed_seconds")
             latency_ms = int(float(elapsed) * 1000) if elapsed is not None else None
             humanized_out = res.get("humanized_text")
-            _record_usage_safe(
-                user_id,
-                feature=FEATURE_HUMANIZER,
-                credits_used=cost,
-                provider="StealthWriter",
-                latency=latency_ms,
-                request_id=job.id,
-            )
+            if not guest_trial and user_id:
+                _record_usage_safe(
+                    int(user_id),
+                    feature=FEATURE_HUMANIZER,
+                    credits_used=cost,
+                    provider="StealthWriter",
+                    latency=latency_ms,
+                    request_id=job.id,
+                )
             try:
                 from services.economy.site_settings import record_humanizer_success
 
                 record_humanizer_success()
             except Exception:
                 app.logger.exception("daily_stats humanizer increment failed")
-            try:
-                from services.dataset_logger import log_humanization_event
+            if not guest_trial and user_id:
+                try:
+                    from services.dataset_logger import log_humanization_event
 
-                log_humanization_event(
-                    user_id,
-                    dataset_source,
-                    text,
-                    humanized_out if isinstance(humanized_out, str) else "",
-                )
-            except Exception:
-                app.logger.exception("dataset_logger stealthwriter hook failed")
+                    log_humanization_event(
+                        int(user_id),
+                        dataset_source,
+                        text,
+                        humanized_out if isinstance(humanized_out, str) else "",
+                    )
+                except Exception:
+                    app.logger.exception("dataset_logger stealthwriter hook failed")
+            if guest_trial:
+                session["guest_humanize_used"] = True
             return jsonify(
                 {
                     "success": True,
@@ -2861,15 +2890,16 @@ def api_browser_stealthwriter_humanize():
                     "elapsed_seconds": res.get("elapsed_seconds"),
                     "job_id": job.id,
                     "coins_charged": cost,
+                    "guest_trial": guest_trial,
                     "original_price": pricing["original_price"],
                     "discount_active": pricing["discount_active"],
                     "discount_percent": pricing["discount_percent"],
-                    "balance": wallet.get_balance(user_id),
+                    "balance": wallet.get_balance(int(user_id)) if user_id else 0,
                 }
             )
 
         # Any non-completed terminal/failure state refunds the charge.
-        _refund_safe(user_id, cost, "humanize", ref_id=job.id)
+        _refund_humanize(ref_id=job.id)
 
         if status == "CANCELLED":
             return jsonify({"success": False, "error": "cancelled", "job_id": job.id}), 409
@@ -2926,7 +2956,7 @@ def api_browser_stealthwriter_humanize():
             )
         return jsonify({"success": False, "error": job.error or "failed", "job_id": job.id}), 500
     except Exception as exc:  # noqa: BLE001
-        _refund_safe(user_id, cost, "humanize")
+        _refund_humanize()
         return (
             jsonify(
                 {
@@ -3959,7 +3989,6 @@ def api_assignment_project_restore_draft(project_id: str):
 
 
 @app.post("/api/humanizer/run")
-@economy_auth.email_verified_required
 def api_humanizer_run():
     """Humanize via StealthWriter browser automation (legacy alias for the humanizer page)."""
     return api_browser_stealthwriter_humanize()

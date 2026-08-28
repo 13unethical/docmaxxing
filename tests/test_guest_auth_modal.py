@@ -99,6 +99,49 @@ def test_only_whitelisted_pages_show_guest_preview():
             assert "/login" in (res.headers.get("Location") or ""), path
 
 
+GUEST_PREVIEW_TOOL_PAGES = ("/assignment", "/humanizer", "/turnitin", "/workspace")
+
+
+def test_guest_page_load_shows_no_error_banner():
+    client = _client()
+    with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
+        for path in GUEST_PREVIEW_TOOL_PAGES:
+            html = client.get(path).get_data(as_text=True)
+            assert "REGISTER_REQUIRED" not in html, path
+            assert "AUTH_REQUIRED" not in html, path
+        assignment_html = client.get("/assignment").get_data(as_text=True)
+        assert 'data-asg-page-error hidden' in assignment_html.replace('"', "'") or (
+            "data-asg-page-error" in assignment_html and "hidden" in assignment_html
+        )
+
+
+def test_guest_history_shows_empty_state_not_error():
+    html = _client().get("/assignment").get_data(as_text=True)
+    assert "Sign in to see history" in html
+
+
+def test_internal_error_codes_never_reach_ui():
+    js = Path(__file__).resolve().parents[1] / "static" / "api-errors.js"
+    text = js.read_text(encoding="utf-8")
+    assert "REGISTER_REQUIRED" in text
+    assert "userMessage" in text
+    assert "isInternalCode" in text
+
+    client = _client()
+    with client.session_transaction() as sess:
+        sess["guest_humanize_used"] = True
+    res = client.post(
+        "/api/browser/providers/stealthwriter/humanize",
+        json={"text": "Sample paragraph for humanize."},
+        headers={"Accept": "application/json"},
+    )
+    assert res.status_code == 403
+    data = res.get_json()
+    assert data["error"] == "REGISTER_REQUIRED"
+    assert data.get("message")
+    assert "REGISTER_REQUIRED" not in data["message"]
+
+
 def test_after_signup_returns_to_original_page(economy, monkeypatch):
     monkeypatch.setenv("EXPOSE_VERIFY_CODE", "1")
     client = _client()
@@ -140,3 +183,4 @@ def test_form_state_survives_signup():
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
         html = _client().get("/").get_data(as_text=True)
     assert 'data-guest-persist="v2_pasted_text"' in html
+    assert "api-errors.js" in html

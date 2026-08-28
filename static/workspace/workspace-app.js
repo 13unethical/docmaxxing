@@ -78,6 +78,7 @@
     });
   }
   function refreshCoins() {
+    if (window.DMApiErrors && window.DMApiErrors.isGuest()) return;
     fetch("/api/economy/balance", { headers: { Accept: "application/json" } })
       .then(function (r) { return r.json(); })
       .then(function (d) {

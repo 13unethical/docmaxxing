@@ -206,6 +206,32 @@
     return api(url, opts);
   }
 
+  function isAuthed() {
+    return !!(window.DM_AUTH && window.DM_AUTH.authenticated);
+  }
+
+  function isAuthError(err) {
+    var code = err && err.code;
+    return (
+      code === "REGISTER_REQUIRED" ||
+      code === "AUTH_REQUIRED" ||
+      code === "EMAIL_NOT_VERIFIED" ||
+      (window.DMApiErrors && window.DMApiErrors.isAuthCode(code))
+    );
+  }
+
+  function userFacingError(err, fallback) {
+    if (window.DMApiErrors) {
+      return window.DMApiErrors.userMessage(
+        (err && err.payload) || { message: err && err.message, error: err && err.code },
+        fallback || "Something went wrong. Please try again."
+      );
+    }
+    var msg = (err && err.message) || fallback || "Something went wrong. Please try again.";
+    if (/^[A-Z][A-Z0-9_]+$/.test(msg)) return fallback || "Something went wrong. Please try again.";
+    return msg;
+  }
+
   async function api(url, options) {
     var opts = options || {};
     var timeoutMs = opts.timeoutMs;
@@ -229,14 +255,18 @@
     var payload = await res.json().catch(function () { return {}; });
     if (!res.ok) {
       if (payload.error === "REGISTER_REQUIRED" || payload.error === "AUTH_REQUIRED") {
-        var authErr = new Error(payload.message || "Create a free account to continue.");
-        authErr.code = "REGISTER_REQUIRED";
+        var authErr = new Error(
+          userFacingError({ payload: payload }, "Create a free account to continue.")
+        );
+        authErr.code = payload.error;
+        authErr.payload = payload;
         throw authErr;
       }
       if (responseMeansProjectMissing(res, payload)) {
         resetProjectState();
       }
-      var msg = payload.message || payload.error || "";
+      var msg = userFacingError({ payload: payload }, "");
+      if (!msg) msg = payload.error || "";
       if (res.status === 404 && !responseMeansProjectMissing(res, payload)) {
         throw new Error(
           msg ||
@@ -895,11 +925,28 @@
   function fail(err, retryFn) {
     state.retryAction = retryFn || null;
     state.autoRunning = false;
+    if (isAuthError(err)) {
+      clearError();
+      setBusy(false);
+      state.autoRunning = false;
+      root.classList.remove("asg-page--production");
+      show($("[data-asg-production]"), false);
+      show($("[data-asg-wizard]"), true);
+      hideWizardActions(false);
+      if (window.DMApiErrors) {
+        window.DMApiErrors.promptAuth({
+          title: "Get your assignment written and formatted",
+          reason: userFacingError(err, "Create a free account to analyze and price your assignment."),
+        }).catch(function () {});
+      }
+      return;
+    }
     var message = "Something went wrong. Please try again.";
-    if (err && err.message) {
-      message = isStaleProjectError(err) ? staleSessionMessage() : err.message;
+    if (err) {
+      message = userFacingError(err, message);
     }
     if (isStaleProjectError(err)) {
+      message = staleSessionMessage();
       resetProjectState();
       setStage("upload");
       showError("");
@@ -935,12 +982,7 @@
         "<p>Not enough credits for this step. Top up to continue — nothing else was started.</p>"
       );
     } else {
-      var detail = code && /^[A-Z][A-Z0-9_]+$/.test(String(code)) ? String(code) : "";
-      if (message && /^[A-Z][A-Z0-9_]+$/.test(message)) {
-        detail = message;
-        message = "We couldn’t finish this step. Please try again.";
-      }
-      showError(message, { detail: detail });
+      showError(message, { detail: "" });
       upsertBubble("error", "assistant", "<p>" + esc(message) + "</p>");
     }
     var primary = $("[data-asg-wizard-primary]");
@@ -2145,6 +2187,17 @@
     var params = new URLSearchParams(window.location.search || "");
     if (params.get("new") === "1") {
       beginNewBriefSession();
+      return;
+    }
+    if (!isAuthed()) {
+      if ((params.get("project") || "").trim()) {
+        var cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete("project");
+        window.history.replaceState({}, "", cleanUrl.toString());
+      }
+      resetProjectState();
+      setStage("upload");
+      clearError();
       return;
     }
     var fromUrl = (params.get("project") || "").trim();
