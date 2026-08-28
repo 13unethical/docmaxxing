@@ -12,6 +12,7 @@ import re
 from typing import Any
 
 from docx import Document
+from services.check_text import document_word_count, split_document_paragraphs
 from services.gemini_client import gemini_enabled, gemini_model
 
 # --- Canonical heading vocabulary (shared across formatter + checker + recovery) ---
@@ -651,12 +652,11 @@ DOC_TYPE_SIGNALS: dict[str, list[str]] = {
 
 
 def paragraphs_from_text(text: str) -> list[str]:
-    blocks = re.split(r"\n\s*\n", (text or "").strip())
-    return [b.strip() for b in blocks if b.strip()]
+    return split_document_paragraphs(text)
 
 
 def _word_count(text: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", text or ""))
+    return document_word_count(text)
 
 
 def _content_words(text: str) -> set[str]:

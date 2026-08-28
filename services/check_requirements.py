@@ -185,10 +185,6 @@ def normalize_requirements(
 
     peer_n, peer_conf = extract_peer_reviewed_count(text)
     sections = payload.get("required_sections") or local.get("required_sections") or []
-    if not sections:
-        from services.document_checker import DEFAULT_REQUIRED_SECTIONS
-
-        sections = list(DEFAULT_REQUIRED_SECTIONS.get(doc_type, []))
 
     refs_required = payload.get("references_required")
     if refs_required is None:

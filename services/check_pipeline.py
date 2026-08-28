@@ -8,14 +8,13 @@ from docx import Document
 
 from services.check_explanation import explain_check_results
 from services.check_metrics import extract_document_metrics
-from services.check_requirements import StructuredRequirements, normalize_requirements
+from services.check_requirements import normalize_requirements
 from services.check_scoring import (
     build_action_plan,
-    build_priorities,
+    build_not_checked,
     compute_readiness_score,
     score_to_verdict,
     validations_to_categories,
-    validations_to_issues,
 )
 from services.check_validator import validate_all_requirements
 
@@ -31,11 +30,13 @@ def run_check_pipeline(
     parsed_requirements: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Full validation-based check; returns score, validations, action plan, explanation."""
+    del structure_tree
     structured = normalize_requirements(
         requirements,
         parsed_payload=parsed_requirements,
         doc_type=document_type,
     )
+    structured_dict = structured.to_dict()
     expected_format = {
         "font_family": structured.font_family,
         "font_size": structured.font_size,
@@ -48,32 +49,39 @@ def run_check_pipeline(
         text=text,
         paragraphs=paragraphs,
         doc=doc,
-        structure_tree=structure_tree,
         expected_format=expected_format,
+        expected_sections=structured.required_sections or None,
     )
     validations = validate_all_requirements(structured, metrics)
-    score = compute_readiness_score(validations)
+    score_meta = compute_readiness_score(validations)
+    score = int(score_meta["score"])
     verdict = score_to_verdict(score)
     categories = validations_to_categories(validations)
-    priorities = build_priorities(validations)
+    not_checked = build_not_checked(
+        structured=structured_dict,
+        validations=validations,
+        has_docx=doc is not None,
+    )
     action_plan = build_action_plan(validations)
-    issues = validations_to_issues(validations)
     explanation = explain_check_results(
         requirements=requirements,
         validations=validations,
         readiness_score=score,
         metrics=metrics,
         document_type=document_type,
+        structured_requirements=structured_dict,
+        has_assignment_brief=bool((requirements or "").strip()),
     )
     return {
-        "structured_requirements": structured.to_dict(),
+        "structured_requirements": structured_dict,
         "metrics": metrics,
         "validations": validations,
         "score": score,
+        "applicable_weight": score_meta["applicable_weight"],
+        "checks_applied": score_meta["checks_applied"],
         "verdict": verdict,
         "categories": categories,
-        "priorities": priorities,
+        "not_checked": not_checked,
         "action_plan": action_plan,
-        "issues": issues,
         "explanation": explanation,
     }

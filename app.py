@@ -5700,6 +5700,7 @@ def api_check_document():
 
     doc: Document | None = None
     f = request.files.get("file")
+    uploaded_filename: str | None = None
 
     if f and f.filename:
         if not is_supported_document_upload(f.filename, f.mimetype):
@@ -5712,6 +5713,7 @@ def api_check_document():
             if ext == ".docx":
                 doc = Document(io.BytesIO(raw))
             doc_text = extract_text_from_document_bytes(raw, f.filename, f.mimetype)
+            uploaded_filename = f.filename
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
         except RuntimeError as e:
@@ -5720,16 +5722,9 @@ def api_check_document():
         except Exception:  # noqa: BLE001
             app.logger.exception("check-document: invalid upload")
             return jsonify({"error": "Could not read the uploaded file."}), 400
+        text = doc_text
     else:
-        doc_text = ""
-
-    text = pasted
-    if doc_text:
-        if not text:
-            text = doc_text
-        elif text != doc_text:
-            # Prefer uploaded file content when both are present.
-            text = doc_text
+        text = pasted
 
     if not text:
         return jsonify(
@@ -5751,6 +5746,21 @@ def api_check_document():
 
     if result.get("error"):
         return jsonify({"error": result["error"]}), 400
+
+    meta = result.setdefault("meta", {})
+    if uploaded_filename:
+        meta["document_source"] = {
+            "type": "file",
+            "filename": uploaded_filename,
+            "label": f"Checked: {uploaded_filename}",
+        }
+    else:
+        meta["document_source"] = {
+            "type": "paste",
+            "filename": None,
+            "label": "Checked: pasted text",
+        }
+    meta["has_assignment_brief"] = bool(requirements)
 
     return jsonify(result)
 

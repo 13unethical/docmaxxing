@@ -171,11 +171,12 @@ def test_pipeline_output_opens_as_valid_docx() -> None:
 
 
 def test_pipeline_output_has_appendix_after_references() -> None:
-    fixture = Path(__file__).resolve().parent / "fixtures" / "test_essay_styled.docx"
-    fixture.parent.mkdir(parents=True, exist_ok=True)
+    import tempfile
 
-    # Keep this fixture representative of the real pipeline path:
-    # Word-styled headings + references + trailing appendix block.
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+        fixture = Path(tmp.name)
+
+    # Minimal Word-styled headings + references + trailing appendix block.
     doc = Document()
     doc.add_paragraph("Introduction", style="Heading 1")
     doc.add_paragraph("Body text before references.")

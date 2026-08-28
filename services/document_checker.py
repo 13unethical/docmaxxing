@@ -18,6 +18,7 @@ from services.document_structure_engine import (
     recover_structure,
     structure_tree_to_detected_sections,
 )
+from services.check_text import document_word_count, split_document_paragraphs
 from services.gemini_client import generate_json, gemini_enabled, gemini_model
 
 MAX_TEXT_CHARS = 200_000
@@ -212,12 +213,11 @@ Use the supplied local analyzer context; do not invent unsupported facts."""
 
 
 def _paragraphs_from_text(text: str) -> list[str]:
-    blocks = re.split(r"\n\s*\n", (text or "").strip())
-    return [b.strip() for b in blocks if b.strip()]
+    return split_document_paragraphs(text)
 
 
 def _word_count(text: str) -> int:
-    return len(re.findall(r"\b[\w'-]+\b", text or ""))
+    return document_word_count(text)
 
 
 def _doc_position(idx: int, total: int) -> str:
@@ -461,8 +461,6 @@ def _expected_sections(parsed: dict[str, Any], doc_type: str) -> list[str]:
     explicit = parsed.get("required_sections")
     if isinstance(explicit, list):
         sections.extend(str(x) for x in explicit if str(x).strip())
-    if not sections:
-        sections.extend(DEFAULT_REQUIRED_SECTIONS.get(doc_type, []))
     if parsed.get("reference_list_required") is True and not any(
         normalize_paragraph_text(x) in SECTION_ALIASES["references"] for x in sections
     ):
@@ -512,7 +510,8 @@ def analyze_structure_recovery(
     )
     if recovery.get("error"):
         return {
-            "health_score": 0,
+            "outline_coverage_score": 0,
+            "outline_coverage_note": "Structural outline coverage only — not the submission readiness score.",
             "detected_sections": [],
             "expected_sections": [],
             "missing_sections": [],
@@ -642,7 +641,8 @@ def analyze_structure_recovery(
     health_score = max(0, min(100, score))
 
     return {
-        "health_score": health_score,
+        "outline_coverage_score": health_score,
+        "outline_coverage_note": "Structural outline coverage only — not the submission readiness score.",
         "detected_sections": detected,
         "expected_sections": expected,
         "missing_sections": missing,
@@ -1232,76 +1232,44 @@ def check_document(
         parsed_requirements=parsed_requirements,
     )
 
-    score = pipeline["score"]
+    score = int(pipeline["score"])
     verdict = pipeline["verdict"]
     categories = pipeline["categories"]
-    issues = pipeline["issues"]
     explanation = pipeline["explanation"]
     validations = pipeline["validations"]
     action_plan = pipeline["action_plan"]
     structured = pipeline["structured_requirements"]
     metrics = pipeline["metrics"]
 
-    has_refs = bool(metrics.get("has_references_section"))
-    heading_count = int(metrics.get("heading_count") or 0)
-    positives, needs_work = _positives_and_needs(paragraphs, issues, wc, has_refs, heading_count)
-
-    next_steps = [
-        f"Step {s['step_number']}: {s['action']} (est. +{s['estimated_improvement']} pts)"
-        for s in action_plan
-    ]
-    if not next_steps:
-        next_steps = _next_steps(issues)
-    for rec in explanation.get("action_plan_narrative") or []:
-        if rec and rec not in next_steps:
-            next_steps.append(rec)
-        if len(next_steps) >= 6:
-            break
-
-    summary = explanation.get("summary") or (
-        f"Readiness score: {score}/100 ({verdict}). About {wc:,} words in {len(paragraphs)} paragraphs."
+    structure_out = dict(structure_analysis)
+    if "health_score" in structure_out:
+        structure_out["outline_coverage_score"] = structure_out.pop("health_score")
+    structure_out.setdefault(
+        "outline_coverage_note",
+        "Structural outline coverage only — not the submission readiness score.",
     )
+    structure_out["detected_sections"] = metrics.get("detected_sections") or []
+    structure_out["structure_extractor"] = metrics.get("structure_extractor")
 
-    if doc is None and any(structured.get(k) for k in ("font_family", "font_size", "line_spacing", "page_numbers_required")):
-        issues.append(
-            _issue(
-                category="formatting",
-                severity="low",
-                title="Upload .docx for layout checks",
-                message="Font, margins, and page numbers can only be verified from a Word file.",
-                fix="Upload your .docx copy to validate formatting against the brief.",
-                penalty=0,
-            )
-        )
+    compliance = explanation.get("compliance_analysis") or {}
 
     return {
         "score": score,
+        "applicable_weight": pipeline["applicable_weight"],
+        "checks_applied": pipeline["checks_applied"],
         "verdict": verdict,
-        "summary": summary,
         "categories": categories,
-        "positives": positives,
-        "needs_work": needs_work,
-        "issues": issues,
-        "next_steps": next_steps,
-        "structure_analysis": structure_analysis,
+        "not_checked": pipeline["not_checked"],
+        "structure_analysis": structure_out,
         "validations": validations,
         "action_plan": action_plan,
-        "priorities": pipeline["priorities"],
-        "gemini_diagnostics": explanation.get("gemini_diagnostics"),
         "meta": {
             "word_count": wc,
             "paragraph_count": len(paragraphs),
             "document_type": doc_type,
-            "document_classification": {
-                "document_type": doc_type,
-                "confidence": 0.0,
-                "source": explanation.get("source") or "local",
-            },
-            "compliance_analysis": explanation.get("compliance_analysis"),
-            "formatting_recommendations": explanation.get("formatting_recommendations"),
+            "compliance_analysis": compliance,
             "parsed_requirements": structured,
             "structured_requirements": structured,
             "metrics": metrics,
-            "notes": [],
         },
     }

@@ -343,6 +343,7 @@
 
   function bindDocumentUploadExtract(fileInputId, pastedInputId, options) {
     var opts = options || {};
+    var fillPasted = opts.fillPasted !== false;
     var fileInput = document.getElementById(fileInputId);
     var pastedInput = document.getElementById(pastedInputId);
     if (!fileInput || !pastedInput) {
@@ -370,13 +371,17 @@
         fileInput.value = "";
         return;
       }
-      pastedInput.value = result.text;
+      if (fillPasted) {
+        pastedInput.value = result.text;
+      } else {
+        pastedInput.value = "";
+      }
       if (opts.statusEl) {
-        opts.statusEl.textContent = "";
-        opts.statusEl.className = (opts.statusEl.className || "").replace(/\s*(error|success|warn)\b/g, "");
+        opts.statusEl.textContent = fillPasted ? "" : "File selected — we'll check the upload, not the text box.";
+        opts.statusEl.className = (opts.statusEl.className || "").replace(/\s*(error|success|warn)\b/g, "") + (fillPasted ? "" : " success");
       }
       if (typeof opts.onExtracted === "function") {
-        opts.onExtracted(result.text);
+        opts.onExtracted(result.text, file);
       }
     });
   }

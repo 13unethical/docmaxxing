@@ -1,10 +1,12 @@
 /**
- * Check page: requirements + text/docx → score, categories, issue cards.
+ * Check page: requirements + text/docx → report (validations, action plan, AI review).
  */
 (function () {
   var $ = function (id) {
     return document.getElementById(id);
   };
+
+  var CR = window.CheckReport || {};
 
   var requirementsInput = $("check_requirements");
   var requirementsFileInput = $("check_requirements_file");
@@ -14,32 +16,26 @@
   var checkBtn = $("check_document_btn");
   var statusEl = $("check_status");
   var resultsWrap = $("check_results");
-  var topProblems = $("check_top_problems");
-  var fixFirst = $("check_fix_first");
+  var reportBody = $("check_report_body");
+  var emptyReport = $("check_empty_report");
+  var emptyReportText = $("check_empty_report_text");
+  var scorePanel = $("check_score_panel");
+  var notEnoughPanel = $("check_not_enough_panel");
+  var notEnoughTitle = $("check_not_enough_title");
+  var notEnoughText = $("check_not_enough_text");
+  var notEnoughActions = $("check_not_enough_actions");
+  var documentSourceEl = $("check_document_source");
   var scoreValue = $("check_score_value");
   var scoreRing = $("check_score_ring");
   var verdictEl = $("check_verdict");
-  var summaryEl = $("check_summary");
-  var complianceText = $("check_compliance_text");
-  var complianceList = $("check_compliance_list");
-  var validationsList = $("check_validations_list");
+  var coverageLine = $("check_coverage_line");
+  var whatsMissingEl = $("check_whats_missing");
+  var notCheckedList = $("check_not_checked_list");
+  var notCheckedCard = $("check_not_checked_card");
   var actionPlanEl = $("check_action_plan");
-  var citationList = $("check_citation_list");
-  var categoriesList = $("check_categories_list");
-  var positivesList = $("check_positives_list");
-  var needsList = $("check_needs_list");
-  var issuesList = $("check_issues_list");
-  var nextSteps = $("check_next_steps");
-  var structureHealthScore = $("structure_health_score");
-  var structureDetectedSections = $("structure_detected_sections");
-  var structureMissingSections = $("structure_missing_sections");
-  var structureParagraphIssues = $("structure_paragraph_issues");
-  var structureHeadingIssues = $("structure_heading_issues");
-  var structureSuggestions = $("structure_suggestions");
-  var structureRecoveryMeta = $("structure_recovery_meta");
-  var structureTree = $("structure_tree");
+  var aiSummaryEl = $("check_ai_summary");
+  var aiRisksEl = $("check_ai_risks");
   var detectedCard = $("detected_requirements_card");
-  var parserEmpty = $("check_parser_empty");
   var detectedSummary = $("detected_requirements_summary");
   var detectedList = $("detected_requirements_list");
   var applyDetectedBtn = $("apply_detected_requirements_btn");
@@ -61,15 +57,46 @@
     }
   }
 
-  function clearTopSummary() {
-    renderBulletList(topProblems, [], "Top issues will appear after analysis.");
-    renderBulletList(fixFirst, [], "Action plan will appear after analysis.");
-  }
-
   function hasRequirementInput() {
     var text = (requirementsInput && requirementsInput.value.trim()) || "";
     var file = requirementsFileInput && requirementsFileInput.files && requirementsFileInput.files[0];
     return !!(text || file);
+  }
+
+  function hasDocxInput() {
+    var file = fileInput && fileInput.files && fileInput.files[0];
+    if (!file) {
+      return false;
+    }
+    return /\.docx$/i.test(file.name || "");
+  }
+
+  function scrollToBrief() {
+    if (requirementsInput) {
+      requirementsInput.focus();
+      requirementsInput.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  function scrollToDocx() {
+    if (fileInput) {
+      fileInput.focus();
+      fileInput.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  function bindGotoButtons() {
+    [
+      ["check_goto_brief_btn", scrollToBrief],
+      ["check_empty_goto_brief", scrollToBrief],
+      ["check_goto_docx_btn", scrollToDocx],
+      ["check_empty_goto_docx", scrollToDocx],
+    ].forEach(function (pair) {
+      var el = $(pair[0]);
+      if (el) {
+        el.addEventListener("click", pair[1]);
+      }
+    });
   }
 
   function formatDetectedValue(value) {
@@ -131,18 +158,14 @@
       detectedList.appendChild(dd);
     });
     var n = countDetected(req);
-    var confidence = Number(req && req.confidence_score);
-    var confidenceText = Number.isFinite(confidence) ? " · confidence " + Math.round(confidence * 100) + "%" : "";
+    var total = detectedRows(req).length;
     if (detectedSummary) {
       detectedSummary.textContent = n
-        ? n + " formatting requirement" + (n === 1 ? "" : "s") + " detected" + confidenceText + "."
-        : "No formatting-specific requirements were detected. The parser ignored unrelated rubric/policy content.";
+        ? n + " of " + total + " requirements found in your brief"
+        : "No requirements were found in your brief.";
     }
     if (applyDetectedBtn) {
       applyDetectedBtn.disabled = !form || !Object.keys(form).length;
-    }
-    if (parserEmpty) {
-      parserEmpty.classList.add("hidden");
     }
   }
 
@@ -209,46 +232,6 @@
     }
   }
 
-  function renderCategories(categories) {
-    if (!categoriesList) {
-      return;
-    }
-    categoriesList.innerHTML = "";
-    var entries = categories && typeof categories === "object" ? Object.keys(categories) : [];
-    entries.forEach(function (key) {
-      var cat = categories[key];
-      if (!cat) {
-        return;
-      }
-      var li = document.createElement("li");
-      li.className = "check-category-item";
-      var label = document.createElement("span");
-      label.className = "check-category-label";
-      label.textContent = cat.label || key;
-      var barWrap = document.createElement("div");
-      barWrap.className = "check-category-bar-wrap";
-      var bar = document.createElement("div");
-      bar.className = "check-category-bar";
-      var sc = Math.max(0, Math.min(100, Number(cat.score) || 0));
-      bar.style.width = sc + "%";
-      if (sc >= 75) {
-        bar.classList.add("bar-high");
-      } else if (sc >= 55) {
-        bar.classList.add("bar-mid");
-      } else {
-        bar.classList.add("bar-low");
-      }
-      var scoreSpan = document.createElement("span");
-      scoreSpan.className = "check-category-score";
-      scoreSpan.textContent = sc;
-      barWrap.appendChild(bar);
-      li.appendChild(label);
-      li.appendChild(barWrap);
-      li.appendChild(scoreSpan);
-      categoriesList.appendChild(li);
-    });
-  }
-
   function renderBulletList(el, items, emptyText) {
     if (!el) {
       return;
@@ -269,160 +252,204 @@
     });
   }
 
-  function pickMainProblems(data) {
-    var out = [];
-    var issues = Array.isArray(data.issues) ? data.issues : [];
-    issues
-      .slice()
-      .sort(function (a, b) {
-        var aw = a && a.severity === "high" ? 2 : a && a.severity === "medium" ? 1 : 0;
-        var bw = b && b.severity === "high" ? 2 : b && b.severity === "medium" ? 1 : 0;
-        return bw - aw;
-      })
-      .forEach(function (item) {
-        if (out.length >= 3 || !item) {
-          return;
-        }
-        var msg = item.title || item.message;
-        if (msg && out.indexOf(msg) === -1) {
-          out.push(msg);
+  function renderLowCoverageActions(actions) {
+    if (!notEnoughActions) {
+      return;
+    }
+    notEnoughActions.innerHTML = "";
+    (actions || []).forEach(function (action) {
+      if (!action) {
+        return;
+      }
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary";
+      btn.textContent = action.label || "Continue";
+      btn.addEventListener("click", function () {
+        if (action.action === "upload_docx") {
+          scrollToDocx();
+        } else {
+          scrollToBrief();
         }
       });
-    (data.needs_work || []).forEach(function (item) {
-      if (out.length >= 3) {
-        return;
-      }
-      if (item && out.indexOf(item) === -1) {
-        out.push(item);
-      }
+      notEnoughActions.appendChild(btn);
     });
-    return out.slice(0, 3);
   }
 
-  function renderCitationAndCompliance(data) {
-    var parsed = (data.meta && data.meta.structured_requirements) || (data.meta && data.meta.parsed_requirements) || {};
-    var citeStyle = parsed.citation_style || "Not detected";
-    var citationNotes = [];
-    var validations = data.validations || [];
-    var citeVal = validations.find(function (v) {
-      return v && v.id === "in_text_citations";
-    });
-    citationNotes.push("Required style: " + citeStyle);
-    if (citeVal) {
-      citationNotes.push(
-        "In-text citations: " + (citeVal.detected || "—") + " · Completion: " + (citeVal.completion_pct || 0) + "%"
-      );
-      if (citeVal.details && citeVal.details.apa_compliance_pct != null) {
-        citationNotes.push("Overall APA compliance: " + citeVal.details.apa_compliance_pct + "%");
-      }
-    }
-    var refVal = validations.find(function (v) {
-      return v && v.id === "references";
-    });
-    if (refVal) {
-      citationNotes.push("References: " + refVal.detected + " / " + refVal.required + " required");
-    }
-    if (!citeVal && !refVal) {
-      citationNotes.push("Run Check with assignment requirements to validate citations.");
-    }
-    renderBulletList(citationList, citationNotes, "No citation notes.");
-
-    if (complianceText) {
-      complianceText.textContent = "Readiness score is " + (data.score || 0) + "/100 (" + (data.verdict || "—") + "). Each requirement contributes weighted points based on completion %.";
-    }
-    var complianceItems = [];
-    var categories = data.categories || {};
-    Object.keys(categories).forEach(function (key) {
-      var item = categories[key];
-      if (!item) {
-        return;
-      }
-      complianceItems.push((item.label || key) + ": " + (item.score || 0) + "/100");
-    });
-    renderBulletList(complianceList, complianceItems, "No compliance details available.");
-    renderValidations(data.validations || []);
-  }
-
-  function statusClass(status) {
-    var s = (status || "").toUpperCase();
-    if (s === "PASS") {
-      return "is-pass";
-    }
-    if (s === "NEEDS_CONFIRMATION") {
-      return "is-confirm";
-    }
-    if (s === "PARTIAL") {
-      return "is-partial";
-    }
-    return "is-fail";
-  }
-
-  function renderValidations(validations) {
-    if (!validationsList) {
+  function renderDocumentSource(data) {
+    if (!documentSourceEl) {
       return;
     }
-    validationsList.innerHTML = "";
-    if (!validations.length) {
-      var empty = document.createElement("p");
-      empty.className = "card-hint";
-      empty.textContent = "No requirement validations available.";
-      validationsList.appendChild(empty);
+    var source = (data.meta && data.meta.document_source) || {};
+    documentSourceEl.textContent = source.label || "";
+    documentSourceEl.classList.toggle("hidden", !source.label);
+  }
+
+  function renderState(data, hasBrief, hasDocx) {
+    var weight = Number(data.applicable_weight) || 0;
+    var wordCount = Number((data.meta && data.meta.word_count) || 0);
+    var enough = CR.hasEnoughCoverage ? CR.hasEnoughCoverage(weight) : weight >= 50;
+
+    if (scorePanel) {
+      scorePanel.classList.toggle("hidden", !enough);
+    }
+    if (notEnoughPanel) {
+      notEnoughPanel.classList.toggle("hidden", enough);
+    }
+
+    if (enough) {
+      updateScoreRing(data.score);
+      if (verdictEl) {
+        verdictEl.textContent = data.verdict || "—";
+        verdictEl.className = "check-verdict " + verdictClass(data.verdict);
+      }
+      if (coverageLine) {
+        coverageLine.textContent = CR.formatCoverageLine
+          ? CR.formatCoverageLine(data.score, data.checks_applied, data.not_checked)
+          : String(data.score) + " / 100";
+      }
+    } else {
+      var state = CR.resolveLowCoverageState
+        ? CR.resolveLowCoverageState({ hasBrief: hasBrief, hasDocx: hasDocx, wordCount: wordCount })
+        : {
+            title: "Limited checks so far",
+            message: "Add your assignment brief and upload a .docx to run a fuller check.",
+            actions: [],
+          };
+      if (notEnoughTitle) {
+        notEnoughTitle.textContent = state.title || "Limited checks so far";
+      }
+      if (notEnoughText) {
+        notEnoughText.textContent = state.message || "";
+      }
+      renderLowCoverageActions(state.actions || []);
+    }
+  }
+
+  function renderWhatsMissing(validations) {
+    if (!whatsMissingEl) {
       return;
     }
-    validations.forEach(function (v) {
-      if (!v || !v.weight) {
-        return;
-      }
+    whatsMissingEl.innerHTML = "";
+    var items = CR.sortMissingValidations ? CR.sortMissingValidations(validations) : [];
+    if (!items.length) {
+      var clear = document.createElement("p");
+      clear.className = "check-all-clear";
+      clear.textContent = "No failed checks — requirements look met for the checks we ran.";
+      whatsMissingEl.appendChild(clear);
+      return;
+    }
+    items.forEach(function (v) {
       var row = document.createElement("article");
-      row.className = "check-validation-row";
+      row.className = "check-missing-row";
       var head = document.createElement("div");
-      head.className = "check-validation-head";
-      var label = document.createElement("span");
-      label.className = "check-validation-label";
-      label.textContent = v.label || v.id || "Requirement";
+      head.className = "check-missing-head";
+      var title = document.createElement("h4");
+      title.className = "check-missing-title";
+      title.textContent = v.label || v.id || "Requirement";
       var badge = document.createElement("span");
-      badge.className = "check-validation-status " + statusClass(v.status);
-      badge.textContent = v.status || "—";
-      head.appendChild(label);
+      badge.className = "check-missing-badge status-" + String(v.status || "fail").toLowerCase();
+      badge.textContent = CR.formatStatusLabel ? CR.formatStatusLabel(v.status) : v.status;
+      head.appendChild(title);
       head.appendChild(badge);
-      var grid = document.createElement("div");
-      grid.className = "check-validation-grid";
-      grid.innerHTML =
-        "<span>Required: <strong>" + (v.required || "—") + "</strong></span>" +
-        "<span>Detected: <strong>" + (v.detected || "—") + "</strong></span>" +
-        "<span>Completion: <strong>" + (v.completion_pct != null ? v.completion_pct : 0) + "%</strong></span>" +
-        "<span>Weight: <strong>" + (v.weight || 0) + " pts</strong></span>" +
-        "<span>Points: <strong>" + (v.points_earned != null ? v.points_earned : 0) + "/" + (v.points_possible || v.weight) + "</strong></span>";
-      if (v.confidence != null && v.confidence < 0.7) {
-        grid.innerHTML += "<span>Confidence: <strong>" + Math.round(Number(v.confidence) * 100) + "%</strong></span>";
+      var summary = document.createElement("p");
+      summary.className = "check-missing-summary";
+      var summaryText = CR.formatValidationSummary ? CR.formatValidationSummary(v) : "";
+      if (summaryText) {
+        summary.textContent = summaryText;
+        row.appendChild(head);
+        row.appendChild(summary);
+      } else {
+        row.appendChild(head);
       }
-      var barWrap = document.createElement("div");
-      barWrap.className = "check-validation-bar-wrap";
-      var bar = document.createElement("div");
-      bar.className = "check-validation-bar";
-      var pct = Math.max(0, Math.min(100, Number(v.completion_pct) || 0));
-      bar.style.width = pct + "%";
-      if (pct < 55) {
-        bar.classList.add("bar-low");
-      } else if (pct < 75) {
-        bar.classList.add("bar-mid");
+      if (v.id === "formatting" && CR.formattingDetailLines) {
+        var fmtLines = CR.formattingDetailLines(v);
+        if (fmtLines.length) {
+          var fmtUl = document.createElement("ul");
+          fmtUl.className = "check-formatting-lines";
+          fmtLines.forEach(function (line) {
+            var li = document.createElement("li");
+            li.textContent = line;
+            fmtUl.appendChild(li);
+          });
+          row.appendChild(fmtUl);
+        }
       }
-      barWrap.appendChild(bar);
-      row.appendChild(head);
-      row.appendChild(grid);
-      row.appendChild(barWrap);
       if (v.details && v.details.checklist && v.details.checklist.length) {
         var ul = document.createElement("ul");
         ul.className = "check-section-checklist";
         v.details.checklist.forEach(function (item) {
           var li = document.createElement("li");
           li.className = item.present ? "is-ok" : "is-miss";
-          li.textContent = item.section || "Section";
+          li.textContent = (item.present ? "✓ " : "✗ ") + (item.section || "Section");
           ul.appendChild(li);
         });
         row.appendChild(ul);
       }
-      validationsList.appendChild(row);
+      if (v.details && v.details.mismatches && v.details.mismatches.length) {
+        var misUl = document.createElement("ul");
+        misUl.className = "check-citation-mismatches";
+        v.details.mismatches.forEach(function (item) {
+          var li = document.createElement("li");
+          li.textContent = String(item);
+          misUl.appendChild(li);
+        });
+        row.appendChild(misUl);
+      }
+      if (v.fix) {
+        var fix = document.createElement("p");
+        fix.className = "check-missing-fix";
+        fix.textContent = v.fix;
+        row.appendChild(fix);
+      }
+      whatsMissingEl.appendChild(row);
+    });
+  }
+
+  function renderNotChecked(notChecked) {
+    if (!notCheckedList) {
+      return;
+    }
+    notCheckedList.innerHTML = "";
+    var items = notChecked || [];
+    if (notCheckedCard) {
+      notCheckedCard.classList.toggle("hidden", !items.length);
+    }
+    if (!items.length) {
+      return;
+    }
+    items.forEach(function (item) {
+      if (!item) {
+        return;
+      }
+      var li = document.createElement("li");
+      li.className = "check-not-checked-item";
+      var main = document.createElement("div");
+      main.className = "check-not-checked-main";
+      var label = document.createElement("span");
+      label.className = "check-not-checked-label";
+      label.textContent = item.id ? String(item.id).replace(/_/g, " ") : "Check";
+      var reason = document.createElement("span");
+      reason.className = "check-not-checked-reason";
+      reason.textContent = item.reason || "Not run";
+      main.appendChild(label);
+      main.appendChild(reason);
+      li.appendChild(main);
+      var actionMeta = CR.notCheckedAction ? CR.notCheckedAction(item.reason) : { action: "add_brief", label: "Add requirements" };
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary check-not-checked-btn";
+      btn.textContent = actionMeta.label;
+      btn.setAttribute("data-not-checked-action", actionMeta.action);
+      btn.addEventListener("click", function () {
+        if (actionMeta.action === "upload_docx") {
+          scrollToDocx();
+        } else {
+          scrollToBrief();
+        }
+      });
+      li.appendChild(btn);
+      notCheckedList.appendChild(li);
     });
   }
 
@@ -434,7 +461,7 @@
     if (!plan || !plan.length) {
       var empty = document.createElement("p");
       empty.className = "card-hint";
-      empty.textContent = "No action steps — requirements appear met.";
+      empty.textContent = "No action steps — requirements appear met for the checks we ran.";
       actionPlanEl.appendChild(empty);
       return;
     }
@@ -451,7 +478,7 @@
       action.textContent = step.action || "";
       var meta = document.createElement("p");
       meta.className = "check-action-step-meta";
-      meta.textContent = "Estimated improvement: +" + (step.estimated_improvement || 0) + " points";
+      meta.textContent = "Could improve score by about +" + (step.estimated_improvement || 0) + " points";
       block.appendChild(title);
       block.appendChild(action);
       block.appendChild(meta);
@@ -459,252 +486,42 @@
     });
   }
 
-  function setupAnalysisTabs() {
-    var tabs = document.querySelectorAll(".check-analysis-tab");
-    var panels = document.querySelectorAll(".check-analysis-panel");
-    if (!tabs.length || !panels.length) {
-      return;
+  function renderAiReview(data) {
+    var compliance = (data.meta && data.meta.compliance_analysis) || {};
+    if (aiSummaryEl) {
+      aiSummaryEl.textContent = compliance.summary || "No AI summary available.";
     }
-    function activate(name) {
-      tabs.forEach(function (btn) {
-        var isOn = btn.getAttribute("data-analysis-tab") === name;
-        btn.classList.toggle("is-active", isOn);
-        btn.setAttribute("aria-selected", isOn ? "true" : "false");
-      });
-      panels.forEach(function (panel) {
-        panel.classList.toggle("is-active", panel.getAttribute("data-analysis-panel") === name);
-      });
-    }
-    tabs.forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        activate(btn.getAttribute("data-analysis-tab"));
-      });
-    });
-    activate("parser");
+    renderBulletList(aiRisksEl, compliance.major_risks || [], "No major risks flagged.");
   }
 
-  function appendStructureEmpty(el, text) {
-    if (!el) {
-      return;
-    }
-    var li = document.createElement("li");
-    li.className = "structure-empty";
-    li.textContent = text;
-    el.appendChild(li);
-  }
+  function renderCheckResults(data, opts) {
+    opts = opts || {};
+    var hasBrief = opts.hasBrief != null ? opts.hasBrief : hasRequirementInput();
+    var hasDocx = opts.hasDocx != null ? opts.hasDocx : hasDocxInput();
 
-  function renderStructureList(el, items, emptyText, mapper) {
-    if (!el) {
-      return;
+    if (resultsWrap) {
+      resultsWrap.classList.remove("hidden");
     }
-    el.innerHTML = "";
-    var list = (items || []).filter(Boolean);
-    if (!list.length) {
-      appendStructureEmpty(el, emptyText);
-      return;
-    }
-    list.forEach(function (item) {
-      var li = document.createElement("li");
-      li.textContent = mapper ? mapper(item) : String(item);
-      el.appendChild(li);
-    });
-  }
 
-  function renderStructureAnalysis(data) {
-    var analysis = data || {};
-    if (structureHealthScore) {
-      var score = Math.max(0, Math.min(100, Number(analysis.health_score) || 0));
-      structureHealthScore.textContent = String(score);
-      structureHealthScore.parentElement.classList.remove("structure-high", "structure-mid", "structure-low");
-      if (score >= 80) {
-        structureHealthScore.parentElement.classList.add("structure-high");
-      } else if (score >= 55) {
-        structureHealthScore.parentElement.classList.add("structure-mid");
-      } else {
-        structureHealthScore.parentElement.classList.add("structure-low");
-      }
+    var empty = CR.isEmptyReport ? CR.isEmptyReport(data) : false;
+    if (emptyReport) {
+      emptyReport.classList.toggle("hidden", !empty);
     }
-    if (structureRecoveryMeta) {
-      var mode = analysis.recovery_mode || "unknown";
-      var docType = analysis.inferred_document_type || "other";
-      var typeConf = analysis.document_type_confidence;
-      var overall = analysis.overall_confidence;
-      var headings = analysis.headings_present ? "Headings preserved" : "Headings reconstructed";
-      var parts = [headings, "Mode: " + mode, "Type: " + docType.replace(/_/g, " ")];
-      if (typeConf != null) {
-        parts.push("Type confidence " + Math.round(Number(typeConf) * 100) + "%");
-      }
-      if (overall != null) {
-        parts.push("Structure confidence " + Math.round(Number(overall) * 100) + "%");
-      }
-      structureRecoveryMeta.textContent = parts.join(" · ");
+    if (reportBody) {
+      reportBody.classList.toggle("hidden", empty);
     }
-    if (structureTree) {
-      structureTree.innerHTML = "";
-      var tree = analysis.structure_tree || [];
-      if (!tree.length) {
-        var emptyLi = document.createElement("li");
-        emptyLi.textContent = "Run Check to recover document structure.";
-        structureTree.appendChild(emptyLi);
-      } else {
-        tree.forEach(function (node) {
-          var li = document.createElement("li");
-          var title = document.createElement("span");
-          title.className = "structure-tree-title";
-          title.textContent = node.title || node.canonical || "Untitled section";
-          li.appendChild(title);
-          var meta = document.createElement("span");
-          meta.className = "structure-tree-meta";
-          var metaParts = [];
-          if (node.confidence != null) {
-            metaParts.push(Math.round(Number(node.confidence) * 100) + "% confidence");
-          }
-          if (node.paragraph_range && node.paragraph_range[0]) {
-            metaParts.push(
-              "¶ " + node.paragraph_range[0] + (node.paragraph_range[1] !== node.paragraph_range[0] ? "–" + node.paragraph_range[1] : "")
-            );
-          }
-          if (node.paragraph_count) {
-            metaParts.push(node.paragraph_count + " paragraph" + (node.paragraph_count === 1 ? "" : "s"));
-          }
-          meta.textContent = metaParts.join(" · ");
-          li.appendChild(meta);
-          structureTree.appendChild(li);
-        });
-      }
-    }
-    renderStructureList(
-      structureDetectedSections,
-      analysis.detected_sections,
-      "No clear section headings detected.",
-      function (section) {
-        var text = section.title || section.canonical || "Untitled section";
-        var para = section.paragraph_number ? "Paragraph " + section.paragraph_number : "";
-        var style = section.style ? section.style : "";
-        return [text, para, style].filter(Boolean).join(" · ");
-      }
-    );
-    renderStructureList(
-      structureMissingSections,
-      analysis.missing_sections,
-      "No missing expected sections detected.",
-      function (section) {
-        return String(section);
-      }
-    );
-    renderStructureList(
-      structureParagraphIssues,
-      analysis.paragraph_issues,
-      "No paragraph break issues detected.",
-      function (issue) {
-        return issue.message || issue.suggestion || "Paragraph issue";
-      }
-    );
-    renderStructureList(
-      structureHeadingIssues,
-      analysis.heading_issues,
-      "No heading consistency issues detected.",
-      function (issue) {
-        return issue.message || issue.suggestion || "Heading issue";
-      }
-    );
-    renderStructureList(
-      structureSuggestions,
-      analysis.suggestions,
-      "No structure restoration suggestions right now.",
-      function (item) {
-        return String(item);
-      }
-    );
-  }
-
-  function formatLocation(loc) {
-    if (!loc || typeof loc !== "object") {
-      return "Approximate: throughout document";
-    }
-    var parts = [];
-    if (loc.paragraph_number) {
-      parts.push("Paragraph " + loc.paragraph_number);
-    }
-    if (loc.section) {
-      parts.push("Section: " + loc.section);
-    }
-    if (loc.heading) {
-      parts.push("Heading: " + loc.heading);
-    }
-    if (loc.position) {
-      parts.push(loc.position.charAt(0).toUpperCase() + loc.position.slice(1));
-    }
-    if (loc.snippet) {
-      parts.push('"' + loc.snippet + '"');
-    }
-    return parts.length ? parts.join(" · ") : "Approximate: throughout document";
-  }
-
-  function renderIssues(issues) {
-    if (!issuesList) {
+    if (empty && emptyReportText) {
+      emptyReportText.textContent =
+        "We couldn't run any checks on this input. Paste your assignment brief and full document text (or upload a .docx), then run Check again.";
       return;
     }
-    issuesList.innerHTML = "";
-    if (!issues || !issues.length) {
-      var empty = document.createElement("p");
-      empty.className = "check-all-clear";
-      empty.textContent = "No issues flagged — great work on these checks.";
-      issuesList.appendChild(empty);
-      return;
-    }
-    issues.forEach(function (issue) {
-      if (!issue) {
-        return;
-      }
-      var card = document.createElement("article");
-      var sev = (issue.severity || "medium").toLowerCase();
-      card.className = "check-issue-card severity-" + sev;
-      var head = document.createElement("div");
-      head.className = "check-issue-head";
-      var badge = document.createElement("span");
-      badge.className = "check-issue-badge";
-      badge.textContent = sev === "high" ? "High" : sev === "low" ? "Low" : "Medium";
-      var title = document.createElement("h4");
-      title.className = "check-issue-title";
-      title.textContent = issue.title || "Issue";
-      head.appendChild(badge);
-      head.appendChild(title);
-      var msg = document.createElement("p");
-      msg.className = "check-issue-message";
-      msg.textContent = issue.message || "";
-      var loc = document.createElement("p");
-      loc.className = "check-issue-location";
-      loc.textContent = formatLocation(issue.location);
-      var fix = document.createElement("p");
-      fix.className = "check-issue-fix";
-      fix.innerHTML = "<strong>Suggested fix:</strong> " + (issue.fix || "Review and adjust.");
-      card.appendChild(head);
-      card.appendChild(msg);
-      card.appendChild(loc);
-      card.appendChild(fix);
-      issuesList.appendChild(card);
-    });
-  }
 
-  function renderNextSteps(steps) {
-    if (!nextSteps) {
-      return;
-    }
-    nextSteps.innerHTML = "";
-    (steps || []).forEach(function (step) {
-      if (!step) {
-        return;
-      }
-      var li = document.createElement("li");
-      li.textContent = String(step);
-      nextSteps.appendChild(li);
-    });
-    if (!nextSteps.children.length) {
-      var li = document.createElement("li");
-      li.textContent = "Review the issue cards above and align your document with the brief.";
-      nextSteps.appendChild(li);
-    }
+    renderDocumentSource(data);
+    renderState(data, hasBrief, hasDocx);
+    renderWhatsMissing(data.validations || []);
+    renderNotChecked(data.not_checked || []);
+    renderActionPlan(data.action_plan || []);
+    renderAiReview(data);
   }
 
   if (applyDetectedBtn) {
@@ -733,11 +550,11 @@
   if (FC && FC.bindDocumentUploadExtract) {
     FC.bindDocumentUploadExtract("check_file", "check_pasted_text", {
       statusEl: statusEl,
+      fillPasted: false,
     });
   }
 
-  setupAnalysisTabs();
-  clearTopSummary();
+  bindGotoButtons();
 
   checkBtn.addEventListener("click", async function () {
     var requirements = (requirementsInput && requirementsInput.value.trim()) || "";
@@ -771,9 +588,6 @@
         }
       } else if (detectedCard) {
         detectedCard.classList.add("hidden");
-        if (parserEmpty) {
-          parserEmpty.classList.remove("hidden");
-        }
       }
 
       if (!pasted && !file) {
@@ -784,10 +598,12 @@
       setStatus("Checking your document…");
       var fd = new FormData();
       fd.append("requirements", requirements);
-      fd.append("pasted_text", pastedInput ? pastedInput.value : "");
       fd.append("document_type", docType);
       if (file) {
         fd.append("file", file);
+        fd.append("pasted_text", "");
+      } else {
+        fd.append("pasted_text", pastedInput ? pastedInput.value : "");
       }
       if (extractedData && extractedData.requirements) {
         fd.append("parsed_requirements", JSON.stringify(extractedData.requirements));
@@ -807,38 +623,12 @@
         return;
       }
 
-      if (resultsWrap) {
-        resultsWrap.classList.remove("hidden");
-      }
+      renderCheckResults(data, {
+        hasBrief: !!(requirements || requirementsFile),
+        hasDocx: !!(file && /\.docx$/i.test(file.name || "")),
+      });
 
-      updateScoreRing(data.score);
-      if (verdictEl) {
-        verdictEl.textContent = data.verdict || "—";
-        verdictEl.className = "check-verdict " + verdictClass(data.verdict);
-      }
-      if (summaryEl) {
-        summaryEl.textContent = data.summary || "";
-      }
-
-      renderCategories(data.categories);
-      renderStructureAnalysis(data.structure_analysis);
-      renderBulletList(positivesList, data.positives, "Run Check again after fixes to see strengths.");
-      renderBulletList(needsList, data.needs_work, "No major gaps flagged in these categories.");
-      renderIssues(data.issues);
-      renderActionPlan(data.action_plan);
-      renderNextSteps(data.next_steps);
-      renderBulletList(topProblems, pickMainProblems(data), "No critical issues detected.");
-      renderBulletList(fixFirst, data.next_steps, "Review the issue cards and adjust your draft.");
-      renderCitationAndCompliance(data);
-
-      var score = Number(data.score) || 0;
-      var kind = "success";
-      if (score < 55) {
-        kind = "error";
-      } else if (score < 75) {
-        kind = "warn";
-      }
-      setStatus("Check complete — scroll down for details.", kind);
+      setStatus("Check complete — scroll down for details.", "success");
       if (resultsWrap) {
         resultsWrap.scrollIntoView({ behavior: "smooth", block: "start" });
       }
@@ -848,7 +638,7 @@
         window.DMToolHistory.push("check", {
           title: window.DMToolHistory.titleFromText(
             docText || reqText,
-            "Check · score " + score
+            "Check · score " + (Number(data.score) || 0)
           ),
           payload: {
             requirements: reqText,
@@ -879,23 +669,7 @@
     if (docTypeSelect && p.document_type) docTypeSelect.value = p.document_type;
     var data = p.result;
     if (!data) return;
-    if (resultsWrap) resultsWrap.classList.remove("hidden");
-    updateScoreRing(data.score);
-    if (verdictEl) {
-      verdictEl.textContent = data.verdict || "—";
-      verdictEl.className = "check-verdict " + verdictClass(data.verdict);
-    }
-    if (summaryEl) summaryEl.textContent = data.summary || "";
-    renderCategories(data.categories);
-    renderStructureAnalysis(data.structure_analysis);
-    renderBulletList(positivesList, data.positives, "Run Check again after fixes to see strengths.");
-    renderBulletList(needsList, data.needs_work, "No major gaps flagged in these categories.");
-    renderIssues(data.issues);
-    renderActionPlan(data.action_plan);
-    renderNextSteps(data.next_steps);
-    renderBulletList(topProblems, pickMainProblems(data), "No critical issues detected.");
-    renderBulletList(fixFirst, data.next_steps, "Review the issue cards and adjust your draft.");
-    renderCitationAndCompliance(data);
+    renderCheckResults(data, { hasBrief: !!(p.requirements || "").trim() });
     setStatus("Restored from history.", "success");
   })();
 })();

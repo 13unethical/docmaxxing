@@ -15,3 +15,5 @@ chrome_profile.tgz
 static/uploads/avatars/*
 !static/uploads/avatars/.gitkeep
 samples/real/
+*.tar.gz.gpg
+.docmaxxing-backup-work/

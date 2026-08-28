@@ -12,15 +12,12 @@ from formatter_v2.structure.from_word_styles import WordStylesExtractor
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 TEXT_FIXTURE = FIXTURES_DIR / "test_essay.txt"
-DOCX_FIXTURE = FIXTURES_DIR / "test_essay_styled.docx"
+DOCX_FIXTURE = FIXTURES_DIR / "test_essay_styled_minimal.docx"
 
 
 def _ensure_fixtures_exist() -> None:
-    """Create tiny fixtures locally for extractor comparison."""
+    """Create tiny paired fixtures locally for extractor comparison."""
     FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
-    if TEXT_FIXTURE.is_file() and DOCX_FIXTURE.is_file():
-        return
-
     lines = [
         "Introduction",
         "• Item one",
@@ -29,8 +26,10 @@ def _ensure_fixtures_exist() -> None:
         "Conclusion",
         "Some body text.",
     ]
-
-    TEXT_FIXTURE.write_text("\n".join(lines), encoding="utf-8")
+    if not TEXT_FIXTURE.is_file():
+        TEXT_FIXTURE.write_text("\n".join(lines), encoding="utf-8")
+    if DOCX_FIXTURE.is_file():
+        return
 
     doc = Document()
     p = doc.add_paragraph(lines[0])

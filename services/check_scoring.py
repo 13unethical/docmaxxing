@@ -1,20 +1,54 @@
-"""Weighted scoring, priorities, and action plan — no AI."""
+"""Weighted scoring and action plan — no AI."""
 
 from __future__ import annotations
 
 from typing import Any
 
+_CHECK_REASONS: dict[str, tuple[str, str]] = {
+    "word_count": ("requirements_match", "требуется бриф"),
+    "sections": ("structure", "требуется бриф"),
+    "references": ("references", "требуется бриф"),
+    "in_text_citations": ("references", "требуется бриф"),
+    "formatting": ("formatting", "требуется .docx"),
+    "academic_style": ("clarity_organization", "требуется бриф"),
+}
 
-def compute_readiness_score(validations: list[dict[str, Any]]) -> int:
-    """Score = sum(weight × completion) over active checks."""
-    active = [v for v in validations if v.get("status") != "SKIP" and float(v.get("weight") or 0) > 0]
+
+def _active_validations(validations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        v
+        for v in validations
+        if v.get("status") not in ("SKIP", "NOT_APPLICABLE", "NOT_CHECKED", "CANNOT_VERIFY")
+        and float(v.get("weight") or 0) > 0
+    ]
+
+
+def compute_readiness_score(validations: list[dict[str, Any]]) -> dict[str, Any]:
+    """Normalised score: Σ(w×c) / Σ(w) × 100 over applied checks."""
+    active = _active_validations(validations)
     if not active:
-        return 0
+        return {
+            "score": 0,
+            "applicable_weight": 0.0,
+            "checks_applied": 0,
+            "earned": 0.0,
+        }
     total_weight = sum(float(v["weight"]) for v in active)
     earned = sum(float(v["weight"]) * float(v.get("completion") or 0) for v in active)
     if total_weight <= 0:
-        return 0
-    return int(round(earned))
+        return {
+            "score": 0,
+            "applicable_weight": 0.0,
+            "checks_applied": 0,
+            "earned": 0.0,
+        }
+    score = int(round(earned / total_weight * 100))
+    return {
+        "score": score,
+        "applicable_weight": round(total_weight, 2),
+        "checks_applied": len(active),
+        "earned": round(earned, 4),
+    }
 
 
 def score_to_verdict(score: int) -> str:
@@ -27,57 +61,97 @@ def score_to_verdict(score: int) -> str:
     return "Major issues"
 
 
+_CATEGORY_LABELS = {
+    "requirements_match": "Requirements match",
+    "structure": "Structure",
+    "formatting": "Formatting",
+    "references": "References / citations",
+    "clarity_organization": "Clarity of organization",
+}
+
+
 def validations_to_categories(validations: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Group validations into category scores for UI bars."""
-    labels = {
-        "requirements_match": "Requirements match",
-        "structure": "Structure",
-        "formatting": "Formatting",
-        "references": "References / citations",
-        "clarity_organization": "Clarity of organization",
-    }
-    buckets: dict[str, list[float]] = {k: [] for k in labels}
+    """Group validations into category scores; unchecked categories are NOT_CHECKED."""
+    buckets: dict[str, list[float]] = {k: [] for k in _CATEGORY_LABELS}
     for v in validations:
         cat = v.get("category") or "requirements_match"
         if cat not in buckets:
             buckets[cat] = []
         w = float(v.get("weight") or 0)
-        if w <= 0 or v.get("status") == "SKIP":
+        if w <= 0 or v.get("status") in ("SKIP", "NOT_APPLICABLE", "NOT_CHECKED", "CANNOT_VERIFY"):
             continue
         buckets[cat].append(float(v.get("completion") or 0) * 100)
+
     out: dict[str, dict[str, Any]] = {}
-    for key, label in labels.items():
+    for key, label in _CATEGORY_LABELS.items():
         scores = buckets.get(key) or []
-        avg = int(round(sum(scores) / len(scores))) if scores else 100
-        out[key] = {"score": avg, "label": label}
+        if not scores:
+            out[key] = {"score": None, "label": label, "status": "NOT_CHECKED"}
+        else:
+            avg = int(round(sum(scores) / len(scores)))
+            out[key] = {"score": avg, "label": label, "status": "CHECKED"}
     return out
 
 
-def build_priorities(validations: list[dict[str, Any]]) -> dict[str, list[str]]:
-    grouped: dict[str, list[str]] = {"critical": [], "medium": [], "low": []}
-    for v in validations:
-        if v.get("status") in ("PASS", "SKIP"):
+def build_not_checked(
+    *,
+    structured: dict[str, Any],
+    validations: list[dict[str, Any]],
+    has_docx: bool,
+) -> list[dict[str, str]]:
+    """Checks that were not run, with a short reason."""
+    applied_ids = {str(v.get("id")) for v in validations if float(v.get("weight") or 0) > 0}
+    items: list[dict[str, str]] = []
+
+    candidates: list[str] = []
+    if structured.get("word_min") is not None or structured.get("word_max") is not None:
+        candidates.append("word_count")
+    candidates.append("sections")
+    if structured.get("references_required") or structured.get("peer_reviewed_refs") is not None:
+        candidates.extend(["references", "in_text_citations"])
+    elif structured.get("citation_style"):
+        candidates.append("in_text_citations")
+    if any(
+        structured.get(k)
+        for k in ("font_family", "font_size", "line_spacing", "page_numbers_required")
+    ):
+        candidates.append("formatting")
+    candidates.append("academic_style")
+
+    for check_id in candidates:
+        if check_id in applied_ids:
             continue
-        pri = v.get("priority") or "medium"
-        if pri not in grouped:
-            pri = "medium"
-        label = v.get("label") or v.get("id") or "Requirement"
-        if label not in grouped[pri]:
-            grouped[pri].append(label)
-    return grouped
+        category, default_reason = _CHECK_REASONS.get(check_id, ("requirements_match", "требуется бриф"))
+        reason = default_reason
+        if check_id == "formatting" and not has_docx:
+            reason = "требуется .docx"
+        if check_id == "in_text_citations":
+            cite_status = next(
+                (str(v.get("status") or "") for v in validations if v.get("id") == "in_text_citations"),
+                "",
+            )
+            if cite_status == "CANNOT_VERIFY":
+                continue
+        items.append({"id": check_id, "category": category, "reason": reason})
+
+    return items
 
 
 def build_action_plan(validations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Steps sorted by potential score gain."""
+    """Steps sorted by potential normalised score gain."""
+    score_meta = compute_readiness_score(validations)
+    applicable_weight = float(score_meta.get("applicable_weight") or 0) or 100.0
+
     candidates: list[dict[str, Any]] = []
     for v in validations:
-        if v.get("status") == "PASS" or not v.get("fix"):
+        if v.get("status") in {"PASS", "NOT_CHECKED", "CANNOT_VERIFY", "SKIP", "NOT_APPLICABLE"} or not v.get("fix"):
             continue
         weight = float(v.get("weight") or 0)
         if weight <= 0:
             continue
         completion = float(v.get("completion") or 0)
-        gain = round(weight * (1.0 - completion), 1)
+        raw_gain = weight * (1.0 - completion)
+        gain = round(raw_gain / applicable_weight * 100, 1)
         if gain < 0.5:
             continue
         candidates.append(
@@ -102,27 +176,3 @@ def build_action_plan(validations: list[dict[str, Any]]) -> list[dict[str, Any]]
             }
         )
     return steps
-
-
-def validations_to_issues(validations: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert failed validations into issue cards for legacy UI."""
-    issues: list[dict[str, Any]] = []
-    for v in validations:
-        if v.get("status") in ("PASS", "SKIP", "NEEDS_CONFIRMATION"):
-            continue
-        completion = float(v.get("completion") or 0)
-        severity = "high" if completion < 0.4 else "medium" if completion < 0.75 else "low"
-        msg = f"Required: {v.get('required')} · Detected: {v.get('detected')} · Completion: {v.get('completion_pct')}%"
-        issues.append(
-            {
-                "category": v.get("category") or "requirements_match",
-                "severity": severity,
-                "title": v.get("label") or "Requirement",
-                "message": msg,
-                "fix": v.get("fix") or "Review this requirement against your brief.",
-                "location": {"position": "throughout document"},
-                "penalty": int(round(float(v.get("weight") or 10) * (1.0 - completion))),
-                "validation_id": v.get("id"),
-            }
-        )
-    return issues
