@@ -56,13 +56,22 @@ def test_guest_sees_page_not_redirect():
 
 
 def test_action_triggers_modal_for_guest():
-    res = _client().get("/humanizer")
+    res = _client().get("/assignment")
     assert res.status_code == 200
     html = res.get_data(as_text=True)
     assert "data-auth-layer" in html
     assert "auth-modal.js" in html
     assert "guest-preview.js" in html
     assert "data-guest-tool" in html
+
+
+def test_humanizer_guest_can_interact_without_tool_lock():
+    res = _client().get("/humanizer")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "data-guest-tool" not in html
+    assert "1 free run" in html
+    assert "data-hz-run" in html
 
 
 def test_admin_page_redirects_guest():
@@ -86,8 +95,12 @@ def test_account_page_redirects_guest():
 def test_only_whitelisted_pages_show_guest_preview():
     client = _client()
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
-        tool_html = client.get("/humanizer").get_data(as_text=True)
-        assert "data-guest-tool" in tool_html
+        humanizer_html = client.get("/humanizer").get_data(as_text=True)
+        assert "data-guest-tool" not in humanizer_html
+        assert "1 free run" in humanizer_html
+
+        assignment_html = client.get("/assignment").get_data(as_text=True)
+        assert "data-guest-tool" in assignment_html
 
         format_html = client.get("/").get_data(as_text=True)
         assert 'data-guest-persist="v2_pasted_text"' in format_html
@@ -118,6 +131,20 @@ def test_guest_page_load_shows_no_error_banner():
 def test_guest_history_shows_empty_state_not_error():
     html = _client().get("/assignment").get_data(as_text=True)
     assert "Sign in to see history" in html
+
+
+def test_guest_humanize_second_request_blocked():
+    client = _client()
+    with client.session_transaction() as sess:
+        sess["guest_humanize_used"] = True
+    res = client.post(
+        "/api/browser/providers/stealthwriter/humanize",
+        json={"text": "Sample paragraph for humanize."},
+        headers={"Accept": "application/json"},
+    )
+    assert res.status_code == 403
+    data = res.get_json()
+    assert data["error"] == "REGISTER_REQUIRED"
 
 
 def test_internal_error_codes_never_reach_ui():

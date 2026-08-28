@@ -7,7 +7,7 @@
 <div class="tools-layout">
   <div
     class="tools-main"
-    {% if guest_preview and not current_user %}
+    {% if guest_preview and not current_user and not guest_tools_interactive %}
     data-guest-tool
     data-auth-title="{% block guest_auth_title %}Run this tool with a free account{% endblock %}"
     data-auth-reason="{% block guest_auth_reason %}Sign up to save progress, use credits, and pick up where you left off.{% endblock %}"

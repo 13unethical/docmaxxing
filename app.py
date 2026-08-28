@@ -2785,6 +2785,11 @@ def api_browser_stealthwriter_humanize():
 
     user = economy_auth.current_user()
     guest_trial = False
+
+    def _release_guest_trial() -> None:
+        if guest_trial:
+            session.pop("guest_humanize_used", None)
+
     if user is None:
         if session.get("guest_humanize_used"):
             return (
@@ -2798,6 +2803,7 @@ def api_browser_stealthwriter_humanize():
                 403,
             )
         guest_trial = True
+        session["guest_humanize_used"] = True
     elif not economy_auth.user_email_verified(user):
         blocked = economy_auth.email_verification_gate()
         if blocked is not None:
@@ -2828,6 +2834,7 @@ def api_browser_stealthwriter_humanize():
             },
         )
         if not isinstance(charged, tuple):
+            _release_guest_trial()
             return charged
         user_id, _tx = charged
 
@@ -2846,6 +2853,7 @@ def api_browser_stealthwriter_humanize():
         job = job_manager.get(job.id)
         if job is None:
             _refund_humanize()
+            _release_guest_trial()
             return jsonify({"success": False, "error": "job not found"}), 500
 
         status = job.status.value
@@ -2881,8 +2889,6 @@ def api_browser_stealthwriter_humanize():
                     )
                 except Exception:
                     app.logger.exception("dataset_logger stealthwriter hook failed")
-            if guest_trial:
-                session["guest_humanize_used"] = True
             return jsonify(
                 {
                     "success": True,
@@ -2900,6 +2906,7 @@ def api_browser_stealthwriter_humanize():
 
         # Any non-completed terminal/failure state refunds the charge.
         _refund_humanize(ref_id=job.id)
+        _release_guest_trial()
 
         if status == "CANCELLED":
             return jsonify({"success": False, "error": "cancelled", "job_id": job.id}), 409
@@ -2957,6 +2964,7 @@ def api_browser_stealthwriter_humanize():
         return jsonify({"success": False, "error": job.error or "failed", "job_id": job.id}), 500
     except Exception as exc:  # noqa: BLE001
         _refund_humanize()
+        _release_guest_trial()
         return (
             jsonify(
                 {

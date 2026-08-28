@@ -1,6 +1,7 @@
 {% extends "tools_base.html" %}
 {% set tools_active = 'humanizer' %}
 {% set guest_preview = true %}
+{% set guest_tools_interactive = true %}
 {% block guest_auth_title %}Humanize AI-detected phrasing{% endblock %}
 {% block guest_auth_reason %}Create a free account to run the Humanizer and spend welcome credits on your first pass.{% endblock %}
 {% block title %}Humanizer — DocMaxxing{% endblock %}
@@ -80,7 +81,12 @@
               Clear
             </button>
           </div>
-          {% if is_discount_active %}
+          {% if not current_user %}
+          <div class="hz-cost" aria-label="Humanize cost">
+            <span class="hz-cost-label">Cost</span>
+            <span class="hz-cost-sale">1 free run</span>
+          </div>
+          {% elif is_discount_active %}
           <div class="hz-cost hz-cost--discount" aria-label="Humanize cost">
             <span class="hz-cost-label">Cost</span>
             <span class="hz-cost-strike">{{ base_cost }}</span>
