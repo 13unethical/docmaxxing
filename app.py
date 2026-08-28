@@ -403,7 +403,8 @@ def _email_verification_wall():
     path = request.path or ""
     if not _path_requires_email_verification(path):
         return None
-    return economy_auth.email_verification_gate()
+    allow_guest = economy_auth.guest_preview_allowed_for_path(path)
+    return economy_auth.email_verification_gate(allow_guest_preview=allow_guest)
 
 
 @app.before_request
@@ -714,6 +715,22 @@ def inject_account():
 # ---------------------------------------------------------------- auth routes
 
 
+def _safe_local_path(url: str | None) -> str | None:
+    path = (url or "").strip()
+    if path.startswith("/") and not path.startswith("//"):
+        return path
+    return None
+
+
+def _redirect_after_auth(*, default: str | None = None) -> Any:
+    nxt = _safe_local_path(session.pop("post_verify_next", None))
+    if nxt:
+        return redirect(nxt)
+    if default:
+        return redirect(default)
+    return redirect(url_for("index"))
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     existing = economy_auth.current_user()
@@ -722,6 +739,7 @@ def register():
             return redirect(url_for("verify_email_code"))
         return redirect(url_for("index"))
     ref_code = (request.values.get("ref") or request.values.get("referral_code") or "").strip()
+    next_url = _safe_local_path(request.values.get("next"))
     if request.method == "GET":
         if ref_code:
             session["pending_referral_code"] = ref_code
@@ -729,6 +747,7 @@ def register():
             "register.html",
             nav_active=None,
             referral_code=ref_code or session.get("pending_referral_code") or "",
+            next_url=next_url or "",
         )
 
     email = (request.form.get("email") or "").strip()
@@ -791,7 +810,11 @@ def register():
     # (bootstrap admin is created already verified and may skip).
     if not economy_auth.user_email_verified(user):
         _send_user_verification_email(user, background=True)
+        if next_url:
+            session["post_verify_next"] = next_url
         return redirect(url_for("verify_email_code"))
+    if next_url:
+        return redirect(next_url)
     return redirect(url_for("index"))
 
 
@@ -802,7 +825,7 @@ def verify_email_code():
     """Enter the 6-digit OTP sent by email (legacy /notice URL kept as alias)."""
     user = economy_auth.current_user()
     if user and economy_auth.user_email_verified(user):
-        return redirect(url_for("workspace"))
+        return _redirect_after_auth(default=url_for("workspace"))
 
     error = None
     resent = False
@@ -832,7 +855,7 @@ def verify_email_code():
         try:
             assert user is not None
             economy_auth.verify_email_otp(int(user["id"]), submitted)
-            return redirect(url_for("workspace"))
+            return _redirect_after_auth(default=url_for("workspace"))
         except economy_auth.AuthError as exc:
             error = str(exc)
 
@@ -1399,6 +1422,7 @@ def api_auth_register():
     referral_code = str(
         payload.get("referral_code") or payload.get("ref") or session.get("pending_referral_code") or ""
     ).strip()
+    next_url = _safe_local_path(str(payload.get("next") or ""))
     if password != password_confirm:
         return jsonify({"success": False, "error": "Passwords do not match."}), 400
     try:
@@ -1418,10 +1442,13 @@ def api_auth_register():
         return jsonify({"success": False, "error": str(exc)}), 400
     session.pop("pending_referral_code", None)
     economy_auth.login_user(user["id"])
-    verify_code = None
     needs_verify = not economy_auth.user_email_verified(user)
     if needs_verify:
         verify_code = _send_user_verification_email(user, background=True)
+        if next_url:
+            session["post_verify_next"] = next_url
+    else:
+        verify_code = None
     payload_out = _auth_success_payload(user)
     payload_out["email_verification_required"] = needs_verify
     if verify_code and (os.environ.get("EXPOSE_VERIFY_CODE") or "").strip().lower() in (
@@ -1823,7 +1850,7 @@ def references():
 
 
 @app.route("/workspace")
-@economy_auth.email_verified_required
+@economy_auth.email_verified_required(allow_guest_preview=True)
 def workspace():
     """Full document workspace — editor, humanize, AI, cite, comments."""
     return render_template("workspace.html", nav_active="workspace")
@@ -1962,7 +1989,7 @@ def editor():
 
 
 @app.route("/humanizer")
-@economy_auth.email_verified_required
+@economy_auth.email_verified_required(allow_guest_preview=True)
 def humanizer():
     from services.economy.pricing import FEATURE_COSTS
     from services.economy.site_settings import humanize_credit_cost
@@ -1984,7 +2011,7 @@ def humanizer():
 
 
 @app.route("/assignment")
-@economy_auth.email_verified_required
+@economy_auth.email_verified_required(allow_guest_preview=True)
 def assignment():
     return render_template("assignment.html", nav_active="assignment")
 
@@ -4785,7 +4812,7 @@ def api_assignment_stage_run(project_id: str):
 
 
 @app.route("/turnitin")
-@economy_auth.email_verified_required
+@economy_auth.email_verified_required(allow_guest_preview=True)
 def turnitin():
     return render_template(
         "turnitin.html",
@@ -6263,6 +6290,18 @@ def format_v2_chat_route():
     """
     if not formatter_v2_enabled():
         return jsonify({"error": "Not found"}), 404
+
+    if economy_auth.current_user() is None:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "REGISTER_REQUIRED",
+                    "message": "Create a free account to edit your formatted document.",
+                }
+            ),
+            403,
+        )
 
     message = (request.form.get("message") or "").strip()
     if not message:

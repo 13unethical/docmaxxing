@@ -5740,6 +5740,46 @@ body.support-chat-open {
   color: var(--muted);
   text-align: center;
 }
+.dm-auth-alt {
+  margin: 0.75rem 0 0;
+  font-size: 0.84rem;
+  color: var(--muted);
+  text-align: center;
+}
+.dm-auth-alt a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.dm-auth-alt a:hover {
+  text-decoration: underline;
+}
+
+body.dm-guest-preview [data-guest-tool].is-guest-locked {
+  position: relative;
+}
+body.dm-guest-preview [data-guest-tool].is-guest-locked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--surface-0, #fff) 8%, transparent);
+  border-radius: inherit;
+  z-index: 2;
+}
+body.dm-guest-preview [data-guest-tool].is-guest-locked button,
+body.dm-guest-preview [data-guest-tool].is-guest-locked input,
+body.dm-guest-preview [data-guest-tool].is-guest-locked select,
+body.dm-guest-preview [data-guest-tool].is-guest-locked textarea,
+body.dm-guest-preview [data-guest-tool].is-guest-locked summary,
+body.dm-guest-preview [data-require-auth] button,
+body.dm-guest-preview [data-require-auth] input,
+body.dm-guest-preview [data-require-auth] select,
+body.dm-guest-preview [data-require-auth] textarea,
+body.dm-guest-preview [data-require-auth] summary {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
 
 /* —— App shell (ChatGPT-style left sidebar) —— */
 body.app-shell-body {

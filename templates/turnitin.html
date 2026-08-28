@@ -1,6 +1,9 @@
 {% extends "tools_base.html" %}
 {% import "macros/ui.html" as ui %}
 {% set tools_active = 'turnitin' %}
+{% set guest_preview = true %}
+{% block guest_auth_title %}Run a Turnitin similarity check{% endblock %}
+{% block guest_auth_reason %}Create a free account to submit documents and keep your reports in one dashboard.{% endblock %}
 {% block title %}Turnitin Similarity Check — DocMaxxing{% endblock %}
 {% block tools_content %}
 <div class="tt-page" data-turnitin-page data-dm-tour-page="turnitin" data-tour="tt-page">

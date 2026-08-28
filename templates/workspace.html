@@ -1,5 +1,8 @@
 {% extends "tools_base.html" %}
 {% set tools_active = 'workspace' %}
+{% set guest_preview = true %}
+{% block guest_auth_title %}Edit, humanize, and cite in one workspace{% endblock %}
+{% block guest_auth_reason %}Create a free account to open documents, run AI tools, and keep drafts synced.{% endblock %}
 {% block body_class %}app-shell-body app-shell-body--workspace{% endblock %}
 {% block title %}Document Editor — DocMaxxing{% endblock %}
 {% block tools_content %}

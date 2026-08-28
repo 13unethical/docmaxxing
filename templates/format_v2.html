@@ -417,7 +417,7 @@
                 <p class="v2-file-name" id="v2_file_name" aria-live="polite"></p>
                 <div class="home-doc-panel home-document-paste" data-v2-doc-panel="paste" hidden>
                   <label class="field">
-                    <textarea id="v2_pasted_text" rows="12" placeholder="Paste your paper…"></textarea>
+                    <textarea id="v2_pasted_text" rows="12" placeholder="Paste your paper…" data-guest-persist="v2_pasted_text"></textarea>
                   </label>
                 </div>
               </div>
@@ -447,7 +447,7 @@
               </summary>
               <div class="settings-body">
                 <label class="field home-brief-paste">
-                  <textarea id="v2_requirements_text" rows="6" placeholder="Paste the brief, rubric, or lecturer email…" autocomplete="off"></textarea>
+                  <textarea id="v2_requirements_text" rows="6" placeholder="Paste the brief, rubric, or lecturer email…" autocomplete="off" data-guest-persist="v2_requirements_text"></textarea>
                 </label>
                 <div class="field-row" style="margin-top:0.6rem;gap:0.6rem;align-items:center">
                   <button type="button" class="btn-secondary" id="v2_parse_btn">Parse brief</button>
@@ -463,7 +463,14 @@
 
             <p class="v2-advanced-label">Advanced</p>
 
-            <div class="v2-advanced-block">
+            <div
+              class="v2-advanced-block"
+              {% if not current_user %}
+              data-require-auth
+              data-auth-title="Unlock advanced formatting"
+              data-auth-reason="Sign up free to customise cover pages, table of contents, structure, and citation overrides."
+              {% endif %}
+            >
             <details class="v2-advanced-row" aria-labelledby="v2-cover-settings">
               <summary id="v2-cover-settings">Cover page</summary>
               <div class="settings-body">
@@ -732,7 +739,17 @@
               <p class="v2-notices-title">Departures from the style</p>
               <div id="v2_notices_list"></div>
             </div>
-            <section id="v2_chat_panel" class="v2-chat-panel" hidden aria-labelledby="v2-chat-label">
+            <section
+              id="v2_chat_panel"
+              class="v2-chat-panel"
+              hidden
+              aria-labelledby="v2-chat-label"
+              {% if not current_user %}
+              data-require-auth
+              data-auth-title="Edit your formatted document with chat"
+              data-auth-reason="Create a free account to apply post-format edits and download the latest DOCX."
+              {% endif %}
+            >
               <h3 class="v2-chat-title" id="v2-chat-label">After formatting</h3>
               <div class="v2-chat-row">
                 <input

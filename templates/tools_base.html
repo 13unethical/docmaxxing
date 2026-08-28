@@ -5,7 +5,14 @@
 {% block page_header %}{% endblock %}
 {% block content %}
 <div class="tools-layout">
-  <div class="tools-main">
+  <div
+    class="tools-main"
+    {% if guest_preview and not current_user %}
+    data-guest-tool
+    data-auth-title="{% block guest_auth_title %}Run this tool with a free account{% endblock %}"
+    data-auth-reason="{% block guest_auth_reason %}Sign up to save progress, use credits, and pick up where you left off.{% endblock %}"
+    {% endif %}
+  >
     {% block tools_content %}{% endblock %}
   </div>
 </div>

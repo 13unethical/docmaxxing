@@ -844,6 +844,16 @@
     return handleFormatJsonResponse(res, { skipAutoDownload: false });
   }
 
+  function requireAuth(opts) {
+    if (window.DM_AUTH && window.DM_AUTH.authenticated) {
+      return Promise.resolve();
+    }
+    if (window.DMAuth && typeof window.DMAuth.require === "function") {
+      return window.DMAuth.require(opts || {});
+    }
+    return Promise.reject(new Error("AUTH_REQUIRED"));
+  }
+
   async function sendChatEdit() {
     var input = $("v2_chat_message");
     var message = (input && input.value || "").trim();
@@ -852,6 +862,15 @@
     if (!state.hasFormatted) {
       renderChatError("Format the document first.");
       setFormatStatus("Format the document first.", "error");
+      return;
+    }
+
+    try {
+      await requireAuth({
+        title: "Edit your formatted document with chat",
+        reason: "Create a free account to apply post-format edits and download the latest DOCX.",
+      });
+    } catch (e) {
       return;
     }
 

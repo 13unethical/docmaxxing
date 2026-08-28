@@ -1,5 +1,8 @@
 {% extends "tools_base.html" %}
 {% set tools_active = 'humanizer' %}
+{% set guest_preview = true %}
+{% block guest_auth_title %}Humanize AI-detected phrasing{% endblock %}
+{% block guest_auth_reason %}Create a free account to run the Humanizer and spend welcome credits on your first pass.{% endblock %}
 {% block title %}Humanizer — DocMaxxing{% endblock %}
 {% block tools_content %}
 <link rel="preconnect" href="https://fonts.googleapis.com" />

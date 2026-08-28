@@ -1,19 +1,22 @@
 /**
  * Registration wall — a shared, page-agnostic auth modal.
  *
- * Pages call window.DMAuth.require({ reason }) which returns a Promise that
- * resolves when the user is authenticated (immediately if already signed in,
- * otherwise after they register/sign in through the modal). No navigation
- * happens, so the caller can simply retry the pending action on resolve.
+ * Pages call window.DMAuth.require({ title, reason }) which returns a Promise
+ * that resolves when the user is authenticated. No navigation happens for
+ * inline sign-up, so the caller can retry the pending action on resolve.
  */
 (function (global) {
   "use strict";
 
   var DM = (global.DM_AUTH = global.DM_AUTH || { authenticated: false });
 
-  var layer, backdrop, modal, reasonEl, errorEl, titleEl;
-  var pending = null; // { resolve, reject }
+  var STATE_KEY_PREFIX = "dm_page_state:";
+  var RETURN_KEY = "dm_auth_return";
+
+  var layer, modal, reasonEl, errorEl, titleEl;
+  var pending = null; // { resolve, reject, retry }
   var lastFocus = null;
+  var saveTimer = null;
 
   function authed() {
     return !!DM.authenticated;
@@ -26,11 +29,106 @@
     return Array.prototype.slice.call((ctx || document).querySelectorAll(sel));
   }
 
+  function storageKey() {
+    return STATE_KEY_PREFIX + global.location.pathname;
+  }
+
+  function collectPersistedFields() {
+    var fields = {};
+    qa("[data-guest-persist]").forEach(function (el) {
+      var key = el.getAttribute("data-guest-persist") || el.id || el.name;
+      if (!key) return;
+      if (el.type === "checkbox") fields[key] = !!el.checked;
+      else if (el.type === "file") return;
+      else fields[key] = el.value;
+    });
+    return fields;
+  }
+
+  function applyPersistedFields(fields) {
+    if (!fields) return;
+    Object.keys(fields).forEach(function (key) {
+      var el =
+        document.querySelector('[data-guest-persist="' + key + '"]') ||
+        document.getElementById(key) ||
+        document.querySelector('[name="' + key + '"]');
+      if (!el) return;
+      if (el.type === "checkbox") el.checked = !!fields[key];
+      else if (el.type !== "file") el.value = fields[key];
+      try {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch (e) {}
+    });
+    try {
+      document.dispatchEvent(
+        new CustomEvent("dm:page-state-restored", { detail: fields })
+      );
+    } catch (e2) {}
+  }
+
+  function savePageState() {
+    try {
+      var fields = collectPersistedFields();
+      if (!Object.keys(fields).length) return;
+      sessionStorage.setItem(
+        storageKey(),
+        JSON.stringify({ savedAt: Date.now(), fields: fields })
+      );
+    } catch (e) {}
+  }
+
+  function restorePageState() {
+    try {
+      var raw = sessionStorage.getItem(storageKey());
+      if (!raw) return;
+      var snap = JSON.parse(raw);
+      applyPersistedFields(snap && snap.fields);
+    } catch (e) {}
+  }
+
+  function clearPageState() {
+    try {
+      sessionStorage.removeItem(storageKey());
+    } catch (e) {}
+  }
+
+  function rememberReturnUrl() {
+    try {
+      var path =
+        global.location.pathname +
+        global.location.search +
+        global.location.hash;
+      sessionStorage.setItem(RETURN_KEY, path);
+    } catch (e) {}
+  }
+
+  function consumeReturnUrl() {
+    try {
+      var path = sessionStorage.getItem(RETURN_KEY) || "";
+      sessionStorage.removeItem(RETURN_KEY);
+      if (path && path.charAt(0) === "/" && path.indexOf("//") !== 0) return path;
+    } catch (e) {}
+    return global.location.pathname + global.location.search + global.location.hash;
+  }
+
+  function scheduleSave() {
+    if (authed()) return;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(savePageState, 400);
+  }
+
+  function bindPersistListeners() {
+    qa("[data-guest-persist]").forEach(function (el) {
+      el.addEventListener("input", scheduleSave);
+      el.addEventListener("change", scheduleSave);
+    });
+  }
+
   function ensureEls() {
     if (layer) return layer;
     layer = q("[data-auth-layer]");
     if (!layer) return null;
-    backdrop = q("[data-auth-backdrop]", layer);
     modal = q(".dm-auth-modal", layer);
     reasonEl = q("[data-auth-reason]", layer);
     errorEl = q("[data-auth-error]", layer);
@@ -60,11 +158,15 @@
     showError("");
   }
 
-  function openModal(reason) {
+  function openModal(opts) {
+    opts = opts || {};
     if (!ensureEls()) return;
-    if (reason && reasonEl) reasonEl.textContent = reason;
+    if (opts.title && titleEl) titleEl.textContent = opts.title;
+    if (opts.reason && reasonEl) reasonEl.textContent = opts.reason;
     showError("");
     switchTab("register");
+    rememberReturnUrl();
+    savePageState();
     lastFocus = document.activeElement;
     layer.hidden = false;
     layer.setAttribute("aria-hidden", "false");
@@ -85,7 +187,9 @@
       if (layer) layer.hidden = true;
     }, 200);
     if (lastFocus && lastFocus.focus) {
-      try { lastFocus.focus(); } catch (e) {}
+      try {
+        lastFocus.focus();
+      } catch (e) {}
     }
     if (reject && pending) {
       var p = pending;
@@ -95,9 +199,12 @@
   }
 
   function buildSidebarCreditsHtml(balance) {
-    var bal = typeof global.formatCoinBalance === "function"
-      ? global.formatCoinBalance(typeof balance === "number" ? balance : 0)
-      : (typeof balance === "number" ? balance.toLocaleString("en-US") : "0");
+    var bal =
+      typeof global.formatCoinBalance === "function"
+        ? global.formatCoinBalance(typeof balance === "number" ? balance : 0)
+        : typeof balance === "number"
+          ? balance.toLocaleString("en-US")
+          : "0";
     return (
       '<a href="/pricing" class="app-sidebar-credits" data-tour="coins" title="Top up credits">' +
       '<span class="app-sidebar-credits-main">' +
@@ -171,6 +278,10 @@
     if (typeof global.DM_refreshAssignmentHistory === "function") {
       global.DM_refreshAssignmentHistory();
     }
+    document.body.classList.remove("dm-guest-preview");
+    qa("[data-guest-tool]").forEach(function (root) {
+      root.classList.remove("is-guest-locked");
+    });
   }
 
   function escapeHtml(s) {
@@ -186,10 +297,15 @@
     if (typeof global.refreshCoinBalance === "function") {
       global.refreshCoinBalance();
     }
+    restorePageState();
     var p = pending;
     pending = null;
     closeModal(false);
     if (p) p.resolve(data);
+  }
+
+  function authNextPath() {
+    return consumeReturnUrl();
   }
 
   function submitForm(kind, form) {
@@ -203,14 +319,18 @@
         showError("Passwords do not match.");
         return;
       }
+      body.next = authNextPath();
     }
     var btn = q(".dm-auth-submit", form);
     var label = btn ? btn.textContent : "";
-    if (btn) { btn.disabled = true; btn.textContent = "Please wait…"; }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "Please wait…";
+    }
     showError("");
     if (kind === "register") {
       try {
-        var params = new URLSearchParams(window.location.search);
+        var params = new URLSearchParams(global.location.search);
         var ref = params.get("ref") || params.get("referral_code") || "";
         if (ref) body.referral_code = ref;
         else if (!body.referral_code) {
@@ -241,21 +361,35 @@
         });
       })
       .then(function (r) {
-        if (btn) { btn.disabled = false; btn.textContent = label; }
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
         if (r.ok && r.data && r.data.success) {
-          var needsVerify = r.data.email_verification_required
-            || (r.data.user && r.data.user.is_verified === false);
+          var needsVerify =
+            r.data.email_verification_required ||
+            (r.data.user && r.data.user.is_verified === false);
           if (needsVerify) {
-            window.location.href = "/verify-email/code";
+            savePageState();
+            rememberReturnUrl();
+            try {
+              sessionStorage.setItem("dm_post_verify_next", authNextPath());
+            } catch (e) {}
+            global.location.href = "/verify-email/code";
             return;
           }
           onAuthSuccess(r.data);
         } else {
-          showError((r.data && r.data.error) || "Something went wrong. Please try again.");
+          showError(
+            (r.data && r.data.error) || "Something went wrong. Please try again."
+          );
         }
       })
       .catch(function () {
-        if (btn) { btn.disabled = false; btn.textContent = label; }
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
         showError("Network error. Please try again.");
       });
   }
@@ -265,10 +399,27 @@
     if (wired || !layer) return;
     wired = true;
     qa("[data-auth-close]", layer).forEach(function (el) {
-      el.addEventListener("click", function () { closeModal(true); });
+      el.addEventListener("click", function () {
+        closeModal(true);
+      });
     });
     qa("[data-auth-tab]", layer).forEach(function (t) {
-      t.addEventListener("click", function () { switchTab(t.getAttribute("data-auth-tab")); });
+      t.addEventListener("click", function () {
+        switchTab(t.getAttribute("data-auth-tab"));
+      });
+    });
+    var loginLink = q("[data-auth-show-login]", layer);
+    if (loginLink) {
+      loginLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        switchTab("login");
+      });
+    }
+    qa("[data-auth-tab-link]", layer).forEach(function (link) {
+      link.addEventListener("click", function (e) {
+        e.preventDefault();
+        switchTab(link.getAttribute("data-auth-tab-link") || "register");
+      });
     });
     qa("[data-auth-form]", layer).forEach(function (f) {
       f.addEventListener("submit", function (e) {
@@ -285,23 +436,40 @@
     opts = opts || {};
     if (authed()) return Promise.resolve({ already: true });
     return new Promise(function (resolve, reject) {
-      // Only one pending gate at a time; reject the previous.
       if (pending) pending.reject(new Error("AUTH_SUPERSEDED"));
       pending = { resolve: resolve, reject: reject };
-      openModal(opts.reason || "Create a free account to continue.");
+      openModal(opts);
     });
+  }
+
+  function boot() {
+    bindPersistListeners();
+    if (!authed()) restorePageState();
   }
 
   global.DMAuth = {
     authed: authed,
     require: require,
-    open: function (reason) { openModal(reason); },
-    close: function () { closeModal(true); },
+    open: function (opts) {
+      openModal(typeof opts === "string" ? { reason: opts } : opts || {});
+    },
+    close: function () {
+      closeModal(true);
+    },
+    savePageState: savePageState,
+    restorePageState: restorePageState,
+    clearPageState: clearPageState,
   };
 
   try {
-    var params = new URLSearchParams(window.location.search);
+    var params = new URLSearchParams(global.location.search);
     var ref = params.get("ref") || params.get("referral_code");
     if (ref) sessionStorage.setItem("dm_pending_ref", ref);
   } catch (e) {}
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
+  }
 })(typeof window !== "undefined" ? window : this);

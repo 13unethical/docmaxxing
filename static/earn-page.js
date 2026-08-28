@@ -222,6 +222,11 @@
   }
 
   function load() {
+    if (!(window.DM_AUTH && window.DM_AUTH.authenticated)) {
+      setStatus("");
+      if (els.link) els.link.value = "Sign in to reveal your personal link";
+      return Promise.resolve();
+    }
     setStatus("Loading…");
     return fetch("/api/referral/me", {
       credentials: "same-origin",

@@ -485,27 +485,74 @@ def _wants_json() -> bool:
     return "application/json" in accept and "text/html" not in accept
 
 
-def login_required(view: Callable) -> Callable:
-    """Guard a view. API paths get 401 JSON; pages redirect to /login."""
+def _guest_page_preview_allowed() -> bool:
+    """True for unsigned GET navigations to HTML pages (not APIs)."""
+    if request.method != "GET":
+        return False
+    if request.path.startswith("/api/"):
+        return False
+    if _wants_json():
+        return False
+    return current_user() is None
 
-    @functools.wraps(view)
-    def wrapped(*args: Any, **kwargs: Any):
-        if current_user() is None:
-            if _wants_json():
-                return (
-                    jsonify(
-                        {
-                            "success": False,
-                            "error": "AUTH_REQUIRED",
-                            "message": "Please sign in to continue.",
-                        }
-                    ),
-                    401,
-                )
-            return redirect(url_for("login", next=request.path))
-        return view(*args, **kwargs)
 
-    return wrapped
+# HTML paths where guests may browse the tool UI (modal on action).
+GUEST_PREVIEW_PAGE_PATHS = frozenset(
+    {
+        "/",
+        "/format-v2",
+        "/assignment",
+        "/assignments",
+        "/humanizer",
+        "/turnitin",
+        "/workspace",
+    }
+)
+
+
+def guest_preview_allowed_for_path(path: str) -> bool:
+    normalized = (path or "").rstrip("/") or "/"
+    if normalized not in GUEST_PREVIEW_PAGE_PATHS:
+        return False
+    return _guest_page_preview_allowed()
+
+
+def login_required(
+    view: Callable | None = None,
+    *,
+    allow_guest_preview: bool = False,
+) -> Callable:
+    """Guard a view. API paths get 401 JSON; pages redirect to /login.
+
+    Pass ``allow_guest_preview=True`` only on whitelisted marketing/tool pages
+    where guests should see the UI and hit the auth modal on action.
+    """
+
+    def decorator(fn: Callable) -> Callable:
+        @functools.wraps(fn)
+        def wrapped(*args: Any, **kwargs: Any):
+            if current_user() is None:
+                if allow_guest_preview and _guest_page_preview_allowed():
+                    return fn(*args, **kwargs)
+                if _wants_json():
+                    return (
+                        jsonify(
+                            {
+                                "success": False,
+                                "error": "AUTH_REQUIRED",
+                                "message": "Please sign in to continue.",
+                            }
+                        ),
+                        401,
+                    )
+                return redirect(url_for("login", next=request.path))
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    if view is not None:
+        return decorator(view)
+    return decorator
 
 
 def user_email_verified(user: dict[str, Any] | None) -> bool:
@@ -515,10 +562,12 @@ def user_email_verified(user: dict[str, Any] | None) -> bool:
     return user.get("is_verified") is True
 
 
-def email_verification_gate():
+def email_verification_gate(*, allow_guest_preview: bool = False):
     """Return a Flask response if login/verify is required; else None."""
     user = current_user()
     if user is None:
+        if allow_guest_preview and _guest_page_preview_allowed():
+            return None
         if _wants_json():
             return (
                 jsonify(
@@ -547,14 +596,26 @@ def email_verification_gate():
     return None
 
 
-def email_verified_required(view: Callable) -> Callable:
-    """Require login + verified email (Workspace and paid tools)."""
+def email_verified_required(
+    view: Callable | None = None,
+    *,
+    allow_guest_preview: bool = False,
+) -> Callable:
+    """Require login + verified email (Workspace and paid tools).
 
-    @functools.wraps(view)
-    def wrapped(*args: Any, **kwargs: Any):
-        blocked = email_verification_gate()
-        if blocked is not None:
-            return blocked
-        return view(*args, **kwargs)
+    ``allow_guest_preview=True`` lets unsigned guests open the HTML page only.
+    """
 
-    return wrapped
+    def decorator(fn: Callable) -> Callable:
+        @functools.wraps(fn)
+        def wrapped(*args: Any, **kwargs: Any):
+            blocked = email_verification_gate(allow_guest_preview=allow_guest_preview)
+            if blocked is not None:
+                return blocked
+            return fn(*args, **kwargs)
+
+        return wrapped
+
+    if view is not None:
+        return decorator(view)
+    return decorator

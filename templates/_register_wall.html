@@ -25,12 +25,14 @@
       <input class="dm-auth-input" type="password" name="password" placeholder="Password (min 6 characters)" autocomplete="new-password" minlength="6" required />
       <input class="dm-auth-input" type="password" name="password_confirm" placeholder="Confirm password" autocomplete="new-password" minlength="6" required />
       <button type="submit" class="dm-auth-submit">Create account &amp; continue</button>
+      <p class="dm-auth-alt">Already have an account? <a href="#" data-auth-show-login>Sign in</a></p>
     </form>
 
     <form class="dm-auth-form" data-auth-form="login" novalidate hidden>
       <input class="dm-auth-input" type="email" name="email" placeholder="Email" autocomplete="email" required />
       <input class="dm-auth-input" type="password" name="password" placeholder="Password" autocomplete="current-password" required />
       <button type="submit" class="dm-auth-submit">Sign in &amp; continue</button>
+      <p class="dm-auth-alt">No account yet? <a href="#" data-auth-tab-link="register">Create one free</a></p>
     </form>
 
     <p class="dm-auth-welcome">New accounts get <strong>{{ welcome_bonus }} welcome coins</strong>. Format and Academic Check stay free.</p>

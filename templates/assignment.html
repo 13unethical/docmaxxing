@@ -1,5 +1,8 @@
 {% extends "tools_base.html" %}
 {% set tools_active = 'assignment' %}
+{% set guest_preview = true %}
+{% block guest_auth_title %}Get your assignment written and formatted{% endblock %}
+{% block guest_auth_reason %}Sign up free to analyse your brief, see pricing, and track progress in one place.{% endblock %}
 {% block title %}Assignment — DocMaxxing{% endblock %}
 {% block tools_content %}
 <div class="asg-chat" data-assignment-page data-dm-tour-page="assignment" data-tour="asg-page">
