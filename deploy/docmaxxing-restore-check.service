@@ -1,0 +1,13 @@
+[Unit]
+Description=DocMaxxing backup restore verification
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/docmaxxing
+EnvironmentFile=-/root/docmaxxing/.env
+ExecStart=/root/docmaxxing/scripts/restore_check.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

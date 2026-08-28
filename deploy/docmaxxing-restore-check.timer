@@ -1,0 +1,10 @@
+[Unit]
+Description=DocMaxxing weekly backup restore verification timer
+
+[Timer]
+OnCalendar=Mon 05:00:00
+Persistent=true
+RandomizedDelaySec=20min
+
+[Install]
+WantedBy=timers.target

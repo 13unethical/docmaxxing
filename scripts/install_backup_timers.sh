@@ -7,10 +7,13 @@ install -m 644 "$ROOT/deploy/docmaxxing-backup-daily.service" /etc/systemd/syste
 install -m 644 "$ROOT/deploy/docmaxxing-backup-daily.timer" /etc/systemd/system/docmaxxing-backup-daily.timer
 install -m 644 "$ROOT/deploy/docmaxxing-backup-weekly.service" /etc/systemd/system/docmaxxing-backup-weekly.service
 install -m 644 "$ROOT/deploy/docmaxxing-backup-weekly.timer" /etc/systemd/system/docmaxxing-backup-weekly.timer
+install -m 644 "$ROOT/deploy/docmaxxing-restore-check.service" /etc/systemd/system/docmaxxing-restore-check.service
+install -m 644 "$ROOT/deploy/docmaxxing-restore-check.timer" /etc/systemd/system/docmaxxing-restore-check.timer
 mkdir -p /var/backups/docmaxxing
 chmod 700 /var/backups/docmaxxing
 systemctl daemon-reload
 systemctl enable --now docmaxxing-backup-daily.timer
 systemctl enable --now docmaxxing-backup-weekly.timer
+systemctl enable --now docmaxxing-restore-check.timer
 echo "Backup timers enabled:"
-systemctl list-timers 'docmaxxing-backup-*' --no-pager
+systemctl list-timers 'docmaxxing-backup-*' 'docmaxxing-restore-check.timer' --no-pager
