@@ -1,0 +1,13 @@
+[Unit]
+Description=DocMaxxing daily backup
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/docmaxxing
+EnvironmentFile=-/root/docmaxxing/.env
+ExecStart=/root/docmaxxing/scripts/backup.sh daily
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

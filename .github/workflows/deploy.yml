@@ -42,6 +42,7 @@ jobs:
             source venv/bin/activate
             pip install -r requirements.txt
             install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service
+            bash scripts/install_backup_timers.sh
             systemctl daemon-reload
             systemctl enable docmaxxing
             systemctl restart docmaxxing

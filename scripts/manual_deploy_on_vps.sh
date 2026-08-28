@@ -11,6 +11,7 @@ playwright install chromium
 mkdir -p /root/docmaxxing/data/projects /root/docmaxxing/data/project_engine
 touch /root/docmaxxing/data/assignment-trace.log
 install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service
+bash scripts/install_backup_timers.sh
 systemctl daemon-reload
 systemctl enable docmaxxing
 systemctl restart docmaxxing
