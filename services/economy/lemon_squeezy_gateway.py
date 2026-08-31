@@ -5,6 +5,10 @@ Docs: https://docs.lemonsqueezy.com/help/webhooks
 Signing: HMAC-SHA256 of the raw request body with ``LEMON_SQUEEZY_WEBHOOK_SECRET``,
 compared to the ``X-Signature`` header.
 
+Checkout buy links use a UUID path segment (``LEMON_CHECKOUT_UUID_CREDITS_*``).
+Webhooks send a numeric ``variant_id`` (``LEMON_VARIANT_ID_CREDITS_*``).
+Both formats are accepted when resolving credits.
+
 Fulfillment is idempotent on Lemon order ``data.id`` (and ledger ``ref_id``).
 """
 
@@ -17,6 +21,8 @@ import logging
 import os
 import sqlite3
 from typing import Any
+
+import requests
 
 from .db import connect
 from .ledger import classify_transaction, signed_credits
@@ -45,34 +51,72 @@ def lemon_squeezy_webhook_secret() -> str:
 
 
 def lemon_variant_coin_map() -> dict[str, int]:
-    """Map Lemon Squeezy ``variant_id`` → coin amount.
+    """Map Lemon Squeezy variant identifiers → coin amount.
 
-    Prefer package env keys; fall back to a placeholder map you can edit.
+    Keys include:
+    - numeric API ``variant_id`` from webhooks (``LEMON_VARIANT_ID_CREDITS_*``)
+    - checkout buy-link UUIDs (``LEMON_CHECKOUT_UUID_CREDITS_*`` / legacy)
+    - legacy ``LEMON_VARIANT_CREDITS_*`` when still set
     """
     mapping: dict[str, int] = {}
 
-    # From TOPUP_PACKAGES when lemon_variant_id is set on the package.
-    for pkg in TOPUP_PACKAGES.values():
-        vid = str(pkg.get("lemon_variant_id") or "").strip()
-        coins = int(pkg.get("coins") or 0)
-        if vid and coins > 0:
-            mapping[vid] = coins
+    def _put(key: str, coins: int) -> None:
+        key = str(key or "").strip()
+        if key and coins > 0:
+            mapping[key] = int(coins)
 
-    # Explicit env overrides (update these with real Lemon variant IDs).
+    for pkg in TOPUP_PACKAGES.values():
+        coins = int(pkg.get("coins") or 0)
+        _put(str(pkg.get("lemon_variant_id") or ""), coins)
+        _put(str(pkg.get("lemon_checkout_uuid") or ""), coins)
+        # Legacy field name (older code stored UUID here).
+        _put(str(pkg.get("lemon_variant_id_legacy") or ""), coins)
+
+    # Explicit env overlays — numeric IDs first, then checkout UUIDs, then legacy.
     for env_key, coins in (
+        ("LEMON_VARIANT_ID_CREDITS_1000", 1000),
+        ("LEMON_VARIANT_ID_CREDITS_2200", 2200),
+        ("LEMON_VARIANT_ID_CREDITS_2500", 2200),
+        ("LEMON_CHECKOUT_UUID_CREDITS_1000", 1000),
+        ("LEMON_CHECKOUT_UUID_CREDITS_2200", 2200),
+        ("LEMON_CHECKOUT_UUID_CREDITS_2500", 2200),
         ("LEMON_VARIANT_CREDITS_1000", 1000),
         ("LEMON_VARIANT_CREDITS_2200", 2200),
         ("LEMON_VARIANT_CREDITS_2500", 2200),
     ):
-        vid = _env(env_key)
-        if vid:
-            mapping[vid] = int(coins)
+        _put(_env(env_key), int(coins))
 
     # Dummy placeholders so the webhook path is testable before real IDs exist.
-    # Replace / override via LEMON_VARIANT_* env vars in production.
     mapping.setdefault("variant_1_id", 1000)
     mapping.setdefault("variant_2_id", 2200)
     return mapping
+
+
+def resolve_variant_credits(variant_id: str | int | None) -> int | None:
+    """Resolve credits for a webhook/checkout variant id (numeric or UUID)."""
+    if variant_id is None:
+        return None
+    raw = str(variant_id).strip()
+    if not raw:
+        return None
+    coin_map = lemon_variant_coin_map()
+
+    # Prefer exact string match (covers both numeric strings and UUIDs).
+    credits = coin_map.get(raw)
+    if credits is not None:
+        return int(credits)
+
+    # Normalize numeric forms: 1992940 vs "1992940" vs 1992940.0
+    if raw.isdigit() or (raw.replace(".", "", 1).isdigit() and raw.count(".") <= 1):
+        try:
+            as_int = str(int(float(raw)))
+        except (TypeError, ValueError):
+            as_int = raw
+        credits = coin_map.get(as_int)
+        if credits is not None:
+            return int(credits)
+
+    return None
 
 
 def ensure_lemon_squeezy_schema(conn: sqlite3.Connection) -> None:
@@ -95,6 +139,10 @@ def ensure_lemon_squeezy_schema(conn: sqlite3.Connection) -> None:
             ON lemon_squeezy_payments(user_id, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_lemon_squeezy_payments_status
             ON lemon_squeezy_payments(status);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_lemon_topup_ref
+            ON transactions(ref_id)
+            WHERE reference_type = 'LemonSqueezy' AND feature = 'topup'
+            AND ref_id IS NOT NULL;
         """
     )
 
@@ -148,6 +196,92 @@ def _lookup_user(user_id: int) -> dict[str, Any] | None:
     if not row:
         return None
     return {"id": int(row["id"]), "email": row["email"], "name": row["name"]}
+
+
+def summarize_webhook_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Extract safe fields for logging / alerts (no secrets)."""
+    if not isinstance(payload, dict):
+        return {
+            "event_name": None,
+            "order_id": None,
+            "order_number": None,
+            "variant_id": None,
+            "user_id": None,
+            "email": None,
+            "total_usd": None,
+        }
+    variant_raw = _dig(payload, "data", "attributes", "first_order_item", "variant_id")
+    total_usd = _dig(payload, "data", "attributes", "total_usd")
+    if total_usd is None:
+        total_usd = _dig(payload, "data", "attributes", "total")
+    return {
+        "event_name": str(_dig(payload, "meta", "event_name") or "").strip() or None,
+        "order_id": str(_dig(payload, "data", "id") or "").strip() or None,
+        "order_number": _dig(payload, "data", "attributes", "order_number"),
+        "variant_id": str(variant_raw).strip() if variant_raw is not None else None,
+        "user_id": _parse_user_id(_dig(payload, "meta", "custom_data", "user_id")),
+        "email": str(
+            _dig(payload, "data", "attributes", "user_email") or ""
+        ).strip()
+        or None,
+        "total_usd": total_usd,
+    }
+
+
+def notify_unhandled_payment(
+    reason: str,
+    *,
+    payload: dict[str, Any] | None = None,
+    detail: str | None = None,
+) -> None:
+    """Best-effort Telegram alert when a paid webhook cannot be fulfilled."""
+    summary = summarize_webhook_payload(payload)
+    total = summary.get("total_usd")
+    if isinstance(total, (int, float)):
+        # Lemon ``total_usd`` / ``total`` are integer cents.
+        amount = f"${float(total) / 100.0:.2f}"
+    elif total is not None:
+        amount = str(total)
+    else:
+        amount = "unknown"
+
+    lines = [
+        "⚠️ Lemon Squeezy payment NOT credited",
+        f"Reason: {reason}",
+        f"Order #: {summary.get('order_number') or '—'}",
+        f"Order id: {summary.get('order_id') or '—'}",
+        f"Amount: {amount}",
+        f"Email: {summary.get('email') or '—'}",
+        f"user_id: {summary.get('user_id') or '—'}",
+        f"variant_id: {summary.get('variant_id') or '—'}",
+    ]
+    if detail:
+        lines.append(f"Detail: {detail}")
+    text = "\n".join(lines)
+
+    token = _env("TELEGRAM_TOKEN") or _env("TELEGRAM_BOT_TOKEN")
+    chat_id = _env("CHAT_ID") or _env("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
+        logger.warning(
+            "lemon-squeezy unhandled payment (telegram not configured): %s",
+            text.replace("\n", " | "),
+        )
+        return
+
+    try:
+        res = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=8,
+        )
+        if not res.ok:
+            logger.warning(
+                "lemon-squeezy telegram alert failed status=%s body=%s",
+                res.status_code,
+                (res.text or "")[:200],
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("lemon-squeezy telegram alert request failed")
 
 
 def _credit_idempotent(
@@ -249,10 +383,16 @@ def handle_webhook_event(payload: dict[str, Any]) -> dict[str, Any]:
 
     user_id = _parse_user_id(_dig(payload, "meta", "custom_data", "user_id"))
     if user_id is None:
+        notify_unhandled_payment("missing_user_id", payload=payload)
         raise LemonSqueezyGatewayError("meta.custom_data.user_id is required")
 
     user = _lookup_user(user_id)
     if user is None:
+        notify_unhandled_payment(
+            "user_not_found",
+            payload=payload,
+            detail=f"user_id={user_id}",
+        )
         raise LemonSqueezyGatewayError(f"user_id={user_id} not found")
 
     variant_raw = _dig(
@@ -260,17 +400,20 @@ def handle_webhook_event(payload: dict[str, Any]) -> dict[str, Any]:
     )
     variant_id = str(variant_raw).strip() if variant_raw is not None else ""
     if not variant_id:
+        notify_unhandled_payment("missing_variant_id", payload=payload)
         raise LemonSqueezyGatewayError("first_order_item.variant_id is missing")
 
-    coin_map = lemon_variant_coin_map()
-    credits = coin_map.get(variant_id)
-    if credits is None:
-        # Also try int-as-str / str-as-int variants in map keys.
-        credits = coin_map.get(str(int(variant_id))) if str(variant_id).isdigit() else None
+    credits = resolve_variant_credits(variant_id)
     if credits is None or int(credits) <= 0:
+        known = sorted(lemon_variant_coin_map().keys())
+        notify_unhandled_payment(
+            "unknown_variant",
+            payload=payload,
+            detail=f"variant_id={variant_id!r} known={known}",
+        )
         raise LemonSqueezyGatewayError(
             f"Unknown Lemon Squeezy variant_id={variant_id!r} "
-            f"(known={sorted(coin_map.keys())})"
+            f"(known={known})"
         )
     credits = int(credits)
 
@@ -283,6 +426,7 @@ def handle_webhook_event(payload: dict[str, Any]) -> dict[str, Any]:
             or ""
         ).strip()
     if not order_id:
+        notify_unhandled_payment("missing_order_id", payload=payload)
         raise LemonSqueezyGatewayError("data.id (order id) is missing")
 
     ref_id = f"lemon:{order_id}"

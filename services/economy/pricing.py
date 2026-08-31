@@ -60,6 +60,32 @@ FEATURE_LABELS: dict[str, str] = {
     "referral_convert": "Referral → credits",
 }
 
+def _lemon_checkout_uuid(package_key: str, *, legacy_env: str, default: str = "") -> str:
+    """Checkout buy-link UUID (path segment). Prefer LEMON_CHECKOUT_UUID_*."""
+    return (
+        _env_str(f"LEMON_CHECKOUT_UUID_CREDITS_{package_key}")
+        or _env_str(legacy_env)
+        or default
+    )
+
+
+def _lemon_numeric_variant_id(package_key: str, *legacy_envs: str) -> str:
+    """Numeric Lemon API variant_id used in webhooks.
+
+    Prefer ``LEMON_VARIANT_ID_CREDITS_*``. Fall back to legacy
+    ``LEMON_VARIANT_CREDITS_*`` only when the value looks numeric (so UUID
+    leftovers in the old keys do not pollute webhook matching).
+    """
+    primary = _env_str(f"LEMON_VARIANT_ID_CREDITS_{package_key}")
+    if primary:
+        return primary
+    for env_name in legacy_envs:
+        raw = _env_str(env_name)
+        if raw and raw.isdigit():
+            return raw
+    return ""
+
+
 # Top-up packages — Pricing UI + Gumroad / Cryptomus / Paddle (Starter / Pro only).
 TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
     "credits_1000": {
@@ -70,9 +96,15 @@ TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
         "featured": False,
         "price_id": _env_str("PADDLE_PRICE_CREDITS_1000"),
         "gumroad_product_id": _env_str("GUMROAD_PRODUCT_CREDITS_1000"),
-        "lemon_variant_id": _env_str(
-            "LEMON_VARIANT_CREDITS_1000",
-            "5074ed4e-a06f-4860-acb0-d6044357d549",
+        # Checkout URL path uses Lemon's share/buy UUID.
+        "lemon_checkout_uuid": _lemon_checkout_uuid(
+            "1000",
+            legacy_env="LEMON_VARIANT_CREDITS_1000",
+            default="5074ed4e-a06f-4860-acb0-d6044357d549",
+        ),
+        # Webhook ``first_order_item.variant_id`` is a numeric API id.
+        "lemon_variant_id": _lemon_numeric_variant_id(
+            "1000", "LEMON_VARIANT_CREDITS_1000"
         ),
         "lemon_checkout_url": _env_str("LEMON_CHECKOUT_CREDITS_1000"),
     },
@@ -87,11 +119,21 @@ TOPUP_PACKAGES: dict[str, dict[str, Any]] = {
         # Prefer new env key; fall back to legacy _2500 product id mapping.
         "gumroad_product_id": _env_str("GUMROAD_PRODUCT_CREDITS_2200")
         or _env_str("GUMROAD_PRODUCT_CREDITS_2500"),
-        "lemon_variant_id": _env_str(
-            "LEMON_VARIANT_CREDITS_2200",
-            "8bd0501d-302f-4054-a905-302112b8e267",
+        "lemon_checkout_uuid": _lemon_checkout_uuid(
+            "2200",
+            legacy_env="LEMON_VARIANT_CREDITS_2200",
+            default="8bd0501d-302f-4054-a905-302112b8e267",
         )
-        or _env_str("LEMON_VARIANT_CREDITS_2500"),
+        or _lemon_checkout_uuid(
+            "2500",
+            legacy_env="LEMON_VARIANT_CREDITS_2500",
+        ),
+        "lemon_variant_id": _lemon_numeric_variant_id(
+            "2200",
+            "LEMON_VARIANT_CREDITS_2200",
+            "LEMON_VARIANT_CREDITS_2500",
+        )
+        or _lemon_numeric_variant_id("2500"),
         "lemon_checkout_url": _env_str("LEMON_CHECKOUT_CREDITS_2200")
         or _env_str("LEMON_CHECKOUT_CREDITS_2500"),
     },
@@ -116,11 +158,11 @@ def lemon_checkout_url_for_package(
     if not pkg:
         return None
     explicit = str(pkg.get("lemon_checkout_url") or "").strip()
-    variant = str(pkg.get("lemon_variant_id") or "").strip()
+    checkout_uuid = str(pkg.get("lemon_checkout_uuid") or "").strip()
     if explicit:
         url = explicit
-    elif variant:
-        url = f"{lemon_store_checkout_base()}/{variant}"
+    elif checkout_uuid:
+        url = f"{lemon_store_checkout_base()}/{checkout_uuid}"
     else:
         return None
     if user_id is not None and int(user_id) > 0:

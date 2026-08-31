@@ -568,6 +568,13 @@ def init_db() -> None:
             "WHERE reference_type = 'Cryptomus' AND feature = 'topup' "
             "AND ref_id IS NOT NULL"
         )
+        # Same for Lemon Squeezy (webhook retries must not double-credit).
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_lemon_topup_ref "
+            "ON transactions(ref_id) "
+            "WHERE reference_type = 'LemonSqueezy' AND feature = 'topup' "
+            "AND ref_id IS NOT NULL"
+        )
         conn.commit()
     finally:
         conn.close()

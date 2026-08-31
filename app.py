@@ -1646,31 +1646,75 @@ def api_lemon_squeezy_webhook():
     ``LEMON_SQUEEZY_WEBHOOK_SECRET`` to the signing secret from Lemon.
     Pass ``user_id`` in checkout ``custom_data`` so credits land on the right account.
     """
+    from services.economy.lemon_squeezy_gateway import (
+        notify_unhandled_payment,
+        summarize_webhook_payload,
+    )
+
     raw = request.get_data(cache=True, as_text=False)
     signature = request.headers.get("X-Signature")
+    header_event = (request.headers.get("X-Event-Name") or "").strip() or None
+
+    # Log BEFORE signature check so failed deliveries remain debuggable.
+    preview: dict[str, Any] = {
+        "event_name": header_event,
+        "order_id": None,
+        "order_number": None,
+        "variant_id": None,
+        "user_id": None,
+        "bytes": len(raw or b""),
+    }
+    payload: dict[str, Any] | None = None
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+        if isinstance(parsed, dict):
+            payload = parsed
+            preview.update(summarize_webhook_payload(payload))
+            if not preview.get("event_name"):
+                preview["event_name"] = header_event
+    except (UnicodeDecodeError, ValueError):
+        pass
+
+    app.logger.info(
+        "lemon-squeezy webhook received event=%s order_id=%s order_number=%s "
+        "variant_id=%s user_id=%s bytes=%s",
+        preview.get("event_name"),
+        preview.get("order_id"),
+        preview.get("order_number"),
+        preview.get("variant_id"),
+        preview.get("user_id"),
+        preview.get("bytes"),
+    )
+
     try:
         verify_lemon_squeezy_signature(raw, signature)
     except LemonSqueezySignatureError as exc:
-        app.logger.warning("lemon-squeezy webhook signature failed: %s", exc)
+        app.logger.warning(
+            "lemon-squeezy webhook signature failed: %s (event=%s order_id=%s)",
+            exc,
+            preview.get("event_name"),
+            preview.get("order_id"),
+        )
         return jsonify({"error": "invalid_signature", "message": str(exc)}), 403
 
-    try:
-        payload = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    if payload is None:
         app.logger.warning("lemon-squeezy webhook: invalid JSON body")
         return jsonify({"error": "invalid_json"}), 400
-
-    if not isinstance(payload, dict):
-        return jsonify({"error": "invalid_payload"}), 400
 
     try:
         result = lemon_squeezy_handle_webhook(payload)
     except LemonSqueezyGatewayError as exc:
         app.logger.warning("lemon-squeezy webhook rejected: %s", exc)
         # 400 for bad custom_data / unknown variant — Lemon should not infinite-retry.
+        # Telegram alert is sent inside the gateway for fulfill failures.
         return jsonify({"error": str(exc)}), 400
     except Exception as exc:  # noqa: BLE001
         app.logger.exception("lemon-squeezy webhook fulfill failed: %s", exc)
+        notify_unhandled_payment(
+            "fulfillment_failed",
+            payload=payload,
+            detail=str(exc)[:300],
+        )
         # 500 so Lemon retries transient DB/outage failures (idempotent on success).
         return jsonify({"error": "fulfillment_failed"}), 500
 
