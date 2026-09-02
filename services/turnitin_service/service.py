@@ -163,6 +163,20 @@ class TurnitinService:
             sim_display = f"{int(similarity) if similarity == int(similarity) else similarity:g}%"
         hl_display = meta.get("ai_highlights_display")
         hl_score = row.get("ai_highlights")
+        provider = str(meta.get("provider") or "plagdetect").strip().lower()
+        if provider != "turnitin" and str(hl_display or "").strip() == "*%":
+            # PlagDetect Highlights is a real %, not Turnitin's 1–19% AI mask.
+            hl_display = None
+            pdf_path = row.get("ai_highlights_report_path")
+            if pdf_path:
+                try:
+                    from services.plagdetect_api.client import highlights_percent_from_pdf
+
+                    parsed_hl = highlights_percent_from_pdf(pdf_path)
+                except Exception:  # noqa: BLE001
+                    parsed_hl = None
+                if parsed_hl is not None:
+                    hl_score = parsed_hl
         if not hl_display and hl_score is not None:
             hl_display = f"{int(hl_score) if hl_score == int(hl_score) else hl_score:g}%"
         return {
@@ -189,6 +203,51 @@ class TurnitinService:
             "aiUnavailable": meta.get("ai_unavailable") or None,
             "provider": meta.get("provider") or "plagdetect",
         }
+
+    def maybe_repair_highlights_percent(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Replace a copied ``*%`` Highlights label with the real PlagDetect number."""
+        meta = dict(row.get("meta") or {})
+        if str(meta.get("provider") or "plagdetect").strip().lower() == "turnitin":
+            return row
+        if str(meta.get("ai_highlights_display") or "").strip() != "*%":
+            return row
+        if not (row.get("has_highlights_report") or row.get("ai_highlights_report_path")):
+            return row
+        submission_id = str(row.get("id") or "").strip()
+        external_id = str(row.get("external_id") or meta.get("external_id") or "").strip()
+        if not submission_id or not external_id:
+            return row
+        try:
+            from services.plagdetect_api.config import is_configured
+            from services.plagdetect_api.client import (
+                PlagDetectAPIClient,
+                format_plain_percent,
+                highlights_percent_from_pdf,
+            )
+
+            hl_score = None
+            if is_configured():
+                client = PlagDetectAPIClient.from_env(timeout=8)
+                hl_score = client.lookup_highlights_percent(
+                    external_id,
+                    pdf_path=row.get("ai_highlights_report_path"),
+                )
+            if hl_score is None:
+                hl_score = highlights_percent_from_pdf(row.get("ai_highlights_report_path"))
+            display = format_plain_percent(hl_score)
+            meta["ai_highlights_display"] = display
+            fields: dict[str, Any] = {"meta_json": json.dumps(meta)}
+            if hl_score is not None:
+                fields["ai_highlights"] = hl_score
+            self.store.update(submission_id, **fields)
+            updated = dict(row)
+            updated["meta"] = meta
+            if hl_score is not None:
+                updated["ai_highlights"] = hl_score
+            return updated
+        except Exception:  # noqa: BLE001
+            log.info("Could not repair PlagDetect highlights percent for %s", submission_id)
+            return row
 
     def _checkpoint_external_id(self, submission_id: str) -> str | None:
         try:
@@ -842,8 +901,7 @@ class TurnitinService:
         meta["transport"] = "api"
         if result.get("ai_score_display"):
             meta["ai_score_display"] = result["ai_score_display"]
-        if result.get("ai_highlights_display"):
-            meta["ai_highlights_display"] = result["ai_highlights_display"]
+        meta["ai_highlights_display"] = result.get("ai_highlights_display")
         hl_path = result.get("ai_highlights_report_path")
         fields: dict[str, Any] = {
             "meta_json": json.dumps(meta),

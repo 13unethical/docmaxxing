@@ -4952,6 +4952,7 @@ def turnitin():
 
 
 def _turnitin_row_api(row: dict[str, Any]) -> dict[str, Any]:
+    row = turnitin_service.maybe_repair_highlights_percent(row)
     return turnitin_service.to_api_row(row)
 
 

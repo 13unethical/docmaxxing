@@ -173,8 +173,21 @@
       );
     }
     var label = scoreDisplay(report, numericKey, displayKey);
+    if (type === "highlights" && label === "*%") {
+      label = null;
+    }
+    var hasFile =
+      kind === "similarity"
+        ? !!report.hasSimilarityReport
+        : kind === "ai"
+          ? !!report.hasAiReport
+          : !!report.hasHighlightsReport;
     if (!label) {
-      return '<div class="tt-score-cell"><span class="tt-score tt-score--pending">—</span></div>';
+      if (type === "highlights" && report.status === "completed" && hasFile) {
+        label = "";
+      } else {
+        return '<div class="tt-score-cell"><span class="tt-score tt-score--pending">—</span></div>';
+      }
     }
     var cls =
       type === "ai"
@@ -182,15 +195,10 @@
         : type === "highlights"
           ? "tt-score--highlights"
           : "tt-score--similarity";
-    var hasFile =
-      kind === "similarity"
-        ? !!report.hasSimilarityReport
-        : kind === "ai"
-          ? !!report.hasAiReport
-          : !!report.hasHighlightsReport;
-    var html =
-      '<div class="tt-score-cell">' +
-      '<span class="tt-score ' + cls + '">' + escapeHtml(label) + "</span>";
+    var html = '<div class="tt-score-cell">';
+    if (label) {
+      html += '<span class="tt-score ' + cls + '">' + escapeHtml(label) + "</span>";
+    }
     if (report.status === "completed" && hasFile) {
       html +=
         '<button type="button" class="tt-score-download' +
@@ -609,11 +617,7 @@
     schedulePoll();
     if (acc.okCount && !acc.failCount) {
       clearFeedback();
-      setStatusText(
-        acc.okCount === 1
-          ? "Queued. Checking on PlagDetect…"
-          : acc.okCount + " files queued. Checking on PlagDetect…"
-      );
+      setStatusText("");
     } else if (acc.okCount && acc.failCount) {
       clearFeedback();
       setStatusText(acc.okCount + " queued, " + acc.failCount + " failed.");

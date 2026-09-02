@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -122,6 +123,7 @@ def test_prefer_plagdetect_api(monkeypatch):
 def test_parse_percent():
     assert parse_percent("45%") == (45.0, False)
     assert parse_percent("12") == (12.0, True)
+    assert parse_percent("4%", mask_low=False) == (4.0, False)
     assert parse_percent("*%") == (None, True)
     assert parse_percent(0) == (0.0, False)
     assert parse_percent(None) == (None, False)
@@ -181,6 +183,127 @@ def test_fetch_highlights(tmp_path, monkeypatch):
     result = client.fetch_highlights(submission_id="12345", report_dir=tmp_path)
     assert result["ai_highlights_display"] == "45%"
     assert (tmp_path / "ai_highlights_report.pdf").read_bytes().startswith(b"%PDF-1.4 hl")
+
+
+class _AsteriskHighlightsSession(_FakeSession):
+    def request(self, method, url, headers=None, json=None, data=None, files=None, timeout=None, stream=False):
+        path = url.split("/api/v1/", 1)[-1]
+        method_u = method.upper()
+        if method_u == "GET" and path == "status/12345":
+            self.calls.append((method_u, url))
+            return _FakeResponse(
+                200,
+                {
+                    "success": True,
+                    "submission_id": 12345,
+                    "status": "completed",
+                    "ai_percentage": "*%",
+                    "plagiarism_percentage": "3%",
+                    "word_count": 12406,
+                },
+            )
+        if method_u == "GET" and path == "highlights/12345/status":
+            self.calls.append((method_u, url))
+            return _FakeResponse(
+                200,
+                {
+                    "success": True,
+                    "highlight_status": "completed",
+                    "file_available": True,
+                    "highlight_percentage": "4%",
+                    "highlight_submission_id": 12346,
+                },
+            )
+        if method_u == "GET" and path == "status/12346":
+            self.calls.append((method_u, url))
+            return _FakeResponse(
+                200,
+                {
+                    "success": True,
+                    "submission_id": 12346,
+                    "status": "completed",
+                    "ai_percentage": "4%",
+                },
+            )
+        return super().request(
+            method, url, headers=headers, json=json, data=data, files=files, timeout=timeout, stream=stream
+        )
+
+
+def test_fetch_highlights_does_not_copy_ai_asterisk(tmp_path, monkeypatch):
+    monkeypatch.setenv("PLAGDETECT_API_KEY", "pd-key")
+    monkeypatch.setenv("PLAGDETECT_API_SECRET", "pd-secret")
+    client = PlagDetectAPIClient(
+        session=_AsteriskHighlightsSession(),
+        poll_interval=0.01,
+        check_timeout=2,
+    )
+    result = client.fetch_highlights(submission_id="12345", report_dir=tmp_path)
+    assert result["ai_score_display"] == "*%"
+    assert result["ai_highlights"] == 4.0
+    assert result["ai_highlights_display"] == "4%"
+
+
+class _AsteriskNoHlPercentSession(_FakeSession):
+    def request(self, method, url, headers=None, json=None, data=None, files=None, timeout=None, stream=False):
+        path = url.split("/api/v1/", 1)[-1]
+        method_u = method.upper()
+        if method_u == "GET" and path == "status/12345":
+            self.calls.append((method_u, url))
+            return _FakeResponse(
+                200,
+                {
+                    "success": True,
+                    "status": "completed",
+                    "ai_percentage": "*%",
+                    "plagiarism_percentage": "3%",
+                },
+            )
+        if method_u == "GET" and path.startswith("status/"):
+            self.calls.append((method_u, url))
+            return _FakeResponse(404, {"message": "not found"})
+        return super().request(
+            method, url, headers=headers, json=json, data=data, files=files, timeout=timeout, stream=stream
+        )
+
+
+def test_fetch_highlights_omits_percent_when_only_asterisk(tmp_path, monkeypatch):
+    monkeypatch.setenv("PLAGDETECT_API_KEY", "pd-key")
+    monkeypatch.setenv("PLAGDETECT_API_SECRET", "pd-secret")
+    client = PlagDetectAPIClient(
+        session=_AsteriskNoHlPercentSession(),
+        poll_interval=0.01,
+        check_timeout=2,
+    )
+    result = client.fetch_highlights(submission_id="12345", report_dir=tmp_path)
+    assert result["ai_score_display"] == "*%"
+    assert result["ai_highlights"] is None
+    assert result["ai_highlights_display"] is None
+
+
+def test_to_api_row_strips_plagdetect_highlights_asterisk():
+    svc = TurnitinService(store=MagicMock())
+    api = svc.to_api_row(
+        {
+            "id": "e74e10e64410",
+            "filename": "Appendix.docx",
+            "status": "completed",
+            "ai_score": None,
+            "ai_highlights": None,
+            "has_report": True,
+            "has_similarity_report": True,
+            "has_ai_report": True,
+            "has_highlights_report": True,
+            "meta": {
+                "provider": "plagdetect",
+                "transport": "api",
+                "ai_score_display": "*%",
+                "ai_highlights_display": "*%",
+            },
+        }
+    )
+    assert api["aiScoreDisplay"] == "*%"
+    assert api["aiHighlightsDisplay"] is None
 
 
 def _init_store(tmp_path, monkeypatch):
@@ -267,3 +390,51 @@ def test_api_check_persists_scores(tmp_path, monkeypatch):
     api = svc.to_api_row(row)
     assert api["provider"] == "plagdetect"
     assert api["externalId"] == "12345"
+
+
+def test_maybe_repair_highlights_percent(tmp_path, monkeypatch):
+    store = _init_store(tmp_path, monkeypatch)
+    hl_pdf = tmp_path / "reports" / "sub-hl" / "ai_highlights_report.pdf"
+    hl_pdf.parent.mkdir(parents=True)
+    hl_pdf.write_bytes(b"%PDF-1.4 hl")
+    store.create(
+        submission_id="sub-hl",
+        user_id=7,
+        filename="Appendix.docx",
+        upload_path=str(tmp_path / "uploads" / "sub-hl" / "essay.docx"),
+    )
+    store.update(
+        "sub-hl",
+        status="completed",
+        external_id="134657",
+        ai_highlights_report_path=str(hl_pdf),
+        meta_json=json.dumps(
+            {
+                "provider": "plagdetect",
+                "transport": "api",
+                "ai_score_display": "*%",
+                "ai_highlights_display": "*%",
+            }
+        ),
+    )
+    monkeypatch.setenv("PLAGDETECT_API_KEY", "pd-key")
+    monkeypatch.setenv("PLAGDETECT_API_SECRET", "pd-secret")
+
+    class LookupClient:
+        @classmethod
+        def from_env(cls, **kwargs):
+            return cls()
+
+        def lookup_highlights_percent(self, submission_id, pdf_path=None):
+            assert submission_id == "134657"
+            return 4.0
+
+    monkeypatch.setattr("services.plagdetect_api.client.PlagDetectAPIClient", LookupClient)
+    svc = TurnitinService(store=store)
+    updated = svc.maybe_repair_highlights_percent(store.get("sub-hl"))
+    assert updated["ai_highlights"] == 4.0
+    assert updated["meta"]["ai_highlights_display"] == "4%"
+    saved = store.get("sub-hl")
+    api = svc.to_api_row(saved)
+    assert api["aiScoreDisplay"] == "*%"
+    assert api["aiHighlightsDisplay"] == "4%"
