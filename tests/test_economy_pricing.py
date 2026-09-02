@@ -41,6 +41,10 @@ def test_detect_cost_scales_with_words():
     assert feature_cost("detect", word_count=99) == 1
 
 
+def test_humanize_list_price_is_twenty_five():
+    assert FEATURE_COSTS["humanize"] == 25
+
+
 def test_cite_cost_is_two_credits():
     assert feature_cost("cite") == 2
 

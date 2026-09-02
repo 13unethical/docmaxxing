@@ -95,6 +95,27 @@
 
   function $(sel) { return root.querySelector(sel); }
 
+  function autosizeComposer(el) {
+    el = el || $("[data-asg-note]");
+    if (!el) return;
+    var styles = window.getComputedStyle(el);
+    var line = parseFloat(styles.lineHeight);
+    if (!line || Number.isNaN(line)) line = 22;
+    var pad =
+      (parseFloat(styles.paddingTop) || 0) + (parseFloat(styles.paddingBottom) || 0);
+    var minH = Math.ceil(line + pad);
+    var maxH = Math.round(Math.min(window.innerHeight * 0.42, 320));
+    el.style.height = "auto";
+    el.style.overflowY = "hidden";
+    var next = Math.max(minH, el.scrollHeight);
+    if (next > maxH) {
+      el.style.height = maxH + "px";
+      el.style.overflowY = "auto";
+    } else {
+      el.style.height = next + "px";
+    }
+  }
+
   function isStaleProjectError(err) {
     var msg = String((err && err.message) || "").trim().toLowerCase();
     // Only treat an explicit missing-project response as an expired session.
@@ -669,6 +690,7 @@
     var note = $("[data-asg-note]");
     if (note) {
       note.value = "";
+      autosizeComposer(note);
       note.focus();
     }
   }
@@ -1569,7 +1591,10 @@
         );
         resetProjectState();
         state.pendingFiles = filesSnapshot.slice();
-        if (noteEl) noteEl.value = noteSnapshot;
+        if (noteEl) {
+          noteEl.value = noteSnapshot;
+          autosizeComposer(noteEl);
+        }
         upsertBubble("status", "assistant", "<p>Uploading and analyzing…</p>");
         await uploadProject();
         // Keep chips until price is ready; clear after success path below.
@@ -1582,14 +1607,20 @@
       if (statusBubble) statusBubble.remove();
       state.pendingFiles = [];
       renderChips();
-      if (noteEl) noteEl.value = "";
+      if (noteEl) {
+        noteEl.value = "";
+        autosizeComposer(noteEl);
+      }
       setBusy(false);
       setStage("price");
     } catch (err) {
       // Restore attachments so the user can retry without re-picking files.
       state.pendingFiles = filesSnapshot.slice();
       renderChips();
-      if (noteEl && noteSnapshot) noteEl.value = noteSnapshot;
+      if (noteEl && noteSnapshot) {
+        noteEl.value = noteSnapshot;
+        autosizeComposer(noteEl);
+      }
       setBusy(false);
       throw err;
     }
@@ -1909,7 +1940,10 @@
         method: "POST",
         body: JSON.stringify({ message: message }),
       });
-      if (input) input.value = "";
+      if (input) {
+        input.value = "";
+        autosizeComposer(input);
+      }
       if (payload.delivery_package) state.deliveryPackage = payload.delivery_package;
       renderRevisionChat(payload);
       setStatus("Revision applied. Download the updated file.");
@@ -2393,14 +2427,21 @@
       });
     }
     if (note) {
-      note.addEventListener("input", syncSendEnabled);
+      note.addEventListener("input", function () {
+        syncSendEnabled();
+        autosizeComposer(note);
+      });
       note.addEventListener("keydown", function (e) {
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
           if (form) form.requestSubmit();
         }
       });
+      autosizeComposer(note);
     }
+    window.addEventListener("resize", function () {
+      autosizeComposer(note);
+    });
     if (form) {
       form.addEventListener("submit", function (e) {
         e.preventDefault();

@@ -116,6 +116,22 @@ def test_only_whitelisted_pages_show_guest_preview():
 GUEST_PREVIEW_TOOL_PAGES = ("/assignment", "/humanizer", "/turnitin", "/workspace", "/check")
 
 
+def test_signed_in_humanizer_and_workspace_cost_is_25(economy):
+    client = _client()
+    user = economy_auth.create_user("hz25@example.com", "secret123")
+    economy_auth.mark_email_verified(user["id"], user["email"])
+    with client.session_transaction() as sess:
+        sess[economy_auth.SESSION_KEY] = user["id"]
+
+    hz = client.get("/humanizer").get_data(as_text=True)
+    assert "1 free run" not in hz
+    assert "25 Credits" in hz
+    assert "hz-cost-strike" not in hz
+
+    ws = client.get("/workspace").get_data(as_text=True)
+    assert 'data-humanize-cost="25"' in ws
+
+
 def test_guest_page_load_shows_no_error_banner():
     client = _client()
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):

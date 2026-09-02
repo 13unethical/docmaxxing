@@ -127,11 +127,14 @@ class JobManager:
         *,
         code: str | None = None,
         details: dict[str, Any] | None = None,
+        result: dict[str, Any] | None = None,
     ) -> None:
         with self._lock:
             job.error = error
             job.error_code = code
             job.error_details = details
+            if result is not None:
+                job.result = result
             job.status = JobStatus.FAILED
             job.progress = "failed"
             job.finished_at = _now()

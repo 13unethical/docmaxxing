@@ -161,6 +161,16 @@
   }
 
   function formatScoreCell(report, numericKey, displayKey, type, kind) {
+    if (type === "ai" && report.aiUnavailable) {
+      return (
+        '<div class="tt-score-cell" title="' +
+        escapeAttr(String(report.aiUnavailable)) +
+        '">' +
+        '<span class="tt-score tt-score--muted">' +
+        escapeHtml(String(report.aiUnavailable)) +
+        "</span></div>"
+      );
+    }
     var label = scoreDisplay(report, numericKey, displayKey);
     if (!label) {
       return '<div class="tt-score-cell"><span class="tt-score tt-score--pending">—</span></div>';
@@ -197,17 +207,26 @@
     return html;
   }
 
+  function isOfficialTurnitin(report) {
+    return report && report.provider === "turnitin";
+  }
+
   function highlightsEligible(report) {
     if (report.status !== "completed") return false;
-    if (report.hasHighlightsReport || report.aiHighlightsDisplay || report.aiHighlights != null) {
+    if (report.hasHighlightsReport) return false;
+    if (isOfficialTurnitin(report)) {
+      return !report.aiUnavailable;
+    }
+    if (report.aiHighlightsDisplay || report.aiHighlights != null) {
       return false;
     }
-    return report.aiScoreDisplay === "*%";
+    if (report.aiScoreDisplay === "*%") return true;
+    var n = Number(report.aiScore);
+    return Number.isFinite(n) && n > 0;
   }
 
   function formatHighlightsCell(report) {
-    var label = scoreDisplay(report, "aiHighlights", "aiHighlightsDisplay");
-    if (label) {
+    if (report.hasHighlightsReport) {
       return formatScoreCell(report, "aiHighlights", "aiHighlightsDisplay", "highlights", "highlights");
     }
 
@@ -239,20 +258,26 @@
     return '<div class="tt-score-cell"><span class="tt-score tt-score--pending">—</span></div>';
   }
 
-  function statusBadge(status) {
+  function statusBadge(status, errorMessage) {
     var labels = {
       queued: "Queued",
       running: "Running",
       completed: "Completed",
       failed: "Failed",
     };
-    return (
+    var html =
       '<span class="tt-badge tt-badge--' +
       status +
-      '">' +
+      '"' +
+      (errorMessage ? ' title="' + escapeAttr(errorMessage) + '"' : "") +
+      ">" +
       (labels[status] || status) +
-      "</span>"
-    );
+      "</span>";
+    if (status === "failed" && errorMessage) {
+      html +=
+        '<p class="tt-error-hint">' + escapeHtml(String(errorMessage)) + "</p>";
+    }
+    return html;
   }
 
   function getOptions() {
@@ -352,7 +377,11 @@
       if (report.status === "queued" || report.status === "running") return true;
       var hs = report.highlightsStatus;
       if (hs === "queued" || hs === "running" || !!state.highlightsPending[report.id]) return true;
-      if (report.status === "completed" && (!report.hasSimilarityReport || !report.hasAiReport)) return true;
+      if (report.status === "completed") {
+        if (isOfficialTurnitin(report)) return false;
+        if (!report.hasSimilarityReport) return true;
+        if (!report.hasAiReport && !report.aiUnavailable) return true;
+      }
       return false;
     });
     if (!stillPending && els.submitStatus) {
@@ -386,7 +415,7 @@
           formatHighlightsCell(report) +
           "</td>" +
           "<td>" +
-          statusBadge(report.status) +
+          statusBadge(report.status, report.errorMessage) +
           "</td>" +
           '<td class="tt-cell-date">' +
           formatDate(report.createdAt) +
@@ -745,6 +774,9 @@
     }
     state.highlightsPending[id] = true;
     renderTable();
+    if (typeof setStatusText === "function") {
+      setStatusText("Requesting AI Highlights… this can take a minute.");
+    }
 
     fetch("/api/turnitin/submissions/" + encodeURIComponent(id) + "/highlights", {
       method: "POST",
@@ -760,14 +792,20 @@
         if (!r.ok || !r.data || !r.data.success) {
           delete state.highlightsPending[id];
           renderTable();
-          var code = r.data && r.data.error;
-          var human = humanizeServiceError(code, (r.data && r.data.message) || "");
+          var msg = (r.data && (r.data.error || r.data.message)) || "";
+          var human = humanizeServiceError(msg, msg);
           showSubmitError(
             (human && human.body) ||
               "Couldn’t start AI Highlights. Nothing extra was charged.",
-            (human && human.detail) || code || ""
+            (human && human.detail) || msg || ("HTTP " + r.status)
           );
+          if (typeof setStatusText === "function") setStatusText("");
           return;
+        }
+        if (r.data.viewer_url) {
+          try {
+            window.open(r.data.viewer_url, "_blank", "noopener");
+          } catch (err) {}
         }
         if (r.data.report) {
           upsertReport(r.data.report);
@@ -808,9 +846,12 @@
       return true;
     }
     // Keep polling until PDFs are attached after scores complete.
+    if (report.status === "completed" && isOfficialTurnitin(report)) {
+      return false;
+    }
     if (
       report.status === "completed" &&
-      (!report.hasSimilarityReport || !report.hasAiReport)
+      (!report.hasSimilarityReport || (!report.hasAiReport && !report.aiUnavailable))
     ) {
       return true;
     }

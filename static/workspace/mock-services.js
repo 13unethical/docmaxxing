@@ -122,7 +122,7 @@ window.WSMock = (function () {
     detectAI: detectAI,
     searchCitations: searchCitations,
     scanCitations: scanCitations,
-    HUMANIZE_COST: 10,
+    HUMANIZE_COST: 25,
     DETECT_CREDITS_PER_100: 1,
     DETECT_WORDS_UNIT: 100,
     AI_COST_PER_500: 0.1,

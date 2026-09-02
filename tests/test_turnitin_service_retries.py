@@ -89,8 +89,9 @@ def test_requeue_check_job_once(tmp_path, monkeypatch):
     assert len(jm.created) == 1
     assert jm.created[0]["max_retries"] == 3
     row = store.get("sub1")
-    assert row["status"] == "queued"
     assert (row.get("meta") or {}).get("service_requeue_count") == 1
+    # Fake job is already FAILED; the watcher thread may finish before this assert.
+    assert row["status"] in ("queued", "running", "failed")
 
     assert not svc._requeue_check_job(
         submission_id="sub1",
@@ -100,3 +101,93 @@ def test_requeue_check_job_once(tmp_path, monkeypatch):
         wallet=MagicMock(),
         refund_fn=refund,
     )
+
+
+def test_no_refund_when_plagdetect_already_has_row(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "services.turnitin_service.store.DB_PATH", tmp_path / "turnitin.db"
+    )
+    monkeypatch.setattr(
+        "services.turnitin_service.store.UPLOAD_ROOT", tmp_path / "uploads"
+    )
+    monkeypatch.setattr(
+        "services.turnitin_service.store.REPORT_ROOT", tmp_path / "reports"
+    )
+    from services.turnitin_service import store as store_mod
+
+    store_mod.init_db()
+    store = TurnitinStore()
+    store.create(
+        submission_id="sub-pd",
+        user_id=7,
+        filename="essay.docx",
+        upload_path=str(tmp_path / "essay.docx"),
+        exclude_bibliography=False,
+        exclude_quotes=False,
+        job_id="job-x",
+    )
+    store.update("sub-pd", external_id="132538")
+
+    svc = TurnitinService(store=store)
+    refund = MagicMock()
+    job = SimpleNamespace(result={"external_id": "132538"}, finished_at=None)
+    svc._maybe_refund(
+        submission_id="sub-pd",
+        user_id=7,
+        cost=300,
+        job=job,
+        job_manager=MagicMock(),
+        refund_fn=refund,
+        error_message="Timed out waiting for PlagDetect results.",
+        error_code="TIMEOUT",
+    )
+    refund.assert_not_called()
+    row = store.get("sub-pd")
+    assert row["status"] in ("completed", "running")
+    assert row["external_id"] == "132538"
+
+
+def test_no_refund_when_failed_job_carries_external_id(tmp_path, monkeypatch):
+    """PlagDetect already took the slot even if the dashboard row says Failed."""
+    monkeypatch.setattr(
+        "services.turnitin_service.store.DB_PATH", tmp_path / "turnitin.db"
+    )
+    monkeypatch.setattr(
+        "services.turnitin_service.store.UPLOAD_ROOT", tmp_path / "uploads"
+    )
+    monkeypatch.setattr(
+        "services.turnitin_service.store.REPORT_ROOT", tmp_path / "reports"
+    )
+    from services.turnitin_service import store as store_mod
+
+    store_mod.init_db()
+    store = TurnitinStore()
+    store.create(
+        submission_id="sub-fail",
+        user_id=7,
+        filename="essay.docx",
+        upload_path=str(tmp_path / "essay.docx"),
+        exclude_bibliography=False,
+        exclude_quotes=False,
+        job_id="job-y",
+    )
+    svc = TurnitinService(store=store)
+    refund = MagicMock()
+    job = SimpleNamespace(
+        result={"external_id": "99911", "success": False, "error": "Failed"},
+        finished_at=None,
+    )
+    svc._maybe_refund(
+        submission_id="sub-fail",
+        user_id=7,
+        cost=300,
+        job=job,
+        job_manager=MagicMock(),
+        refund_fn=refund,
+        error_message="External check failed",
+        error_code="ERROR",
+    )
+    refund.assert_not_called()
+    row = store.get("sub-fail")
+    assert row["external_id"] == "99911"
+    assert row["status"] in ("completed", "running")

@@ -70,6 +70,7 @@
             </div>
           </div>
 
+          <p class="tt-submit-hint">AI reports work on documents between 300 and 30,000 words. Longer files still get a similarity score.</p>
           <p class="tt-submit-status" data-tt-submit-status data-tour="tt-status" role="status" aria-live="polite"></p>
           <div class="tt-feedback" data-tt-feedback hidden></div>
         </div>
@@ -125,13 +126,13 @@
         hidden=True
       ) }}
       <p class="tt-ai-footnote" hidden>
-        An AI score of <strong>*%</strong> means no exact percentage was returned.
-        When that happens, <strong>Get Highlights</strong> is available for a detailed AI highlights report.
+        An AI score of <strong>*%</strong> means Turnitin hid the exact percentage (usually 1–19%).
+        <strong>Get Highlights</strong> opens the AI writing report with highlighted passages — the same view as in a Turnitin admin account.
       </p>
     </div>
   </section>
 </div>
 {% endblock %}
 {% block tools_scripts %}
-<script src="{{ url_for('static', filename='turnitin-page.js') }}?v=20260828-retry"></script>
+<script src="{{ url_for('static', filename='turnitin-page.js') }}?v=20260831-pd-api"></script>
 {% endblock %}

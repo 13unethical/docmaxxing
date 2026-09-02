@@ -445,12 +445,51 @@ def _parse_percent(text: str | None) -> float | None:
     return None
 
 
+AI_WORD_LIMIT_DISPLAY = "AI needs 300–30,000 words"
+_AI_WORD_LIMIT_RE = re.compile(
+    r"300\s*[-–—to]+\s*30[,\s]?000|30[,\s]?000\s*words|AI reports require",
+    re.I,
+)
+
+
+def _is_ai_word_limit_text(text: str | None) -> bool:
+    """True when PlagDetect refuses AI because the document is outside 300–30,000 words."""
+    return bool(_AI_WORD_LIMIT_RE.search(text or ""))
+
+
+def _row_has_similarity(row: dict[str, Any] | None) -> bool:
+    if not row:
+        return False
+    return _parse_percent(row.get("similarity_text")) is not None
+
+
+def _ai_unavailable_reason(row: dict[str, Any] | None) -> str | None:
+    if not row:
+        return None
+    blob = " ".join(
+        str(row.get(k) or "")
+        for k in ("ai_text", "status_text", "row_text")
+    )
+    if _is_ai_word_limit_text(blob):
+        return AI_WORD_LIMIT_DISPLAY
+    return None
+
+
 def _highlights_timeout_s() -> int:
     return _env_int("PLAGDETECT_HIGHLIGHTS_TIMEOUT", 180)
 
 
 def _column_index(column: str) -> int:
-    return {"ai": 2, "similarity": 3, "highlights": 5}[column]
+    mapping = _LAST_COL_MAP or {
+        "ai": 3,
+        "similarity": 2,
+        "highlights": 5,
+        "status": 4,
+    }
+    return mapping[column]
+
+
+_LAST_COL_MAP: dict[str, int] | None = None
 
 
 def _parse_score_text(text: str | None) -> dict[str, Any]:
@@ -505,6 +544,23 @@ def _clear_checkpoint(submission_id: str | None) -> None:
         pass
 
 
+def _persist_store_external_id(submission_id: str, external_id: str) -> None:
+    """Write the PlagDetect id into SQLite as soon as the upload lands.
+
+    The watcher refunds when this is missing. Checkpoint files alone are easy
+    to miss if a second Chrome job starts before scores come back.
+    """
+    ext = str(external_id or "").strip()
+    if not submission_id or not ext:
+        return
+    try:
+        from services.turnitin_service.store import TurnitinStore
+
+        TurnitinStore().update(submission_id, external_id=ext)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _reload_dashboard(page: Any) -> None:
     try:
         page.goto(_dashboard_url(), wait_until="domcontentloaded", timeout=20_000)
@@ -549,11 +605,24 @@ def _wait_for_file_attached_in_modal(page: Any, filename: str) -> None:
 
 
 def _read_submissions_table(page: Any) -> list[dict[str, Any]]:
-    return page.evaluate(
+    global _LAST_COL_MAP
+    payload = page.evaluate(
         """() => {
             const rows = [];
+            let colMap = { similarity: 2, ai: 3, status: 4, highlights: 5 };
             const tables = Array.from(document.querySelectorAll('table'));
             for (const table of tables) {
+                const heads = Array.from(table.querySelectorAll('thead th, thead td'))
+                    .map(h => (h.innerText || h.textContent || '').trim().toLowerCase());
+                if (heads.length) {
+                    heads.forEach((h, i) => {
+                        if (h.includes('similar')) colMap.similarity = i;
+                        else if (h.includes('highlight')) colMap.highlights = i;
+                        else if (h === 'ai' || h.includes('ai score') || h.includes('ai %')) colMap.ai = i;
+                        else if (h.includes('status')) colMap.status = i;
+                        else if (h.includes('file')) colMap.filename = i;
+                    });
+                }
                 const trs = Array.from(table.querySelectorAll('tbody tr'));
                 for (const tr of trs) {
                     const cells = Array.from(tr.querySelectorAll('td')).map(td =>
@@ -561,20 +630,34 @@ def _read_submissions_table(page: Any) -> list[dict[str, Any]]:
                     );
                     if (!cells.length) continue;
                     const idMatch = (cells[0] || '').match(/#?([a-zA-Z0-9]+)/);
+                    const cell = (i) => (i >= 0 && i < cells.length ? cells[i] : '');
                     rows.push({
                         id: idMatch ? idMatch[1] : null,
-                        filename: cells[1] || cells[0] || '',
-                        ai_text: cells[2] || '',
-                        similarity_text: cells[3] || '',
-                        status_text: cells[4] || cells[3] || '',
-                        highlights_text: cells[5] || '',
+                        filename: cell(colMap.filename || 1) || cells[1] || cells[0] || '',
+                        similarity_text: cell(colMap.similarity),
+                        ai_text: cell(colMap.ai),
+                        status_text: cell(colMap.status),
+                        highlights_text: cell(colMap.highlights),
                         row_text: cells.join(' | '),
                     });
                 }
             }
-            return rows;
+            return { rows, colMap };
         }"""
     )
+    if isinstance(payload, dict):
+        cmap = payload.get("colMap") or {}
+        try:
+            _LAST_COL_MAP = {
+                "similarity": int(cmap.get("similarity", 2)),
+                "ai": int(cmap.get("ai", 3)),
+                "status": int(cmap.get("status", 4)),
+                "highlights": int(cmap.get("highlights", 5)),
+            }
+        except (TypeError, ValueError):
+            pass
+        return list(payload.get("rows") or [])
+    return list(payload or [])
 
 
 def _normalize_filename(name: str) -> str:
@@ -655,19 +738,32 @@ def _find_row(
 
 
 def _row_status(row: dict[str, Any]) -> str:
-    text = (row.get("status_text") or row.get("row_text") or "").upper()
+    """Map a PlagDetect table row to queued/running/completed/failed.
+
+    Similarity already scored counts as completed even if the AI cell or
+    status column says Failed (PlagDetect does this when AI is outside
+    the 300–30,000 word window).
+    """
+    if _row_has_similarity(row):
+        return "completed"
+    # Prefer the status column — scanning full row_text can match AI help copy.
+    text = (row.get("status_text") or "").upper()
     if "COMPLET" in text or "DONE" in text or "SUCCESS" in text:
         return "completed"
     if "FAIL" in text or "ERROR" in text:
+        if _ai_unavailable_reason(row) and _row_has_similarity(row):
+            return "completed"
         return "failed"
     if "RUN" in text or "PROCESS" in text or "PENDING" in text:
         return "running"
     if "QUEUE" in text:
         return "queued"
     ai = _parse_percent(row.get("ai_text"))
-    sim = _parse_percent(row.get("similarity_text"))
-    if ai is not None or sim is not None:
+    if ai is not None:
         return "completed"
+    row_blob = (row.get("row_text") or "").upper()
+    if "FAIL" in row_blob or "ERROR" in row_blob:
+        return "failed"
     return "running"
 
 
@@ -1401,6 +1497,7 @@ def submit_check(
                     "source_filename": filename,
                 },
             )
+            _persist_store_external_id(submission_id, external_id)
             uploaded = True
 
     if not external_id:
@@ -1429,8 +1526,10 @@ def submit_check(
         external_id = row.get("id") or external_id
         plagdetect_filename = row.get("filename") or plagdetect_filename
         status = _row_status(row)
+        if status == "failed" and _row_has_similarity(row):
+            status = "completed"
+            break
         if status == "failed":
-            _clear_checkpoint(submission_id)
             return {
                 "success": False,
                 "error": row.get("status_text") or "External check failed",
@@ -1451,6 +1550,9 @@ def submit_check(
 
     ai_parsed = _parse_score_text(row.get("ai_text"))
     sim_parsed = _parse_score_text(row.get("similarity_text"))
+    ai_unavailable = _ai_unavailable_reason(row)
+    if ai_unavailable:
+        ai_parsed = {"numeric": None, "display": None}
 
     out_dir = Path(report_dir) if report_dir else path.parent / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1462,15 +1564,20 @@ def submit_check(
     if external_id:
         for attempt in range(1, 4):
             try:
-                ai_ok, sim_ok = _download_both_reports(page, external_id, ai_report, sim_report)
+                if ai_unavailable:
+                    sim_ok = _download_report(page, external_id, "similarity", sim_report)
+                    ai_ok = False
+                else:
+                    ai_ok, sim_ok = _download_both_reports(page, external_id, ai_report, sim_report)
             except Exception as exc:  # noqa: BLE001
                 print(f"[plagdetect] report download attempt {attempt} failed: {exc}", flush=True)
                 ai_ok, sim_ok = False, False
-            if ai_ok and sim_ok:
+            if sim_ok and (ai_ok or ai_unavailable):
                 break
             print(
                 f"[plagdetect] report download incomplete "
-                f"(ai={ai_ok}, similarity={sim_ok}) — retry {attempt}/3",
+                f"(ai={ai_ok}, similarity={sim_ok}, ai_unavailable={bool(ai_unavailable)}) "
+                f"— retry {attempt}/3",
                 flush=True,
             )
             page.wait_for_timeout(1500)
@@ -1487,6 +1594,7 @@ def submit_check(
         "similarity_display": sim_parsed["display"],
         "ai_score": ai_parsed["numeric"],
         "ai_score_display": ai_parsed["display"],
+        "ai_unavailable": ai_unavailable,
         "ai_report_path": str(ai_report.resolve()) if ai_ok else None,
         "similarity_report_path": str(sim_report.resolve()) if sim_ok else None,
         "elapsed_seconds": elapsed,

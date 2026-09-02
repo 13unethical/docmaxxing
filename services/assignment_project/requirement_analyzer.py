@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from formatter.document_io import extract_text_from_document_bytes
-from services.check_requirements import parse_word_count_spec
 from services.assignment_pipeline.models import utc_now
 from services.assignment_llm import (
     STAGE_REQUIREMENT_ANALYSIS,
@@ -25,6 +24,8 @@ from services.assignment_project.models import (
     RequirementJSON,
     RubricCriterion,
 )
+from services.assignment_spec.word_count_statement import text_asks_to_state_word_count
+from services.check_requirements import parse_word_count_spec
 
 
 @dataclass
@@ -81,6 +82,13 @@ class GeminiRequirementAnalyzer:
                         for item in normalized.get("missing_information", [])
                         if "word count" not in item.lower()
                     ]
+            if not normalized.get("state_word_count"):
+                brief_blob = "\n".join(
+                    str(sections.get(key) or "")
+                    for key in ("assignment_brief", "rubric", "lecture_notes", "uploaded_files")
+                )
+                if text_asks_to_state_word_count(brief_blob):
+                    normalized["state_word_count"] = True
             # Fill missing per-section budgets from brief text (e.g. "Introduction – 100 words").
             local_budgets = _extract_section_word_budgets_from_sources(sections)
             merged_budgets = dict(normalized.get("section_word_budgets") or {})
@@ -110,6 +118,7 @@ class GeminiRequirementAnalyzer:
                 difficulty=normalized.get("difficulty"),
                 academic_level=normalized.get("academic_level"),
                 missing_information=normalized.get("missing_information", []),
+                state_word_count=bool(normalized.get("state_word_count")),
                 analyzer_version=self.VERSION,
                 analyzed_at=utc_now(),
             )
@@ -146,7 +155,7 @@ def _requirement_system_prompt() -> str:
         "Return one strict JSON object only, no markdown, no code fences, no commentary. "
         "Required top-level keys: assignment_type, title, word_count, citation_style, "
         "required_sections, section_word_budgets, rubric, learning_outcomes, minimum_sources, "
-        "formatting, deadline, difficulty, academic_level, missing_information. "
+        "formatting, deadline, difficulty, academic_level, missing_information, state_word_count. "
         "word_count and minimum_sources must be integers or null; never use descriptive text for them. "
         "academic_level must be exactly one of: 'high_school', 'undergraduate', "
         "'postgraduate', 'phd' (infer from wording like module code, 'Level 7', "
@@ -166,6 +175,9 @@ def _requirement_system_prompt() -> str:
         "→ word_count = the UPPER bound of the range (550, 2200, 1200). "
         "4) Only set word_count to null if no numeric length limit appears anywhere; "
         "then list 'word count' in missing_information. "
+        "state_word_count is a boolean: true ONLY if the brief or rubric tells the student "
+        "to state, indicate, include, or print the word count on the paper, cover, or "
+        "front page. A length limit like '2000 words' is NOT that instruction — set false. "
         "Do not invent a default length. Do not use essay-length defaults. "
         "SECTION WORD BUDGETS (critical): "
         "If the brief assigns per-section limits like 'Introduction – 100 words', "
@@ -334,6 +346,14 @@ def _coerce_section_word_budgets(raw: Any) -> dict[str, int]:
     return out
 
 
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None or value == "":
+        return False
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+
 def _coerce_word_count_value(word_count: Any) -> int | None:
     """Turn Gemini word_count (int, '2000', '500-550', 'about 1500 words') into an int."""
     if word_count is None or isinstance(word_count, bool):
@@ -390,6 +410,7 @@ def _normalize_requirement_json(raw: dict[str, Any]) -> dict[str, Any]:
     difficulty = pick("difficulty")
     academic_level = pick("academic_level", "academicLevel", "level")
     missing_information = pick("missing_information", "missingInformation")
+    state_word_count = pick("state_word_count", "stateWordCount")
 
     if not isinstance(required_sections, list):
         raise ValueError("required_sections must be an array")
@@ -461,6 +482,7 @@ def _normalize_requirement_json(raw: dict[str, Any]) -> dict[str, Any]:
         "difficulty": str(difficulty) if difficulty not in (None, "") else None,
         "academic_level": _normalize_academic_level(academic_level),
         "missing_information": [str(v) for v in missing_information if str(v).strip()],
+        "state_word_count": _coerce_bool(state_word_count),
     }
 
 

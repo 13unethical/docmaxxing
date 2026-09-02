@@ -70,7 +70,7 @@ window.WSTourSteps = [
     id: "humanize-run",
     title: "Step 2 — run humanization",
     body:
-      "When you're ready, click Humanize marked selections. Costs 10 credits per call. Success shows green highlights; failures are refunded.",
+      "When you're ready, click Humanize marked selections. Costs 25 credits per call. Success shows green highlights; failures are refunded.",
     target: "[data-tour='humanize-run']",
     tab: "humanize",
     placement: "left",

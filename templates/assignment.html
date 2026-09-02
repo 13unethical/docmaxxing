@@ -5,7 +5,7 @@
 {% block guest_auth_reason %}Sign up free to analyse your brief, see pricing, and track progress in one place.{% endblock %}
 {% block title %}{{ seo.title }}{% endblock %}
 {% block tools_content %}
-{% include "_tool_landing_hero.html" %}
+<h1 class="sr-only">{{ seo.h1 }}</h1>
 <div class="asg-chat" data-assignment-page data-dm-tour-page="assignment" data-tour="asg-page">
   <div class="asg-drop-overlay" data-asg-drop-overlay hidden>
     <div class="asg-drop-overlay-inner">
@@ -109,5 +109,5 @@
 </div>
 {% endblock %}
 {% block tools_scripts %}
-<script src="{{ url_for('static', filename='assignment-page.js') }}?v=20260828-retry"></script>
+<script src="{{ url_for('static', filename='assignment-page.js') }}?v=20260831-asg-grow"></script>
 {% endblock %}

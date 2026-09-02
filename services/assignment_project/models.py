@@ -103,6 +103,7 @@ class RequirementJSON:
     difficulty: str | None = None
     academic_level: str | None = None
     missing_information: list[str] = field(default_factory=list)
+    state_word_count: bool = False
     analyzer_version: str = "mock-1.0"
     analyzed_at: datetime | None = None
 
@@ -125,6 +126,7 @@ class RequirementJSON:
             "difficulty": self.difficulty,
             "academic_level": self.academic_level,
             "missing_information": list(self.missing_information),
+            "state_word_count": bool(self.state_word_count),
             "analyzer_version": self.analyzer_version,
             "analyzed_at": self.analyzed_at.isoformat() if self.analyzed_at else None,
         }
@@ -157,6 +159,7 @@ class RequirementJSON:
             difficulty=data.get("difficulty"),
             academic_level=data.get("academic_level"),
             missing_information=list(data.get("missing_information") or []),
+            state_word_count=bool(data.get("state_word_count")),
             analyzer_version=str(data.get("analyzer_version") or "mock-1.0"),
             analyzed_at=analyzed_at,
         )

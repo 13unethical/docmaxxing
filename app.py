@@ -9,7 +9,7 @@ from pathlib import Path
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(Path(__file__).resolve().parent / ".env")
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=True)
 except ImportError:
     pass
 
@@ -1928,7 +1928,23 @@ def references():
 @economy_auth.email_verified_required(allow_guest_preview=True)
 def workspace():
     """Full document workspace — editor, humanize, AI, cite, comments."""
-    return render_template("workspace.html", nav_active="workspace")
+    from services.economy.pricing import FEATURE_COSTS
+    from services.economy.site_settings import humanize_credit_cost
+
+    pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
+    base_cost = int(pricing["original_price"])
+    discount_percent = int(pricing["discount_percent"] or 0)
+    is_discount_active = bool(pricing["discount_active"]) and discount_percent > 0
+    discounted_cost = int(pricing["charged"])
+    return render_template(
+        "workspace.html",
+        nav_active="workspace",
+        humanize_cost=discounted_cost if is_discount_active else base_cost,
+        base_cost=base_cost,
+        is_discount_active=is_discount_active,
+        discount_percent=discount_percent,
+        discounted_cost=discounted_cost,
+    )
 
 
 @app.route("/presentation")
@@ -4974,6 +4990,36 @@ def api_turnitin_request_highlights(submission_id: str):
     row = turnitin_service.store.get_for_user(submission_id, user_id)
     if row is None:
         return jsonify({"success": False, "error": "Not found"}), 404
+    provider = (row.get("meta") or {}).get("provider") or "plagdetect"
+    if provider == "turnitin":
+        if row.get("status") != "completed":
+            return jsonify({"success": False, "error": "Wait for the check to finish first."}), 400
+        if not row.get("external_id"):
+            return jsonify({"success": False, "error": "Turnitin submission id missing."}), 400
+        hl_status = (row.get("highlights_status") or "").strip().lower()
+        if hl_status in ("queued", "running"):
+            return jsonify({"success": False, "error": "AI Highlights already in progress."}), 409
+        if row.get("has_highlights_report"):
+            return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
+        try:
+            started = turnitin_service.start_tca_highlights(
+                submission_id=submission_id,
+                user_id=user_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            turnitin_service.store.update(submission_id, highlights_status="failed")
+            app.logger.exception("turnitin/highlights TCA failed")
+            return jsonify({"success": False, "error": f"Could not start highlights: {exc}"}), 500
+        updated = turnitin_service.store.get_for_user(submission_id, user_id)
+        return jsonify(
+            {
+                "success": True,
+                "submission_id": submission_id,
+                "highlights_status": "running",
+                "viewer_url": (started or {}).get("viewer_url"),
+                "report": _turnitin_row_api(updated or row),
+            }
+        )
     if row.get("status") != "completed":
         return jsonify({"success": False, "error": "Wait for the check to finish first."}), 400
     if not row.get("external_id"):
@@ -4986,6 +5032,40 @@ def api_turnitin_request_highlights(submission_id: str):
         return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
 
     meta = row.get("meta") or {}
+    if turnitin_service.uses_plagdetect_http(row):
+        ai_display = str(meta.get("ai_score_display") or "")
+        ai_score = row.get("ai_score")
+        try:
+            ai_num = float(ai_score) if ai_score is not None else None
+        except (TypeError, ValueError):
+            ai_num = None
+        if (
+            row.get("ai_highlights") is None
+            and ai_display != "*%"
+            and not (ai_num is not None and ai_num > 0)
+        ):
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "AI Highlights need a non-zero AI score (or *%).",
+                }
+            ), 400
+        try:
+            turnitin_service.start_plagdetect_api_highlights(submission_id=submission_id)
+        except Exception as exc:  # noqa: BLE001
+            turnitin_service.store.update(submission_id, highlights_status="failed")
+            app.logger.exception("turnitin/highlights PlagDetect API failed")
+            return jsonify({"success": False, "error": f"Could not start highlights: {exc}"}), 500
+        updated = turnitin_service.store.get_for_user(submission_id, user_id)
+        return jsonify(
+            {
+                "success": True,
+                "submission_id": submission_id,
+                "highlights_status": "running",
+                "report": _turnitin_row_api(updated or row),
+            }
+        )
+
     # Allow re-fetch when score exists but PDF is missing.
     if row.get("ai_highlights") is not None and not row.get("has_highlights_report"):
         pass
@@ -5051,7 +5131,20 @@ def api_turnitin_fetch_reports(submission_id: str):
     if row.get("status") != "completed":
         return jsonify({"success": False, "error": "Wait for the check to finish first."}), 400
     if not row.get("external_id"):
-        return jsonify({"success": False, "error": "PlagDetect submission id missing."}), 400
+        return jsonify({"success": False, "error": "Submission id missing."}), 400
+    provider = (row.get("meta") or {}).get("provider") or "plagdetect"
+    if provider == "turnitin":
+        if row.get("has_similarity_report"):
+            return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
+        try:
+            turnitin_service.fetch_tca_similarity_pdf(submission_id)
+        except Exception as exc:  # noqa: BLE001
+            app.logger.exception("turnitin/fetch-reports TCA failed")
+            return jsonify(
+                {"success": False, "error": f"Could not download Turnitin PDF: {exc}"}
+            ), 500
+        updated = turnitin_service.store.get_for_user(submission_id, user_id)
+        return jsonify({"success": True, "report": _turnitin_row_api(updated or row)})
 
     body = request.get_json(silent=True) or {}
     want_sim = body.get("similarity", True)
@@ -5064,6 +5157,22 @@ def api_turnitin_fetch_reports(submission_id: str):
 
     if not fetch_similarity and not fetch_ai and not fetch_highlights:
         return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
+
+    if turnitin_service.uses_plagdetect_http(row):
+        try:
+            turnitin_service.fetch_plagdetect_api_reports(
+                submission_id,
+                fetch_similarity=fetch_similarity,
+                fetch_ai=fetch_ai,
+                fetch_highlights=fetch_highlights,
+            )
+        except Exception as exc:  # noqa: BLE001
+            app.logger.exception("turnitin/fetch-reports PlagDetect API failed")
+            return jsonify(
+                {"success": False, "error": f"Could not download PlagDetect PDF: {exc}"}
+            ), 500
+        updated = turnitin_service.store.get_for_user(submission_id, user_id)
+        return jsonify({"success": True, "report": _turnitin_row_api(updated or row)})
 
     try:
         from services.browser.providers import plagdetect as pd
@@ -5135,7 +5244,10 @@ def api_turnitin_report_download(submission_id: str, kind: str):
 @app.post("/api/turnitin/check")
 @economy_auth.email_verified_required
 def api_turnitin_check():
-    """Upload a document, charge coins, and queue a PlagDetect browser job."""
+    """Upload a document, charge coins, and run PlagDetect API or Turnitin."""
+    from services.plagdetect_api import prefer_plagdetect_api
+    from services.turnitin_api import prefer_official_api
+
     user_id = economy_auth.current_user_id()
     f = request.files.get("file")
     if f is None or not f.filename:
@@ -5152,27 +5264,11 @@ def api_turnitin_check():
         return charged
     user_id, _tx = charged
 
+    use_tca = prefer_official_api()
+    use_pd_api = (not use_tca) and prefer_plagdetect_api()
+    job_id = None
     try:
-        from services.browser.providers import plagdetect as pd
-
-        pd._validate_urls()
         upload_path = turnitin_service.save_upload(submission_id, filename, f.read())
-        report_dir = str(turnitin_service.report_dir(submission_id))
-        ensure_engine_started()
-        from services.browser.jobs.retry import MAX_RETRIES
-
-        job = job_manager.create(
-            "plagdetect",
-            "check",
-            {
-                "file_path": upload_path,
-                "exclude_bibliography": exclude_bibliography,
-                "exclude_quotes": exclude_quotes,
-                "report_dir": report_dir,
-                "submission_id": submission_id,
-            },
-            max_retries=MAX_RETRIES,
-        )
         turnitin_service.store.create(
             submission_id=submission_id,
             user_id=user_id,
@@ -5180,17 +5276,64 @@ def api_turnitin_check():
             upload_path=upload_path,
             exclude_bibliography=exclude_bibliography,
             exclude_quotes=exclude_quotes,
-            job_id=job.id,
+            job_id=None,
         )
-        turnitin_service.watch_job(
-            submission_id=submission_id,
-            job_id=job.id,
-            user_id=user_id,
-            cost=cost,
-            job_manager=job_manager,
-            wallet=wallet,
-            refund_fn=_refund_safe,
-        )
+        if use_tca:
+            turnitin_service.store.update(
+                submission_id,
+                meta_json=json.dumps({"provider": "turnitin"}),
+            )
+            turnitin_service.start_tca_check(
+                submission_id=submission_id,
+                user_id=user_id,
+                cost=cost,
+                refund_fn=_refund_safe,
+            )
+        elif use_pd_api:
+            turnitin_service.store.update(
+                submission_id,
+                meta_json=json.dumps({"provider": "plagdetect", "transport": "api"}),
+            )
+            turnitin_service.start_plagdetect_api_check(
+                submission_id=submission_id,
+                user_id=user_id,
+                cost=cost,
+                refund_fn=_refund_safe,
+            )
+        else:
+            from services.browser.providers import plagdetect as pd
+            from services.browser.jobs.retry import MAX_RETRIES
+
+            pd._validate_urls()
+            report_dir = str(turnitin_service.report_dir(submission_id))
+            ensure_engine_started()
+            job = job_manager.create(
+                "plagdetect",
+                "check",
+                {
+                    "file_path": upload_path,
+                    "exclude_bibliography": exclude_bibliography,
+                    "exclude_quotes": exclude_quotes,
+                    "report_dir": report_dir,
+                    "submission_id": submission_id,
+                },
+                max_retries=MAX_RETRIES,
+            )
+            job_id = job.id
+            turnitin_service.store.update(
+                submission_id,
+                job_id=job.id,
+                meta_json=json.dumps({"provider": "plagdetect", "transport": "browser"}),
+            )
+            turnitin_service.watch_job(
+                submission_id=submission_id,
+                job_id=job.id,
+                user_id=user_id,
+                cost=cost,
+                job_manager=job_manager,
+                wallet=wallet,
+                refund_fn=_refund_safe,
+            )
     except Exception as exc:  # noqa: BLE001
         _refund_safe(user_id, cost, "turnitin", ref_id=submission_id)
         app.logger.exception("turnitin/check failed")
@@ -5200,8 +5343,8 @@ def api_turnitin_check():
         user_id,
         feature=FEATURE_TURNITIN,
         credits_used=cost,
-        provider="PlagDetect",
-        request_id=job.id,
+        provider="Turnitin" if use_tca else "PlagDetect",
+        request_id=job_id or submission_id,
     )
 
     return jsonify(
@@ -5210,7 +5353,8 @@ def api_turnitin_check():
             "submission_id": submission_id,
             "filename": filename,
             "status": "queued",
-            "job_id": job.id,
+            "job_id": job_id,
+            "provider": "turnitin" if use_tca else "plagdetect",
             "coins_charged": cost,
             "balance": wallet.get_balance(user_id),
         }

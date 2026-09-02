@@ -52,4 +52,15 @@ jobs:
             bash scripts/patch_nginx_timeouts.sh || true
             echo "Deployed $(git rev-parse --short HEAD)"
             echo "Storage: $(grep PROJECT_STORAGE_DIR .env || true)"
+            if grep -qE '^TURNITIN_API_KEY=.+' .env && grep -qE '^TURNITIN_API_SECRET=.+' .env; then
+              echo "PlagDetect API credentials: present"
+            else
+              echo "WARNING: TURNITIN_API_KEY/SECRET missing — Turnitin stays on browser automation"
+            fi
+            if grep -qE '^TURNITIN_USE_TCA=1' .env; then
+              echo "WARNING: TURNITIN_USE_TCA=1 — official TCA path, not PlagDetect HTTP"
+            fi
+            if grep -qE '^TURNITIN_USE_BROWSER=1' .env; then
+              echo "WARNING: TURNITIN_USE_BROWSER=1 — forcing Chrome fallback"
+            fi
             ls -la /root/docmaxxing/data/assignment-trace.log || true

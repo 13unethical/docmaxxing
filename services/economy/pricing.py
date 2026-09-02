@@ -37,7 +37,7 @@ USD_TO_COINS: int = _env_int("USD_TO_COINS", 100)
 # Flat / base costs in credits, keyed by feature id.
 # ``detect`` is overridden dynamically via word_count (1 credit / 100 words, min 1).
 FEATURE_COSTS: dict[str, int] = {
-    "humanize": _env_int("COST_HUMANIZE", 200),
+    "humanize": _env_int("COST_HUMANIZE", 25),
     "detect": _env_int("COST_DETECT", 1),
     "check": _env_int("COST_CHECK", 20),
     "cite": _env_int("COST_CITE", 2),

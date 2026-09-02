@@ -8,6 +8,20 @@ from services.assignment_formatting import (
     AssignmentFormatEngine,
     _overrides_from_requirement,
 )
+from services.assignment_spec.word_count_statement import (
+    requirement_asks_to_state_word_count,
+    text_asks_to_state_word_count,
+)
+
+
+def test_length_limit_is_not_an_instruction_to_print_word_count() -> None:
+    assert text_asks_to_state_word_count("Write an essay of 2000 words using APA.") is False
+    assert requirement_asks_to_state_word_count({"word_count": 2000}) is False
+
+
+def test_cover_instruction_is_detected() -> None:
+    assert text_asks_to_state_word_count("Please state the word count on the cover.") is True
+    assert requirement_asks_to_state_word_count({"state_word_count": True}) is True
 
 
 def _draft() -> dict:
@@ -86,6 +100,7 @@ def test_assignment_has_no_hardcoded_spacing_default(tmp_path, monkeypatch) -> N
     assert ieee["profile_summary"]["line_spacing"] == 1.0
     assert harvard["profile_summary"]["page_number_position"] == "bottom_center"
     assert ieee["profile_summary"]["page_number_position"] == "bottom_center"
+    assert "Word count:" not in (harvard.get("plain_text") or "")
     apa = AssignmentFormatEngine().format_draft(
         draft=_draft(),
         requirement_json={"citation_style": "apa7"},
@@ -108,3 +123,49 @@ def test_assignment_notices_reach_project_result(tmp_path, monkeypatch) -> None:
     assert notices
     assert any(n.get("field") == "alignment" for n in notices)
     assert any(n.get("severity") == "deviation" for n in notices)
+
+
+def test_word_count_line_only_when_brief_asks(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("PROJECT_STORAGE_DIR", str(tmp_path))
+    engine = AssignmentFormatEngine()
+    silent = engine.format_draft(
+        draft=_draft(),
+        requirement_json={"citation_style": "harvard", "word_count": 2000},
+        project_id="proj-wc-silent",
+    )
+    assert not (silent.get("plain_text") or "").lstrip().startswith("Word count:")
+
+    asked = engine.format_draft(
+        draft=_draft(),
+        requirement_json={
+            "citation_style": "harvard",
+            "word_count": 2000,
+            "state_word_count": True,
+        },
+        project_id="proj-wc-asked",
+    )
+    assert (asked.get("plain_text") or "").lstrip().startswith("Word count:")
+
+    rubric_asked = engine.format_draft(
+        draft=_draft(),
+        requirement_json={
+            "citation_style": "harvard",
+            "rubric": [
+                {
+                    "criterion": "Presentation",
+                    "description": "State the word count on the cover page.",
+                }
+            ],
+        },
+        project_id="proj-wc-rubric",
+    )
+    assert (rubric_asked.get("plain_text") or "").lstrip().startswith("Word count:")
+
+    leftover = dict(_draft())
+    leftover["content"] = "Word count: 8\n\n## Introduction\n\nBody paragraph about coastal risk and policy.\n"
+    stripped = engine.format_draft(
+        draft=leftover,
+        requirement_json={"citation_style": "harvard"},
+        project_id="proj-wc-strip",
+    )
+    assert not (stripped.get("plain_text") or "").lstrip().startswith("Word count:")

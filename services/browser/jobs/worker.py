@@ -161,7 +161,9 @@ class BrowserWorker(threading.Thread):
 
                 result = self._run_with_timeout(job, lambda: self._dispatch(job), timeout=self._timeout_for(job))
 
-                if isinstance(result, dict) and result.get("success"):
+                if isinstance(result, dict) and (
+                    result.get("success") or result.get("similarity") is not None
+                ):
                     self._jobs.log(job, "Result received", "success")
                     self._jobs.complete(job, result)
                     return
@@ -171,7 +173,9 @@ class BrowserWorker(threading.Thread):
                 if code == "LOGIN_REQUIRED":
                     self._jobs.log(job, "Result received", "LOGIN_REQUIRED")
                     message = (result or {}).get("message") or "LOGIN_REQUIRED"
-                    self._jobs.fail(job, message, code="LOGIN_REQUIRED")
+                    self._jobs.fail(
+                        job, message, code="LOGIN_REQUIRED", result=result if isinstance(result, dict) else None
+                    )
                     return
                 if code == "NO_CHANGE":
                     # StealthWriter produced no change (daily limit / already human).
@@ -180,12 +184,18 @@ class BrowserWorker(threading.Thread):
                     message = (result or {}).get("message") or "NO_CHANGE"
                     self._jobs.fail(job, message, code="NO_CHANGE")
                     return
-                # e.g. "text is required" — not retryable.
-                self._jobs.fail(job, str(code), code="ERROR")
+                # e.g. PlagDetect row Failed — keep external_id so we do not refund a used slot.
+                self._jobs.fail(
+                    job,
+                    str(code),
+                    code="ERROR",
+                    result=result if isinstance(result, dict) else None,
+                )
                 return
 
             except JobTimeout:
-                exc: BaseException = JobTimeout(f"exceeded {self._job_timeout}s")
+                limit = self._timeout_for(job)
+                exc: BaseException = JobTimeout(f"exceeded {limit}s")
                 code = "TIMEOUT"
                 retryable = True
                 details = None
@@ -200,7 +210,13 @@ class BrowserWorker(threading.Thread):
                 return
 
             if (not retryable) or attempt >= max_attempts:
-                self._jobs.fail(job, str(exc), code=code, details=details)
+                self._jobs.fail(
+                    job,
+                    str(exc),
+                    code=code,
+                    details=details,
+                    result=self._plagdetect_job_result(job),
+                )
                 return
 
             step = escalation_for_attempt(attempt)
@@ -213,6 +229,24 @@ class BrowserWorker(threading.Thread):
             )
             self._jobs.update_status(job, JobStatus.RETRYING, progress=f"recovery: {step}")
             self._escalate(step, job)
+
+    def _plagdetect_job_result(self, job: Job) -> dict[str, Any] | None:
+        """Keep the PlagDetect submission id on failure so the watcher does not refund."""
+        if job.provider != "plagdetect":
+            return None
+        sid = str((job.payload or {}).get("submission_id") or "").strip()
+        if not sid:
+            return None
+        try:
+            from services.browser.providers.plagdetect import _load_checkpoint
+
+            cp = _load_checkpoint(sid) or {}
+        except Exception:  # noqa: BLE001
+            return None
+        ext = str(cp.get("external_id") or "").strip()
+        if not ext:
+            return None
+        return {"external_id": ext, "success": False}
 
     def _dispatch(self, job: Job) -> dict[str, Any]:
         """Invoke the UNMODIFIED provider workflow for this job."""

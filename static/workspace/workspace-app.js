@@ -17,7 +17,7 @@
   var TOUR_KEY = "docmaxxing_ws_tour_done";
   var HUMANIZE_URL = "/api/browser/providers/stealthwriter/humanize";
   var MAX_WORDS_PER_CALL = 5000;
-  var HUMANIZE_COST = Mock.HUMANIZE_COST || 10;
+  var HUMANIZE_COST = Number(root.getAttribute("data-humanize-cost")) || Mock.HUMANIZE_COST || 25;
   var DETECT_CREDITS_PER_100 = Mock.DETECT_CREDITS_PER_100 || 1;
   var DETECT_WORDS_UNIT = Mock.DETECT_WORDS_UNIT || 100;
   var MARK_TOKEN = function (i) { return "⟦WS:" + i + "⟧"; };

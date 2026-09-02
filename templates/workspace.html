@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="{{ url_for('static', filename='workspace.css') }}?v=20260813-scroll-scope" />
 
-<div class="ws" data-workspace data-tour="editor-page">
+<div class="ws" data-workspace data-tour="editor-page" data-humanize-cost="{{ humanize_cost }}">
 
   <!-- ============================ LANDING / DOCUMENT PICKER ============================ -->
   <section class="ws-landing" data-ws-landing hidden>
@@ -322,7 +322,7 @@
 </div>
 {% endblock %}
 {% block tools_scripts %}
-<script src="{{ url_for('static', filename='workspace/mock-services.js') }}?v=20260805-shell"></script>
-<script src="{{ url_for('static', filename='workspace/tour-steps.js') }}?v=20260805-shell"></script>
-<script src="{{ url_for('static', filename='workspace/workspace-app.js') }}?v=20260813-dm-states"></script>
+<script src="{{ url_for('static', filename='workspace/mock-services.js') }}?v=20260901-hz-25"></script>
+<script src="{{ url_for('static', filename='workspace/tour-steps.js') }}?v=20260901-hz-25"></script>
+<script src="{{ url_for('static', filename='workspace/workspace-app.js') }}?v=20260901-hz-25"></script>
 {% endblock %}

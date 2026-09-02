@@ -118,6 +118,7 @@ def test_normalize_keeps_section_word_budgets():
     normalized = _normalize_requirement_json(raw)
     assert normalized["section_word_budgets"]["Introduction"] == 100
     assert normalized["section_word_budgets"]["Reflection"] == 300
+    assert normalized["state_word_count"] is False
 
 
 def test_required_sections_dict_strings_become_clean_titles():

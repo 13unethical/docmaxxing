@@ -26,6 +26,10 @@ from formatter_v2.spec import (
 )
 from services.assignment_pipeline.models import utc_now
 from services.assignment_spec.validate import count_body_words, count_words
+from services.assignment_spec.word_count_statement import (
+    LEADING_WORD_COUNT_LINE,
+    requirement_asks_to_state_word_count,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -304,9 +308,12 @@ class AssignmentFormatEngine:
         title = str(draft.get("title") or requirement_json.get("title") or "Assignment")
         content = str(draft.get("content") or "")
         body_words = int(draft.get("total_words") or count_body_words(content))
-        # Brief often requires stating word count on the front of the assessment.
-        if body_words > 0 and not re.search(r"(?im)^\s*word\s*count\s*:", content):
-            content = f"Word count: {body_words}\n\n{content.lstrip()}"
+        # Only print "Word count:" when the brief asks to state it on the paper.
+        if requirement_asks_to_state_word_count(requirement_json):
+            if body_words > 0 and not re.search(r"(?im)^\s*word\s*count\s*:", content):
+                content = f"Word count: {body_words}\n\n{content.lstrip()}"
+        else:
+            content = LEADING_WORD_COUNT_LINE.sub("", content, count=1)
 
         overrides, style_name = _overrides_from_requirement(requirement_json)
         profile = load_profile(style_name)
