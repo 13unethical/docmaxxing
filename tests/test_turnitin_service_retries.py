@@ -191,3 +191,32 @@ def test_no_refund_when_failed_job_carries_external_id(tmp_path, monkeypatch):
     row = store.get("sub-fail")
     assert row["external_id"] == "99911"
     assert row["status"] in ("completed", "running")
+
+
+def test_api_row_hides_operator_errors_from_users():
+    from services.turnitin_service.service import public_error_message
+
+    cred = (
+        "Turnitin rejected the API credentials (HTTP 403). These Key/Secret "
+        "pairs are often LTI keys. In Turnitin admin -> Integrations, use "
+        "Generate TCA Scope (not LTI Scope)."
+    )
+    out = public_error_message(cred, error_code="403")
+    assert out
+    assert "HTTP 403" not in out
+    assert ".env" not in out
+    assert "TCA" not in out
+    assert "TURNITIN_API" not in public_error_message(
+        "Turnitin API credentials were rejected. Check `TURNITIN_API_KEY`."
+    )
+    login = public_error_message(
+        "PlagDetect session is not logged in. Set PLAGDETECT_EMAIL in .env.",
+        error_code="LOGIN_REQUIRED",
+    )
+    assert login
+    assert "PLAGDETECT" not in login
+    assert ".env" not in login
+    timeout = public_error_message(
+        "Timed out waiting for PlagDetect results.", error_code="TIMEOUT"
+    )
+    assert "timed out" in timeout.lower() or "too long" in timeout.lower()

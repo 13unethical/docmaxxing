@@ -82,34 +82,35 @@
 
   function humanizeServiceError(code, message) {
     var c = String(code || "");
-    if (c === "STALE_PAGE") {
-      return {
-        body: "The checker session closed before your file was sent. Your credits weren’t charged. Try again.",
-        detail: c,
-      };
-    }
-    if (c === "LOGIN_REQUIRED") {
-      return {
-        body: "The checking service isn’t signed in right now. Your credits weren’t charged. Try again in a moment.",
-        detail: c,
-      };
-    }
     var msg = String(message || "");
+    var blob = (c + " " + msg).toLowerCase();
+    var unavailable =
+      "The checker is temporarily unavailable. Please try again in a few minutes.";
+    var timeout =
+      "This check took too long. Credits were refunded if it didn’t finish. Try again.";
+    var generic =
+      "We couldn’t finish this check. Credits were refunded if it didn’t complete. Try again.";
+    if (c === "LOGIN_REQUIRED" || /not logged in|credentials|api key|\.env|http 40/i.test(blob)) {
+      return { body: unavailable, detail: "" };
+    }
+    if (c === "STALE_PAGE" || /browser has been closed|stale/i.test(blob)) {
+      return { body: generic, detail: "" };
+    }
+    if (c === "TIMEOUT" || /timed out|timeout/i.test(blob)) {
+      return { body: timeout, detail: "" };
+    }
     if (/INSUFFICIENT|not enough/i.test(msg) || c === "INSUFFICIENT_COINS") {
       return null;
     }
-    if (/Target page, context or browser has been closed/i.test(msg)) {
-      return {
-        body: "The checker session closed before your file was sent. Your credits weren’t charged. Try again.",
-        detail: c || "STALE_PAGE",
-      };
+    if (
+      /turnitin_|plagdetect_|tca |lti |\/api\/browser|generate tca/i.test(blob)
+    ) {
+      return { body: unavailable, detail: "" };
     }
-    return {
-      body: msg && !/^[A-Z][A-Z0-9_]+$/.test(msg)
-        ? msg
-        : "We couldn’t finish this check. Your credits weren’t charged if the upload never started. Try again.",
-      detail: c && c !== msg ? c : (/^[A-Z][A-Z0-9_]+$/.test(msg) ? msg : ""),
-    };
+    if (msg && msg.length <= 160 && msg.indexOf("`") < 0 && msg.indexOf("/") < 0) {
+      return { body: msg, detail: "" };
+    }
+    return { body: generic, detail: "" };
   }
 
   function showSubmitError(body, detail, onRetry) {
@@ -520,7 +521,7 @@
       );
       if (human) {
         setStatusText(human.body + " Credits were refunded if the check did not finish.");
-        showSubmitError(human.body, human.detail, function () {
+        showSubmitError(human.body, "", function () {
           if (els.fileInput) els.fileInput.click();
         });
       }
@@ -571,7 +572,7 @@
       } else {
         acc.lastError = {
           body: "Submission failed. Please try again.",
-          detail: code || ("HTTP " + r.status),
+          detail: "",
         };
       }
       return acc;
@@ -681,7 +682,7 @@
                   acc.failCount += 1;
                   showSubmitError(
                     "Sign in to run a Turnitin check. Nothing was charged.",
-                    "AUTH_REQUIRED"
+                    ""
                   );
                   return acc;
                 });
@@ -797,7 +798,7 @@
           showSubmitError(
             (human && human.body) ||
               "Couldn’t start AI Highlights. Nothing extra was charged.",
-            (human && human.detail) || msg || ("HTTP " + r.status)
+            ""
           );
           if (typeof setStatusText === "function") setStatusText("");
           return;

@@ -24,6 +24,58 @@ _TRANSIENT_JOB_CODES = frozenset(
     }
 )
 
+_USER_CHECK_FAILED = (
+    "We couldn’t finish this check. Credits were refunded if it didn’t complete. Try again."
+)
+_USER_CHECK_UNAVAILABLE = (
+    "The checker is temporarily unavailable. Please try again in a few minutes."
+)
+_USER_CHECK_TIMEOUT = (
+    "This check took too long. Credits were refunded if it didn’t finish. Try again."
+)
+_INTERNAL_ERROR_MARKERS = (
+    "turnitin_api",
+    "plagdetect_",
+    ".env",
+    "http 40",
+    "http 50",
+    "tca ",
+    "lti ",
+    "api key",
+    "api secret",
+    "x-api-",
+    "/api/browser",
+    "app-us.turnitin",
+    "credentials",
+    "generate tca",
+    "login_required",
+    "chrome",
+    "playwright",
+)
+
+
+def public_error_message(raw: str | None, *, error_code: str | None = None) -> str | None:
+    """User-facing check error. Operator diagnostics stay in the database."""
+    text = str(raw or "").strip()
+    if not text and not error_code:
+        return None
+    blob = f"{error_code or ''} {text}".lower()
+    code = str(error_code or "").strip().upper()
+    if code == "LOGIN_REQUIRED" or "not logged in" in blob or "credentials" in blob:
+        return _USER_CHECK_UNAVAILABLE
+    if code == "TIMEOUT" or "timed out" in blob or "timeout" in blob:
+        return _USER_CHECK_TIMEOUT
+    if any(marker in blob for marker in _INTERNAL_ERROR_MARKERS):
+        return _USER_CHECK_UNAVAILABLE
+    if code in _TRANSIENT_JOB_CODES:
+        return _USER_CHECK_FAILED
+    if text and not any(ch.isalpha() for ch in text):
+        return _USER_CHECK_FAILED
+    # Keep short, already-human copy (no paths, env vars, or HTTP dumps).
+    if text and len(text) <= 160 and "`" not in text and "/" not in text:
+        return text
+    return _USER_CHECK_FAILED
+
 
 class TurnitinService:
     def __init__(self, store: TurnitinStore | None = None) -> None:
@@ -129,7 +181,10 @@ class TurnitinService:
             "hasAiReport": bool(row.get("has_ai_report")),
             "hasHighlightsReport": bool(row.get("has_highlights_report")),
             "highlightsStatus": row.get("highlights_status"),
-            "errorMessage": row.get("error_message"),
+            "errorMessage": public_error_message(
+                row.get("error_message"),
+                error_code=str(meta.get("error_code") or "") or None,
+            ),
             "externalId": row.get("external_id"),
             "aiUnavailable": meta.get("ai_unavailable") or None,
             "provider": meta.get("provider") or "plagdetect",
