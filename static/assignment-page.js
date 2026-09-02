@@ -663,6 +663,19 @@
       state.busy || (!(state.pendingFiles && state.pendingFiles.length) && !hasNote);
   }
 
+  function clearComposer() {
+    var note = $("[data-asg-note]");
+    var fileInput = $("[data-asg-files]");
+    state.pendingFiles = [];
+    if (fileInput) fileInput.value = "";
+    if (note) {
+      note.value = "";
+      autosizeComposer(note);
+    }
+    renderChips();
+    syncSendEnabled();
+  }
+
   function beginNewBriefSession() {
     resetProjectState();
     state.composerMode = "brief";
@@ -1519,11 +1532,17 @@
     return "upload";
   }
 
-  async function uploadProject() {
+  async function uploadProject(filesOverride, noteOverride) {
     var form = new FormData();
-    var files = collectUploadFiles();
+    var files =
+      filesOverride && filesOverride.length
+        ? filesOverride.map(function (f) {
+            return f && f.file ? f : { file: f };
+          })
+        : collectUploadFiles();
     var noteEl = $("[data-asg-note]");
-    var note = noteEl ? noteEl.value.trim() : "";
+    var note =
+      noteOverride != null ? String(noteOverride).trim() : noteEl ? noteEl.value.trim() : "";
     // Prefer legacy field names so the server always stores an assignment_brief.
     files.forEach(function (entry, idx) {
       var f = entry.file;
@@ -1590,14 +1609,9 @@
             : "") + (noteSnapshot ? "<p>" + esc(noteSnapshot) + "</p>" : "")
         );
         resetProjectState();
-        state.pendingFiles = filesSnapshot.slice();
-        if (noteEl) {
-          noteEl.value = noteSnapshot;
-          autosizeComposer(noteEl);
-        }
+        clearComposer();
         upsertBubble("status", "assistant", "<p>Uploading and analyzing…</p>");
-        await uploadProject();
-        // Keep chips until price is ready; clear after success path below.
+        await uploadProject(filesSnapshot, noteSnapshot);
       }
       upsertBubble("status", "assistant", "<p>Analyzing your requirements…</p>");
       await analyzeRequirements();
@@ -1605,12 +1619,7 @@
       await calculatePrice();
       var statusBubble = document.querySelector('[data-kind="status"]');
       if (statusBubble) statusBubble.remove();
-      state.pendingFiles = [];
-      renderChips();
-      if (noteEl) {
-        noteEl.value = "";
-        autosizeComposer(noteEl);
-      }
+      clearComposer();
       setBusy(false);
       setStage("price");
     } catch (err) {
@@ -1622,6 +1631,7 @@
         autosizeComposer(noteEl);
       }
       setBusy(false);
+      syncSendEnabled();
       throw err;
     }
   }
@@ -1933,6 +1943,10 @@
     var input = $("[data-asg-note]") || $("[data-asg-revchat-input]");
     var message = input && input.value ? input.value.trim() : "";
     if (!message) return;
+    if (input) {
+      input.value = "";
+      autosizeComposer(input);
+    }
     setBusy(true);
     setStatus("Applying your revisions…");
     try {
@@ -1940,10 +1954,6 @@
         method: "POST",
         body: JSON.stringify({ message: message }),
       });
-      if (input) {
-        input.value = "";
-        autosizeComposer(input);
-      }
       if (payload.delivery_package) state.deliveryPackage = payload.delivery_package;
       renderRevisionChat(payload);
       setStatus("Revision applied. Download the updated file.");
@@ -1964,6 +1974,10 @@
         dl._bound = true;
       }
     } catch (err) {
+      if (input && message && !input.value.trim()) {
+        input.value = message;
+        autosizeComposer(input);
+      }
       fail(err, function () {
         return sendRevisionChat();
       });

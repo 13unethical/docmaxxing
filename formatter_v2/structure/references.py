@@ -79,6 +79,22 @@ _SURNAME_INITIALS_RE = re.compile(
     r"^[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’\-]+,\s*[A-Z]\.(?:\s*[A-Z]\.)*"
 )
 _DOI_OR_URL_RE = re.compile(r"(?i)\bdoi\b|https?://")
+_PLACEHOLDER_NOTE_RE = re.compile(
+    r"\s*\((?:this\s+is\s+a\s+|a\s+)?placeholder\b[^)]*\)\.?",
+    re.IGNORECASE,
+)
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_MD_ITALIC_RE = re.compile(r"(?<!\*)\*([^*]+?)\*(?!\*)")
+_PERSON_ENTRY_START_RE = re.compile(
+    r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’\-]+,\s*[A-Z]\.(?:\s*[A-Z]\.)*"
+    r"(?:\s*(?:&|and)\s*[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’\-]+,\s*[A-Z]\.(?:\s*[A-Z]\.)*)*"
+    r"\s*\(\s*(?:19|20)\d{2}[a-z]?\s*\)"
+)
+_ORG_ENTRY_START_RE = re.compile(
+    r"[A-Z][A-Za-z0-9&'’\-]{2,}(?:\s+[A-Z][A-Za-z0-9&'’\-]+){0,8}"
+    r"\.\s*\(\s*(?:19|20)\d{2}[a-z]?\s*\)"
+)
+_NUMBERED_REF_PREFIX_ONLY_RE = re.compile(r"^(?:\[\d+\]|\d+[.)])$")
 
 
 def normalize_refs_heading(text: str) -> str:
@@ -168,6 +184,55 @@ def looks_like_reference_entry(
     return False
 
 
+def clean_reference_entry_text(text: str) -> str:
+    """Drop markdown markers and LLM placeholder notes from a bibliography line."""
+    cleaned = _PLACEHOLDER_NOTE_RE.sub("", text or "")
+    cleaned = _MD_BOLD_RE.sub(r"\1", cleaned)
+    cleaned = _MD_ITALIC_RE.sub(r"\1", cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    return cleaned.strip(" \t,;")
+
+
+def split_concatenated_reference_entries(text: str) -> list[str]:
+    """Split a glued bibliography blob into one APA/Harvard-style entry each."""
+    cleaned = clean_reference_entry_text(text)
+    if not cleaned:
+        return []
+    parts: list[str] = []
+    for line in cleaned.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts.extend(_split_inline_reference_entries(line))
+    return parts or ([cleaned] if cleaned else [])
+
+
+def _split_inline_reference_entries(text: str) -> list[str]:
+    starts = [0]
+    for match in _PERSON_ENTRY_START_RE.finditer(text):
+        _maybe_mark_entry_start(text, match.start(), starts)
+    for match in _ORG_ENTRY_START_RE.finditer(text):
+        _maybe_mark_entry_start(text, match.start(), starts)
+    unique = sorted({index for index in starts if 0 <= index < len(text)})
+    unique.append(len(text))
+    entries = [
+        text[unique[i] : unique[i + 1]].strip()
+        for i in range(len(unique) - 1)
+        if text[unique[i] : unique[i + 1]].strip()
+    ]
+    return entries or [text]
+
+
+def _maybe_mark_entry_start(text: str, index: int, starts: list[int]) -> None:
+    if index <= 0:
+        return
+    previous = text[:index].rstrip()
+    if _NUMBERED_REF_PREFIX_ONLY_RE.fullmatch(previous):
+        return
+    if previous.endswith((".", '."', ".”", ".'", ".’")):
+        starts.append(index)
+
+
 def find_heading_latch_index(texts: Sequence[str]) -> int | None:
     for index, text in enumerate(texts):
         if is_references_heading(text):
@@ -229,6 +294,21 @@ def _block_plain(block: Block) -> str:
     return str(block.text)
 
 
+def explode_reference_blocks(references: list[Block]) -> list[Block]:
+    """Turn concatenated REFERENCES_ENTRY paragraphs into one entry per block."""
+    out: list[Block] = []
+    for block in references:
+        if block.role != ParagraphRole.REFERENCES_ENTRY:
+            out.append(block)
+            continue
+        parts = split_concatenated_reference_entries(_block_plain(block))
+        if not parts:
+            continue
+        for part in parts:
+            out.append(Block(ParagraphRole.REFERENCES_ENTRY, part))
+    return out
+
+
 def apply_content_refs_latch(
     model: DocumentModel,
     paragraphs: Sequence[Paragraph | None] | None = None,
@@ -260,7 +340,7 @@ def apply_content_refs_latch(
         cover=model.cover,
         front_matter=list(model.front_matter),
         body=new_body,
-        references=list(model.references) + latched,
+        references=list(model.references) + explode_reference_blocks(latched),
         appendices=list(model.appendices),
     )
 
@@ -345,7 +425,7 @@ def split_body_and_references(
         role = role_for_body(stripped, para, is_first)
         body.append(Block(role, stripped))
 
-    return body, references
+    return body, explode_reference_blocks(references)
 
 
 def partition_blocks_by_references(
@@ -409,7 +489,7 @@ def partition_blocks_by_references(
 
         body.append(block)
 
-    return body, references
+    return body, explode_reference_blocks(references)
 
 
 def move_appendices_from_body(model: DocumentModel) -> DocumentModel:

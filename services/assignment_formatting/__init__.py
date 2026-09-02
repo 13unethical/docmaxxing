@@ -232,6 +232,28 @@ def _profile_summary(spec) -> dict[str, Any]:
     }
 
 
+def _heading_level_and_title(line: str) -> tuple[int, str] | None:
+    if line.startswith("## "):
+        return 2, line[3:].strip()
+    if line.startswith("# "):
+        return 1, line[2:].strip()
+    return None
+
+
+def _is_references_heading_title(title: str) -> bool:
+    from formatter_v2.structure.references import is_references_heading
+
+    return is_references_heading(title)
+
+
+def _add_reference_paragraphs(doc: Document, blob: str) -> None:
+    from formatter_v2.structure.references import split_concatenated_reference_entries
+
+    for entry in split_concatenated_reference_entries(blob):
+        if entry:
+            doc.add_paragraph(entry)
+
+
 def _docx_from_markdown(title: str, content: str) -> Document:
     """Build a docx from draft text.
 
@@ -240,10 +262,14 @@ def _docx_from_markdown(title: str, content: str) -> Document:
 
     Critical: a block that starts with ``## Heading`` followed by body on the next
     line must become Heading + Normal — never one giant Heading paragraph.
-    """
-    import re
 
+    References are the exception: each bibliographic entry must be its own
+    paragraph so hanging indent can apply.
+    """
     from docx.enum.text import WD_BREAK
+
+    from formatter.markdown_cleanup import clean_markdown_in_document
+    from formatter_v2.structure.references import is_refs_latch_breaker
 
     doc = Document()
     if title.strip():
@@ -251,12 +277,12 @@ def _docx_from_markdown(title: str, content: str) -> Document:
 
     text = re.sub(r"<!--\s*pagebreak\s*-->", "\n\n[[PAGEBREAK]]\n\n", content or "", flags=re.I)
     blocks = re.split(r"\n\s*\n", text)
+    in_references = False
     for block in blocks:
         raw = (block or "").strip()
         if not raw:
             continue
         if raw == "[[PAGEBREAK]]":
-            # Insert page break as a dedicated paragraph so refs start on a new page.
             p = doc.add_paragraph()
             run = p.add_run()
             run.add_break(WD_BREAK.PAGE)
@@ -265,31 +291,32 @@ def _docx_from_markdown(title: str, content: str) -> Document:
         if not lines:
             continue
 
-        # Heading-only line.
-        if len(lines) == 1 and lines[0].startswith("## "):
-            doc.add_heading(lines[0][3:].strip(), level=2)
-            continue
-        if len(lines) == 1 and lines[0].startswith("# "):
-            doc.add_heading(lines[0][2:].strip(), level=1)
-            continue
-
-        # Heading + body in the same block (single newline after ## Title).
-        if lines[0].startswith("## "):
-            doc.add_heading(lines[0][3:].strip(), level=2)
-            body = " ".join(lines[1:]).strip()
-            if body:
-                doc.add_paragraph(body)
-            continue
-        if lines[0].startswith("# "):
-            doc.add_heading(lines[0][2:].strip(), level=1)
-            body = " ".join(lines[1:]).strip()
-            if body:
-                doc.add_paragraph(body)
+        heading = _heading_level_and_title(lines[0])
+        if heading:
+            level, heading_title = heading
+            in_references = _is_references_heading_title(heading_title)
+            doc.add_heading(heading_title, level=level)
+            rest = "\n".join(lines[1:]).strip()
+            if rest:
+                if in_references:
+                    _add_reference_paragraphs(doc, rest)
+                else:
+                    doc.add_paragraph(" ".join(lines[1:]).strip())
             continue
 
-        # Soft-wrapped prose → one Normal paragraph.
+        if in_references:
+            if is_refs_latch_breaker(" ".join(lines)):
+                in_references = False
+                para_text = " ".join(lines)
+                doc.add_paragraph(para_text)
+            else:
+                _add_reference_paragraphs(doc, "\n".join(lines))
+            continue
+
         para_text = " ".join(lines)
         doc.add_paragraph(para_text)
+
+    clean_markdown_in_document(doc)
     return doc
 
 

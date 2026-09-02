@@ -397,3 +397,42 @@ def test_references_at_end_of_document_still_latch_all_entries() -> None:
         assert not any(
             b.role == ParagraphRole.REFERENCES_ENTRY for b in model.body
         )
+
+
+_MARKS_BLOB = (
+    "Donnelly, J. (2007). *Universal Human Rights in Theory and Practice*. Cornell University Press. "
+    "Marks, S. P. (2006). *Human Rights: A Brief Introduction*. "
+    "(This is a placeholder for a relevant work by Stephen P. Marks). "
+    "United Nations. (1948). *Universal Declaration of Human Rights*. "
+    "United Nations. (1966). *International Covenant on Civil and Political Rights*. "
+    "United Nations. (1966). *International Covenant on Economic, Social and Cultural Rights*."
+)
+
+
+def test_split_concatenated_marks_reading_list() -> None:
+    from formatter_v2.structure.references import split_concatenated_reference_entries
+
+    entries = split_concatenated_reference_entries(_MARKS_BLOB)
+    assert len(entries) == 5
+    assert entries[0].startswith("Donnelly, J. (2007).")
+    assert "Universal Human Rights in Theory and Practice" in entries[0]
+    assert "*" not in "".join(entries)
+    assert "placeholder" not in "".join(entries).lower()
+    assert entries[1].startswith("Marks, S. P. (2006).")
+    assert entries[2].startswith("United Nations. (1948).")
+    assert entries[3].startswith("United Nations. (1966).") and "Civil and Political" in entries[3]
+    assert entries[4].startswith("United Nations. (1966).") and "Economic, Social" in entries[4]
+
+
+def test_concatenated_references_paragraph_explodes_in_extractor() -> None:
+    lines = [
+        "Question 1",
+        "Human rights are entitlements grounded in dignity.",
+        "References",
+        _MARKS_BLOB,
+    ]
+    model = HeuristicsExtractor().extract(lines)
+    entries = [b.text for b in model.references if b.role == ParagraphRole.REFERENCES_ENTRY]
+    assert len(entries) == 5
+    assert all("*" not in text for text in entries)
+    assert all("placeholder" not in text.lower() for text in entries)

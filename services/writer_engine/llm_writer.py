@@ -202,7 +202,9 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "revision": revision,
     }
     global_word_count = payload.requirement_json.get("word_count") or payload.blueprint.get("total_target_words")
-    return (
+    from services.assignment_spec.validate import is_references_section_title
+
+    rules = (
         "You are an academic section writer optimizing for the UPLOADED GRADING RUBRIC.\n"
         "STRICT RULES:\n"
         "1) Use ONLY the provided blueprint section structure and purpose.\n"
@@ -227,9 +229,19 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "If comparison is mandatory for this section, compare two concepts across fields.\n"
         "12) Never include forbidden content listed in the grade contract.\n"
         "13) warnings should flag any requirement/rubric conflict or missing input.\n"
-        "14) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n\n"
-        f"INPUT:\n{json.dumps(blueprint_guard, ensure_ascii=False)}"
+        "14) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n"
     )
+    if is_references_section_title(section.title):
+        rules += (
+            "15) REFERENCES SECTION: put EACH bibliographic entry on its own line, "
+            "separated by a blank line. Do not glue entries into one paragraph.\n"
+            "16) Do not use markdown (*italics*, **bold**, or # headings) in citations. "
+            "Write book and article titles as plain text.\n"
+            "17) Never write placeholder notes such as '(This is a placeholder for a relevant work…)'. "
+            "If the brief names a required reading, cite that work with a complete real reference "
+            "(author, year, title, publisher or journal). Do not invent fake sources.\n"
+        )
+    return rules + f"INPUT:\n{json.dumps(blueprint_guard, ensure_ascii=False)}"
 
 
 def _blueprint_section(blueprint: dict[str, Any], section_id: str) -> dict[str, Any]:

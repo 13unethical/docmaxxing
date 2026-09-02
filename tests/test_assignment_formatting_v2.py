@@ -169,3 +169,27 @@ def test_word_count_line_only_when_brief_asks(tmp_path, monkeypatch) -> None:
         project_id="proj-wc-strip",
     )
     assert not (stripped.get("plain_text") or "").lstrip().startswith("Word count:")
+
+
+def test_docx_from_markdown_splits_glued_references() -> None:
+    from services.assignment_formatting import _docx_from_markdown
+
+    blob = (
+        "Donnelly, J. (2007). *Universal Human Rights in Theory and Practice*. Cornell University Press. "
+        "Marks, S. P. (2006). *Human Rights: A Brief Introduction*. "
+        "(This is a placeholder for a relevant work by Stephen P. Marks). "
+        "United Nations. (1948). *Universal Declaration of Human Rights*."
+    )
+    doc = _docx_from_markdown(
+        "Human Rights Journal",
+        "## References\n" + blob,
+    )
+    texts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    assert "References" in texts
+    assert any(t.startswith("Donnelly, J. (2007).") for t in texts)
+    assert any(t.startswith("Marks, S. P. (2006).") for t in texts)
+    assert any(t.startswith("United Nations. (1948).") for t in texts)
+    assert not any("*" in t for t in texts if t != "Human Rights Journal")
+    assert not any("placeholder" in t.lower() for t in texts)
+    glued = next((t for t in texts if "Donnelly" in t and "Marks" in t), None)
+    assert glued is None

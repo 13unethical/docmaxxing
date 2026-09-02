@@ -646,7 +646,14 @@ def _apply_references_section(
         return body
     # Page-break hint for formatters that look for this HTML comment / marker.
     page_break = "\n\n<!-- pagebreak -->\n\n" if on_new_page else "\n\n"
-    ref_block = page_break + "## " + heading + "\n\n" + "\n\n".join(references)
+    from formatter_v2.structure.references import split_concatenated_reference_entries
+
+    entries: list[str] = []
+    for item in references:
+        entries.extend(split_concatenated_reference_entries(str(item)))
+    if not entries:
+        return body
+    ref_block = page_break + "## " + heading + "\n\n" + "\n\n".join(entries)
     return body.rstrip() + ref_block + "\n"
 
 
