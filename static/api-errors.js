@@ -15,6 +15,8 @@
     REGISTER_REQUIRED: "Create a free account to continue.",
     EMAIL_NOT_VERIFIED: "Please verify your email to continue.",
     INSUFFICIENT_COINS: "Not enough credits for this step.",
+    GENERATION_PAUSED: "Something went wrong. Please try again.",
+    TIMEOUT: "This is taking longer than usual. Please tap Retry.",
   };
 
   function isInternalCode(value) {

@@ -2,7 +2,7 @@
 {% set include_umami_analytics = false %}
 {% block title %}Admin Panel — DocMaxxing{% endblock %}
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v=20260813-adm-kpi-tokens" />
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v=20260903-preflight" />
 {% endblock %}
 {% block content %}
 <div class="adm-page" data-admin-page>
@@ -39,6 +39,21 @@
         <p class="adm-today-value" data-adm-today-turnitin>0</p>
       </article>
     </div>
+
+    <section class="adm-preflight" data-adm-preflight>
+      <div class="adm-analytics-head">
+        <div>
+          <h3 class="adm-section-subtitle">Assignment pipeline check</h3>
+          <p class="adm-promo-lede">
+            Does not write an assignment and does not spend credits. Keys are checked instantly.
+            “Check Humanizer session” only looks at the StealthWriter tab — it does not run Humanize.
+          </p>
+        </div>
+        <button type="button" class="adm-btn adm-btn--ghost" data-adm-preflight-run>Check Humanizer session</button>
+      </div>
+      <p class="adm-status" data-adm-preflight-status role="status" aria-live="polite"></p>
+      <ul class="adm-preflight-list" data-adm-preflight-list></ul>
+    </section>
 
     <form class="adm-promo-form" data-adm-promo-form>
       <h3 class="adm-promo-title">Humanizer discount</h3>
@@ -385,5 +400,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='admin-page.js') }}?v=20260813-set-balance-v2"></script>
+<script src="{{ url_for('static', filename='admin-page.js') }}?v=20260903-preflight"></script>
 {% endblock %}

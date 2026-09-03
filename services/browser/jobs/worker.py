@@ -176,6 +176,11 @@ class BrowserWorker(threading.Thread):
                     self._jobs.fail(
                         job, message, code="LOGIN_REQUIRED", result=result if isinstance(result, dict) else None
                     )
+                    self._notify_critical_failure(
+                        job,
+                        code="LOGIN_REQUIRED",
+                        error=message,
+                    )
                     return
                 if code == "NO_CHANGE":
                     # StealthWriter produced no change (daily limit / already human).
@@ -217,6 +222,7 @@ class BrowserWorker(threading.Thread):
                     details=details,
                     result=self._plagdetect_job_result(job),
                 )
+                self._notify_critical_failure(job, code=code, error=str(exc))
                 return
 
             step = escalation_for_attempt(attempt)
@@ -229,6 +235,24 @@ class BrowserWorker(threading.Thread):
             )
             self._jobs.update_status(job, JobStatus.RETRYING, progress=f"recovery: {step}")
             self._escalate(step, job)
+
+    def _notify_critical_failure(self, job: Job, *, code: str, error: str) -> None:
+        if (code or "").upper() not in {"LOGIN_REQUIRED", "TIMEOUT"}:
+            return
+        try:
+            from services.alerts.telegram_alerts import notify_browser_job_failure
+
+            notify_browser_job_failure(
+                provider=job.provider,
+                operation=job.operation,
+                code=str(code or "ERROR"),
+                error=error,
+                job_id=job.id,
+                attempts=int(job.attempts or 0),
+                max_attempts=int(job.max_retries + 1),
+            )
+        except Exception:  # noqa: BLE001
+            pass
 
     def _plagdetect_job_result(self, job: Job) -> dict[str, Any] | None:
         """Keep the PlagDetect submission id on failure so the watcher does not refund."""

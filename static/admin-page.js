@@ -81,6 +81,9 @@
     todayHumanizerUsed: root.querySelector("[data-adm-today-humanizer-used]"),
     todayHumanizerLimit: root.querySelector("[data-adm-today-humanizer-limit]"),
     todayTurnitin: root.querySelector("[data-adm-today-turnitin]"),
+    preflightStatus: root.querySelector("[data-adm-preflight-status]"),
+    preflightList: root.querySelector("[data-adm-preflight-list]"),
+    preflightRun: root.querySelector("[data-adm-preflight-run]"),
     promoForm: root.querySelector("[data-adm-promo-form]"),
     promoActive: root.querySelector("[data-adm-promo-active]"),
     promoPercent: root.querySelector("[data-adm-promo-percent]"),
@@ -378,6 +381,70 @@
       })
       .catch(function () {
         setWithdrawalsStatus("Network error.", true);
+      });
+  }
+
+  function setPreflightStatus(msg, isError) {
+    if (!els.preflightStatus) return;
+    els.preflightStatus.textContent = msg || "";
+    els.preflightStatus.classList.toggle("adm-status--error", !!isError);
+  }
+
+  function renderPreflight(data) {
+    if (!els.preflightList) return;
+    var checks = (data && data.checks) || [];
+    els.preflightList.innerHTML = checks
+      .map(function (c) {
+        var state = c.ok === true ? "ok" : c.ok === false ? "fail" : "skip";
+        var mark = state === "ok" ? "OK" : state === "fail" ? "FAIL" : "SKIP";
+        return (
+          "<li class=\"adm-preflight-item adm-preflight-item--" +
+          state +
+          "\"><strong>" +
+          mark +
+          "</strong> " +
+          String(c.label || c.id || "") +
+          " — " +
+          String(c.detail || "") +
+          "</li>"
+        );
+      })
+      .join("");
+  }
+
+  function loadPreflight(probeBrowser) {
+    var qs = probeBrowser ? "?browser=1" : "";
+    setPreflightStatus(probeBrowser ? "Checking StealthWriter tab…" : "Checking API keys…");
+    return fetch("/api/admin/pipeline-preflight" + qs, { credentials: "same-origin" })
+      .then(function (r) {
+        return r.json().then(function (data) {
+          return { ok: r.ok, data: data };
+        });
+      })
+      .then(function (r) {
+        if (!r.ok || (r.data && r.data.success === false)) {
+          setPreflightStatus(
+            (r.data && (r.data.error || r.data.message)) || "Preflight failed.",
+            true
+          );
+          return;
+        }
+        renderPreflight(r.data);
+        if (r.data && r.data.ok) {
+          setPreflightStatus(
+            probeBrowser
+              ? "Keys + Humanizer session checked. No assignment was generated."
+              : "API keys look OK. Click “Check Humanizer session” for StealthWriter login."
+          );
+        } else {
+          setPreflightStatus(
+            "Something is not ready: " + ((r.data && r.data.blocking) || []).join(", "),
+            true
+          );
+        }
+      })
+      .catch(function () {
+        setPreflightStatus("Network error.", true);
       });
   }
 
@@ -1465,6 +1532,11 @@
       loadTodayUsage();
     });
   }
+  if (els.preflightRun) {
+    els.preflightRun.addEventListener("click", function () {
+      loadPreflight(true);
+    });
+  }
   if (els.promoForm) {
     els.promoForm.addEventListener("submit", savePromo);
   }
@@ -1497,6 +1569,7 @@
   }
 
   loadTodayUsage();
+  loadPreflight(false);
   loadAnalytics();
   loadDatasetStats();
   loadWithdrawals();

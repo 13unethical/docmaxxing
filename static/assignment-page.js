@@ -236,22 +236,32 @@
   function isTransientApiError(err) {
     if (!err || isAuthError(err)) return false;
     var code = String(err.code || "").toUpperCase();
-    if (code === "INSUFFICIENT_COINS" || code === "EMAIL_NOT_VERIFIED") return false;
+    if (
+      code === "INSUFFICIENT_COINS" ||
+      code === "EMAIL_NOT_VERIFIED" ||
+      code === "GENERATION_PAUSED" ||
+      code === "LOGIN_REQUIRED" ||
+      code === "NO_CHANGE"
+    ) {
+      return false;
+    }
+    if (err.payload && err.payload.retryable === false) return false;
     var msg = String(err.message || "").toLowerCase();
     if (msg.indexOf("payment") >= 0 || msg.indexOf("not enough credit") >= 0) return false;
     if (msg.indexOf("project not found") >= 0 || msg.indexOf("stale session") >= 0) return false;
+    if (msg.indexOf("something went wrong") >= 0) return false;
+    if (msg.indexOf("not signed in") >= 0) return false;
     return (
       msg.indexOf("network error") >= 0 ||
       msg.indexOf("timed out") >= 0 ||
-      msg.indexOf("try again") >= 0 ||
       msg.indexOf("failed on the server") >= 0 ||
       msg.indexOf("writing step failed") >= 0 ||
-      msg.indexOf("server error") >= 0 ||
+      msg.indexOf("server error (") >= 0 ||
       msg.indexOf("502") >= 0 ||
       msg.indexOf("503") >= 0 ||
       msg.indexOf("504") >= 0 ||
       msg.indexOf("detection step failed") >= 0 ||
-      msg.indexOf("temporary") >= 0
+      msg.indexOf("temporary server") >= 0
     );
   }
 
@@ -278,7 +288,7 @@
         if (!isTransientApiError(err) || attempt >= maxAttempts) throw err;
         if (inProductionFlow()) {
           setProductionNotice(
-            "Brief connection hiccup — retrying (" + attempt + "/" + maxAttempts + ")…"
+            "Still working — retrying (" + attempt + "/" + maxAttempts + ")…"
           );
         }
         await sleep(700 * attempt + Math.floor(Math.random() * 300));
@@ -301,16 +311,39 @@
     );
   }
 
+  function looksLikeInternalPipeline(text) {
+    var low = String(text || "").toLowerCase();
+    return (
+      low.indexOf("stealth") >= 0 ||
+      low.indexOf("humanizer") >= 0 ||
+      low.indexOf("humanise") >= 0 ||
+      low.indexOf("playwright") >= 0 ||
+      low.indexOf("signed in on the server") >= 0 ||
+      low.indexOf("zerogpt") >= 0
+    );
+  }
+
   function userFacingError(err, fallback) {
+    var fb = fallback || "Something went wrong. Please try again.";
+    var raw = "";
     if (window.DMApiErrors) {
-      return window.DMApiErrors.userMessage(
+      raw = window.DMApiErrors.userMessage(
         (err && err.payload) || { message: err && err.message, error: err && err.code },
-        fallback || "Something went wrong. Please try again."
+        fb
       );
+    } else {
+      raw = (err && err.message) || fb;
     }
-    var msg = (err && err.message) || fallback || "Something went wrong. Please try again.";
-    if (/^[A-Z][A-Z0-9_]+$/.test(msg)) return fallback || "Something went wrong. Please try again.";
-    return msg;
+    if (/^[A-Z][A-Z0-9_]+$/.test(raw) || looksLikeInternalPipeline(raw)) return fb;
+    return raw || fb;
+  }
+
+  function throwHttpError(payload, fallback, extra) {
+    var err = new Error(userFacingError({ payload: payload }, fallback));
+    err.code = (payload && payload.error) || (extra && extra.code) || "";
+    err.payload = payload || {};
+    if (extra && extra.status) err.status = extra.status;
+    throw err;
   }
 
   async function api(url, options) {
@@ -329,9 +362,15 @@
       res = await fetch(url, fetchOpts);
     } catch (err) {
       if (err && err.name === "AbortError") {
-        throw new Error("This AI step timed out. Please click Retry.");
+        throwHttpError(
+          { error: "TIMEOUT", message: "This is taking longer than usual. Please tap Retry." },
+          "This is taking longer than usual. Please tap Retry."
+        );
       }
-      throw new Error("Network error. Please check your connection and retry.");
+      throwHttpError(
+        { error: "NETWORK_ERROR", message: "Network error. Please check your connection and retry." },
+        "Network error. Please check your connection and retry."
+      );
     }
     var payload = await res.json().catch(function () { return {}; });
     if (!res.ok) {
@@ -347,29 +386,34 @@
         resetProjectState();
       }
       var msg = userFacingError({ payload: payload }, "");
-      if (!msg) msg = payload.error || "";
+      if (!msg || /^[A-Z][A-Z0-9_]+$/.test(msg)) {
+        msg = payload.message || "";
+      }
       if (res.status === 404 && !responseMeansProjectMissing(res, payload)) {
-        throw new Error(
-          msg ||
-          ("This step is unavailable (HTTP 404). Restart the server if you just updated the app, then click Retry.")
+        throwHttpError(
+          payload,
+          msg || "Something went wrong. Please try again.",
+          { status: res.status }
         );
       }
       if (res.status === 504) {
-        throw new Error(msg || "This AI step can take a few minutes. Please wait and click Retry.");
-      }
-      if (res.status >= 500) {
-        throw new Error(
-          msg ||
-          (isLongRunningStageUrl(url)
-            ? "This step hit a temporary server issue. Retrying usually fixes it."
-            : ("Server error (" + res.status + "). Please try again."))
+        throwHttpError(
+          payload,
+          msg || "This is taking longer than usual. Please tap Retry.",
+          { status: 504 }
         );
       }
-      var err = new Error(msg || ("HTTP " + res.status));
-      err.code = payload.error || "";
-      err.status = res.status;
-      err.payload = payload;
-      throw err;
+      if (res.status >= 500) {
+        throwHttpError(
+          payload,
+          msg ||
+            (isLongRunningStageUrl(url)
+              ? "Something went wrong. Please try again."
+              : ("Server error (" + res.status + "). Please try again.")),
+          { status: res.status }
+        );
+      }
+      throwHttpError(payload, msg || ("HTTP " + res.status), { status: res.status });
     }
     return payload;
   }
@@ -1058,10 +1102,10 @@
     var payload = err && err.payload;
     var productionPause = inProductionFlow();
     if (productionPause) {
-      message =
+        message =
         userFacingError(
           err,
-          "A brief connection issue paused this step. Tap Retry to continue — your progress is saved."
+          "Something went wrong. Please try again."
         ) || message;
     }
 
@@ -1805,7 +1849,7 @@
           break;
         }
         // Soft retry for transient ZeroGPT / network blips.
-        if (attempts < 3 && (msg.indexOf("try again") >= 0 || msg.indexOf("zerogpt") >= 0 || msg.indexOf("timed out") >= 0 || msg.indexOf("502") >= 0 || msg.indexOf("detection step failed") >= 0)) {
+        if (attempts < 3 && (msg.indexOf("zerogpt") >= 0 || msg.indexOf("timed out") >= 0 || msg.indexOf("502") >= 0 || msg.indexOf("detection step failed") >= 0 || msg.indexOf("network error") >= 0)) {
           await new Promise(function (resolve) { setTimeout(resolve, 800 * attempts); });
           continue;
         }

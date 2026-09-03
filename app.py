@@ -1100,6 +1100,44 @@ def api_admin_daily_stats():
         )
 
 
+@app.get("/api/admin/pipeline-preflight")
+@economy_auth.admin_required
+def api_admin_pipeline_preflight():
+    """Check assignment providers without generating a project or spending credits.
+
+    Query ``browser=1`` also snapshots the StealthWriter tab (no Humanize click).
+    """
+    from services.assignment_project.preflight import (
+        static_provider_checks,
+        with_stealthwriter_snapshot,
+    )
+
+    payload = static_provider_checks()
+    probe_browser = str(request.args.get("browser") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if not probe_browser:
+        payload["stealthwriter"] = {
+            "ok": None,
+            "skipped": True,
+            "humanize_not_run": True,
+        }
+        return jsonify({"success": True, **payload})
+
+    try:
+        ensure_engine_started()
+        from services.browser.providers.stealthwriter import StealthWriterProvider
+
+        snapshot = _browser_submit(lambda: StealthWriterProvider().health(), timeout=25)
+        payload = with_stealthwriter_snapshot(payload, snapshot)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("pipeline preflight stealthwriter probe failed")
+        payload = with_stealthwriter_snapshot(payload, None, error=str(exc))
+    return jsonify({"success": True, **payload})
+
+
 @app.patch("/api/admin/site-settings")
 @economy_auth.admin_required
 def api_admin_site_settings():
@@ -3865,9 +3903,9 @@ def api_debug_full_pipeline():
     try:
         project_id = _prepare_debug_project(payload)
     except Exception as exc:  # noqa: BLE001
-        return (
-            jsonify(
-                {
+            return (
+                jsonify(
+                    {
                     "success": False,
                     "project_id": None,
                     "total_time_ms": int((time.perf_counter() - started) * 1000),
@@ -4329,7 +4367,14 @@ def api_assignment_humanizer_advance(project_id: str):
     except KeyError:
         return jsonify({"error": "Humanizer session not found"}), 404
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 502
+        from services.humanizer_engine.client_errors import humanizer_fail_payload
+
+        app.logger.warning(
+            "assignment generation paused project_id=%s: %s",
+            project_id,
+            exc,
+        )
+        return jsonify(humanizer_fail_payload(exc)), 502
     try:
         from services.dataset_logger import log_humanization_event
 
@@ -5452,9 +5497,13 @@ def _send_telegram_text(text: str) -> tuple[dict[str, Any] | None, str | None, i
     """POST sendMessage. Returns (tg_json, error_message, http_status_on_error)."""
     token, chat_id = _telegram_credentials()
     if not token or not chat_id:
-        return None, "Telegram is not configured. Set TELEGRAM_TOKEN and CHAT_ID environment variables.", 503
+        return (
+            None,
+            "Telegram is not configured. Set TELEGRAM_TOKEN and CHAT_ID environment variables.",
+            503,
+        )
 
-    body = text if len(text) <= TELEGRAM_TEXT_MAX_LEN else text[: TELEGRAM_TEXT_MAX_LEN - 1] + "…"
+    body = text if len(text) <= TELEGRAM_TEXT_MAX_LEN else text[: TELEGRAM_TEXT_MAX_LEN - 1] + "..."
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     try:
         tg_res = requests.post(
@@ -5473,13 +5522,13 @@ def _send_telegram_text(text: str) -> tuple[dict[str, Any] | None, str | None, i
     except ValueError:
         return None, "Unexpected response from Telegram.", 502
 
-    if not tg_res.ok or not tg_data.get("ok"):
-        desc = tg_data.get("description") if isinstance(tg_data, dict) else None
-        app.logger.warning(
-            "feedback: Telegram API error %s — %s",
-            tg_res.status_code,
-            desc or (tg_res.text[:200] if tg_res.text else ""),
-        )
+        if not tg_res.ok or not tg_data.get("ok"):
+            desc = tg_data.get("description") if isinstance(tg_data, dict) else None
+            app.logger.warning(
+                "feedback: Telegram API error %s — %s",
+                tg_res.status_code,
+                desc or (tg_res.text[:200] if tg_res.text else ""),
+            )
         return None, "Could not deliver message.", 502
     return tg_data if isinstance(tg_data, dict) else {}, None, 200
 

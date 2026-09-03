@@ -38,8 +38,45 @@
 }
 
 [data-theme="dark"] .adm-today-card {
+  background: var(--surface-2);
   box-shadow: none;
 }
+
+.adm-preflight {
+  margin-top: 1.25rem;
+}
+
+.adm-preflight-list {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.adm-preflight-item {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface-1);
+  font-size: 0.9rem;
+}
+
+.adm-preflight-item strong {
+  display: inline-block;
+  min-width: 3.2rem;
+}
+
+.adm-preflight-item--ok strong { color: #15803d; }
+.adm-preflight-item--fail strong { color: #b91c1c; }
+.adm-preflight-item--skip strong { color: var(--muted); }
+
+[data-theme="dark"] .adm-preflight-item {
+  background: var(--surface-2);
+}
+[data-theme="dark"] .adm-preflight-item--ok strong { color: #4ade80; }
+[data-theme="dark"] .adm-preflight-item--fail strong { color: #f87171; }
 
 .adm-today-label {
   margin: 0;
