@@ -1,0 +1,15 @@
+[Unit]
+Description=DocMaxxing daily synthetic Humanizer training backfill
+After=network.target docmaxxing.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/docmaxxing
+EnvironmentFile=-/root/docmaxxing/.env
+# Consume only remaining shared Humanizer allowance within the reset window.
+# Idempotent per Asia/Tashkent day (daily_run_marker.json). No real-user export.
+ExecStart=/root/docmaxxing/venv/bin/python /root/docmaxxing/scripts/collect_daily_humanizer_training.py --execute --minutes-before-reset 10
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

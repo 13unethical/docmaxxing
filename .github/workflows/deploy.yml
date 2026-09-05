@@ -45,10 +45,12 @@ jobs:
             pip install -r requirements.txt
             install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service
             bash scripts/install_backup_timers.sh
+            bash scripts/install_humanizer_training_timer.sh
             systemctl daemon-reload
             systemctl enable docmaxxing
             systemctl restart docmaxxing
             systemctl is-active --quiet docmaxxing
+            systemctl is-enabled --quiet docmaxxing-humanizer-training-daily.timer
             bash scripts/patch_nginx_timeouts.sh || true
             echo "Deployed $(git rev-parse --short HEAD)"
             echo "Storage: $(grep PROJECT_STORAGE_DIR .env || true)"

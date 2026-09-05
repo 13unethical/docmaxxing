@@ -489,6 +489,18 @@ def _migrate_humanizer_dataset(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    cols = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(humanizer_dataset_logs)").fetchall()
+    }
+    if "training_eligible" not in cols:
+        try:
+            conn.execute(
+                "ALTER TABLE humanizer_dataset_logs ADD COLUMN training_eligible "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        except sqlite3.OperationalError:
+            pass
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_humanizer_dataset_source "
         "ON humanizer_dataset_logs(source, created_at DESC)"
@@ -496,6 +508,10 @@ def _migrate_humanizer_dataset(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_humanizer_dataset_user "
         "ON humanizer_dataset_logs(user_id, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_humanizer_dataset_eligible "
+        "ON humanizer_dataset_logs(training_eligible, source, created_at DESC)"
     )
     conn.execute(
         """

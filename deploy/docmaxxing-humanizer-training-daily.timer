@@ -1,0 +1,12 @@
+[Unit]
+Description=DocMaxxing daily synthetic Humanizer training backfill timer
+
+[Timer]
+# ~10 minutes before Asia/Tashkent 05:00 daily Humanizer reset
+# (script also enforces minutes-before-reset=10).
+OnCalendar=*-*-* 04:50:00 Asia/Tashkent
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

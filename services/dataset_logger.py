@@ -108,6 +108,20 @@ def ensure_dataset_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_humanizer_dataset_user "
             "ON humanizer_dataset_logs(user_id, created_at DESC)"
         )
+        # Explicit training eligibility (default 0). Existing rows stay ineligible.
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(humanizer_dataset_logs)").fetchall()
+        }
+        if "training_eligible" not in cols:
+            conn.execute(
+                "ALTER TABLE humanizer_dataset_logs ADD COLUMN training_eligible "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_humanizer_dataset_eligible "
+            "ON humanizer_dataset_logs(training_eligible, source, created_at DESC)"
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS detector_dataset_logs (
@@ -130,6 +144,13 @@ def ensure_dataset_schema() -> None:
             "CREATE INDEX IF NOT EXISTS idx_detector_dataset_user "
             "ON detector_dataset_logs(user_id, created_at DESC)"
         )
+    # Keep training_eligible column migrations in sync.
+    try:
+        from services.humanizer_training.consent import ensure_training_consent_schema
+
+        ensure_training_consent_schema()
+    except Exception:  # noqa: BLE001
+        logger.exception("training eligibility schema ensure failed")
 
 
 def _insert_humanizer_row(
@@ -138,16 +159,31 @@ def _insert_humanizer_row(
     source: str,
     original_text: str,
     humanized_text: str,
+    training_eligible: int = 0,
 ) -> None:
     with connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO humanizer_dataset_logs
-                (user_id, source, original_text, humanized_text)
-            VALUES (?, ?, ?, ?)
-            """,
-            (int(user_id), source, original_text, humanized_text),
-        )
+        cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(humanizer_dataset_logs)").fetchall()
+        }
+        if "training_eligible" in cols:
+            conn.execute(
+                """
+                INSERT INTO humanizer_dataset_logs
+                    (user_id, source, original_text, humanized_text, training_eligible)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (int(user_id), source, original_text, humanized_text, int(training_eligible)),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO humanizer_dataset_logs
+                    (user_id, source, original_text, humanized_text)
+                VALUES (?, ?, ?, ?)
+                """,
+                (int(user_id), source, original_text, humanized_text),
+            )
 
 
 def _insert_detector_row(
@@ -201,11 +237,20 @@ def log_humanization_event(
         def _run() -> None:
             try:
                 ensure_dataset_schema()
+                try:
+                    from services.humanizer_training.consent import (
+                        training_eligible_for_new_log,
+                    )
+
+                    eligible = training_eligible_for_new_log(uid, source=src)
+                except Exception:  # noqa: BLE001
+                    eligible = 0
                 _insert_humanizer_row(
                     user_id=uid,
                     source=src,
                     original_text=original,
                     humanized_text=humanized,
+                    training_eligible=eligible,
                 )
             except Exception:  # noqa: BLE001
                 logger.exception(
