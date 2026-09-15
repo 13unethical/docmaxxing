@@ -1,6 +1,12 @@
 """Site-wide settings + daily usage counters (economy SQLite).
 
-All daily boundaries use Asia/Tashkent (GMT+5).
+Timezone: Asia/Tashkent (GMT+5).
+
+Humanizer ``daily_stats`` rows (``humanizer_requests_count``, remaining,
+admin humanizer usage) use the same **05:00→05:00** period key as
+``services.humanizer_training.daily_budget`` (``humanizer_period_date_iso``).
+
+``today_tashkent_iso()`` remains calendar-midnight for non-humanizer callers.
 """
 
 from __future__ import annotations
@@ -30,7 +36,16 @@ def now_tashkent() -> datetime:
 
 
 def today_tashkent_iso() -> str:
+    """Calendar date in Asia/Tashkent (midnight boundary). Not the Humanizer quota period."""
     return now_tashkent().date().isoformat()
+
+
+def humanizer_stats_day_iso(*, now: datetime | None = None) -> str:
+    """Date key for Humanizer daily_stats — shared with daily_budget (05:00 period)."""
+    # Lazy import avoids circular import (daily_budget imports site_settings helpers).
+    from services.humanizer_training.daily_budget import humanizer_period_date_iso
+
+    return humanizer_period_date_iso(now=now)
 
 
 def _parse_hhmm(value: str | None) -> time:
@@ -213,10 +228,17 @@ def update_site_settings(**kwargs: Any) -> dict[str, Any]:
     return get_site_settings()
 
 
-def get_daily_stats(day: str | None = None) -> dict[str, Any]:
+def get_daily_stats(
+    day: str | None = None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Humanizer usage for one 05:00 Asia/Tashkent period (default: current period)."""
     with connect() as conn:
         ensure_schema(conn)
-        day = ensure_today_row(conn, day)
+        day = ensure_today_row(
+            conn, day if day is not None else humanizer_stats_day_iso(now=now)
+        )
         row = conn.execute(
             "SELECT * FROM daily_stats WHERE date = ?", (day,)
         ).fetchone()
@@ -245,7 +267,7 @@ def get_admin_dashboard_stats() -> dict[str, Any]:
             "discount": status,
         }
     except Exception as exc:  # noqa: BLE001
-        day = today_tashkent_iso()
+        day = humanizer_stats_day_iso()
         return {
             "today": {
                 "date": day,
@@ -265,15 +287,22 @@ def get_admin_dashboard_stats() -> dict[str, Any]:
         }
 
 
-def increment_daily_stat(field: str, *, day: str | None = None, by: int = 1) -> dict[str, Any]:
+def increment_daily_stat(
+    field: str,
+    *,
+    day: str | None = None,
+    by: int = 1,
+    now: datetime | None = None,
+) -> dict[str, Any]:
     if field not in ("humanizer_requests_count",):
         raise ValueError(f"Unsupported daily stat field: {field}")
     by = int(by)
+    resolved = day if day is not None else humanizer_stats_day_iso(now=now)
     if by == 0:
-        return get_daily_stats(day)
+        return get_daily_stats(resolved)
     with connect() as conn:
         ensure_schema(conn)
-        day = ensure_today_row(conn, day)
+        day = ensure_today_row(conn, resolved)
         conn.execute(
             f"UPDATE daily_stats SET {field} = COALESCE({field}, 0) + ? WHERE date = ?",
             (by, day),
@@ -281,8 +310,13 @@ def increment_daily_stat(field: str, *, day: str | None = None, by: int = 1) -> 
     return get_daily_stats(day)
 
 
-def record_humanizer_success() -> dict[str, Any]:
-    return increment_daily_stat("humanizer_requests_count")
+def record_humanizer_success(
+    *,
+    day: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Increment Humanizer usage on the shared 05:00 period key (same as budget)."""
+    return increment_daily_stat("humanizer_requests_count", day=day, now=now)
 
 
 def decrement_turnitin_global_balance(*, by: int = 1) -> dict[str, Any]:

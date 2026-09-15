@@ -51,6 +51,7 @@ jobs:
             systemctl restart docmaxxing
             systemctl is-active --quiet docmaxxing
             systemctl is-enabled --quiet docmaxxing-humanizer-training-daily.timer
+            systemctl is-enabled --quiet docmaxxing-humanizer-training-export.timer
             bash scripts/patch_nginx_timeouts.sh || true
             echo "Deployed $(git rev-parse --short HEAD)"
             echo "Storage: $(grep PROJECT_STORAGE_DIR .env || true)"

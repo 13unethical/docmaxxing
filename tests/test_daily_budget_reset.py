@@ -13,6 +13,9 @@ from services.economy.site_settings import (
     TZ_TASHKENT,
     ensure_schema,
     ensure_today_row,
+    get_daily_stats,
+    humanizer_stats_day_iso,
+    record_humanizer_success,
     update_site_settings,
 )
 from services.humanizer_training.consent import ensure_training_consent_schema
@@ -20,6 +23,7 @@ from services.humanizer_training.daily_budget import (
     get_humanizer_daily_budget,
     humanizer_period_date_iso,
     next_reset_at,
+    reserve_humanizer_slots,
     within_reset_window,
 )
 
@@ -111,3 +115,50 @@ def test_window_ten_minutes_before_0500(economy):
     far = _tashkent(2026, 9, 5, 4, 40, 0)
     budget_far = get_humanizer_daily_budget(now=far)
     assert within_reset_window(minutes_before_reset=10, now=far, budget=budget_far) is False
+
+
+def test_0450_uses_previous_humanizer_period(economy):
+    now = _tashkent(2026, 9, 15, 4, 50, 0)
+    assert humanizer_period_date_iso(now=now) == "2026-09-14"
+    assert humanizer_stats_day_iso(now=now) == "2026-09-14"
+    # Calendar midnight key differs before 05:00 — stats must not use it.
+    assert now.date().isoformat() == "2026-09-15"
+    assert humanizer_stats_day_iso(now=now) != now.date().isoformat()
+    stats = get_daily_stats(now=now)
+    assert stats["date"] == "2026-09-14"
+
+
+def test_0500_plus_uses_current_humanizer_period(economy):
+    now = _tashkent(2026, 9, 15, 5, 0, 0)
+    assert humanizer_period_date_iso(now=now) == "2026-09-15"
+    assert humanizer_stats_day_iso(now=now) == "2026-09-15"
+    stats = get_daily_stats(now=now)
+    assert stats["date"] == "2026-09-15"
+
+
+def test_record_humanizer_success_same_period_as_reserve(economy):
+    before = _tashkent(2026, 9, 15, 4, 50, 0)
+    period = humanizer_period_date_iso(now=before)
+    assert period == "2026-09-14"
+
+    reserved = reserve_humanizer_slots(3, now=before)
+    assert reserved.reserved == 3
+    assert reserved.budget.date == period
+
+    recorded = record_humanizer_success(now=before)
+    assert recorded["date"] == period
+    assert recorded["humanizer_requests_count"] == 4  # 3 reserved + 1 success
+
+    budget = get_humanizer_daily_budget(now=before)
+    assert budget.date == period
+    assert budget.used_today == 4
+    assert get_daily_stats(now=before)["humanizer_remaining"] == budget.remaining
+
+    after = _tashkent(2026, 9, 15, 5, 10, 0)
+    period_new = humanizer_period_date_iso(now=after)
+    assert period_new == "2026-09-15"
+    recorded_new = record_humanizer_success(now=after)
+    assert recorded_new["date"] == period_new
+    assert recorded_new["humanizer_requests_count"] == 1
+    # Previous period untouched by post-05:00 write
+    assert get_daily_stats(day=period)["humanizer_requests_count"] == 4

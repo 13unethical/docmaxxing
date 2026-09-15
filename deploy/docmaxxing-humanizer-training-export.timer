@@ -1,0 +1,13 @@
+[Unit]
+Description=DocMaxxing incremental real-user Humanizer training export timer
+
+[Timer]
+# After Asia/Tashkent 05:00 Humanizer period rollover; off-peak vs synthetic 04:50.
+OnCalendar=*-*-* 05:10:00 Asia/Tashkent
+Persistent=true
+AccuracySec=1min
+# Do not start a second export while a previous oneshot is still running.
+Unit=docmaxxing-humanizer-training-export.service
+
+[Install]
+WantedBy=timers.target

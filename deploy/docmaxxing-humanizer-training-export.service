@@ -1,0 +1,15 @@
+[Unit]
+Description=DocMaxxing incremental real-user Humanizer training export
+After=network.target docmaxxing.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/docmaxxing
+EnvironmentFile=-/root/docmaxxing/.env
+# Append-only export of new training_eligible=1 standalone/assignment rows.
+# Idempotent via export_checkpoint.json + records.jsonl dedupe. No Chrome/SW.
+ExecStart=/root/docmaxxing/venv/bin/python /root/docmaxxing/scripts/export_real_humanizer_training_data.py --incremental
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
