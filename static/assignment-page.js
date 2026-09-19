@@ -86,6 +86,7 @@
     extraFiles: [],
     busy: false,
     autoRunning: false,
+    writerAdvanceInFlight: false,
     retryAction: null,
     forceContinue: false,
     productionPeakPct: 0,
@@ -251,12 +252,30 @@
     if (msg.indexOf("project not found") >= 0 || msg.indexOf("stale session") >= 0) return false;
     if (msg.indexOf("something went wrong") >= 0) return false;
     if (msg.indexOf("not signed in") >= 0) return false;
+    // Hard credit depletion is not fixed by retry; rate-limit 429 is.
+    if (
+      msg.indexOf("credits are depleted") >= 0 ||
+      msg.indexOf("credit balance") >= 0 ||
+      msg.indexOf("prepayment credits") >= 0
+    ) {
+      return false;
+    }
+    var status = Number(err.status) || 0;
     return (
+      status === 429 ||
+      status === 502 ||
+      status === 503 ||
+      status === 504 ||
       msg.indexOf("network error") >= 0 ||
       msg.indexOf("timed out") >= 0 ||
+      msg.indexOf("taking longer than usual") >= 0 ||
       msg.indexOf("failed on the server") >= 0 ||
       msg.indexOf("writing step failed") >= 0 ||
       msg.indexOf("server error (") >= 0 ||
+      msg.indexOf("rate limit") >= 0 ||
+      msg.indexOf("too many requests") >= 0 ||
+      msg.indexOf("resource_exhausted") >= 0 ||
+      msg.indexOf(" 429") >= 0 ||
       msg.indexOf("502") >= 0 ||
       msg.indexOf("503") >= 0 ||
       msg.indexOf("504") >= 0 ||
@@ -279,19 +298,35 @@
     var maxAttempts = opts.maxAttempts != null ? opts.maxAttempts : LLM_MAX_ATTEMPTS;
     var lastErr;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      var heartbeat = null;
+      var startedAt = Date.now();
       try {
+        if (inProductionFlow() && isLongRunningStageUrl(url)) {
+          heartbeat = setInterval(function () {
+            var secs = Math.round((Date.now() - startedAt) / 1000);
+            if (secs < 15) return;
+            setProductionNotice(
+              "Still working on this step… " + secs + "s" +
+                (attempt > 1 ? " (retry " + attempt + "/" + maxAttempts + ")" : "")
+            );
+            updateProductionProgress(state.stage);
+          }, 5000);
+        }
         var result = await api(url, opts);
-        if (attempt > 1) setProductionNotice("");
+        if (attempt > 1 || heartbeat) setProductionNotice("");
         return result;
       } catch (err) {
         lastErr = err;
         if (!isTransientApiError(err) || attempt >= maxAttempts) throw err;
         if (inProductionFlow()) {
           setProductionNotice(
-            "Still working — retrying (" + attempt + "/" + maxAttempts + ")…"
+            "Temporary AI hiccup — retrying (" + attempt + "/" + maxAttempts + ")…"
           );
+          updateProductionProgress(state.stage);
         }
-        await sleep(700 * attempt + Math.floor(Math.random() * 300));
+        await sleep(1200 * attempt + Math.floor(Math.random() * 400));
+      } finally {
+        if (heartbeat) clearInterval(heartbeat);
       }
     }
     throw lastErr;
@@ -906,23 +941,46 @@
     });
   }
 
+  function productionStageLabel(stage) {
+    var key = stage || state.stage || "";
+    var map = {
+      research: "Research",
+      blueprint: "Blueprint",
+      writer: "Writing",
+      citations: "Citations",
+      humanizer: "Humanizing",
+      format: "Formatting",
+      review: "Academic review",
+      revision: "Revision",
+      validation: "Validation",
+      detection: "AI detection",
+      delivery: "Packaging",
+    };
+    return map[key] || "Working";
+  }
+
   function updateProductionProgress(stage) {
     if (state.deliveryPackage) {
       removeBubble("production");
       return;
     }
-    var raw = productionPercent(stage || state.stage);
+    var stageKey = stage || state.stage;
+    var raw = productionPercent(stageKey);
     var pct = Math.max(Number(state.productionPeakPct) || 0, Math.max(0, Math.min(100, raw)));
     state.productionPeakPct = pct;
     var fill = $("[data-asg-production-fill]");
     var label = $("[data-asg-production-pct]");
     if (fill) fill.style.width = pct + "%";
     if (label) label.textContent = pct + "%";
+    var stageText = productionStageLabel(stageKey);
     upsertBubble(
       "production",
       "assistant",
       '<div class="asg-prod-card">' +
         "<h3>Generating your assignment</h3>" +
+        '<p class="asg-production-stage">' +
+        stageText +
+        "</p>" +
         '<div class="asg-production-bar" aria-hidden="true"><div class="asg-production-bar-fill" style="width:' +
         pct +
         '%"></div></div>' +
@@ -1757,43 +1815,73 @@
   }
 
   async function advanceWriter() {
-    await ensureWriterSession();
+    if (state.writerAdvanceInFlight) {
+      throw new Error("Writing is already in progress. Please wait for the current section to finish.");
+    }
+    state.writerAdvanceInFlight = true;
     try {
-      state.writerSession = await apiLlm(projectUrl("/writer/advance"), {
-        method: "POST",
-        ...writerSessionBody(),
-      });
-    } catch (err) {
-      if (String(err.message || "").toLowerCase().indexOf("not found") >= 0) {
-        state.writerSession = null;
-        await ensureWriterSession();
+      await ensureWriterSession();
+      var cur =
+        state.writerSession &&
+        (state.writerSession.current_section ||
+          ((state.writerSession.sections || []).find(function (s) {
+            return s && s.id === state.writerSession.current_section_id;
+          }) ||
+            null));
+      var sectionTitle = (cur && (cur.title || cur.heading || cur.id)) || "next section";
+      var doneCount = ((state.writerSession && state.writerSession.completed_section_ids) || []).length;
+      var totalCount = ((state.writerSession && state.writerSession.sections) || []).length;
+      setProductionNotice(
+        "Writing " +
+          sectionTitle +
+          (totalCount ? " (" + doneCount + "/" + totalCount + ")" : "") +
+          "…"
+      );
+      updateProductionProgress("writer");
+      try {
+        // Never auto-retry advance: a timed-out/502 client retry races the still-running
+        // gunicorn worker and freezes progress at the same section.
         state.writerSession = await apiLlm(projectUrl("/writer/advance"), {
           method: "POST",
           ...writerSessionBody(),
+          maxAttempts: 1,
         });
-      } else {
-        throw err;
-      }
-    }
-    renderProgress();
-    if (writerSectionsComplete(state.writerSession)) {
-      try {
-        state.draft = await apiLlm(projectUrl("/writer/merge"), {
-          method: "POST",
-          ...writerSessionBody(),
-        });
-        state.writerSession.status = "merged";
       } catch (err) {
-        var mergeMsg = String(err && err.message || "");
-        if (/still in progress|sections remaining|before merge/i.test(mergeMsg)) {
-          if (state.writerSession) state.writerSession.status = "active";
-          return;
+        if (String(err.message || "").toLowerCase().indexOf("not found") >= 0) {
+          state.writerSession = null;
+          await ensureWriterSession();
+          state.writerSession = await apiLlm(projectUrl("/writer/advance"), {
+            method: "POST",
+            ...writerSessionBody(),
+            maxAttempts: 1,
+          });
+        } else {
+          throw err;
         }
-        throw err;
       }
-    } else if (state.writerSession.status === "completed") {
-      // Inconsistent snapshot — keep advancing instead of merging early.
-      state.writerSession.status = "active";
+      renderProgress();
+      if (writerSectionsComplete(state.writerSession)) {
+        try {
+          state.draft = await apiLlm(projectUrl("/writer/merge"), {
+            method: "POST",
+            ...writerSessionBody(),
+            maxAttempts: 1,
+          });
+          state.writerSession.status = "merged";
+        } catch (err) {
+          var mergeMsg = String(err && err.message || "");
+          if (/still in progress|sections remaining|before merge/i.test(mergeMsg)) {
+            if (state.writerSession) state.writerSession.status = "active";
+            return;
+          }
+          throw err;
+        }
+      } else if (state.writerSession.status === "completed") {
+        // Inconsistent snapshot — keep advancing instead of merging early.
+        state.writerSession.status = "active";
+      }
+    } finally {
+      state.writerAdvanceInFlight = false;
     }
   }
 
@@ -2104,6 +2192,15 @@
 
   async function advanceHumanizer() {
     await ensureHumanizer();
+    var paras = (state.humanizerSession && state.humanizerSession.paragraphs) || [];
+    var done = 0;
+    for (var i = 0; i < paras.length; i++) {
+      if (paras[i] && (paras[i].status === "completed" || paras[i].status === "passed")) done += 1;
+    }
+    setProductionNotice(
+      "Humanizing paragraphs (" + done + "/" + (paras.length || "?") + ")…"
+    );
+    updateProductionProgress("humanizer");
     try {
       state.humanizerSession = await apiLlm(projectUrl("/humanizer/advance"), {
         method: "POST",

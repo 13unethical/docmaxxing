@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from threading import RLock
 
@@ -150,12 +151,54 @@ class ProjectStore:
             return list(ids)
 
     def list_projects_for_user(self, user_id: str) -> list[Project]:
-        """Load projects owned by user_id, newest first."""
+        """Load projects owned by user_id, newest first.
+
+        Peeks user_id from the start of each bundle before a full parse so listing
+        does not block gunicorn workers on huge writer_session artifacts.
+        """
         uid = str(user_id or "").strip()
         if not uid:
             return []
+        user_id_re = re.compile(r'"user_id"\s*:\s*(null|"((?:\\.|[^"\\])*)")')
         projects: list[Project] = []
         for project_id in self.list_project_ids():
+            path = self._bundle_path(project_id)
+            if path.is_file():
+                try:
+                    head = path.read_bytes()[:16384].decode("utf-8", errors="ignore")
+                except OSError:
+                    continue
+                match = user_id_re.search(head)
+                if match is not None:
+                    peeked = "" if match.group(1) == "null" else (match.group(2) or "")
+                    if peeked != uid:
+                        continue
+                try:
+                    payload = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    continue
+                proj_data = payload.get("project")
+                if not isinstance(proj_data, dict):
+                    continue
+                if str(proj_data.get("user_id") or "") != uid:
+                    continue
+                artifacts = proj_data.get("artifacts") if isinstance(proj_data.get("artifacts"), dict) else {}
+                slim = dict(proj_data)
+                slim_artifacts: dict = {}
+                delivery = artifacts.get("delivery_package")
+                if isinstance(delivery, dict) and delivery:
+                    slim_artifacts["delivery_package"] = {"present": True}
+                chat = artifacts.get("revision_chat")
+                if isinstance(chat, dict):
+                    slim_artifacts["revision_chat"] = {
+                        "rounds_used": int(chat.get("rounds_used") or 0),
+                    }
+                slim["artifacts"] = slim_artifacts
+                try:
+                    projects.append(Project.from_dict(slim))
+                except Exception:  # noqa: BLE001
+                    continue
+                continue
             try:
                 project = self.get_project(project_id)
             except Exception:  # noqa: BLE001

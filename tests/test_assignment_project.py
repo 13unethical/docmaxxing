@@ -544,3 +544,125 @@ def test_start_humanizer_restores_session_from_disk(tmp_path):
     advanced = service_b.advance_humanizer(project_id)
     assert advanced.paragraphs_processed >= 0
     assert store.require_bundle(project_id).project.artifacts.get("humanizer_session")
+
+
+def test_advance_writer_serializes_overlapping_calls(tmp_path):
+    """Two overlapping advances must not freeze on the same section (flock)."""
+    import threading
+
+    from services.blueprint_engine.models import Blueprint, BlueprintSection, WordDistributionEntry
+    from services.blueprint_engine.models import BlueprintEngineInput
+    from services.blueprint_engine.service import BlueprintEngineService
+    from services.writer_engine import MockSectionWriter, WriterEngineService
+    from services.writer_engine.mock_reviewer import MockSectionReviewer
+
+    class _MultiSectionBlueprintService:
+        def __init__(self) -> None:
+            self.store = BlueprintEngineService().store
+
+        def build_blueprint(self, *, requirement_json, research_plan, project_id=None):
+            sections = [
+                BlueprintSection(
+                    id="part-1",
+                    title="Part 1",
+                    objective="Cover part 1.",
+                    estimated_words=100,
+                    key_points=["A"],
+                ),
+                BlueprintSection(
+                    id="part-2",
+                    title="Part 2",
+                    objective="Cover part 2.",
+                    estimated_words=100,
+                    key_points=["B"],
+                ),
+                BlueprintSection(
+                    id="part-3",
+                    title="Part 3",
+                    objective="Cover part 3.",
+                    estimated_words=100,
+                    key_points=["C"],
+                ),
+            ]
+            blueprint = Blueprint(
+                id="blueprint-multi-1",
+                project_id=project_id,
+                total_target_words=300,
+                total_target_sections=3,
+                writing_order=["part-1", "part-2", "part-3"],
+                transition_rules=[],
+                citation_strategy="APA 7",
+                academic_tone="Formal academic prose",
+                critical_analysis_locations=[],
+                comparison_locations=[],
+                counterargument_locations=[],
+                conclusion_goals=[],
+                sections=sections,
+                word_distribution=[
+                    WordDistributionEntry(title=s.title, estimated_words=100) for s in sections
+                ],
+                writing_queue=[s.title for s in sections],
+                estimated_completion_time="1 hour",
+                engine_version="stub-multi",
+            )
+            _ = BlueprintEngineInput  # keep import used for type parity with stubs
+            return self.store.save(blueprint)
+
+    store = ProjectStore(root=tmp_path / "projects")
+    service = ProjectService(
+        store=store,
+        pipeline=AssignmentPipelineService(),
+        research=_StubResearchService(),  # type: ignore[arg-type]
+        blueprint=_MultiSectionBlueprintService(),  # type: ignore[arg-type]
+        writer=WriterEngineService(writer=MockSectionWriter(), reviewer=MockSectionReviewer()),
+        analyzer=_StubRequirementAnalyzer(),
+    )
+    bundle = service.create_project(
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service.analyze_requirements(project_id)
+    service.calculate_pricing(project_id)
+    service.confirm_payment(project_id)
+    service.run_research(project_id)
+    service.run_blueprint(project_id)
+    service.start_writer(project_id)
+
+    results: list = []
+    errors: list = []
+
+    def _advance() -> None:
+        try:
+            results.append(service.advance_writer(project_id))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_advance) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert not errors
+    assert len(results) == 2
+    completed_counts = sorted(len(item.completed_section_ids) for item in results)
+    # With flock, the second caller advances the next section instead of rewriting the first.
+    assert completed_counts == [1, 2]
+
+
+def test_list_projects_for_user_skips_other_owners_without_full_artifact_load(tmp_path):
+    store = ProjectStore(root=tmp_path / "projects")
+    service = ProjectService(store=store, analyzer=_StubRequirementAnalyzer())
+    mine = service.create_project(user_id="user-a", title="Mine")
+    other = service.create_project(user_id="user-b", title="Other")
+    # Inflate other owner's artifacts so a naive full parse would be expensive.
+    other_project = store.require_project(other.project.id)
+    other_project.artifacts["writer_session"] = {
+        "id": "x",
+        "padding": "x" * 200000,
+    }
+    store.save_project(other_project)
+
+    listed = store.list_projects_for_user("user-a")
+    assert [p.id for p in listed] == [mine.project.id]
+    assert all(p.user_id == "user-a" for p in listed)

@@ -2408,6 +2408,13 @@
   line-height: 1;
 }
 
+.asg-production-stage {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .asg-production-eta {
   margin: 0;
   font-size: 0.95rem;

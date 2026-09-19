@@ -27,6 +27,7 @@ from services.assignment_project.requirement_analyzer import (
 )
 from services.assignment_project.pricing import calculate_project_price
 from services.assignment_project.paths import project_files_dir
+from services.assignment_project.project_lock import project_file_lock
 from services.assignment_project.session_sync import pick_freshest, rank_of
 from services.assignment_project.store import ProjectStore
 from services.assignment_project.trace_log import trace
@@ -964,9 +965,12 @@ class ProjectService:
         return saved
 
     def advance_writer(self, project_id: str, *, writer_session: dict[str, Any] | None = None):
-        session = self._load_writer_session(project_id, seed=writer_session)
-        updated = self.writer.advance_section(session.id)
-        return self._persist_writer_session(project_id, updated)
+        # Cross-worker lock: overlapping /writer/advance (retries, dual tabs) used to
+        # rewrite the same section on two gunicorn workers and freeze progress.
+        with project_file_lock(project_id, name="writer", root=self.store.storage_root):
+            session = self._load_writer_session(project_id, seed=writer_session)
+            updated = self.writer.advance_section(session.id)
+            return self._persist_writer_session(project_id, updated)
 
     def revise_writer_section(
         self,
@@ -975,9 +979,10 @@ class ProjectService:
         *,
         writer_session: dict[str, Any] | None = None,
     ):
-        session = self._load_writer_session(project_id, seed=writer_session)
-        updated = self.writer.revise_section(session.id, section_id)
-        return self._persist_writer_session(project_id, updated)
+        with project_file_lock(project_id, name="writer", root=self.store.storage_root):
+            session = self._load_writer_session(project_id, seed=writer_session)
+            updated = self.writer.revise_section(session.id, section_id)
+            return self._persist_writer_session(project_id, updated)
 
     def merge_writer_draft(self, project_id: str, *, writer_session: dict[str, Any] | None = None):
         session = self._load_writer_session(project_id, seed=writer_session)
