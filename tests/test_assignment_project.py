@@ -666,3 +666,50 @@ def test_list_projects_for_user_skips_other_owners_without_full_artifact_load(tm
     listed = store.list_projects_for_user("user-a")
     assert [p.id for p in listed] == [mine.project.id]
     assert all(p.user_id == "user-a" for p in listed)
+
+
+def test_assignment_refund_eligible_when_paid_without_delivery(tmp_path):
+    store = ProjectStore(root=tmp_path / "projects")
+    service = ProjectService(store=store, analyzer=_StubRequirementAnalyzer())
+    bundle = service.create_project(
+        user_id="42",
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service.analyze_requirements(project_id)
+    service.calculate_pricing(project_id)
+    service.confirm_payment(project_id)
+    project = store.require_project(project_id)
+    project.artifacts["coins_charged"] = 576
+    store.save_project(project)
+
+    amount = service.assert_assignment_refund_eligible(project_id)
+    assert amount == 576
+
+    service.mark_assignment_refunded(project_id, amount)
+    marked = store.require_project(project_id)
+    assert marked.artifacts.get("payment_refunded") is True
+    assert marked.artifacts.get("payment_confirmed") is False
+
+    with pytest.raises(ValueError, match="already refunded"):
+        service.assert_assignment_refund_eligible(project_id)
+
+
+def test_assignment_refund_blocked_after_delivery(tmp_path):
+    store = ProjectStore(root=tmp_path / "projects")
+    service = ProjectService(store=store, analyzer=_StubRequirementAnalyzer())
+    bundle = service.create_project(
+        user_id="42",
+        files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}],
+    )
+    project_id = bundle.project.id
+    service.analyze_requirements(project_id)
+    service.calculate_pricing(project_id)
+    service.confirm_payment(project_id)
+    project = store.require_project(project_id)
+    project.artifacts["coins_charged"] = 100
+    project.artifacts["delivery_package"] = {"id": "pkg-1"}
+    store.save_project(project)
+
+    with pytest.raises(ValueError, match="Delivery already completed"):
+        service.assert_assignment_refund_eligible(project_id)

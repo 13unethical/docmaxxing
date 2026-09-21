@@ -36,6 +36,13 @@ def user_friendly_llm_error(message: str) -> str:
         )
     if "quota" in lower or "rate limit" in lower or "429" in lower:
         return "AI provider rate limit reached. Wait a minute and press Retry."
+    if (
+        "timed out" in lower
+        or "timeout" in lower
+        or "read timeout" in lower
+        or "httpsconnectionpool" in lower
+    ):
+        return "AI took too long on this step. Press Retry — progress is kept."
     if "claude:" in lower and "gemini:" in lower:
         return msg
     if msg:

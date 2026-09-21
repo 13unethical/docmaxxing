@@ -799,6 +799,10 @@ class ProjectService:
 
         bundle.project.artifacts["payment_confirmed"] = True
         bundle.project.artifacts["payment_confirmed_at"] = utc_now().isoformat()
+        # Clear stale refund marker if re-paid after a prior failed run.
+        bundle.project.artifacts.pop("payment_refunded", None)
+        bundle.project.artifacts.pop("payment_refunded_at", None)
+        bundle.project.artifacts.pop("payment_refund_coins", None)
         bundle.project.updated_at = utc_now()
         self.store.save_project(bundle.project)
 
@@ -808,6 +812,68 @@ class ProjectService:
             StageResult(output={"payment_confirmed": True}),
         )
         self._sync_pipeline_state(project_id)
+        return self.store.require_bundle(project_id)
+
+    def assignment_refund_amount(self, project_id: str) -> int:
+        """Coins to return for a paid project that never delivered."""
+        from services.economy.pricing import USD_TO_COINS
+
+        bundle = self.store.require_bundle(project_id)
+        art = bundle.project.artifacts if isinstance(bundle.project.artifacts, dict) else {}
+        for key in ("coins_charged",):
+            raw = art.get(key)
+            if raw is not None:
+                try:
+                    amount = int(raw)
+                except (TypeError, ValueError):
+                    amount = 0
+                if amount > 0:
+                    return amount
+        if bundle.project.credits:
+            try:
+                amount = int(bundle.project.credits)
+            except (TypeError, ValueError):
+                amount = 0
+            if amount > 0:
+                return amount
+        pricing = art.get("pricing") if isinstance(art.get("pricing"), dict) else {}
+        if pricing.get("amount_coins") is not None:
+            try:
+                amount = int(pricing["amount_coins"])
+            except (TypeError, ValueError):
+                amount = 0
+            if amount > 0:
+                return amount
+        if pricing.get("amount_usd") is not None or bundle.project.price is not None:
+            usd = pricing.get("amount_usd", bundle.project.price)
+            return max(1, int(round(float(usd) * USD_TO_COINS)))
+        return 0
+
+    def assert_assignment_refund_eligible(self, project_id: str) -> int:
+        """Raise ValueError unless paid, undelivered, and not already refunded."""
+        bundle = self.store.require_bundle(project_id)
+        art = bundle.project.artifacts if isinstance(bundle.project.artifacts, dict) else {}
+        if art.get("payment_refunded"):
+            raise ValueError("This assignment was already refunded.")
+        if not art.get("payment_confirmed"):
+            raise ValueError("Nothing to refund — payment was not charged.")
+        delivery = art.get("delivery_package")
+        if isinstance(delivery, dict) and delivery:
+            raise ValueError("Delivery already completed — not eligible for an automatic refund.")
+        amount = self.assignment_refund_amount(project_id)
+        if amount <= 0:
+            raise ValueError("Cannot determine refund amount for this project.")
+        return amount
+
+    def mark_assignment_refunded(self, project_id: str, coins: int) -> ProjectBundle:
+        """Mark payment reversed so the user can re-pay or abandon cleanly."""
+        project = self.store.require_project(project_id)
+        project.artifacts["payment_refunded"] = True
+        project.artifacts["payment_refunded_at"] = utc_now().isoformat()
+        project.artifacts["payment_refund_coins"] = int(coins)
+        project.artifacts["payment_confirmed"] = False
+        project.updated_at = utc_now()
+        self.store.save_project(project)
         return self.store.require_bundle(project_id)
 
     def run_research(
@@ -1286,9 +1352,10 @@ class ProjectService:
         return self._persist_humanizer_session(project_id, session)
 
     def advance_humanizer(self, project_id: str, *, humanizer_session: dict[str, Any] | None = None):
-        session = self._load_humanizer_session(project_id, seed=humanizer_session)
-        updated = self.humanizer.advance_paragraph(session.id)
-        return self._persist_humanizer_session(project_id, updated)
+        with project_file_lock(project_id, name="humanizer", root=self.store.storage_root):
+            session = self._load_humanizer_session(project_id, seed=humanizer_session)
+            updated = self.humanizer.advance_paragraph(session.id)
+            return self._persist_humanizer_session(project_id, updated)
 
     def merge_humanized_draft(self, project_id: str, *, humanizer_session: dict[str, Any] | None = None):
         session = self._load_humanizer_session(project_id, seed=humanizer_session)

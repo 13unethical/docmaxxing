@@ -132,14 +132,27 @@
   function stateError(opts) {
     opts = opts || {};
     var retry = "";
-    if (!opts.hideRetry) {
-      retry =
-        '<div class="dm-state-error__actions">' +
-        '<button type="button" class="dm-btn dm-btn--outline-danger dm-btn--sm"' +
-        (opts.retryAttrs ? " " + opts.retryAttrs : "") +
-        ">" +
-        esc(opts.retryLabel || "Retry") +
-        "</button></div>";
+    if (!opts.hideRetry || opts.secondaryLabel) {
+      var buttons = "";
+      if (!opts.hideRetry) {
+        buttons +=
+          '<button type="button" class="dm-btn dm-btn--outline-danger dm-btn--sm"' +
+          (opts.retryAttrs ? " " + opts.retryAttrs : "") +
+          ">" +
+          esc(opts.retryLabel || "Retry") +
+          "</button>";
+      }
+      if (opts.secondaryLabel) {
+        buttons +=
+          '<button type="button" class="dm-btn dm-btn--ghost dm-btn--sm"' +
+          (opts.secondaryAttrs ? " " + opts.secondaryAttrs : "") +
+          ">" +
+          esc(opts.secondaryLabel) +
+          "</button>";
+      }
+      if (buttons) {
+        retry = '<div class="dm-state-error__actions">' + buttons + "</div>";
+      }
     }
     return (
       '<div class="dm-state-error' +

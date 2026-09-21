@@ -1078,12 +1078,20 @@
       return;
     }
     if (window.dmStates) {
+      var offerRefund = !!(
+        opts.offerRefund &&
+        state.paymentConfirmed &&
+        !state.deliveryPackage &&
+        state.projectId
+      );
       el.innerHTML = window.dmStates.error({
         title: opts.title || "Something went wrong",
         body: msg,
         detail: opts.detail || "",
         retryAttrs: state.retryAction ? "data-asg-inline-retry" : "",
         hideRetry: !state.retryAction,
+        secondaryLabel: offerRefund ? "Refund credits" : "",
+        secondaryAttrs: offerRefund ? "data-asg-inline-refund" : "",
       });
       var retry = el.querySelector("[data-asg-inline-retry]");
       if (retry && state.retryAction) {
@@ -1093,9 +1101,60 @@
           if (typeof fn === "function") fn();
         });
       }
+      var refundBtn = el.querySelector("[data-asg-inline-refund]");
+      if (refundBtn) {
+        refundBtn.addEventListener("click", function () {
+          requestAssignmentRefund().catch(function (err) {
+            showError(userFacingError(err, "Refund failed. Please contact support."), {
+              title: "Refund failed",
+              offerRefund: true,
+            });
+          });
+        });
+      }
       return;
     }
     el.textContent = msg;
+  }
+
+  async function requestAssignmentRefund() {
+    if (!state.projectId) throw new Error("No project to refund.");
+    setBusy(true);
+    try {
+      var payload = await api(projectUrl("/refund-failed"), { method: "POST" });
+      state.paymentConfirmed = false;
+      state.retryAction = null;
+      saveWizard();
+      var coins = Number(payload && payload.coins_refunded) || 0;
+      var bal = payload && payload.balance;
+      showError(
+        coins
+          ? "Refunded " + coins.toLocaleString() + " credits to your balance."
+          : "Credits refunded to your balance.",
+        {
+          title: "Credits refunded",
+          detail: bal != null ? "New balance: " + Number(bal).toLocaleString() : "",
+          offerRefund: false,
+        }
+      );
+      state.retryAction = null;
+      upsertBubble(
+        "error",
+        "assistant",
+        "<p>Credits were refunded because generation did not finish. You can start a new run anytime.</p>"
+      );
+      updateSummaryPayButton();
+      updateChrome();
+      if (typeof window.refreshCreditsBadge === "function") {
+        try {
+          window.refreshCreditsBadge();
+        } catch (e) {}
+      }
+      return payload;
+    } finally {
+      setBusy(false);
+      updateActions();
+    }
   }
 
   function clearError() {
@@ -1202,12 +1261,21 @@
       showError(message, {
         title: productionPause ? "Paused briefly" : "Something went wrong",
         detail: "",
+        offerRefund: productionPause,
       });
       if (productionPause) {
         var pausePct = Math.max(
           Number(state.productionPeakPct) || 0,
           productionPercent(state.stage)
         );
+        var refundNote =
+          err && err.payload && err.payload.refunded
+            ? " Credits were refunded automatically."
+            : "";
+        if (err && err.payload && err.payload.refunded) {
+          state.paymentConfirmed = false;
+          saveWizard();
+        }
         upsertBubble(
           "production",
           "assistant",
@@ -1221,6 +1289,7 @@
             "%</p>" +
             '<p class="asg-production-pause">' +
             esc(message) +
+            esc(refundNote) +
             "</p></div>"
         );
       } else {
@@ -1403,11 +1472,11 @@
       payBtn.addEventListener("click", function () {
         if (!state.paymentConfirmed) {
           runAutoProduction().catch(function (err) {
-            fail(err, runAutoProduction);
+            fail(err, productionRetryAction());
           });
         } else {
           continueAutoProduction().catch(function (err) {
-            fail(err, continueAutoProduction);
+            fail(err, productionRetryAction());
           });
         }
       });
@@ -2362,11 +2431,17 @@
     return { ok: true };
   }
 
-  async function beginProduction() {
-    state.productionPeakPct = 0;
-    setStage("research");
+  async function beginProduction(opts) {
+    var resume = !!(opts && opts.resume);
+    // Keep the peak on Retry so the bar does not jump back to 0% mid-pipeline.
+    if (!resume) state.productionPeakPct = 0;
+    if (!resume) setStage("research");
     enterProductionLayout();
-    updateProductionProgress("research");
+    updateProductionProgress(state.stage || "research");
+  }
+
+  function productionRetryAction() {
+    return state.paymentConfirmed ? continueAutoProduction : runAutoProduction;
   }
 
   async function continueAutoProduction() {
@@ -2378,7 +2453,7 @@
     updateSummaryPayButton();
     try {
       await ensurePaymentConfirmed();
-      beginProduction();
+      beginProduction({ resume: true });
       var result = await runProductionCore();
       if (!(await handleProductionResult(result))) return;
     } catch (err) {
@@ -2389,7 +2464,7 @@
         setStage("price");
         renderSummary();
       }
-      fail(err, continueAutoProduction);
+      fail(err, productionRetryAction());
       return;
     } finally {
       state.autoRunning = false;
@@ -2423,7 +2498,7 @@
         setStage("price");
         renderSummary();
       }
-      fail(err, runAutoProduction);
+      fail(err, productionRetryAction());
       return;
     } finally {
       state.autoRunning = false;
@@ -2626,12 +2701,12 @@
       pay.addEventListener("click", function () {
         if (!state.paymentConfirmed) {
           runAutoProduction().catch(function (err) {
-            fail(err, runAutoProduction);
+            fail(err, productionRetryAction());
           });
           return;
         }
         continueAutoProduction().catch(function (err) {
-          fail(err, continueAutoProduction);
+          fail(err, productionRetryAction());
         });
       });
     }
@@ -2662,11 +2737,11 @@
         e.preventDefault();
         if (!state.paymentConfirmed) {
           runAutoProduction().catch(function (err) {
-            fail(err, runAutoProduction);
+            fail(err, productionRetryAction());
           });
         } else {
           continueAutoProduction().catch(function (err) {
-            fail(err, continueAutoProduction);
+            fail(err, productionRetryAction());
           });
         }
       }

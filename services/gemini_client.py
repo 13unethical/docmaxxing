@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MODEL = "gemini-3.1-flash-lite"
 _DEFAULT_TIMEOUT_S = 30
 _DEFAULT_PRO_TIMEOUT_S = 120
-_DEFAULT_FLASH_TIMEOUT_S = 60
+# Flash often needs >60s on large format/review prompts; 60s caused mid-pipeline pauses.
+_DEFAULT_FLASH_TIMEOUT_S = 120
 _DEFAULT_MAX_RETRIES = 3
 _INITIAL_BACKOFF_S = 1.0
 _MAX_BACKOFF_S = 32.0

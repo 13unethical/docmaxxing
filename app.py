@@ -432,6 +432,43 @@ def _refund_safe(user_id: int, cost: int, feature: str, *, ref_id: str | None = 
         app.logger.exception("refund failed for user=%s feature=%s", user_id, feature)
 
 
+def _assignment_auto_refund(project_id: str, *, reason: str) -> dict[str, Any] | None:
+    """Refund a paid undelivered assignment. Returns payload or None if ineligible."""
+    user_id = economy_auth.current_user_id()
+    if not user_id:
+        return None
+    try:
+        coins = project_service.assert_assignment_refund_eligible(project_id)
+    except (KeyError, ValueError):
+        return None
+    try:
+        wallet.refund(
+            int(user_id),
+            int(coins),
+            "assignment",
+            ref_id=project_id,
+            meta={"reason": reason[:200]},
+        )
+        project_service.mark_assignment_refunded(project_id, coins)
+    except Exception:  # noqa: BLE001
+        app.logger.exception(
+            "assignment auto-refund failed project_id=%s user=%s", project_id, user_id
+        )
+        return None
+    app.logger.warning(
+        "assignment auto-refunded project_id=%s user=%s coins=%s reason=%s",
+        project_id,
+        user_id,
+        coins,
+        reason[:120],
+    )
+    return {
+        "refunded": True,
+        "coins_refunded": int(coins),
+        "balance": wallet.get_balance(int(user_id)),
+    }
+
+
 def _record_usage_safe(
     user_id: int,
     *,
@@ -2448,11 +2485,20 @@ def api_assignment_project_confirm_payment(project_id: str):
         if charged_here:
             _refund_safe(user_id, coins, "assignment", ref_id=project_id)
         raise
+    if charged_here and coins > 0:
+        try:
+            project = bundle.project
+            project.artifacts["coins_charged"] = int(coins)
+            project_service.store.save_project(project)
+            bundle = project_service.store.require_bundle(project_id)
+        except Exception:  # noqa: BLE001
+            app.logger.exception("failed to persist coins_charged project_id=%s", project_id)
     trace(
         "api.confirm_payment.completed",
         project_id=project_id,
         price=bundle.project.price,
         payment_confirmed=bool(bundle.project.artifacts.get("payment_confirmed")),
+        coins_charged=coins if charged_here else 0,
     )
     if charged_here and coins > 0:
         _record_usage_safe(
@@ -2466,6 +2512,43 @@ def api_assignment_project_confirm_payment(project_id: str):
     if isinstance(payload, dict):
         payload["coins_charged"] = coins if charged_here else 0
         payload["balance"] = wallet.get_balance(user_id)
+    return jsonify(payload)
+
+
+@app.post("/api/assignment/projects/<project_id>/refund-failed")
+@economy_auth.login_required
+def api_assignment_project_refund_failed(project_id: str):
+    """Refund coins when payment succeeded but delivery never completed."""
+    user_id = economy_auth.current_user_id()
+    try:
+        coins = project_service.assert_assignment_refund_eligible(project_id)
+    except KeyError as exc:
+        return _assignment_not_found("refund-failed", project_id, exc)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    try:
+        wallet.refund(
+            int(user_id),
+            int(coins),
+            "assignment",
+            ref_id=project_id,
+            meta={"reason": "user-refund-failed-assignment"},
+        )
+        bundle = project_service.mark_assignment_refunded(project_id, coins)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("assignment refund-failed project_id=%s", project_id)
+        return jsonify({"error": str(exc) or "Refund failed. Please contact support."}), 502
+    trace(
+        "api.refund_failed.completed",
+        project_id=project_id,
+        coins_refunded=coins,
+        user_id=user_id,
+    )
+    payload = _project_api_payload(bundle)
+    if isinstance(payload, dict):
+        payload["coins_refunded"] = coins
+        payload["balance"] = wallet.get_balance(int(user_id))
+        payload["refunded"] = True
     return jsonify(payload)
 
 
@@ -4055,6 +4138,9 @@ def api_assignment_project_review(project_id: str):
         return jsonify({"error": "Project or draft not found"}), 404
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    except Exception as exc:  # noqa: BLE001
+        message = str(exc)
+        return jsonify({"error": user_friendly_llm_error(message)}), llm_error_http_status(message)
     return jsonify({
         "review_report": report.to_dict(),
         "pass_number": int(project.artifacts.get("review_pass_number", 1)),
@@ -4374,7 +4460,19 @@ def api_assignment_humanizer_advance(project_id: str):
             project_id,
             exc,
         )
-        return jsonify(humanizer_fail_payload(exc)), 502
+        payload = humanizer_fail_payload(exc)
+        # Non-retryable humanizer failures (e.g. LOGIN_REQUIRED) — refund like other products.
+        if payload.get("retryable") is False:
+            refund_info = _assignment_auto_refund(
+                project_id, reason=f"humanizer:{exc}"
+            )
+            if refund_info:
+                payload.update(refund_info)
+                payload["message"] = (
+                    "Something went wrong and your credits were refunded. "
+                    "You can start again when ready."
+                )
+        return jsonify(payload), 502
     try:
         from services.dataset_logger import log_humanization_event
 
@@ -4630,7 +4728,8 @@ def api_assignment_format(project_id: str):
     except KeyError as exc:
         return jsonify({"error": str(exc)}), 404
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": str(exc)}), 500
+        message = str(exc)
+        return jsonify({"error": user_friendly_llm_error(message)}), llm_error_http_status(message)
     return jsonify({"formatted_document": formatted})
 
 
