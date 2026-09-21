@@ -285,7 +285,8 @@
   }
 
   function setProductionNotice(text) {
-    state.productionNotice = text || "";
+    // Students only see a generic wait line — never stage/provider detail.
+    state.productionNotice = text ? "Please wait…" : "";
     var eta = document.querySelector(".asg-production-eta");
     if (eta) {
       eta.textContent = state.productionNotice || "Estimated time: 3–5 minutes";
@@ -354,7 +355,17 @@
       low.indexOf("humanise") >= 0 ||
       low.indexOf("playwright") >= 0 ||
       low.indexOf("signed in on the server") >= 0 ||
-      low.indexOf("zerogpt") >= 0
+      low.indexOf("zerogpt") >= 0 ||
+      low.indexOf("plagdetect") >= 0 ||
+      low.indexOf("turnitin") >= 0 ||
+      low.indexOf("gemini") >= 0 ||
+      low.indexOf("claude") >= 0 ||
+      low.indexOf("anthropic") >= 0 ||
+      low.indexOf("slots_remaining") >= 0 ||
+      low.indexOf("no slots") >= 0 ||
+      low.indexOf("returned ") >= 0 ||
+      low.indexOf('{"') >= 0 ||
+      low.indexOf("httpsconnectionpool") >= 0
     );
   }
 
@@ -942,21 +953,7 @@
   }
 
   function productionStageLabel(stage) {
-    var key = stage || state.stage || "";
-    var map = {
-      research: "Research",
-      blueprint: "Blueprint",
-      writer: "Writing",
-      citations: "Citations",
-      humanizer: "Humanizing",
-      format: "Formatting",
-      review: "Academic review",
-      revision: "Revision",
-      validation: "Validation",
-      detection: "AI detection",
-      delivery: "Packaging",
-    };
-    return map[key] || "Working";
+    return "Working";
   }
 
   function updateProductionProgress(stage) {
@@ -972,15 +969,11 @@
     var label = $("[data-asg-production-pct]");
     if (fill) fill.style.width = pct + "%";
     if (label) label.textContent = pct + "%";
-    var stageText = productionStageLabel(stageKey);
     upsertBubble(
       "production",
       "assistant",
       '<div class="asg-prod-card">' +
         "<h3>Generating your assignment</h3>" +
-        '<p class="asg-production-stage">' +
-        stageText +
-        "</p>" +
         '<div class="asg-production-bar" aria-hidden="true"><div class="asg-production-bar-fill" style="width:' +
         pct +
         '%"></div></div>' +

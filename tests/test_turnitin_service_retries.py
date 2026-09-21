@@ -215,8 +215,20 @@ def test_api_row_hides_operator_errors_from_users():
     )
     assert login
     assert "PLAGDETECT" not in login
+    assert "PlagDetect" not in login
     assert ".env" not in login
     timeout = public_error_message(
         "Timed out waiting for PlagDetect results.", error_code="TIMEOUT"
     )
     assert "timed out" in timeout.lower() or "too long" in timeout.lower()
+    assert "PlagDetect" not in timeout
+
+    slots = public_error_message(
+        'PlagDetect API POST submit returned 400: {"error":"No slots available. '
+        'Please purchase more slots.","processing_count":0,"slots_remaining":0}',
+        error_code="400",
+    )
+    assert slots
+    assert "PlagDetect" not in slots
+    assert "slots" not in slots.lower() or "capacity" in slots.lower()
+    assert "{" not in slots

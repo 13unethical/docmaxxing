@@ -33,12 +33,28 @@ _USER_CHECK_UNAVAILABLE = (
 _USER_CHECK_TIMEOUT = (
     "This check took too long. Credits were refunded if it didn’t finish. Try again."
 )
+_USER_CHECK_CAPACITY = (
+    "The checker is at capacity right now. Please try again in a few minutes."
+)
 _INTERNAL_ERROR_MARKERS = (
-    "turnitin_api",
-    "plagdetect_",
+    "turnitin",
+    "plagdetect",
+    "stealthwriter",
+    "stealth writer",
+    "slots_remaining",
+    "processing_count",
+    "no slots",
+    "purchase more slots",
     ".env",
     "http 40",
     "http 50",
+    "returned 400",
+    "returned 401",
+    "returned 403",
+    "returned 429",
+    "returned 500",
+    "returned 502",
+    "returned 503",
     "tca ",
     "lti ",
     "api key",
@@ -51,6 +67,8 @@ _INTERNAL_ERROR_MARKERS = (
     "login_required",
     "chrome",
     "playwright",
+    '{"',
+    '"error"',
 )
 
 
@@ -65,14 +83,19 @@ def public_error_message(raw: str | None, *, error_code: str | None = None) -> s
         return _USER_CHECK_UNAVAILABLE
     if code == "TIMEOUT" or "timed out" in blob or "timeout" in blob:
         return _USER_CHECK_TIMEOUT
+    if "no slots" in blob or "slots_remaining" in blob or "purchase more slots" in blob:
+        return _USER_CHECK_CAPACITY
     if any(marker in blob for marker in _INTERNAL_ERROR_MARKERS):
         return _USER_CHECK_UNAVAILABLE
     if code in _TRANSIENT_JOB_CODES:
         return _USER_CHECK_FAILED
     if text and not any(ch.isalpha() for ch in text):
         return _USER_CHECK_FAILED
-    # Keep short, already-human copy (no paths, env vars, or HTTP dumps).
-    if text and len(text) <= 160 and "`" not in text and "/" not in text:
+    # Never pass through JSON dumps, HTTP status lines, or provider names.
+    if "{" in text or "}" in text or "http" in blob or "api " in blob:
+        return _USER_CHECK_FAILED
+    # Keep short, already-human copy (no paths, env vars, or dumps).
+    if text and len(text) <= 120 and "`" not in text and "/" not in text and "\\" not in text:
         return text
     return _USER_CHECK_FAILED
 
@@ -343,7 +366,7 @@ class TurnitinService:
             external_id=external_id,
             similarity_report_path=res.get("similarity_report_path"),
             ai_report_path=res.get("ai_report_path"),
-            error_message=None if has_scores else (note or "Waiting for PlagDetect reports."),
+            error_message=None if has_scores else (note or "Waiting for reports."),
             meta_json=json.dumps(meta),
             completed_at=(
                 job.finished_at.isoformat()

@@ -88,6 +88,8 @@
       "The checker is temporarily unavailable. Please try again in a few minutes.";
     var timeout =
       "This check took too long. Credits were refunded if it didn’t finish. Try again.";
+    var capacity =
+      "The checker is at capacity right now. Please try again in a few minutes.";
     var generic =
       "We couldn’t finish this check. Credits were refunded if it didn’t complete. Try again.";
     if (c === "LOGIN_REQUIRED" || /not logged in|credentials|api key|\.env|http 40/i.test(blob)) {
@@ -102,12 +104,17 @@
     if (/INSUFFICIENT|not enough/i.test(msg) || c === "INSUFFICIENT_COINS") {
       return null;
     }
+    if (/no slots|slots_remaining|purchase more slots|at capacity/i.test(blob)) {
+      return { body: capacity, detail: "" };
+    }
     if (
-      /turnitin_|plagdetect_|tca |lti |\/api\/browser|generate tca/i.test(blob)
+      /turnitin|plagdetect|stealth|tca |lti |\/api\/browser|generate tca|returned \d{3}|\{"|\"error\"/i.test(
+        blob
+      )
     ) {
       return { body: unavailable, detail: "" };
     }
-    if (msg && msg.length <= 160 && msg.indexOf("`") < 0 && msg.indexOf("/") < 0) {
+    if (msg && msg.length <= 120 && msg.indexOf("`") < 0 && msg.indexOf("/") < 0 && msg.indexOf("{") < 0) {
       return { body: msg, detail: "" };
     }
     return { body: generic, detail: "" };
