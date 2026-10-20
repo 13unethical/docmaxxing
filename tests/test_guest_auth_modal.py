@@ -17,6 +17,7 @@ GUEST_PREVIEW_PAGES = (
     "/turnitin",
     "/workspace",
     "/check",
+    "/veil",
 )
 
 PROTECTED_PAGE_REDIRECTS = (
@@ -113,7 +114,7 @@ def test_only_whitelisted_pages_show_guest_preview():
             assert "/login" in (res.headers.get("Location") or ""), path
 
 
-GUEST_PREVIEW_TOOL_PAGES = ("/assignment", "/humanizer", "/turnitin", "/workspace", "/check")
+GUEST_PREVIEW_TOOL_PAGES = ("/assignment", "/humanizer", "/turnitin", "/workspace", "/check", "/veil")
 
 
 def test_signed_in_humanizer_and_workspace_cost_is_25(economy):

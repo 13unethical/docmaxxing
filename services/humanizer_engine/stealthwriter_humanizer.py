@@ -57,11 +57,15 @@ class StealthWriterTextHumanizer:
             return join_body_and_references(body, refs)
 
         protected, headings = protect_markdown_headings(body)
+        from services.assignment_figures import protect_figure_markers, restore_figure_markers
+
+        protected, figures = protect_figure_markers(protected)
         chunks = split_text_by_word_limit(protected, max_words=self.max_words)
         outputs: list[str] = []
         for chunk in chunks:
             outputs.append(self._humanize_chunk(chunk))
-        humanized_body = restore_markdown_headings("\n\n".join(outputs), headings)
+        humanized_body = restore_figure_markers("\n\n".join(outputs), figures)
+        humanized_body = restore_markdown_headings(humanized_body, headings)
         return join_body_and_references(humanized_body, refs)
 
     def _humanize_chunk(self, chunk: str) -> str:

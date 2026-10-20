@@ -424,6 +424,13 @@ def _assignment_project_ownership_guard():
     return _require_project_owner_response(project_id)
 
 
+@app.after_request
+def _activity_ledger_hook(response):
+    from services.economy.activity_log import log_request
+
+    return log_request(response)
+
+
 def _refund_safe(user_id: int, cost: int, feature: str, *, ref_id: str | None = None) -> None:
     """Best-effort refund; never raises into the request path."""
     try:
@@ -946,6 +953,7 @@ def login():
     email = (request.form.get("email") or "").strip()
     password = request.form.get("password") or ""
     user = economy_auth.verify_credentials(email, password)
+    economy_auth.log_login_attempt(email, user)
     if user is None:
         return render_template(
             "login.html",
@@ -1434,6 +1442,32 @@ def api_admin_usage():
     return jsonify({"success": True, **payload})
 
 
+@app.get("/api/admin/activity")
+@economy_auth.admin_required
+def api_admin_activity():
+    """Site-wide activity ledger (registrations, logins, coins, admin edits, requests)."""
+    from services.economy.activity_log import list_activity
+
+    search = (request.args.get("q") or request.args.get("search") or "").strip()
+    category = (request.args.get("category") or "").strip()
+    try:
+        user_id = int(request.args.get("user_id") or 0) or None
+    except ValueError:
+        user_id = None
+    try:
+        limit = int(request.args.get("limit", "100"))
+    except ValueError:
+        limit = 100
+    try:
+        offset = int(request.args.get("offset", "0"))
+    except ValueError:
+        offset = 0
+    payload = list_activity(
+        search=search, category=category, user_id=user_id, limit=limit, offset=offset
+    )
+    return jsonify({"success": True, **payload})
+
+
 @app.get("/api/admin/analytics")
 @economy_auth.admin_required
 def api_admin_analytics():
@@ -1543,6 +1577,7 @@ def api_auth_login():
     email = str(payload.get("email") or "").strip()
     password = str(payload.get("password") or "")
     user = economy_auth.verify_credentials(email, password)
+    economy_auth.log_login_attempt(email, user)
     if user is None:
         return jsonify({"success": False, "error": "Incorrect email or password."}), 401
     economy_auth.login_user(user["id"])
@@ -1989,6 +2024,236 @@ def check():
     return render_template("check.html", nav_active="check")
 
 
+def _public_origin() -> str:
+    """Origin the visitor used, including TLS terminated in front of gunicorn."""
+    configured = (os.environ.get("PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    if configured:
+        return configured
+    proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",")[0].strip()
+    host = (request.headers.get("X-Forwarded-Host") or request.host).split(",")[0].strip()
+    return f"{proto}://{host}"
+
+
+def _veil_bearer_user():
+    header = request.headers.get("Authorization") or ""
+    if not header.lower().startswith("bearer "):
+        return None
+    from services.veil_tokens import user_for_token
+
+    return user_for_token(header[7:])
+
+
+@app.route('/veil')
+def veil_landing():
+    from services.veil_access import pass_cost, pass_days, pass_status
+
+    user = economy_auth.current_user()
+    return render_template(
+        "veil.html",
+        veil_pass_cost=pass_cost(),
+        veil_pass_days=pass_days(),
+        veil_pass=pass_status(int(user["id"])) if user else None,
+        veil_error=request.args.get("error") or "",
+        veil_unlocked=request.args.get("unlocked") == "1",
+    )
+
+
+@app.route("/veil/download")
+def veil_download():
+    from services.veil_access import pass_status
+    from services.veil_extension import pack_extension
+
+    user = economy_auth.current_user()
+    if user is None:
+        return redirect(url_for("login", next="/veil/download"))
+    if not economy_auth.user_email_verified(user):
+        return redirect(url_for("verify_email_code"))
+    if not pass_status(int(user["id"]))["active"]:
+        return redirect("/veil#access")
+    data = pack_extension(_public_origin())
+    return send_file(
+        io.BytesIO(data),
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="Veil.zip",
+        max_age=0,
+    )
+
+
+@app.post("/veil/unlock")
+@economy_auth.login_required
+def veil_unlock():
+    from services.veil_access import purchase_pass
+
+    user = economy_auth.current_user()
+    if not economy_auth.user_email_verified(user):
+        return redirect(url_for("verify_email_code"))
+    try:
+        result = purchase_pass(int(user["id"]))
+    except InsufficientCoins:
+        return redirect("/veil?error=credits#access")
+    _record_usage_safe(int(user["id"]), feature="veil", credits_used=int(result["credits"]))
+    return redirect("/veil?unlocked=1#access")
+
+
+@app.route("/veil/connect")
+@economy_auth.login_required
+def veil_connect():
+    from services.veil_access import pass_status
+    from services.veil_extension import EXTENSION_ID
+    from services.veil_tokens import issue_token
+
+    user = economy_auth.current_user()
+    if not economy_auth.user_email_verified(user):
+        return redirect(url_for("verify_email_code"))
+    return render_template(
+        "veil_connect.html",
+        token=issue_token(int(user["id"])),
+        email=user["email"],
+        balance=wallet.get_balance(int(user["id"])),
+        extension_id=EXTENSION_ID,
+        veil_pass=pass_status(int(user["id"])),
+    )
+
+
+@app.get("/api/veil/me")
+def api_veil_me():
+    from services.veil_access import pass_cost, pass_status
+
+    user = _veil_bearer_user()
+    if user is None:
+        return jsonify({"success": False, "error": "AUTH_REQUIRED", "message": "Please sign in."}), 401
+    status = pass_status(int(user["id"]))
+    return jsonify(
+        {
+            "success": True,
+            "email": user["email"],
+            "balance": wallet.get_balance(int(user["id"])),
+            "pass_active": status["active"],
+            "pass_expires": status["expires_at"],
+            "pass_expires_label": status["expires_label"],
+            "pass_cost": pass_cost(),
+        }
+    )
+
+
+@app.post("/api/veil/revoke")
+def api_veil_revoke():
+    from services.veil_tokens import revoke_token
+
+    header = request.headers.get("Authorization") or ""
+    if header.lower().startswith("bearer "):
+        revoke_token(header[7:])
+    return jsonify({"success": True})
+
+
+_VEIL_SYSTEM_PROMPT = """You are a study tutor inside a browser overlay. The student is reading a page and asks about a passage, or sends a cropped image of a formula, diagram, notes, or a slide.
+
+Explain the material so they understand it. When detailed mode is on, show the reasoning step by step. When it is off, answer in a short paragraph or a few bullets.
+Reply in the language of the student's question. Do not invent sources, citations, or statistics. If an image is unreadable, say so."""
+
+
+def _veil_images(raw) -> tuple[list[dict], str | None]:
+    """Turn data-URL screenshots into Claude image blocks. Returns (blocks, error)."""
+    import base64
+    import re
+
+    if raw in (None, ""):
+        return [], None
+    if not isinstance(raw, list):
+        return [], "Images must be a list."
+    if len(raw) > 3:
+        return [], "Attach at most 3 images."
+    pattern = re.compile(r"^data:image/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=\s]+)$", re.IGNORECASE)
+    blocks = []
+    for item in raw:
+        match = pattern.match(str(item or "").strip())
+        if match is None:
+            return [], "Each image must be a PNG, JPEG, or WebP data URL."
+        try:
+            blob = base64.b64decode(re.sub(r"\s+", "", match.group(2)), validate=True)
+        except Exception:  # noqa: BLE001
+            return [], "Could not read one of the images."
+        if not blob or len(blob) > 1_200_000:
+            return [], "Each image must be under 1.2 MB."
+        media = "image/jpeg" if match.group(1).lower() in ("jpeg", "jpg") else f"image/{match.group(1).lower()}"
+        blocks.append(
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": media, "data": base64.b64encode(blob).decode("ascii")},
+            }
+        )
+    return blocks, None
+
+
+@app.post("/api/veil/ask")
+def api_veil_ask():
+    from services.claude_client import claude_enabled, generate_reply
+
+    user = _veil_bearer_user()
+    if user is None:
+        return jsonify({"success": False, "error": "AUTH_REQUIRED", "message": "Please sign in from the Veil icon."}), 401
+    if not economy_auth.user_email_verified(user):
+        return jsonify(
+            {"success": False, "error": "EMAIL_NOT_VERIFIED", "message": "Please verify your email first."}
+        ), 403
+    if not claude_enabled():
+        return jsonify({"success": False, "error": "UNAVAILABLE", "message": "Veil is not configured yet."}), 503
+
+    payload = request.get_json(silent=True) or {}
+    text = str(payload.get("text") or "").strip()
+    if len(text) > 6000:
+        return jsonify({"success": False, "error": "TOO_LONG", "message": "Question is too long (6000 characters max)."}), 400
+    images, image_error = _veil_images(payload.get("images"))
+    if image_error:
+        return jsonify({"success": False, "error": "BAD_IMAGE", "message": image_error}), 400
+    if not text and not images:
+        return jsonify({"success": False, "error": "EMPTY", "message": "Type a question or attach an image."}), 400
+
+    from services.veil_access import pass_status
+
+    user_id = int(user["id"])
+    if not pass_status(user_id)["active"]:
+        return jsonify(
+            {
+                "success": False,
+                "error": "PASS_REQUIRED",
+                "message": "Срок доступа закончился. Оплатите ещё 30 дней на странице Veil, и он снова заработает.",
+            }
+        ), 402
+
+    extended = bool(payload.get("extended"))
+    prompt = text or "Explain this image."
+    if extended:
+        prompt += "\n\nGive a detailed, step-by-step explanation."
+    blocks: list[dict] = [{"type": "text", "text": prompt}, *images]
+    started = time.monotonic()
+    answer, _diag = generate_reply(
+        system_prompt=_VEIL_SYSTEM_PROMPT,
+        content=blocks,
+        max_tokens=1800 if extended else 700,
+    )
+    if not answer:
+        return jsonify(
+            {
+                "success": False,
+                "error": "FAILED",
+                "message": "Could not get an answer. Try again.",
+                "balance": wallet.get_balance(user_id),
+            }
+        ), 502
+    _record_usage_safe(
+        user_id,
+        feature="veil",
+        credits_used=0,
+        provider="anthropic",
+        latency=int((time.monotonic() - started) * 1000),
+    )
+    return jsonify(
+        {"success": True, "answer": answer, "credits_used": 0, "balance": wallet.get_balance(user_id)}
+    )
+
+
 @app.route("/templates")
 def templates():
     return redirect(url_for("index"), code=302)
@@ -2023,13 +2288,115 @@ def workspace():
 
 
 @app.route("/presentation")
+@economy_auth.email_verified_required(allow_guest_preview=True)
 def presentation():
-    """Presentation UI is temporarily gated."""
+    """AI presentation builder — Claude writes the deck, python-pptx renders it."""
+    from services.presentation_generator import MAX_SLIDES, MAX_TOPIC_CHARS, MIN_SLIDES
+    from services.presentation_themes import CATEGORIES, DEFAULT_THEME, themes_for_client
+
     return render_template(
-        "soon.html",
+        "presentation.html",
         nav_active="presentation",
-        feature="Presentation",
+        presentation_cost=feature_cost("presentation"),
+        min_slides=MIN_SLIDES,
+        max_slides=MAX_SLIDES,
+        max_topic_chars=MAX_TOPIC_CHARS,
+        themes=themes_for_client(),
+        theme_categories=CATEGORIES,
+        default_theme=DEFAULT_THEME,
     )
+
+
+@app.post("/api/presentation/generate")
+@economy_auth.email_verified_required
+def api_presentation_generate():
+    from services.claude_client import claude_enabled
+    from services.presentation_generator import PresentationError, generate_deck
+
+    payload = request.get_json(silent=True) or {}
+    topic = str(payload.get("topic") or "").strip()
+    if not topic:
+        return jsonify({"success": False, "error": "Topic is required."}), 400
+    if not claude_enabled():
+        return jsonify({"success": False, "error": "Presentation AI is not configured."}), 503
+    try:
+        slide_count = int(payload.get("slide_count") or 8)
+    except (TypeError, ValueError):
+        slide_count = 8
+
+    cost = feature_cost("presentation")
+    charged = _charge_current_user("presentation", cost, meta={"slide_count": slide_count})
+    if not isinstance(charged, tuple):
+        return charged
+    user_id, tx = charged
+
+    started = time.monotonic()
+    try:
+        deck, diag = generate_deck(
+            topic=topic,
+            details=str(payload.get("details") or ""),
+            slide_count=slide_count,
+            tone=str(payload.get("tone") or "academic"),
+            language=str(payload.get("language") or "auto"),
+            theme=str(payload.get("theme") or ""),
+            images=payload.get("images") is not False,
+        )
+    except PresentationError as exc:
+        _refund_safe(user_id, cost, "presentation")
+        app.logger.warning("presentation generate failed: %s", exc)
+        return jsonify({"success": False, "error": "Could not generate the presentation. Credits refunded."}), 502
+    except Exception:  # noqa: BLE001
+        _refund_safe(user_id, cost, "presentation")
+        app.logger.exception("presentation generate crashed")
+        return jsonify({"success": False, "error": "Could not generate the presentation. Credits refunded."}), 502
+
+    _record_usage_safe(
+        user_id,
+        feature="presentation",
+        credits_used=cost,
+        provider="anthropic",
+        latency=int((time.monotonic() - started) * 1000),
+    )
+    return jsonify(
+        {
+            "success": True,
+            "deck": deck,
+            "credits_used": cost,
+            "balance": tx.get("balance") if isinstance(tx, dict) else None,
+            "model": diag.get("model"),
+        }
+    )
+
+
+@app.post("/api/presentation/export")
+@economy_auth.email_verified_required
+def api_presentation_export():
+    from services.presentation_generator import PresentationError, build_pptx, deck_filename, normalize_deck
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        deck = normalize_deck(payload.get("deck"))
+        data = build_pptx(deck)
+    except PresentationError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return send_file(
+        io.BytesIO(data),
+        mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        as_attachment=True,
+        download_name=deck_filename(deck),
+    )
+
+
+@app.get("/api/presentation/image/<image_id>")
+def api_presentation_image(image_id: str):
+    from services.presentation_images import image_path
+
+    path = image_path(image_id)
+    if path is None:
+        return jsonify({"success": False, "error": "Image not found."}), 404
+    response = send_file(path, mimetype="image/jpeg", max_age=60 * 60 * 24 * 30)
+    response.headers["Cache-Control"] = "public, max-age=2592000, immutable"
+    return response
 
 
 @app.route("/earn")

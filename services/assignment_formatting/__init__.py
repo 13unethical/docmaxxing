@@ -330,6 +330,7 @@ class AssignmentFormatEngine:
         requirement_json: dict[str, Any],
         project_id: str,
         citation_pack: dict[str, Any] | None = None,
+        assignment_images: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         del citation_pack  # references already embedded in draft content when available
         title = str(draft.get("title") or requirement_json.get("title") or "Assignment")
@@ -350,12 +351,20 @@ class AssignmentFormatEngine:
         source = io.BytesIO()
         document.save(source)
         result = format_document_v2(source.getvalue(), overrides, style_name)
+        docx_bytes = result.docx_bytes
+        images = assignment_images
+        if not images and isinstance(requirement_json.get("assignment_images"), list):
+            images = requirement_json.get("assignment_images")
+        if images:
+            from services.assignment_figures import embed_figures_in_docx_bytes
+
+            docx_bytes = embed_figures_in_docx_bytes(docx_bytes, images)
 
         out_dir = _storage_root() / project_id / "formatted"
         out_dir.mkdir(parents=True, exist_ok=True)
         filename = "formatted.docx"
         path = out_dir / filename
-        path.write_bytes(result.docx_bytes)
+        path.write_bytes(docx_bytes)
 
         notices = [n.model_dump(mode="json") for n in result.notices]
         return {

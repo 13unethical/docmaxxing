@@ -49,6 +49,42 @@ def _row_to_tx(row: sqlite3.Row) -> dict[str, Any]:
     return base
 
 
+def _log_wallet_activity(
+    tx_id: int | None,
+    user_id: int,
+    *,
+    tx_type: str,
+    feature: str,
+    credits: int,
+    balance_before: int,
+    balance_after: int,
+    reference_type: str | None,
+    ref_id: str | None,
+    meta: dict[str, Any] | None,
+) -> None:
+    from .activity_log import log_activity
+
+    admin_id = (meta or {}).get("admin_id")
+    log_activity(
+        f"wallet.{str(tx_type).lower()}",
+        category="wallet",
+        user_id=user_id,
+        actor_id=int(admin_id) if admin_id else None,
+        summary=f"{feature} {credits:+d} coins ({balance_before} → {balance_after})",
+        details={
+            "feature": feature,
+            "credits": credits,
+            "reference_type": reference_type,
+            "ref_id": ref_id,
+            "reason": (meta or {}).get("reason"),
+        },
+        source_ref=f"tx:{tx_id}" if tx_id else None,
+        # Admin balance edits are the whole point of that request; other debits
+        # (humanize, turnitin…) still get their own request row with status code.
+        mark_request=bool(admin_id),
+    )
+
+
 class WalletService:
     """Thin service over the economy DB. Stateless; safe to share."""
 
@@ -134,6 +170,18 @@ class WalletService:
                 ),
             )
             tx_id = cur.lastrowid
+        _log_wallet_activity(
+            tx_id,
+            user_id,
+            tx_type=tx_type or kind,
+            feature=feature,
+            credits=delta,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            reference_type=reference_type,
+            ref_id=ref_id,
+            meta=meta,
+        )
         return {
             "id": tx_id,
             "user_id": user_id,
@@ -232,6 +280,18 @@ class WalletService:
             )
             tx_id = cur.lastrowid
 
+        _log_wallet_activity(
+            tx_id,
+            user_id,
+            tx_type=TYPE_ADMIN_SET,
+            feature=feature,
+            credits=delta,
+            balance_before=balance_before,
+            balance_after=balance_after,
+            reference_type=REF_ADMIN,
+            ref_id=ref_id,
+            meta=meta,
+        )
         return {
             "id": tx_id,
             "user_id": user_id,

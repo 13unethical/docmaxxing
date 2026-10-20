@@ -79,6 +79,7 @@ def generate_json(
     model: str | None = None,
     max_retries: int = _DEFAULT_MAX_RETRIES,
     timeout_s: int = _DEFAULT_TIMEOUT_S,
+    max_tokens: int = 4096,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Call Claude and parse a JSON object from the response."""
     active_model = (model or claude_model()).strip() or claude_model()
@@ -93,7 +94,7 @@ def generate_json(
 
     body = {
         "model": active_model,
-        "max_tokens": 4096,
+        "max_tokens": int(max_tokens),
         "temperature": temperature,
         "system": system_prompt,
         "messages": [{"role": "user", "content": user_prompt}],
@@ -186,6 +187,102 @@ def generate_json(
             )
             return data, diag
 
+        except _NETWORK_EXCEPTIONS as exc:
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            total_latency_ms += elapsed_ms
+            last_error_message = repr(exc)
+            if attempt < max_retries:
+                total_retries += 1
+                time.sleep(min(8.0, 1.0 * (2**attempt)))
+                continue
+            break
+
+    diag = _base_diagnostics(model=active_model, request_chars=request_chars)
+    diag.update(
+        {
+            "failure_reason": "unavailable",
+            "http_status": last_http_status,
+            "retry_count": total_retries,
+            "latency_ms": total_latency_ms,
+            "error_message": (last_error_message or "Unknown Claude failure")[:500],
+        }
+    )
+    return None, diag
+
+
+def generate_reply(
+    *,
+    system_prompt: str,
+    content: str | list[dict[str, Any]],
+    temperature: float = 0.3,
+    model: str | None = None,
+    max_retries: int = _DEFAULT_MAX_RETRIES,
+    timeout_s: int = 90,
+    max_tokens: int = 1500,
+) -> tuple[str | None, dict[str, Any]]:
+    """Call Claude and return plain text. `content` is a user message or content blocks."""
+    active_model = (model or claude_model()).strip() or claude_model()
+    blocks = content if isinstance(content, list) else [{"type": "text", "text": content}]
+    request_chars = sum(len(str(block.get("text") or "")) for block in blocks if isinstance(block, dict))
+
+    if not claude_enabled():
+        diag = _base_diagnostics(model=active_model, request_chars=request_chars)
+        diag["failure_reason"] = "validation_error"
+        diag["error_message"] = "ANTHROPIC_API_KEY is not set"
+        return None, diag
+
+    body = {
+        "model": active_model,
+        "max_tokens": int(max_tokens),
+        "temperature": temperature,
+        "system": system_prompt,
+        "messages": [{"role": "user", "content": blocks}],
+    }
+    headers = {
+        "x-api-key": claude_api_key(),
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+    total_retries = 0
+    total_latency_ms = 0
+    last_http_status: int | None = None
+    last_error_message = ""
+
+    for attempt in range(max_retries + 1):
+        started = time.monotonic()
+        try:
+            response = requests.post(_API_URL, json=body, headers=headers, timeout=timeout_s)
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            total_latency_ms += elapsed_ms
+            last_http_status = response.status_code
+            if response.status_code in _RETRYABLE_HTTP_STATUS and attempt < max_retries:
+                total_retries += 1
+                last_error_message = response.text[:500]
+                time.sleep(min(8.0, 1.0 * (2**attempt)))
+                continue
+            if not response.ok:
+                last_error_message = response.text[:800]
+                break
+            payload = response.json()
+            text = "\n".join(
+                str(part.get("text") or "")
+                for part in (payload.get("content") or [])
+                if isinstance(part, dict) and part.get("type") == "text"
+            ).strip()
+            if not text:
+                last_error_message = "Empty model response"
+                break
+            diag = _base_diagnostics(model=active_model, request_chars=request_chars)
+            diag.update(
+                {
+                    "api_call_success": True,
+                    "retry_count": total_retries,
+                    "latency_ms": total_latency_ms,
+                    "http_status": response.status_code,
+                }
+            )
+            return text, diag
         except _NETWORK_EXCEPTIONS as exc:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             total_latency_ms += elapsed_ms

@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Veil",
+  "version": "1.1.0",
+  "description": "Study overlay: explain selected text and cropped diagrams on the page you are reading.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArcX/hrsBUYkx/u6E97mX28zkW1qXBs/4qgXQkW3A7yOsh5+VNDD8QKVunDrRn4gAlvifJBrbUUGoaBL/wmKH1ACBHYu910KCVFi9apj3nI9OOCOti1M4qOXys7JejYITPZRXQ6tu2p2kFYmbW4qLg6njCIgkj4sqt69n2TTx1ruahbyshDx45bNW2N/m+5f89OO03weu57WbEjJcnPUjrsqaHtVwG/sUAqLi5YSOez8oyjetca1mIbUuYyy7tGdc/lcW4EH3e5wUXvXw6PYVDRyQKhpFT7hwAyHAF15PtqI0sxgmqVwWr6AsCg1trsKxlvgiqetYC3UJJt2NHZAiDQIDAQAB",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Veil",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "externally_connectable": {
+    "matches": [
+      "https://docmaxxing.com/*",
+      "https://www.docmaxxing.com/*",
+      "http://127.0.0.1/*",
+      "http://localhost/*"
+    ]
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": false
+    }
+  ]
+}

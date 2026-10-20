@@ -145,6 +145,14 @@
             </svg>
             <span class="app-sidebar-label">Check</span>
           </a>
+          <a href="{{ url_for('veil_landing') }}" class="app-nav-link" title="Veil" target="_blank" rel="noopener noreferrer">
+            <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3 5 6.5v5.2c0 4.4 2.9 7.6 7 9.3 4.1-1.7 7-4.9 7-9.3V6.5L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+              <path d="M9.2 12.2 11 14l3.8-4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="app-sidebar-label">Veil</span>
+            <span class="nav-discount-badge">NEW</span>
+          </a>
           <a href="{{ url_for('workspace') }}" class="app-nav-link{% if _nav == 'workspace' %} is-active{% endif %}" title="Workspace"{% if _nav == 'workspace' %} aria-current="page"{% endif %}>
             <svg class="nav-link-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M20 17V5a2 2 0 0 0-4 0v12l2 2 2-2z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>

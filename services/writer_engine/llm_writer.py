@@ -241,6 +241,33 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
             "If the brief names a required reading, cite that work with a complete real reference "
             "(author, year, title, publisher or journal). Do not invent fake sources.\n"
         )
+    images = payload.requirement_json.get("assignment_images") or []
+    if payload.requirement_json.get("include_assignment_images") and images:
+        named = []
+        for item in images:
+            if not isinstance(item, dict):
+                continue
+            fname = str(item.get("filename") or "").strip()
+            if not fname:
+                continue
+            sec = str(item.get("section") or "").strip()
+            cap = str(item.get("caption") or "").strip()
+            label = fname
+            if sec:
+                label += f" (prefer section: {sec})"
+            if cap:
+                label += f" — {cap}"
+            named.append(label)
+        if named:
+            rules += (
+                "18) FIGURES: illustrative photos are available (auto-fetched or attached). "
+                "Where a photo fits this section, insert a marker on its own line:\n"
+                "[[FIGURE:filename|short caption]]\n"
+                f"Available files: {'; '.join(named)}. "
+                "Prefer files whose section matches this section title. "
+                "Use each file at most once across the whole paper. "
+                "Do not invent filenames. If no image fits this section, omit markers.\n"
+            )
     return rules + f"INPUT:\n{json.dumps(blueprint_guard, ensure_ascii=False)}"
 
 

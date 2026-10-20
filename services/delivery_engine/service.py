@@ -38,6 +38,7 @@ class DeliveryEngineService:
         humanization_attempts: int = 0,
         completion_time: str = "—",
         formatted_document_path: str | None = None,
+        assignment_images: list[dict[str, Any]] | None = None,
     ) -> DeliveryPackage:
         for key, value in {
             "final_draft": final_draft,
@@ -62,6 +63,7 @@ class DeliveryEngineService:
             humanization_attempts=humanization_attempts,
             completion_time=completion_time,
             formatted_document_path=formatted_document_path,
+            assignment_images=list(assignment_images or []) or None,
         )
 
         placeholder = DeliveryPackage(

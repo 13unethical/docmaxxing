@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -173,6 +174,7 @@ class ProjectService:
         for entry in merged_files:
             self._add_file_record(project_id, entry)
 
+        self._sync_assignment_images(project_id)
         self.pipeline.create_project(upload_manifest=upload_manifest, project_id=project_id)
         self._sync_pipeline_state(project_id)
 
@@ -678,8 +680,97 @@ class ProjectService:
                 "parsed": parsed,
             },
         )
+        self._sync_assignment_images(project_id)
         self._touch_project(project_id)
         return file_record
+
+    def _sync_assignment_images(
+        self,
+        project_id: str,
+        *,
+        auto_fetch: bool = False,
+    ) -> list[dict[str, str]]:
+        """Persist image paths (uploads + optional Commons auto-fetch) for FIGURE embedding."""
+        from services.assignment_figures import (
+            brief_requires_photos,
+            collect_assignment_images,
+            extract_figure_queries,
+            fetch_commons_figures,
+            merge_image_lists,
+        )
+        from services.assignment_project.paths import project_files_dir
+        from services.assignment_project.requirement_analyzer import _extract_file_text
+
+        bundle = self.store.require_bundle(project_id)
+        project = bundle.project
+        uploaded = collect_assignment_images(bundle.files)
+        existing = project.artifacts.get("assignment_images")
+        existing_list = existing if isinstance(existing, list) else []
+
+        images = merge_image_lists(uploaded, existing_list)
+
+        if auto_fetch:
+            source_bits = [
+                project.note or "",
+                project.title or "",
+                str(bundle.requirement.title or ""),
+            ]
+            for file in bundle.files:
+                try:
+                    source_bits.append(_extract_file_text(file))
+                except Exception:  # noqa: BLE001
+                    continue
+            source_blob = "\n\n".join(source_bits)
+            if brief_requires_photos(source_blob) or not images:
+                # Fetch when brief/sample asks for photos, or when we have none yet
+                # but placeholders exist. Skip network if uploads already cover need.
+                needs = brief_requires_photos(source_blob)
+                if needs:
+                    queries = extract_figure_queries(
+                        source_blob,
+                        sections=list(bundle.requirement.required_sections or []),
+                        community=str(bundle.requirement.title or project.title or ""),
+                    )
+                    # Only fetch queries not already satisfied by existing captions/filenames.
+                    have = {
+                        str(i.get("query") or i.get("caption") or "").lower()
+                        for i in images
+                    }
+                    pending = [
+                        q
+                        for q in queries
+                        if q.get("query", "").lower() not in have
+                        and q.get("caption", "").lower() not in have
+                    ]
+                    # If we already have enough images for scoped sections, skip.
+                    scoped = [
+                        s
+                        for s in (bundle.requirement.required_sections or [])
+                        if not re.search(
+                            r"\b(references?|bibliography|works cited|cover)\b",
+                            str(s),
+                            re.I,
+                        )
+                    ]
+                    target = max(2, min(4, len(scoped) * 2)) if scoped else 2
+                    if pending and len(images) < target:
+                        dest = project_files_dir(project_id) / "auto_figures"
+                        need = max(0, target - len(images))
+                        fetched = fetch_commons_figures(
+                            project_id=project_id,
+                            dest_dir=dest,
+                            queries=pending[: max(need, len(pending))],
+                        )
+                        # Prefer exactly the remaining slots.
+                        images = merge_image_lists(images, fetched[:need] if need else fetched)
+
+        if images:
+            project.artifacts["assignment_images"] = images
+        else:
+            project.artifacts.pop("assignment_images", None)
+        project.updated_at = utc_now()
+        self.store.save_project(project)
+        return images
 
     def analyze_requirements(self, project_id: str) -> ProjectBundle:
         self._ensure_pipeline_project(project_id)
@@ -697,6 +788,7 @@ class ProjectService:
             )
             self.store.save_requirement(analyzed)
             self._apply_requirement_to_project(bundle.project, analyzed)
+            self._sync_assignment_images(project_id, auto_fetch=True)
 
             self.pipeline.complete_stage(
                 project_id,
@@ -1008,6 +1100,13 @@ class ProjectService:
 
         bundle = self.store.require_bundle(project_id)
         requirement = bundle.requirement.to_dict()
+        images = bundle.project.artifacts.get("assignment_images")
+        if not isinstance(images, list) or not images:
+            images = self._sync_assignment_images(project_id, auto_fetch=True)
+        if images:
+            # Attached or auto-fetched images are available for [[FIGURE:...]] markers.
+            requirement["assignment_images"] = images
+            requirement["include_assignment_images"] = True
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
 
@@ -1474,11 +1573,33 @@ class ProjectService:
             citation_pack = None
         self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.FORMATTING, force=True)
+        images = bundle.project.artifacts.get("assignment_images")
+        if not isinstance(images, list) or not images:
+            images = self._sync_assignment_images(project_id, auto_fetch=True)
+        from services.assignment_figures import ensure_figure_markers
+
+        content = ensure_figure_markers(str(draft.get("content") or ""), images)
+        if content != str(draft.get("content") or ""):
+            draft = dict(draft)
+            draft["content"] = content
+            # Keep humanized/plain draft in sync so delivery text matches DOCX.
+            try:
+                humanized = self._load_humanized_draft(project_id)
+                humanized.content = content
+                self._persist_humanized_draft(project_id, humanized)
+            except Exception:  # noqa: BLE001
+                try:
+                    raw_draft = self._load_draft(project_id)
+                    raw_draft.content = content
+                    self._persist_draft(project_id, raw_draft)
+                except Exception:  # noqa: BLE001
+                    pass
         formatted = self.format_engine.format_draft(
             draft=draft,
             requirement_json=bundle.requirement.to_dict(),
             project_id=project_id,
             citation_pack=citation_pack,
+            assignment_images=images or None,
         )
         project = self.store.require_project(project_id)
         project.artifacts["formatted_document"] = formatted
@@ -1974,6 +2095,9 @@ class ProjectService:
             humanization_attempts=humanization_attempts,
             completion_time=completion_time,
             formatted_document_path=formatted_path,
+            assignment_images=bundle.project.artifacts.get("assignment_images")
+            if isinstance(bundle.project.artifacts.get("assignment_images"), list)
+            else None,
         )
 
         project = self.store.require_project(project_id)

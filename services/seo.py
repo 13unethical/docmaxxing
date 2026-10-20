@@ -127,6 +127,17 @@ _PAGE_OVERRIDES: dict[str, dict[str, Any]] = {
             "Fast Turnitin-style checks with downloadable PDF results."
         ),
     },
+    "/veil": {
+        "title": "Veil — Study Overlay for Chrome | DocMaxxing",
+        "description": (
+            "Veil explains selected text, formulas, and diagrams in a panel "
+            "on the page you are already reading. Uses your DocMaxxing credits."
+        ),
+        "h1": "Study overlay that stays on your tab",
+        "lede": (
+            "Explain problems, notes, and PDFs in a panel over any page."
+        ),
+    },
     "/check": {
         "title": "Academic Check — Draft vs Assignment Brief | DocMaxxing",
         "description": (

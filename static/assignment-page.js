@@ -731,7 +731,7 @@
       return;
     }
     state.composerMode = "brief";
-    if (input) input.placeholder = "Add a note (optional)…";
+    if (input) input.placeholder = "e.g. Only Shelter + Transportation — paste or attach photos";
     if (attach) {
       attach.hidden = false;
       attach.removeAttribute("hidden");
@@ -809,6 +809,81 @@
     mergePendingFiles(fileList);
     renderChips();
     syncSendEnabled();
+  }
+
+  function normalizePastedImageFile(file, index) {
+    if (!file) return null;
+    var type = String(file.type || "");
+    if (type && type.indexOf("image/") !== 0) return null;
+    var name = String(file.name || "").trim();
+    var looksGeneric =
+      !name ||
+      name === "image.png" ||
+      name === "image.jpg" ||
+      name === "blob" ||
+      name === "untitled" ||
+      /^image\.(png|jpe?g|gif|webp)$/i.test(name);
+    if (!looksGeneric) return file;
+    var ext = "png";
+    if (type.indexOf("jpeg") >= 0 || type.indexOf("jpg") >= 0) ext = "jpg";
+    else if (type.indexOf("webp") >= 0) ext = "webp";
+    else if (type.indexOf("gif") >= 0) ext = "gif";
+    else if (/\.([a-z0-9]+)$/i.test(name)) ext = RegExp.$1.toLowerCase();
+    var stamp = Date.now().toString(36) + "-" + String(index || 0);
+    try {
+      return new File([file], "pasted-image-" + stamp + "." + ext, {
+        type: type || "image/png",
+        lastModified: Date.now(),
+      });
+    } catch (err) {
+      // Older Safari may not support File constructor — keep original blob/file.
+      return file;
+    }
+  }
+
+  /** Images copied from browser / screenshot / Finder → composer attachments. */
+  function filesFromClipboardEvent(e) {
+    var dt = e && e.clipboardData;
+    if (!dt) return [];
+    var out = [];
+    var seen = {};
+
+    function pushFile(file, index) {
+      var normalized = normalizePastedImageFile(file, index);
+      if (!normalized) return;
+      var key = [normalized.name, normalized.size, normalized.lastModified || 0].join("::");
+      if (seen[key]) return;
+      seen[key] = true;
+      out.push(normalized);
+    }
+
+    if (dt.items && dt.items.length) {
+      for (var i = 0; i < dt.items.length; i++) {
+        var item = dt.items[i];
+        if (!item || item.kind !== "file") continue;
+        if (item.type && item.type.indexOf("image/") !== 0) continue;
+        try {
+          pushFile(item.getAsFile(), i);
+        } catch (err) {}
+      }
+    }
+    if (!out.length && dt.files && dt.files.length) {
+      for (var j = 0; j < dt.files.length; j++) {
+        var f = dt.files[j];
+        if (f && (String(f.type || "").indexOf("image/") === 0 || /\.(png|jpe?g|gif|webp)$/i.test(f.name || ""))) {
+          pushFile(f, j);
+        }
+      }
+    }
+    return out;
+  }
+
+  function onComposerPaste(e) {
+    var images = filesFromClipboardEvent(e);
+    if (!images.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    addFilesFromUser(images);
   }
 
   function fileTypeLabel(file) {
@@ -2660,12 +2735,15 @@
           if (form) form.requestSubmit();
         }
       });
+      note.addEventListener("paste", onComposerPaste);
       autosizeComposer(note);
     }
     window.addEventListener("resize", function () {
       autosizeComposer(note);
     });
     if (form) {
+      // Paste on composer chrome (chips / attach) — note handler stops bubble when it runs.
+      form.addEventListener("paste", onComposerPaste);
       form.addEventListener("submit", function (e) {
         e.preventDefault();
         if (state.composerMode === "revision") {

@@ -71,8 +71,11 @@ class BrowserConnection:
         if self._pw is None or self._browser is None or self._context is None:
             return False
         try:
-            _ = self._browser.contexts
-            return True
+            # `contexts` is cached client-side and keeps answering after Chrome
+            # drops the context, so check the connection and context membership.
+            if not self._browser.is_connected():
+                return False
+            return self._context in self._browser.contexts
         except Exception:  # noqa: BLE001
             return False
 

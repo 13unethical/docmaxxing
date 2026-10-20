@@ -181,6 +181,7 @@ class DeliveryEngineInput:
     # Absolute path to Format Engine DOCX. When set, delivery must ship this file
     # instead of rebuilding an unformatted document from markdown.
     formatted_document_path: str | None = None
+    assignment_images: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -195,4 +196,5 @@ class DeliveryEngineInput:
             "humanization_attempts": self.humanization_attempts,
             "completion_time": self.completion_time,
             "formatted_document_path": self.formatted_document_path,
+            "assignment_images": list(self.assignment_images or []),
         }

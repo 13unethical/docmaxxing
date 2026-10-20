@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Connect Veil — DocMaxxing</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #f8fafc;
+      color: #0f172a;
+      font: 16px/1.5 system-ui, sans-serif;
+    }
+    .card {
+      width: min(28rem, calc(100% - 2rem));
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 16px;
+      padding: 1.6rem 1.5rem;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
+    }
+    h1 { margin: 0 0 0.4rem; font-size: 1.4rem; }
+    p { margin: 0.4rem 0; color: #475569; }
+    .ok { color: #047857; font-weight: 650; }
+    .err { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Veil</h1>
+    <p id="state">Connecting your account…</p>
+    <p>{{ email }}</p>
+    {% if veil_pass.active %}
+      <p>Access until {{ veil_pass.expires_label }}.</p>
+    {% else %}
+      <p>Access is not active. <a href="{{ url_for('veil_landing') }}#access">Unlock 30 days</a> on the Veil page, then use the extension.</p>
+    {% endif %}
+  </div>
+  <script>
+    const state = document.getElementById("state");
+    const extensionId = {{ extension_id|tojson }};
+    const message = {
+      type: "VEIL_AUTH",
+      token: {{ token|tojson }},
+      email: {{ email|tojson }},
+      balance: {{ balance|tojson }}
+    };
+    function fail(text) {
+      state.className = "err";
+      state.textContent = text;
+    }
+    if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
+      fail("Veil is not installed in this browser. Download it, load the folder in chrome://extensions, then open this page again.");
+    } else {
+      chrome.runtime.sendMessage(extensionId, message, function (response) {
+        if (chrome.runtime.lastError || !response || !response.ok) {
+          fail("Could not reach Veil. Make sure the extension is installed and enabled, then reload this page.");
+          return;
+        }
+        state.className = "ok";
+        state.textContent = "Connected. You can close this tab and use Veil on any page.";
+      });
+    }
+  </script>
+</body>
+</html>

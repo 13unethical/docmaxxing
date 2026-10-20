@@ -2,7 +2,7 @@
 {% set include_umami_analytics = false %}
 {% block title %}Admin Panel — DocMaxxing{% endblock %}
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v=20260903-preflight" />
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}?v=20261002-activity" />
 {% endblock %}
 {% block content %}
 <div class="adm-page" data-admin-page>
@@ -252,6 +252,56 @@
     </div>
   </section>
 
+  <section class="adm-card adm-activity" aria-labelledby="adm-activity-title" data-adm-activity>
+    <div class="adm-analytics-head">
+      <div>
+        <h2 class="adm-section-title" id="adm-activity-title">Activity ledger</h2>
+        <p class="adm-analytics-lede">
+          Every action on the site: sign-ups, logins, coin movements, admin edits, and
+          state-changing requests. Deleted accounts keep their history here.
+        </p>
+      </div>
+      <button type="button" class="adm-btn adm-btn--ghost" data-adm-activity-refresh>Refresh</button>
+    </div>
+    <div class="adm-activity-toolbar">
+      <input
+        type="search"
+        class="adm-search adm-activity-search"
+        placeholder="Search email, action, path, IP or user ID"
+        data-adm-activity-search
+        aria-label="Search activity"
+      />
+      <select class="adm-activity-select" data-adm-activity-category aria-label="Filter by category">
+        <option value="">All categories</option>
+      </select>
+      <button type="button" class="adm-btn adm-btn--ghost" data-adm-activity-clear-user hidden>
+        Clear user filter
+      </button>
+    </div>
+    <p class="adm-activity-meta" data-adm-activity-meta></p>
+    <p class="adm-status" data-adm-activity-status role="status" aria-live="polite"></p>
+    <div class="adm-table-wrap">
+      <table class="adm-table adm-activity-table">
+        <thead>
+          <tr>
+            <th scope="col">When</th>
+            <th scope="col">Category</th>
+            <th scope="col">Action</th>
+            <th scope="col">User</th>
+            <th scope="col">By</th>
+            <th scope="col">Details</th>
+            <th scope="col">IP</th>
+          </tr>
+        </thead>
+        <tbody data-adm-activity-body></tbody>
+      </table>
+      <p class="adm-empty" data-adm-activity-empty hidden>No activity yet.</p>
+    </div>
+    <div class="adm-activity-more">
+      <button type="button" class="adm-btn adm-btn--ghost" data-adm-activity-more hidden>Load more</button>
+    </div>
+  </section>
+
   <section class="adm-card">
     <div class="adm-toolbar">
       <div class="adm-search-wrap">
@@ -400,5 +450,5 @@
 </div>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='admin-page.js') }}?v=20260903-preflight"></script>
+<script src="{{ url_for('static', filename='admin-page.js') }}?v=20261002-activity"></script>
 {% endblock %}

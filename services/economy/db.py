@@ -218,6 +218,24 @@ CREATE TABLE IF NOT EXISTS support_messages (
 
 CREATE INDEX IF NOT EXISTS idx_support_messages_user_created
     ON support_messages(user_id, created_at ASC);
+
+CREATE TABLE IF NOT EXISTS extension_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash   TEXT NOT NULL UNIQUE,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT,
+    revoked      INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_extension_tokens_user
+    ON extension_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS veil_passes (
+    user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -591,6 +609,12 @@ def init_db() -> None:
             "WHERE reference_type = 'LemonSqueezy' AND feature = 'topup' "
             "AND ref_id IS NOT NULL"
         )
+        from .activity_log import backfill_activity
+
+        try:
+            backfill_activity(conn)
+        except sqlite3.Error:
+            pass
         conn.commit()
     finally:
         conn.close()

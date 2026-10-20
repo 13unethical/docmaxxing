@@ -60,17 +60,20 @@ class ZeroGPTTextHumanizer:
             protect_markdown_headings,
             restore_markdown_headings,
         )
+        from services.assignment_figures import protect_figure_markers, restore_figure_markers
 
         selected_mode = normalize_humanizer_mode(mode or self.mode)
         tone = map_academic_tone_to_zerogpt(academic_tone)
         chunk_words = min(MAX_WORDS_PER_INPUT, TRANSFORM_CHUNK_WORDS)
         # Entire draft body is humanized; markdown headings are protected then restored.
         protected, headings = protect_markdown_headings(text)
+        protected, figures = protect_figure_markers(protected)
         chunks = split_text_by_word_limit(protected, max_words=chunk_words)
         outputs: list[str] = []
         for chunk in chunks:
             outputs.append(self._humanize_chunk(chunk, tone=tone, mode=selected_mode))
-        return restore_markdown_headings("\n\n".join(outputs), headings)
+        restored = restore_figure_markers("\n\n".join(outputs), figures)
+        return restore_markdown_headings(restored, headings)
 
     def _humanize_chunk(self, chunk: str, *, tone: str, mode: str) -> str:
         result = self._humanizer.humanize(chunk, tone=tone, mode=mode)

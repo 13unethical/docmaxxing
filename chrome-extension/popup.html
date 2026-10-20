@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Veil</title>
+  <style>
+    body {
+      margin: 0;
+      width: 260px;
+      font: 13px/1.4 system-ui, sans-serif;
+      color: #0f172a;
+      background: #fff;
+    }
+    .wrap { padding: 14px; }
+    h1 { margin: 0 0 4px; font-size: 16px; }
+    p { margin: 0 0 10px; color: #475569; }
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .primary { background: #2563eb; color: #fff; }
+    .ghost { margin-top: 8px; background: #f1f5f9; color: #0f172a; }
+    .email { font-weight: 650; color: #0f172a; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Veil</h1>
+    <p id="status">Checking your account…</p>
+    <button type="button" class="primary" id="sign-in" hidden>Sign in</button>
+    <button type="button" class="primary" id="renew" hidden>Renew access</button>
+    <button type="button" class="ghost" id="sign-out" hidden>Sign out</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

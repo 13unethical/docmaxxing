@@ -1,0 +1,1114 @@
+/* Veil landing — Cluely-inspired design with DocMaxxing colors & aesthetics */
+
+.tools-layout:has(.veil-page) {
+  display: block;
+  margin: 0;
+  min-height: 0;
+}
+
+.tools-main:has(.veil-page) {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.veil-page {
+  --veil-blue: #2563eb;
+  --veil-blue-hover: #1d4ed8;
+  --veil-blue-light: #eff6ff;
+  --veil-blue-border: #bfdbfe;
+  --veil-blue-glow: rgba(37, 99, 235, 0.35);
+  --veil-ink: #0f172a;
+  --veil-sub: #475569;
+  --veil-mute: #64748b;
+  --veil-border: #e2e8f0;
+  --veil-card: #ffffff;
+  --veil-bg-soft: #f8fafc;
+  --veil-dark-bg: #11141a;
+  --veil-dark-panel: #16181f;
+  --veil-dark-border: rgba(255, 255, 255, 0.1);
+  color: var(--veil-ink);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.veil-page h1,
+.veil-page h2,
+.veil-page h3.veil-serif,
+.veil-serif {
+  font-family: "Source Serif 4", Georgia, Cambria, "Times New Roman", Times, serif;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+.veil-wrap {
+  width: min(1140px, calc(100% - 2.5rem));
+  margin-inline: auto;
+}
+
+/* ==========================================================================
+   1. HERO & SKY BACKGROUND (Cluely Style)
+   ========================================================================== */
+
+.veil-sky {
+  position: relative;
+  background:
+    radial-gradient(110% 75% at 50% -10%, rgba(255, 240, 225, 0.55) 0%, transparent 45%),
+    radial-gradient(90% 60% at 85% 10%, rgba(186, 222, 255, 0.55) 0%, transparent 52%),
+    linear-gradient(180deg, #93c5fd 0%, #bfdbfe 25%, #dbeafe 52%, #eff6ff 78%, #ffffff 100%);
+  padding: 4.5rem 1rem 5.5rem;
+  margin: -0.5rem -1rem 0;
+  overflow: hidden;
+}
+
+.veil-hero {
+  text-align: center;
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.veil-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.35rem 0.95rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.08);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1e3a8a;
+  margin-bottom: 1.5rem;
+  backdrop-filter: blur(12px);
+}
+
+.veil-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--veil-blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+  animation: veilPulse 2s infinite;
+}
+
+@keyframes veilPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.2); opacity: 0.75; }
+}
+
+.veil-hero h1 {
+  margin: 0;
+  font-size: clamp(2.6rem, 5.8vw, 4.8rem);
+  line-height: 1.02;
+  color: #0f172a;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+.veil-hero h1 span.veil-hero-accent {
+  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.veil-hero p.veil-hero-desc {
+  margin: 1.4rem auto 0;
+  max-width: 36rem;
+  color: #334155;
+  font-size: clamp(1.05rem, 1.8vw, 1.2rem);
+  font-weight: 450;
+  line-height: 1.55;
+}
+
+.veil-cta-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+.veil-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem 1.6rem;
+  border-radius: 999px;
+  background: var(--veil-blue);
+  color: #ffffff !important;
+  font-size: 0.96rem;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 12px 28px -6px rgba(37, 99, 235, 0.45);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.veil-cta-primary:hover {
+  background: var(--veil-blue-hover);
+  box-shadow: 0 16px 36px -6px rgba(37, 99, 235, 0.6);
+  transform: translateY(-1px);
+}
+
+.veil-cta-primary svg {
+  width: 18px;
+  height: 18px;
+}
+
+.veil-cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.4rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--veil-ink) !important;
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  font-size: 0.94rem;
+  font-weight: 500;
+  text-decoration: none;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s;
+}
+
+.veil-cta-secondary:hover {
+  background: #ffffff;
+  border-color: #cbd5e1;
+}
+
+/* ==========================================================================
+   2. HERO MOCKUP: BROWSER WINDOW WITH REAL VEIL PANEL (Cluely Style)
+   ========================================================================== */
+
+.veil-mock-container {
+  position: relative;
+  width: min(1040px, calc(100% - 1.5rem));
+  margin: 3.5rem auto 0;
+}
+
+.veil-browser {
+  overflow: hidden;
+  border-radius: 1.25rem;
+  background: #ffffff;
+  box-shadow:
+    0 32px 80px -20px rgba(15, 23, 42, 0.22),
+    0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+.veil-browser-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.8rem 1.2rem;
+  background: #f1f5f9;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.veil-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.veil-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+
+.veil-url-bar {
+  flex: 1;
+  max-width: 26rem;
+  margin: 0 auto;
+  padding: 0.3rem 0.8rem;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  color: #64748b;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  justify-content: center;
+}
+
+.veil-url-bar svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.6;
+}
+
+.veil-browser-viewport {
+  position: relative;
+  min-height: 28rem;
+  padding: 2.5rem 3rem;
+  background: #fbfcfe;
+  display: flex;
+  gap: 2rem;
+}
+
+/* Academic Page Simulation inside Mock */
+.veil-sim-page {
+  flex: 1;
+  max-width: 60%;
+}
+
+.veil-sim-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--veil-blue);
+  margin: 0 0 0.5rem;
+}
+
+.veil-sim-title {
+  margin: 0 0 1rem;
+  font-size: 1.55rem;
+  color: #0f172a;
+}
+
+.veil-sim-text {
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: #475569;
+  margin-bottom: 1.25rem;
+}
+
+.veil-highlight {
+  background: #dbeafe;
+  color: #1e3a8a;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  border-bottom: 2px solid #3b82f6;
+  font-weight: 500;
+}
+
+.veil-sim-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 1.5rem;
+}
+
+.veil-sim-line {
+  height: 8px;
+  border-radius: 99px;
+  background: #e2e8f0;
+}
+
+/* 
+   THE ACTUAL VEIL EXTENSION PANEL (matching content.js & screenshots)
+*/
+.veil-extension-panel {
+  position: absolute;
+  top: 1.8rem;
+  right: 2.2rem;
+  width: 320px;
+  border-radius: 14px;
+  background: #111419;
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 24px 60px -12px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+  padding: 10px 12px 12px;
+  font-family: Inter, -apple-system, sans-serif;
+  z-index: 20;
+}
+
+.veil-panel-drag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 10px;
+}
+
+.veil-panel-drag-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.veil-panel-drag-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--veil-blue);
+}
+
+.veil-panel-drag-dots {
+  display: flex;
+  gap: 3px;
+  opacity: 0.5;
+}
+
+.veil-panel-drag-dots span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #ffffff;
+}
+
+.veil-panel-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.veil-bubble-user {
+  align-self: flex-end;
+  background: #1e293b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px 10px 2px 10px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #e2e8f0;
+  max-width: 90%;
+}
+
+.veil-bubble-ai {
+  align-self: flex-start;
+  background: rgba(37, 99, 235, 0.1);
+  border: 1px solid rgba(37, 99, 235, 0.3);
+  border-radius: 10px 10px 10px 2px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #f1f5f9;
+}
+
+.veil-bubble-ai-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #60a5fa;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.veil-bubble-ai math-formula {
+  display: block;
+  font-family: "Source Serif 4", Georgia, serif;
+  font-size: 12.5px;
+  color: #ffffff;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  margin: 4px 0;
+}
+
+.veil-panel-input-box {
+  width: 100%;
+  min-height: 48px;
+  box-sizing: border-box;
+  padding: 8px;
+  border-radius: 8px;
+  background: #1a1d24;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+
+.veil-panel-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.veil-panel-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #cbd5e1;
+  cursor: default;
+}
+
+.veil-panel-toggle input[type="checkbox"] {
+  accent-color: var(--veil-blue);
+  cursor: pointer;
+  margin: 0;
+}
+
+.veil-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.veil-btn-crop {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: #262933;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.veil-btn-crop svg {
+  width: 14px;
+  height: 14px;
+}
+
+.veil-btn-send {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--veil-blue);
+  border: none;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.veil-btn-send svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* Callout markers explaining the panel */
+.veil-callout {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #0f172a;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  box-shadow: 0 10px 24px -4px rgba(37, 99, 235, 0.15);
+  pointer-events: none;
+  z-index: 30;
+}
+
+.veil-callout-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--veil-blue);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.veil-callout-1 {
+  top: 5.5rem;
+  right: 23rem;
+}
+
+.veil-callout-2 {
+  bottom: 2rem;
+  right: 18rem;
+}
+
+/* ==========================================================================
+   3. BENTO SECTION: HOW VEIL HELPS (Cluely Screenshot 6)
+   ========================================================================== */
+
+.veil-section {
+  padding: 5.5rem 0;
+}
+
+.veil-section--subtle {
+  background: #f8fafc;
+  border-top: 1px solid #f1f5f9;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.veil-center {
+  text-align: center;
+}
+
+.veil-section-title {
+  font-size: clamp(2.1rem, 4vw, 3.2rem);
+  line-height: 1.1;
+  color: #0f172a;
+  margin: 0;
+}
+
+.veil-section-sub {
+  margin: 0.9rem auto 0;
+  max-width: 34rem;
+  color: var(--veil-sub);
+  font-size: 1.05rem;
+}
+
+.veil-bento-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.75rem;
+  margin-top: 3.5rem;
+}
+
+.veil-bento-card {
+  border-radius: 1.75rem;
+  padding: 2.5rem;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 20px 45px -12px rgba(15, 23, 42, 0.06);
+}
+
+.veil-bento-card--blue {
+  background: linear-gradient(145deg, #2563eb 0%, #1d4ed8 100%);
+  color: #ffffff;
+}
+
+.veil-bento-card--slate {
+  background: #ffffff;
+  color: var(--veil-ink);
+}
+
+.veil-pill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  font-size: 1.1rem;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+.veil-bento-card--blue .veil-pill-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  backdrop-filter: blur(10px);
+}
+
+.veil-bento-card--slate .veil-pill-badge {
+  background: #eff6ff;
+  color: var(--veil-blue);
+  border: 1px solid #bfdbfe;
+}
+
+.veil-bento-card h2 {
+  font-size: clamp(1.6rem, 2.4vw, 2.1rem);
+  line-height: 1.25;
+  margin: 0 0 1rem;
+}
+
+.veil-bento-card p {
+  font-size: 0.98rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.veil-bento-card--blue p {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.veil-bento-card--slate p {
+  color: var(--veil-sub);
+}
+
+.veil-bento-card-art {
+  margin-top: 2.5rem;
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.veil-bento-card--blue .veil-bento-card-art {
+  background: rgba(15, 23, 42, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 1.25rem;
+}
+
+.veil-bento-card--slate .veil-bento-card-art {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 1.25rem;
+}
+
+/* ==========================================================================
+   4. NOTE EDITOR PREVIEW (Cluely Screenshot 7)
+   ========================================================================== */
+
+.veil-notes-preview {
+  margin-top: 3.5rem;
+  border-radius: 1.5rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 24px 60px -16px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+
+.veil-notes-head {
+  padding: 1.25rem 2rem;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.veil-notes-meta {
+  font-size: 12px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.veil-notes-tags {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.veil-notes-tag {
+  padding: 0.2rem 0.6rem;
+  border-radius: 6px;
+  background: #f1f5f9;
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.veil-notes-body {
+  padding: 2.2rem 2.5rem;
+}
+
+.veil-notes-body h4 {
+  margin: 0 0 1.2rem;
+  font-size: 1.35rem;
+  color: #0f172a;
+}
+
+.veil-notes-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.veil-notes-list li {
+  position: relative;
+  padding-left: 1.4rem;
+  font-size: 0.95rem;
+  color: #334155;
+  line-height: 1.55;
+}
+
+.veil-notes-list li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--veil-blue);
+  font-weight: bold;
+  font-size: 1.2rem;
+  line-height: 1;
+  top: 2px;
+}
+
+/* ==========================================================================
+   5. UNDETECTABLE IN EVERY WAY (Cluely Screenshot 8)
+   ========================================================================== */
+
+.veil-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  margin-top: 3.5rem;
+}
+
+.veil-card-feature {
+  background: #ffffff;
+  border-radius: 1.5rem;
+  padding: 1.75rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 16px 36px -12px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.veil-card-feature h3 {
+  font-size: 1.15rem;
+  margin: 1.25rem 0 0.5rem;
+  color: #0f172a;
+}
+
+.veil-card-feature p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--veil-sub);
+  line-height: 1.55;
+}
+
+/* Split slider comparison art */
+.veil-split-art {
+  border-radius: 1rem;
+  background: #f1f5f9;
+  overflow: hidden;
+  position: relative;
+  height: 170px;
+  border: 1px solid #e2e8f0;
+  display: flex;
+}
+
+.veil-split-left {
+  flex: 1;
+  background: #ffffff;
+  padding: 0.75rem;
+  border-right: 2px solid var(--veil-blue);
+  position: relative;
+}
+
+.veil-split-right {
+  flex: 1;
+  background: #f8fafc;
+  padding: 0.75rem;
+}
+
+.veil-split-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.veil-split-left .veil-split-badge {
+  background: #eff6ff;
+  color: var(--veil-blue);
+}
+
+.veil-split-right .veil-split-badge {
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+.veil-split-overlay-mock {
+  background: #111419;
+  color: #ffffff;
+  border-radius: 6px;
+  padding: 6px;
+  font-size: 10px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+}
+
+/* ==========================================================================
+   6. PLATFORM COMPATIBILITY (Cluely Screenshot 9)
+   ========================================================================== */
+
+.veil-platforms {
+  padding: 3rem 0;
+  border-top: 1px solid #f1f5f9;
+  border-bottom: 1px solid #f1f5f9;
+  background: #ffffff;
+}
+
+.veil-platforms-label {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  margin-bottom: 2rem;
+}
+
+.veil-platforms-list {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2.5rem;
+  flex-wrap: wrap;
+}
+
+.veil-platform-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.veil-platform-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--veil-blue);
+}
+
+/* ==========================================================================
+   7. STATS & PERFORMANCE (Cluely Screenshot 10)
+   ========================================================================== */
+
+.veil-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2rem;
+  margin-top: 3.5rem;
+}
+
+.veil-stat-col {
+  padding: 2rem;
+  border-radius: 1.25rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  text-align: left;
+}
+
+.veil-stat-val {
+  font-size: clamp(2.8rem, 4.5vw, 4rem);
+  font-weight: 500;
+  color: var(--veil-blue);
+  line-height: 1;
+  margin: 0 0 0.6rem;
+}
+
+.veil-stat-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0 0 0.35rem;
+}
+
+.veil-stat-sub {
+  font-size: 0.9rem;
+  color: var(--veil-sub);
+  margin: 0;
+}
+
+/* ==========================================================================
+   8. FAQ ACCORDION (Cluely Screenshot 11)
+   ========================================================================== */
+
+.veil-faq-wrap {
+  max-width: 48rem;
+  margin: 3.5rem auto 0;
+}
+
+.veil-faq-item {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.veil-faq-item summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.4rem 0;
+  cursor: pointer;
+  list-style: none;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0f172a;
+  transition: color 0.15s;
+}
+
+.veil-faq-item summary::-webkit-details-marker {
+  display: none;
+}
+
+.veil-faq-item summary:hover {
+  color: var(--veil-blue);
+}
+
+.veil-faq-chevron {
+  width: 18px;
+  height: 18px;
+  color: #94a3b8;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.veil-faq-item[open] .veil-faq-chevron {
+  transform: rotate(180deg);
+  color: var(--veil-blue);
+}
+
+.veil-faq-body {
+  padding-bottom: 1.4rem;
+  font-size: 0.95rem;
+  color: var(--veil-sub);
+  line-height: 1.6;
+}
+
+/* ==========================================================================
+   9. BOTTOM CTA WITH 3D KEYS (Cluely Screenshot 12)
+   ========================================================================== */
+
+.veil-bottom-cta {
+  position: relative;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(224, 242, 254, 0.7) 0%, transparent 60%),
+    linear-gradient(180deg, #f0f7ff 0%, #e2eefb 100%);
+  border-top: 1px solid #dbeafe;
+  padding: 6.5rem 1rem;
+  text-align: center;
+  overflow: hidden;
+}
+
+.veil-key-float {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  box-shadow:
+    0 18px 36px -10px rgba(37, 99, 235, 0.18),
+    0 4px 10px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  pointer-events: none;
+  animation: keyFloat 6s ease-in-out infinite alternate;
+}
+
+@keyframes keyFloat {
+  0% { transform: translateY(0px) rotate(var(--rot, 0deg)); }
+  100% { transform: translateY(-12px) rotate(calc(var(--rot, 0deg) + 2deg)); }
+}
+
+.veil-key-alt {
+  left: 12%;
+  top: 25%;
+  padding: 0.65rem 1.1rem;
+  --rot: -8deg;
+}
+
+.veil-key-q {
+  left: 20%;
+  bottom: 25%;
+  padding: 0.65rem 0.95rem;
+  --rot: 6deg;
+  animation-delay: -2s;
+}
+
+.veil-key-s {
+  right: 22%;
+  top: 22%;
+  padding: 0.65rem 0.95rem;
+  --rot: -5deg;
+  animation-delay: -3.5s;
+}
+
+.veil-key-enter {
+  right: 12%;
+  bottom: 22%;
+  padding: 0.65rem 1.2rem;
+  --rot: 8deg;
+  animation-delay: -1s;
+}
+
+.veil-bottom-cta h2 {
+  font-size: clamp(2.2rem, 4.5vw, 3.4rem);
+  margin: 0;
+  color: #0f172a;
+}
+
+.veil-bottom-cta p {
+  margin: 1rem auto 2.2rem;
+  max-width: 32rem;
+  color: var(--veil-sub);
+  font-size: 1.1rem;
+}
+
+/* Footer in Cluely style */
+.veil-footer {
+  border-top: 1px solid #e2e8f0;
+  padding: 2.5rem 1rem;
+  background: #ffffff;
+}
+
+.veil-footer-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  font-size: 0.88rem;
+  color: #64748b;
+}
+
+.veil-footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.veil-footer-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #047857;
+}
+
+.veil-footer-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+}
+
+/* ==========================================================================
+   RESPONSIVE DESIGN
+   ========================================================================== */
+
+@media (max-width: 960px) {
+  .veil-bento-grid,
+  .veil-grid-3,
+  .veil-stats-row {
+    grid-template-columns: 1fr;
+  }
+
+  .veil-browser-viewport {
+    flex-direction: column;
+    padding: 1.5rem;
+  }
+
+  .veil-sim-page {
+    max-width: 100%;
+  }
+
+  .veil-extension-panel {
+    position: static;
+    width: 100%;
+    margin-top: 1.5rem;
+  }
+
+  .veil-callout {
+    display: none;
+  }
+
+  .veil-key-float {
+    display: none;
+  }
+}

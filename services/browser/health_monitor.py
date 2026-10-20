@@ -42,6 +42,10 @@ class HealthMonitor(threading.Thread):
         self._lock = threading.Lock()
         self._last: dict[str, Any] = {"status": "starting"}
         self._sw_last_logged_in: bool | None = None
+        # StealthWriter sessions expire 7 days after last use; visiting the
+        # dashboard periodically slides the expiry and re-snapshots cookies.
+        self._sw_keepalive_s = _env_int("STEALTHWRITER_KEEPALIVE_HOURS", 6) * 3600
+        self._sw_last_keepalive: float | None = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -95,6 +99,14 @@ class HealthMonitor(threading.Thread):
             except Exception as exc:  # noqa: BLE001
                 print(f"[health-monitor] recovery failed: {exc}", flush=True)
 
+        if browser_alive:
+            keepalive = self._stealthwriter_keepalive(active_jobs=active_jobs)
+            if isinstance(keepalive.get("logged_in"), bool):
+                sw_logged_in = keepalive["logged_in"]
+                sw_url = keepalive.get("current_url") or sw_url
+                snapshot["stealthwriter_logged_in"] = sw_logged_in
+                snapshot["stealthwriter_url"] = sw_url
+
         self._handle_stealthwriter_session_alerts(
             logged_in=sw_logged_in,
             current_url=sw_url,
@@ -103,6 +115,30 @@ class HealthMonitor(threading.Thread):
 
         with self._lock:
             self._last = snapshot
+
+    def _stealthwriter_keepalive(self, *, active_jobs: int) -> dict[str, Any]:
+        if self._sw_keepalive_s <= 0 or active_jobs > 0 or self._worker is None or self._service is None:
+            return {}
+        last = self._sw_last_keepalive
+        if last is not None and time.monotonic() - last < self._sw_keepalive_s:
+            return {}
+        self._sw_last_keepalive = time.monotonic()
+
+        def _refresh() -> dict[str, Any]:
+            provider = self._service.providers().get("stealthwriter")
+            if provider is None or not hasattr(provider, "status"):
+                return {}
+            data = provider.status()
+            return data if isinstance(data, dict) else {}
+
+        try:
+            result = self._worker.submit(_refresh, timeout=60)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[health-monitor] stealthwriter keepalive failed: {exc}", flush=True)
+            return {}
+        result = result if isinstance(result, dict) else {}
+        print(f"[health-monitor] stealthwriter keepalive logged_in={result.get('logged_in')}", flush=True)
+        return result
 
     def _probe_stealthwriter_health(self, *, active_jobs: int) -> dict[str, Any]:
         """Read provider tab status on the browser worker thread.

@@ -1,0 +1,1557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Veil — Study Overlay for Chrome</title>
+  <meta name="description" content="Veil explains selected text, formulas, and diagrams in a panel on the page you are already reading. It uses your DocMaxxing credits." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet" />
+  <style>
+    /* Reset & Base */
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: #0f172a;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Standalone Navigation Bar */
+    .veil-nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(16px);
+      background: rgba(255, 255, 255, 0.82);
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    }
+    .veil-nav-wrap {
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .veil-nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      flex-shrink: 0;
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: #0f172a;
+      text-decoration: none;
+    }
+    .veil-nav-links {
+      display: flex;
+      align-items: center;
+      gap: 1.35rem;
+      min-width: 0;
+      font-size: 0.92rem;
+      font-weight: 500;
+    }
+    .veil-nav-link {
+      color: #475569;
+      text-decoration: none;
+      white-space: nowrap;
+      transition: color 0.15s;
+    }
+    .veil-nav-link:hover {
+      color: #2563eb;
+    }
+    .veil-nav-cta {
+      display: inline-flex;
+      align-items: center;
+      flex-shrink: 0;
+      gap: 0.5rem;
+      padding: 0.5rem 1.15rem;
+      border-radius: 999px;
+      background: #2563eb;
+      color: #ffffff;
+      font-size: 0.88rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+    }
+    .veil-nav-cta:hover {
+      background: #1d4ed8;
+      transform: translateY(-1px);
+    }
+
+    /* Inlined Core Cluely-style CSS */
+    .veil-page {
+      --veil-blue: #2563eb;
+      --veil-blue-hover: #1d4ed8;
+      --veil-blue-light: #eff6ff;
+      --veil-blue-border: #bfdbfe;
+      --veil-blue-glow: rgba(37, 99, 235, 0.35);
+      --veil-ink: #0f172a;
+      --veil-sub: #475569;
+      --veil-mute: #64748b;
+      --veil-border: #e2e8f0;
+      --veil-card: #ffffff;
+      --veil-bg-soft: #f8fafc;
+      color: var(--veil-ink);
+    }
+
+    .veil-page h1,
+    .veil-page h2,
+    .veil-page h3.veil-serif,
+    .veil-serif {
+      font-family: "Source Serif 4", Georgia, Cambria, "Times New Roman", Times, serif;
+      font-weight: 500;
+      letter-spacing: -0.025em;
+    }
+
+    .veil-wrap {
+      width: min(1140px, calc(100% - 2.5rem));
+      margin-inline: auto;
+    }
+
+    .veil-sky {
+      position: relative;
+      background:
+        radial-gradient(110% 75% at 50% -10%, rgba(255, 240, 225, 0.55) 0%, transparent 45%),
+        radial-gradient(90% 60% at 85% 10%, rgba(186, 222, 255, 0.55) 0%, transparent 52%),
+        linear-gradient(180deg, #93c5fd 0%, #bfdbfe 25%, #dbeafe 52%, #eff6ff 78%, #ffffff 100%);
+      padding: 4.5rem 1rem 5.5rem;
+      overflow: hidden;
+    }
+
+    .veil-hero {
+      text-align: center;
+      max-width: 52rem;
+      margin: 0 auto;
+      padding: 0 1rem;
+    }
+
+    .veil-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.35rem 0.95rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.95);
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.08);
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #1e3a8a;
+      margin-bottom: 1.5rem;
+      backdrop-filter: blur(12px);
+    }
+
+    .veil-badge-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--veil-blue);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+      animation: veilPulse 2s infinite;
+    }
+
+    @keyframes veilPulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.2); opacity: 0.75; }
+    }
+
+    .veil-hero h1 {
+      margin: 0;
+      font-size: clamp(2.6rem, 5.8vw, 4.8rem);
+      line-height: 1.02;
+      color: #0f172a;
+      text-shadow: 0 1px 2px rgba(255, 255, 255, 0.4);
+    }
+
+    .veil-hero h1 span.veil-hero-accent {
+      background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .veil-hero p.veil-hero-desc {
+      margin: 1.4rem auto 0;
+      max-width: 36rem;
+      color: #334155;
+      font-size: clamp(1.05rem, 1.8vw, 1.2rem);
+      font-weight: 450;
+      line-height: 1.55;
+    }
+
+    .veil-cta-group {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1rem;
+      margin-top: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .veil-cta-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.75rem 1.6rem;
+      border-radius: 999px;
+      background: var(--veil-blue);
+      color: #ffffff !important;
+      font-size: 0.96rem;
+      font-weight: 600;
+      text-decoration: none;
+      box-shadow: 0 12px 28px -6px rgba(37, 99, 235, 0.45);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .veil-cta-primary:hover {
+      background: var(--veil-blue-hover);
+      box-shadow: 0 16px 36px -6px rgba(37, 99, 235, 0.6);
+      transform: translateY(-1px);
+    }
+
+    .veil-cta-primary svg {
+      width: 18px;
+      height: 18px;
+    }
+
+    button.veil-cta-primary,
+    button.veil-cta-secondary {
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    button.veil-cta-primary { border: 0; }
+
+    .veil-access-note {
+      margin: 1.2rem auto 0;
+      max-width: 36rem;
+      text-align: center;
+      font-size: 0.95rem;
+    }
+
+    .veil-access-note--ok { color: #047857; }
+    .veil-access-note--err { color: #b91c1c; }
+
+    .veil-cta-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.4rem;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.85);
+      color: var(--veil-ink) !important;
+      border: 1px solid rgba(255, 255, 255, 0.95);
+      font-size: 0.94rem;
+      font-weight: 500;
+      text-decoration: none;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
+      transition: all 0.2s;
+    }
+
+    .veil-cta-secondary:hover {
+      background: #ffffff;
+      border-color: #cbd5e1;
+    }
+
+    /* Mockup */
+    .veil-mock-container {
+      position: relative;
+      width: min(1040px, calc(100% - 1.5rem));
+      margin: 3.5rem auto 0;
+    }
+
+    .veil-browser {
+      overflow: hidden;
+      border-radius: 1.25rem;
+      background: #ffffff;
+      box-shadow:
+        0 32px 80px -20px rgba(15, 23, 42, 0.22),
+        0 0 0 1px rgba(0, 0, 0, 0.06);
+    }
+
+    .veil-browser-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.8rem 1.2rem;
+      background: #f1f5f9;
+      border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    }
+
+    .veil-dots {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .veil-dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+
+    .veil-url-bar {
+      flex: 1;
+      max-width: 26rem;
+      margin: 0 auto;
+      padding: 0.3rem 0.8rem;
+      border-radius: 8px;
+      background: #ffffff;
+      border: 1px solid rgba(0, 0, 0, 0.05);
+      color: #64748b;
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      justify-content: center;
+    }
+
+    .veil-url-bar svg {
+      width: 12px;
+      height: 12px;
+      opacity: 0.6;
+    }
+
+    .veil-browser-viewport {
+      position: relative;
+      min-height: 28rem;
+      padding: 2.5rem 3rem;
+      background: #fbfcfe;
+      display: flex;
+      gap: 2rem;
+    }
+
+    .veil-sim-page {
+      flex: 1;
+      max-width: 60%;
+    }
+
+    .veil-sim-kicker {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--veil-blue);
+      margin: 0 0 0.5rem;
+    }
+
+    .veil-sim-title {
+      margin: 0 0 1rem;
+      font-size: 1.55rem;
+      color: #0f172a;
+    }
+
+    .veil-sim-text {
+      font-size: 0.95rem;
+      line-height: 1.65;
+      color: #475569;
+      margin-bottom: 1.25rem;
+    }
+
+    .veil-highlight {
+      background: #dbeafe;
+      color: #1e3a8a;
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+      border-bottom: 2px solid #3b82f6;
+      font-weight: 500;
+    }
+
+    .veil-sim-lines {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 1.5rem;
+    }
+
+    .veil-sim-line {
+      height: 8px;
+      border-radius: 99px;
+      background: #e2e8f0;
+    }
+
+    /* The actual extension panel */
+    .veil-extension-panel {
+      position: absolute;
+      top: 1.8rem;
+      right: 2.2rem;
+      width: 320px;
+      border-radius: 14px;
+      background: #111419;
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow:
+        0 24px 60px -12px rgba(0, 0, 0, 0.55),
+        0 0 0 1px rgba(255, 255, 255, 0.06);
+      padding: 10px 12px 12px;
+      font-family: Inter, -apple-system, sans-serif;
+      z-index: 20;
+    }
+
+    .veil-panel-drag {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      margin-bottom: 10px;
+    }
+
+    .veil-panel-drag-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94a3b8;
+    }
+
+    .veil-panel-drag-icon {
+      width: 14px;
+      height: 14px;
+      color: var(--veil-blue);
+    }
+
+    .veil-panel-drag-dots {
+      display: flex;
+      gap: 3px;
+      opacity: 0.5;
+    }
+
+    .veil-panel-drag-dots span {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: #ffffff;
+    }
+
+    .veil-panel-chat {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .veil-bubble-user {
+      align-self: flex-end;
+      background: #1e293b;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px 10px 2px 10px;
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #e2e8f0;
+      max-width: 90%;
+    }
+
+    .veil-bubble-ai {
+      align-self: flex-start;
+      background: rgba(37, 99, 235, 0.1);
+      border: 1px solid rgba(37, 99, 235, 0.3);
+      border-radius: 10px 10px 10px 2px;
+      padding: 8px 10px;
+      font-size: 11.5px;
+      line-height: 1.45;
+      color: #f1f5f9;
+    }
+
+    .veil-bubble-ai-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      color: #60a5fa;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .veil-panel-input-box {
+      width: 100%;
+      min-height: 48px;
+      box-sizing: border-box;
+      padding: 8px;
+      border-radius: 8px;
+      background: #1a1d24;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #e2e8f0;
+      font-size: 11.5px;
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+
+    .veil-panel-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .veil-panel-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: #cbd5e1;
+      cursor: default;
+    }
+
+    .veil-panel-toggle input[type="checkbox"] {
+      accent-color: var(--veil-blue);
+      cursor: pointer;
+      margin: 0;
+    }
+
+    .veil-panel-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .veil-btn-crop {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      background: #262933;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .veil-btn-crop svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .veil-btn-send {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      background: var(--veil-blue);
+      border: none;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .veil-btn-send svg {
+      width: 13px;
+      height: 13px;
+    }
+
+    .veil-callout {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #0f172a;
+      border: 1px solid rgba(37, 99, 235, 0.2);
+      box-shadow: 0 10px 24px -4px rgba(37, 99, 235, 0.15);
+      pointer-events: none;
+      z-index: 30;
+    }
+
+    .veil-callout-pulse {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--veil-blue);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+    }
+
+    .veil-callout-1 {
+      top: 5.5rem;
+      right: 23rem;
+    }
+
+    .veil-callout-2 {
+      bottom: 2rem;
+      right: 18rem;
+    }
+
+    /* Sections */
+    .veil-section {
+      padding: 5.5rem 0;
+    }
+    .veil-section--subtle {
+      background: #f8fafc;
+      border-top: 1px solid #f1f5f9;
+      border-bottom: 1px solid #f1f5f9;
+    }
+    .veil-center {
+      text-align: center;
+    }
+    .veil-section-title {
+      font-size: clamp(2.1rem, 4vw, 3.2rem);
+      line-height: 1.1;
+      color: #0f172a;
+      margin: 0;
+    }
+    .veil-section-sub {
+      margin: 0.9rem auto 0;
+      max-width: 34rem;
+      color: var(--veil-sub);
+      font-size: 1.05rem;
+    }
+
+    /* Bento Grid */
+    .veil-bento-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.75rem;
+      margin-top: 3.5rem;
+    }
+    .veil-bento-card {
+      border-radius: 1.75rem;
+      padding: 2.5rem;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      border: 1px solid rgba(0, 0, 0, 0.05);
+      box-shadow: 0 20px 45px -12px rgba(15, 23, 42, 0.06);
+    }
+    .veil-bento-card--blue {
+      background: linear-gradient(145deg, #2563eb 0%, #1d4ed8 100%);
+      color: #ffffff;
+    }
+    .veil-bento-card--slate {
+      background: #ffffff;
+      color: var(--veil-ink);
+    }
+    .veil-pill-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 999px;
+      font-size: 1.1rem;
+      font-weight: 500;
+      vertical-align: middle;
+    }
+    .veil-bento-card--blue .veil-pill-badge {
+      background: rgba(255, 255, 255, 0.2);
+      color: #ffffff;
+      backdrop-filter: blur(10px);
+    }
+    .veil-bento-card--slate .veil-pill-badge {
+      background: #eff6ff;
+      color: var(--veil-blue);
+      border: 1px solid #bfdbfe;
+    }
+    .veil-bento-card h2 {
+      font-size: clamp(1.6rem, 2.4vw, 2.1rem);
+      line-height: 1.25;
+      margin: 0 0 1rem;
+    }
+    .veil-bento-card p {
+      font-size: 0.98rem;
+      line-height: 1.6;
+      margin: 0;
+    }
+    .veil-bento-card--blue p { color: rgba(255, 255, 255, 0.88); }
+    .veil-bento-card--slate p { color: var(--veil-sub); }
+
+    .veil-bento-card-art {
+      margin-top: 2.5rem;
+      border-radius: 1rem;
+      overflow: hidden;
+    }
+    .veil-bento-card--blue .veil-bento-card-art {
+      background: rgba(15, 23, 42, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 1.25rem;
+    }
+    .veil-bento-card--slate .veil-bento-card-art {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 1.25rem;
+    }
+
+    /* Notes preview */
+    .veil-notes-preview {
+      margin-top: 3.5rem;
+      border-radius: 1.5rem;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 24px 60px -16px rgba(15, 23, 42, 0.08);
+      overflow: hidden;
+    }
+    .veil-notes-head {
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .veil-notes-meta { font-size: 12px; color: #94a3b8; font-weight: 500; }
+    .veil-notes-tags { display: flex; gap: 0.5rem; }
+    .veil-notes-tag {
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      background: #f1f5f9;
+      font-size: 11px;
+      font-weight: 600;
+      color: #475569;
+    }
+    .veil-notes-body { padding: 2.2rem 2.5rem; }
+    .veil-notes-body h4 { margin: 0 0 1.2rem; font-size: 1.35rem; color: #0f172a; }
+    .veil-notes-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
+    .veil-notes-list li {
+      position: relative;
+      padding-left: 1.4rem;
+      font-size: 0.95rem;
+      color: #334155;
+      line-height: 1.55;
+    }
+    .veil-notes-list li::before {
+      content: "•";
+      position: absolute;
+      left: 0;
+      color: var(--veil-blue);
+      font-weight: bold;
+      font-size: 1.2rem;
+      line-height: 1;
+      top: 2px;
+    }
+
+    /* 3-grid features */
+    .veil-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+      margin-top: 3.5rem;
+    }
+    .veil-card-feature {
+      background: #ffffff;
+      border-radius: 1.5rem;
+      padding: 1.75rem;
+      border: 1px solid #e2e8f0;
+      box-shadow: 0 16px 36px -12px rgba(15, 23, 42, 0.05);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .veil-card-feature h3 { font-size: 1.15rem; margin: 1.25rem 0 0.5rem; color: #0f172a; }
+    .veil-card-feature p { margin: 0; font-size: 0.9rem; color: var(--veil-sub); line-height: 1.55; }
+
+    .veil-split-art {
+      border-radius: 1rem;
+      background: #f1f5f9;
+      overflow: hidden;
+      position: relative;
+      height: 170px;
+      border: 1px solid #e2e8f0;
+      display: flex;
+    }
+    .veil-split-left {
+      flex: 1;
+      background: #ffffff;
+      padding: 0.75rem;
+      border-right: 2px solid var(--veil-blue);
+      position: relative;
+    }
+    .veil-split-right {
+      flex: 1;
+      background: #f8fafc;
+      padding: 0.75rem;
+    }
+    .veil-split-badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .veil-split-left .veil-split-badge { background: #eff6ff; color: var(--veil-blue); }
+    .veil-split-right .veil-split-badge { background: #e2e8f0; color: #64748b; }
+    .veil-split-overlay-mock {
+      background: #111419;
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 6px;
+      font-size: 10px;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+    }
+
+    /* Platforms */
+    .veil-platforms {
+      padding: 3rem 0;
+      border-top: 1px solid #f1f5f9;
+      border-bottom: 1px solid #f1f5f9;
+      background: #ffffff;
+    }
+    .veil-platforms-label {
+      text-align: center;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #94a3b8;
+      margin-bottom: 2rem;
+    }
+    .veil-platforms-list {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 2.5rem;
+      flex-wrap: wrap;
+    }
+    .veil-platform-item {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #475569;
+    }
+    .veil-platform-icon { width: 20px; height: 20px; color: var(--veil-blue); }
+
+    /* Stats */
+    .veil-stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+      margin-top: 3.5rem;
+    }
+    .veil-stat-col {
+      padding: 2rem;
+      border-radius: 1.25rem;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      text-align: left;
+    }
+    .veil-stat-val {
+      font-size: clamp(2.8rem, 4.5vw, 4rem);
+      font-weight: 500;
+      color: var(--veil-blue);
+      line-height: 1;
+      margin: 0 0 0.6rem;
+    }
+    .veil-stat-title { font-size: 1.15rem; font-weight: 600; color: #0f172a; margin: 0 0 0.35rem; }
+    .veil-stat-sub { font-size: 0.9rem; color: var(--veil-sub); margin: 0; }
+
+    /* FAQ */
+    .veil-steps {
+      max-width: 40rem;
+      margin: 2.5rem auto 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: veil-step;
+    }
+    .veil-steps li {
+      counter-increment: veil-step;
+      position: relative;
+      padding: 0.85rem 0 0.85rem 3rem;
+      border-bottom: 1px solid #e2e8f0;
+      color: #334155;
+    }
+    .veil-steps li::before {
+      content: counter(veil-step);
+      position: absolute;
+      left: 0;
+      top: 0.85rem;
+      width: 1.8rem;
+      height: 1.8rem;
+      border-radius: 50%;
+      background: #eff6ff;
+      color: #1d4ed8;
+      font-weight: 700;
+      font-size: 0.9rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .veil-steps code {
+      font-size: 0.88em;
+      background: #f1f5f9;
+      padding: 0.1em 0.35em;
+      border-radius: 4px;
+    }
+
+    .veil-faq-wrap { max-width: 48rem; margin: 3.5rem auto 0; }
+    .veil-faq-item { border-bottom: 1px solid #e2e8f0; }
+    .veil-faq-item summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.4rem 0;
+      cursor: pointer;
+      list-style: none;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #0f172a;
+      transition: color 0.15s;
+    }
+    .veil-faq-item summary::-webkit-details-marker { display: none; }
+    .veil-faq-item summary:hover { color: var(--veil-blue); }
+    .veil-faq-chevron {
+      width: 18px;
+      height: 18px;
+      color: #94a3b8;
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .veil-faq-item[open] .veil-faq-chevron { transform: rotate(180deg); color: var(--veil-blue); }
+    .veil-faq-body { padding-bottom: 1.4rem; font-size: 0.95rem; color: var(--veil-sub); line-height: 1.6; }
+
+    /* Bottom CTA */
+    .veil-bottom-cta {
+      position: relative;
+      background:
+        radial-gradient(120% 90% at 50% 0%, rgba(224, 242, 254, 0.7) 0%, transparent 60%),
+        linear-gradient(180deg, #f0f7ff 0%, #e2eefb 100%);
+      border-top: 1px solid #dbeafe;
+      padding: 6.5rem 1rem;
+      text-align: center;
+      overflow: hidden;
+    }
+    .veil-key-float {
+      position: absolute;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      background: #ffffff;
+      color: #334155;
+      font-size: 1rem;
+      font-weight: 700;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      box-shadow:
+        0 18px 36px -10px rgba(37, 99, 235, 0.18),
+        0 4px 10px rgba(0, 0, 0, 0.05),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      pointer-events: none;
+      animation: keyFloat 6s ease-in-out infinite alternate;
+    }
+    @keyframes keyFloat {
+      0% { transform: translateY(0px) rotate(var(--rot, 0deg)); }
+      100% { transform: translateY(-12px) rotate(calc(var(--rot, 0deg) + 2deg)); }
+    }
+    .veil-key-alt { left: 12%; top: 25%; padding: 0.65rem 1.1rem; --rot: -8deg; }
+    .veil-key-q { left: 20%; bottom: 25%; padding: 0.65rem 0.95rem; --rot: 6deg; animation-delay: -2s; }
+    .veil-key-s { right: 22%; top: 22%; padding: 0.65rem 0.95rem; --rot: -5deg; animation-delay: -3.5s; }
+    .veil-key-enter { right: 12%; bottom: 22%; padding: 0.65rem 1.2rem; --rot: 8deg; animation-delay: -1s; }
+
+    .veil-bottom-cta h2 { font-size: clamp(2.2rem, 4.5vw, 3.4rem); margin: 0; color: #0f172a; }
+    .veil-bottom-cta p { margin: 1rem auto 2.2rem; max-width: 32rem; color: var(--veil-sub); font-size: 1.1rem; }
+
+    /* Footer */
+    .veil-footer { border-top: 1px solid #e2e8f0; padding: 2.5rem 1rem; background: #ffffff; }
+    .veil-footer-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      font-size: 0.88rem;
+      color: #64748b;
+    }
+    .veil-footer-brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 600; color: #0f172a; }
+    .veil-footer-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.65rem;
+      border-radius: 999px;
+      background: #f1f5f9;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: #047857;
+    }
+    .veil-footer-status-dot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; }
+
+    @media (max-width: 960px) {
+      .veil-nav-links { display: none; }
+      .veil-bento-grid, .veil-grid-3, .veil-stats-row { grid-template-columns: 1fr; }
+      .veil-browser-viewport { flex-direction: column; padding: 1.5rem; }
+      .veil-sim-page { max-width: 100%; }
+      .veil-extension-panel { position: static; width: 100%; margin-top: 1.5rem; }
+      .veil-callout, .veil-key-float { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="veil-nav">
+    <div class="veil-nav-wrap">
+      <a href="{{ url_for('index') }}" class="veil-nav-brand">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#2563eb;">
+          <path d="M12 3 5 6.5v5.2c0 4.4 2.9 7.6 7 9.3 4.1-1.7 7-4.9 7-9.3V6.5L12 3Z"/>
+        </svg>
+        <span>Veil</span>
+      </a>
+
+      <div class="veil-nav-links">
+        <a href="#how-it-works" class="veil-nav-link">How it works</a>
+        <a href="#features" class="veil-nav-link">Features</a>
+        <a href="#access" class="veil-nav-link">Access</a>
+        <a href="#faq" class="veil-nav-link">FAQ</a>
+        <a href="{{ url_for('humanizer') }}" class="veil-nav-link">DocMaxxing App</a>
+      </div>
+
+      <a href="#access" class="veil-nav-cta">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+        </svg>
+        <span>Get for Chrome</span>
+      </a>
+    </div>
+  </nav>
+
+  <div class="veil-page">
+    <!-- 1. Hero & Sky Section (Cluely style) -->
+    <section class="veil-sky">
+      <div class="veil-hero">
+        <div class="veil-badge">
+          <span class="veil-badge-dot"></span>
+          <span>Study help, on the page you are reading</span>
+        </div>
+
+        <h1>
+          Focus on the reading.<br />
+          <span class="veil-hero-accent">Never leave the tab.</span>
+        </h1>
+
+        <p class="veil-hero-desc">
+          Veil explains a passage, a formula, or a diagram in a panel on the page you already have open, so you can keep reading. One payment of {{ "{:,}".format(veil_pass_cost) }} credits unlocks it for {{ veil_pass_days }} days.
+        </p>
+
+        <div class="veil-cta-group">
+          <a class="veil-cta-primary" href="#access">
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+            </svg>
+            <span>Unlock for {{ veil_pass_days }} days</span>
+          </a>
+          <a class="veil-cta-secondary" href="#install">
+            <span>How to install</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M7 17l10-10M17 17V7H7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+
+      <!-- 2. Hero Mockup: Real Browser Window with Veil Panel -->
+      <div class="veil-mock-container" id="how-it-works">
+        <div class="veil-browser">
+          <div class="veil-browser-bar">
+            <div class="veil-dots">
+              <span class="veil-dot" style="background:#ff5f57"></span>
+              <span class="veil-dot" style="background:#febc2e"></span>
+              <span class="veil-dot" style="background:#28c840"></span>
+            </div>
+            <div class="veil-url-bar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <span>notes.university.edu/courses/phys101/lecture-4</span>
+            </div>
+          </div>
+
+          <div class="veil-browser-viewport">
+            <!-- Academic page text simulation -->
+            <div class="veil-sim-page">
+              <p class="veil-sim-kicker">Physics 101 · Problem 4.2</p>
+              <h3 class="veil-sim-title veil-serif">Two-Dimensional Kinematics with Launch Angles</h3>
+              <p class="veil-sim-text">
+                A projectile is launched from ground level at an initial velocity of <strong>v₀ = 18 m/s</strong> at an angle of <strong>θ = 45°</strong> above the horizontal. Assume standard gravity <em>g = 9.81 m/s²</em> and neglect air drag.
+              </p>
+              <p class="veil-sim-text">
+                <span class="veil-highlight">Determine the maximum vertical elevation reached by the projectile and the total elapsed time of flight before striking the ground.</span>
+              </p>
+
+              <div class="veil-sim-lines" aria-hidden="true">
+                <span class="veil-sim-line" style="width: 82%;"></span>
+                <span class="veil-sim-line" style="width: 65%;"></span>
+                <span class="veil-sim-line" style="width: 74%;"></span>
+              </div>
+            </div>
+
+            <!-- THE ACTUAL VEIL EXTENSION PANEL -->
+            <aside class="veil-extension-panel">
+              <div class="veil-panel-drag">
+                <div class="veil-panel-drag-title">
+                  <svg class="veil-panel-drag-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 3 5 6.5v5.2c0 4.4 2.9 7.6 7 9.3 4.1-1.7 7-4.9 7-9.3V6.5L12 3Z"/>
+                  </svg>
+                  <span>Veil</span>
+                </div>
+                <div class="veil-panel-drag-dots">
+                  <span></span><span></span><span></span>
+                </div>
+              </div>
+
+              <div class="veil-panel-chat">
+                <div class="veil-bubble-user">
+                  "Determine the maximum vertical elevation..."
+                </div>
+                <div class="veil-bubble-ai">
+                  <span class="veil-bubble-ai-tag">✦ DocMaxxing AI</span>
+                  <div>At peak height, vertical velocity <code>v_y = 0</code>.</div>
+                  <div style="font-family:'Source Serif 4',serif; padding:4px 6px; background:rgba(0,0,0,0.25); border-radius:6px; margin:4px 0;">
+                    t_{apex} = \frac{v_0 \sin\theta}{g} = \mathbf{1.30\text{ s}}
+                  </div>
+                  <div style="margin-top:4px;">Total time of flight: <strong>T = 2.60 s</strong></div>
+                  <div>Maximum elevation: <strong>H = 8.26 m</strong></div>
+                </div>
+              </div>
+
+              <div class="veil-panel-input-box">
+                <span style="color:#94a3b8; font-size:11px;">Selected text auto-pasted via Alt+Q...</span>
+              </div>
+
+              <div class="veil-panel-controls">
+                <label class="veil-panel-toggle">
+                  <input type="checkbox" checked />
+                  <span>Развернутый</span>
+                </label>
+
+                <div class="veil-panel-actions">
+                  <button type="button" class="veil-btn-crop" title="Crop Diagram (Alt+S)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M6 2v14a2 2 0 0 0 2 2h14"></path>
+                      <path d="M18 22V8a2 2 0 0 0-2-2H2"></path>
+                    </svg>
+                  </button>
+                  <button type="button" class="veil-btn-send" title="Send (Enter)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <line x1="22" y1="2" x2="11" y2="13"></line>
+                      <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </aside>
+
+            <!-- Callouts explaining the features -->
+            <div class="veil-callout veil-callout-1">
+              <span class="veil-callout-pulse"></span>
+              <span>Alt+Q: Auto-pastes selected text</span>
+            </div>
+
+            <div class="veil-callout veil-callout-2">
+              <span class="veil-callout-pulse"></span>
+              <span>Alt+S: Crop math & diagrams</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. How Veil Helps (Cluely Screenshot 6 Bento Cards) -->
+    <section class="veil-section">
+      <div class="veil-wrap">
+        <div class="veil-center">
+          <h2 class="veil-section-title">How Veil helps while studying</h2>
+          <p class="veil-section-sub">
+            Everything you need to digest dense course materials without switching tabs or losing your train of thought.
+          </p>
+        </div>
+
+        <div class="veil-bento-grid">
+          <!-- Card 1: Blue card -->
+          <article class="veil-bento-card veil-bento-card--blue">
+            <div>
+              <h2>
+                Veil <span class="veil-pill-badge">📖 reads</span> any text on your screen
+              </h2>
+              <p>
+                Highlight any confusing passage, complex question, or assignment prompt. Press <strong>Alt+Q</strong> and Veil instantly gives you plain-language explanations right where you're looking.
+              </p>
+            </div>
+
+            <div class="veil-bento-card-art">
+              <div style="font-size:12px; font-weight:600; margin-bottom:6px; opacity:0.8;">Instant Context Capture</div>
+              <div style="background:rgba(255,255,255,0.15); border-radius:8px; padding:8px 12px; font-size:12px;">
+                &gt; "Active transport requires cellular energy (ATP) to move substances against concentration gradients..."
+              </div>
+              <div style="margin-top:8px; font-size:11.5px; opacity:0.9;">
+                ✦ <strong>Veil:</strong> Unlike passive diffusion, think of active transport as pumping water uphill — molecular pumps consume ATP to maintain cell homeostasis.
+              </div>
+            </div>
+          </article>
+
+          <!-- Card 2: Slate card -->
+          <article class="veil-bento-card veil-bento-card--slate">
+            <div>
+              <h2>
+                When you need math, Veil <span class="veil-pill-badge">✦ crops</span> diagrams
+              </h2>
+              <p>
+                Formulas, geometry diagrams, circuit schematics, and chemistry structures can't be selected as text. Hit <strong>Alt+S</strong> to crop any area for instant visual OCR and step-by-step reasoning.
+              </p>
+            </div>
+
+            <div class="veil-bento-card-art">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                <span style="font-size:11px; font-weight:700; color:#2563eb; text-transform:uppercase;">Visual Crop Mode</span>
+                <span style="font-size:10px; font-family:monospace; background:#eff6ff; padding:2px 6px; border-radius:4px; color:#1d4ed8;">Alt + S</span>
+              </div>
+              <div style="border:1.5px dashed #2563eb; background:rgba(37,99,235,0.04); border-radius:8px; padding:10px; font-size:12px; color:#1e293b;">
+                📐 <em>[Cropped Area: Circuit Diagram with R₁=4Ω, R₂=6Ω in parallel]</em>
+                <div style="margin-top:6px; font-weight:600; color:#0f172a;">
+                  R_{eq} = \frac{4 \cdot 6}{4 + 6} = \mathbf{2.4\,\Omega}
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4. Instant Study Notes (Cluely Screenshot 7) -->
+    <section class="veil-section veil-section--subtle">
+      <div class="veil-wrap">
+        <div class="veil-center">
+          <h2 class="veil-section-title">Instant study notes & solutions</h2>
+          <p class="veil-section-sub">
+            The easiest way to get clean, structured academic breakdowns from dense lectures.
+          </p>
+        </div>
+
+        <div class="veil-notes-preview">
+          <div class="veil-notes-head">
+            <span class="veil-notes-meta">Monday, Physics Review · Exam Preparation</span>
+            <div class="veil-notes-tags">
+              <span class="veil-notes-tag">Kinematics</span>
+              <span class="veil-notes-tag">Energy Conservation</span>
+              <span class="veil-notes-tag">Study notes</span>
+            </div>
+          </div>
+
+          <div class="veil-notes-body">
+            <h4 class="veil-serif">Core Formula Breakdown: Projectile Trajectories</h4>
+            <ul class="veil-notes-list">
+              <li><strong>Time of flight:</strong> Independent of horizontal velocity; determined entirely by vertical component: T = 2v₀ sinθ / g.</li>
+              <li><strong>Apex height:</strong> Kinetic energy from vertical speed converts fully to potential energy: H = v₀² sin²θ / 2g.</li>
+              <li><strong>Symmetry rule:</strong> Launch speed equals landing speed in vacuum conditions; flight time up equals flight time down.</li>
+              <li><strong>Veil recommendation:</strong> Check whether problem specifies air drag before omitting drag equations.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="veil-section" id="features">
+      <div class="veil-wrap">
+        <div class="veil-center">
+          <h2 class="veil-section-title">Stays on the page with you</h2>
+          <p class="veil-section-sub">
+            A small panel for explanations, next to the text you are already reading.
+          </p>
+        </div>
+
+        <div class="veil-grid-3">
+          <!-- Feature 1 -->
+          <article class="veil-card-feature">
+            <div style="font-size:2rem; margin-bottom:0.5rem;">🎯</div>
+            <div>
+              <h3>No extra tab</h3>
+              <p>
+                The panel opens on the page you are reading. Ask about the passage in front of you, then hide it and keep going.
+              </p>
+            </div>
+            <div style="margin-top:1.5rem; padding:0.6rem 0.8rem; border-radius:8px; background:#f1f5f9; font-size:11.5px; color:#334155;">
+              <strong>Same page:</strong> explanations sit beside the text, not in another window.
+            </div>
+          </article>
+
+          <article class="veil-card-feature">
+            <div style="font-size:2rem; margin-bottom:0.5rem;">💳</div>
+            <div>
+              <h3>30 days at a time</h3>
+              <p>
+                Pay {{ "{:,}".format(veil_pass_cost) }} credits once. Questions during those {{ veil_pass_days }} days are included. When the month ends, Veil stops until you pay again.
+              </p>
+            </div>
+            <div style="margin-top:1.5rem; padding:0.6rem 0.8rem; border-radius:8px; background:#f1f5f9; font-size:11.5px; color:#334155;">
+              <strong>{{ "{:,}".format(veil_pass_cost) }} credits</strong> · {{ veil_pass_days }} days · renew to continue
+            </div>
+          </article>
+
+          <!-- Feature 3 -->
+          <article class="veil-card-feature">
+            <div style="font-size:2rem; margin-bottom:0.5rem;">⌨️</div>
+            <div>
+              <h3>Follows your eyes</h3>
+              <p>
+                Move the panel anywhere across your screen with the top drag handle. Fully controllable via keyboard shortcuts without reaching for your mouse.
+              </p>
+            </div>
+            <div style="margin-top:1.5rem; display:flex; gap:6px;">
+              <span style="padding:4px 8px; border-radius:6px; background:#f1f5f9; font-family:monospace; font-size:11px; font-weight:600;">Alt + Q</span>
+              <span style="padding:4px 8px; border-radius:6px; background:#f1f5f9; font-family:monospace; font-size:11px; font-weight:600;">Alt + S</span>
+              <span style="padding:4px 8px; border-radius:6px; background:#f1f5f9; font-family:monospace; font-size:11px; font-weight:600;">Esc</span>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. Platform Compatibility (Cluely Screenshot 9) -->
+    <section class="veil-platforms">
+      <div class="veil-wrap">
+        <div class="veil-platforms-label">Works on the pages you already study from</div>
+        <div class="veil-platforms-list">
+          <div class="veil-platform-item">
+            <svg class="veil-platform-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24M14.83 14.83l4.24 4.24M14.83 9.17l4.24-4.24M4.93 19.07l4.24-4.24"/></svg>
+            <span>Canvas LMS</span>
+          </div>
+          <div class="veil-platform-item">
+            <svg class="veil-platform-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 7h10M7 12h10M7 17h6"/></svg>
+            <span>Blackboard</span>
+          </div>
+          <div class="veil-platform-item">
+            <svg class="veil-platform-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <span>Chrome PDFs</span>
+          </div>
+          <div class="veil-platform-item">
+            <svg class="veil-platform-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10M6 10h10"/></svg>
+            <span>Google Docs</span>
+          </div>
+          <div class="veil-platform-item">
+            <svg class="veil-platform-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+            <span>Wikipedia</span>
+          </div>
+          <div class="veil-platform-item">
+            <svg class="veil-platform-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 6 4 14-8-4-8 4 4-14-6-5h8l2-8 2 8h8z"/></svg>
+            <span>Quizlet</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7. Real-Time Performance Stats (Cluely Screenshot 10) -->
+    <section class="veil-section veil-section--subtle">
+      <div class="veil-wrap">
+        <div class="veil-center">
+          <h2 class="veil-section-title">Three ways to ask</h2>
+          <p class="veil-section-sub">
+            Text, a selected passage, or a cropped picture of a formula or diagram.
+          </p>
+        </div>
+
+        <div class="veil-stats-row">
+          <div class="veil-stat-col">
+            <div class="veil-stat-val veil-serif">Alt+Q</div>
+            <div class="veil-stat-title">Open and ask</div>
+            <p class="veil-stat-sub">Opens the panel. If text is selected, it is pasted into the question. Option+Q on a Mac.</p>
+          </div>
+
+          <div class="veil-stat-col">
+            <div class="veil-stat-val veil-serif">Alt+S</div>
+            <div class="veil-stat-title">Crop a region</div>
+            <p class="veil-stat-sub">Drag over a formula, diagram, or slide. Veil sends that picture with your question.</p>
+          </div>
+
+          <div class="veil-stat-col">
+            <div class="veil-stat-val veil-serif">{{ veil_pass_days }}d</div>
+            <div class="veil-stat-title">One payment</div>
+            <p class="veil-stat-sub">{{ "{:,}".format(veil_pass_cost) }} credits from your DocMaxxing balance. Access ends on its own after {{ veil_pass_days }} days.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="veil-section" id="access">
+      <div class="veil-wrap">
+        <div class="veil-center">
+          <h2 class="veil-section-title">Pay {{ "{:,}".format(veil_pass_cost) }} credits, then download</h2>
+          <p class="veil-section-sub">
+            The download button appears after payment. Access lasts {{ veil_pass_days }} days. After that Veil stops answering until you pay again. Paying early adds another {{ veil_pass_days }} days onto the time you still have.
+          </p>
+        </div>
+        {% if veil_unlocked and veil_pass and veil_pass.active %}
+          <p class="veil-access-note veil-access-note--ok">Access is on until {{ veil_pass.expires_label }}.</p>
+        {% endif %}
+        {% if veil_error == "credits" %}
+          <p class="veil-access-note veil-access-note--err">
+            You need {{ "{:,}".format(veil_pass_cost) }} credits. You have {{ "{:,}".format(coin_balance) }}.
+            <a href="{{ url_for('credits') }}">Top up</a>, then come back.
+          </p>
+        {% endif %}
+        <div class="veil-cta-group">
+          {% if not current_user %}
+            <a class="veil-cta-primary" href="{{ url_for('login', next='/veil') }}">Sign in to unlock</a>
+          {% elif veil_pass and veil_pass.active %}
+            <a class="veil-cta-primary" href="{{ url_for('veil_download') }}">Download Veil.zip</a>
+            <form method="post" action="{{ url_for('veil_unlock') }}">
+              <button class="veil-cta-secondary" type="submit">Add {{ veil_pass_days }} days — {{ "{:,}".format(veil_pass_cost) }} credits</button>
+            </form>
+          {% else %}
+            <form method="post" action="{{ url_for('veil_unlock') }}">
+              <button class="veil-cta-primary" type="submit">Pay {{ "{:,}".format(veil_pass_cost) }} credits for {{ veil_pass_days }} days</button>
+            </form>
+            {% if coin_balance < veil_pass_cost %}
+              <a class="veil-cta-secondary" href="{{ url_for('credits') }}">Top up credits</a>
+            {% endif %}
+          {% endif %}
+        </div>
+        {% if current_user and veil_pass and veil_pass.active %}
+          <p class="veil-access-note">Active until {{ veil_pass.expires_label }}. You have {{ "{:,}".format(coin_balance) }} credits left.</p>
+        {% elif current_user %}
+          <p class="veil-access-note">Your balance: {{ "{:,}".format(coin_balance) }} credits.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="veil-section veil-section--subtle" id="install">
+      <div class="veil-wrap">
+        <div class="veil-center">
+          <h2 class="veil-section-title">Install Veil in Chrome</h2>
+          <p class="veil-section-sub">
+            Unlock access first. The download button then appears in the section above.
+          </p>
+        </div>
+        <ol class="veil-steps">
+          <li>Sign in and pay <strong>{{ "{:,}".format(veil_pass_cost) }} credits</strong>. That turns Veil on for <strong>{{ veil_pass_days }} days</strong>.</li>
+          <li>Click <strong>Download Veil.zip</strong> and unzip it. You should see a folder named Veil.</li>
+          <li>Open <code>chrome://extensions</code>, turn on <strong>Developer mode</strong>, and click <strong>Load unpacked</strong>.</li>
+          <li>Choose the Veil folder. Pin Veil from the puzzle-piece menu, open it, and click <strong>Sign in</strong>.</li>
+          <li>On any page, press <strong>Alt+Q</strong> (Option+Q on a Mac) to open the panel. <strong>Alt+S</strong> crops a formula or diagram.</li>
+          <li>When the {{ veil_pass_days }} days end, the panel stops answering until you pay again on this page. The extension can stay installed.</li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="veil-section" id="faq">
+      <div class="veil-wrap">
+        <div class="veil-center">
+          <h2 class="veil-section-title">Frequently asked questions</h2>
+          <p class="veil-section-sub">Everything you need to know about Veil for Chrome.</p>
+        </div>
+
+        <div class="veil-faq-wrap">
+          <details class="veil-faq-item" open>
+            <summary>
+              <span>How does the panel stay on the page?</span>
+              <svg class="veil-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
+            <div class="veil-faq-body">
+              Veil draws its panel in its own layer so the page's styles do not restyle it. You drag it where you want, ask a question, and hide it again. It does not open a new tab.
+            </div>
+          </details>
+
+          <details class="veil-faq-item">
+            <summary>
+              <span>How do the keyboard shortcuts work?</span>
+              <svg class="veil-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
+            <div class="veil-faq-body">
+              <strong>Alt + Q:</strong> Toggles the assistant panel open or closed. If you have text selected on the page, it automatically pastes it into the input.<br />
+              <strong>Alt + S:</strong> Activates the crosshair crop tool. Click and drag to crop any math formula, chart, or diagram for instant analysis.<br />
+              <strong>Esc:</strong> Closes the crop tool. Hide the panel itself with Alt+Q (Option+Q on a Mac).
+            </div>
+          </details>
+
+          <details class="veil-faq-item">
+            <summary>
+              <span>What does the «Развернутый» toggle do?</span>
+              <svg class="veil-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
+            <div class="veil-faq-body">
+              When «Развернутый» (Detailed Mode) is checked, Veil generates full step-by-step derivations, theoretical principles, and intermediate math steps. When unchecked, it delivers quick, concise bullet points and direct answers.
+            </div>
+          </details>
+
+          <details class="veil-faq-item">
+            <summary>
+              <span>Does Veil work on PDF files and slides?</span>
+              <svg class="veil-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
+            <div class="veil-faq-body">
+              Yes. Veil functions seamlessly over any online PDF, local file opened in Google Chrome, lecture slides on Google Drive, or web-based reading material.
+            </div>
+          </details>
+
+          <details class="veil-faq-item">
+            <summary>
+              <span>How does Veil connect with my DocMaxxing account?</span>
+              <svg class="veil-faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </summary>
+            <div class="veil-faq-body">
+              Sign in from the Veil icon with the same DocMaxxing account you paid on. The {{ "{:,}".format(veil_pass_cost) }} credits buy {{ veil_pass_days }} days of answers. There is no extra charge per question. When the date passes, pay again on this page and Veil starts working again.
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9. Bottom CTA Section with 3D Keycaps (Cluely Screenshot 12) -->
+    <section class="veil-bottom-cta" id="download">
+      <!-- Floating 3D keycaps -->
+      <span class="veil-key-float veil-key-alt">Alt</span>
+      <span class="veil-key-float veil-key-q">Q</span>
+      <span class="veil-key-float veil-key-s">S</span>
+      <span class="veil-key-float veil-key-enter">↵ Enter</span>
+
+      <div class="veil-wrap">
+        <h2 class="veil-serif">Study AI that works where you are,<br />not in another tab.</h2>
+        <p>Pay {{ "{:,}".format(veil_pass_cost) }} credits for {{ veil_pass_days }} days, download the extension, and ask about the page you are reading.</p>
+        <a class="veil-cta-primary" href="#access">
+          <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
+          </svg>
+          <span>Get for Chrome</span>
+        </a>
+      </div>
+    </section>
+
+    <!-- 10. Footer -->
+    <footer class="veil-footer">
+      <div class="veil-wrap veil-footer-wrap">
+        <div class="veil-footer-brand">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:#2563eb;">
+            <path d="M12 3 5 6.5v5.2c0 4.4 2.9 7.6 7 9.3 4.1-1.7 7-4.9 7-9.3V6.5L12 3Z"/>
+          </svg>
+          <span>Veil by DocMaxxing</span>
+        </div>
+
+        <div style="display:flex; gap:1.5rem; font-size:0.85rem;">
+          <a href="#how-it-works" style="color:#64748b; text-decoration:none;">How it works</a>
+          <a href="#features" style="color:#64748b; text-decoration:none;">Features</a>
+          <a href="#faq" style="color:#64748b; text-decoration:none;">FAQ</a>
+        </div>
+
+        <div class="veil-footer-status">
+          <span class="veil-footer-status-dot"></span>
+          <span>All systems operational</span>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+</body>
+</html>

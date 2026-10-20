@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from .activity_log import log_activity
 from .analytics import AnalyticsService
 from .auth import normalize_email
 from .db import connect
@@ -162,6 +163,15 @@ class AdminService:
                 (1 if is_admin else 0, user_id),
             )
 
+        log_activity(
+            "admin.role_changed",
+            category="admin",
+            user_id=user_id,
+            user_email=row["email"],
+            actor_id=actor_id,
+            summary=f"{'Granted' if is_admin else 'Revoked'} admin for {row['email']}",
+            details={"is_admin": bool(is_admin)},
+        )
         return {
             "userId": user_id,
             "email": row["email"],
@@ -196,8 +206,27 @@ class AdminService:
                 (user_id,),
             )
             avatar_file = row["avatar_file"] if "avatar_file" in row.keys() else None
+            balance_row = conn.execute(
+                "SELECT balance FROM wallets WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            created_row = conn.execute(
+                "SELECT created_at FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
             conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
 
+        log_activity(
+            "admin.user_deleted",
+            category="admin",
+            user_id=user_id,
+            user_email=row["email"],
+            actor_id=actor_id,
+            summary=f"Deleted user #{user_id} {row['email']}",
+            details={
+                "balance_at_delete": int(balance_row["balance"]) if balance_row else 0,
+                "registered_at": created_row["created_at"] if created_row else None,
+                "was_admin": bool(row["is_admin"]),
+            },
+        )
         self._cleanup_avatar_file(avatar_file)
         self._cleanup_turnitin_for_user(user_id)
 

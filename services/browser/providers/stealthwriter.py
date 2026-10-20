@@ -79,7 +79,7 @@ def check_interactive_login() -> dict[str, Any]:
     redirected = _is_sign_in_url(current_url)
     logged_in = (not redirected) and ("/dashboard" in current_url.lower())
     if logged_in:
-        BrowserService.instance().save_session(PROVIDER_NAME)
+        _persist_session()
     return {
         "success": True,
         "logged_in": logged_in,
@@ -106,6 +106,17 @@ def open_manual_login_browser() -> dict[str, Any]:
 def _is_sign_in_url(url: str) -> bool:
     lower = (url or "").lower()
     return "/sign-in" in lower or "/signin" in lower
+
+
+def _persist_session() -> None:
+    """Re-snapshot cookies after authenticated activity.
+
+    StealthWriter (better-auth) slides the session expiry forward on use, but the
+    stored snapshot is re-applied on every reconnect; without re-saving, the old
+    cookie (and its original 7-day expiry) wins and the session dies on schedule.
+    """
+    if not BrowserService.instance().save_session(PROVIDER_NAME):
+        print("[stealthwriter] session snapshot save failed", flush=True)
 
 
 # ------------------------------------------------------------------ diagnostics
@@ -155,18 +166,34 @@ def _read_locator_text(locator: Any) -> str:
 
 
 def _find_input_textarea(page: Any) -> Any:
-    candidates = [
-        page.get_by_placeholder(re.compile(r"paste|text|humaniz|write|enter", re.I)),
-        page.locator("textarea").first,
-        page.locator('[contenteditable="true"]').first,
-        page.locator('[role="textbox"]').first,
-    ]
-    for loc in candidates:
-        try:
-            if loc.count() > 0 and loc.first.is_visible(timeout=2000):
-                return loc.first
-        except Exception:  # noqa: BLE001
-            continue
+    """Return the humanizer input box, retrying after overlays settle."""
+    for attempt in range(5):
+        if attempt:
+            try:
+                _dismiss_ui_overlays(page)
+            except Exception:  # noqa: BLE001
+                pass
+            page.wait_for_timeout(400 * attempt)
+        candidates = [
+            page.get_by_placeholder(re.compile(r"paste|text|humaniz|write|enter", re.I)),
+            page.locator("textarea").first,
+            page.locator('[contenteditable="true"]').first,
+            page.locator('[role="textbox"]').first,
+        ]
+        for loc in candidates:
+            try:
+                if loc.count() <= 0:
+                    continue
+                target = loc.first
+                # Wait for visibility — dropdowns after model/level often cover it briefly.
+                try:
+                    target.wait_for(state="visible", timeout=2500)
+                except Exception:  # noqa: BLE001
+                    if not target.is_visible(timeout=500):
+                        continue
+                return target
+            except Exception:  # noqa: BLE001
+                continue
     return None
 
 
@@ -433,6 +460,7 @@ def _ensure_model_selected(page: Any, model: str = DEFAULT_STEALTHWRITER_MODEL) 
     clicked = _click_first_visible(
         page,
         [
+            re.compile(r"ghost\s*5\.1\s*legacy", re.I),
             re.compile(r"legacy\s*5\.1", re.I),
             re.compile(r"ghost\s*5\.1", re.I),
             re.compile(r"^\s*5\.1\s*$", re.I),
@@ -896,16 +924,25 @@ def humanize_text(
                 )
                 last_exc = RuntimeError(str(result.get("message") or "NO_CHANGE"))
                 continue
+            if isinstance(result, dict) and result.get("success"):
+                _persist_session()
             return result
         except StealthWriterAutomationError as exc:
             last_exc = exc
             step = ""
             if isinstance(exc.diagnostics, dict):
                 step = str(exc.diagnostics.get("step") or "")
-            retryable = step in {"wait_for_output", "navigate_humanizer", "click_humanize", "paste_text"}
+            retryable = step in {
+                "wait_for_output",
+                "navigate_humanizer",
+                "click_humanize",
+                "paste_text",
+                "locate_textarea",
+            }
             if not retryable or attempt >= 3:
                 raise
             continue
+
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
             if not _is_stale_browser_error(exc) or attempt >= 3:
@@ -942,8 +979,9 @@ def _humanize_text_once(
     _ensure_model_selected(page, selected_model)
     _ensure_rewrite_level(page, selected_level)
     _dismiss_ui_overlays(page)
+    page.wait_for_timeout(500)
 
-    # Locate textarea
+    # Locate textarea (retry — model/level menus can briefly hide it).
     input_box = _find_input_textarea(page)
     if input_box is None:
         raise StealthWriterAutomationError(
@@ -1210,6 +1248,7 @@ def get_session_status() -> dict[str, Any]:
         }
 
     identity = _read_sidebar_identity(page) or {}
+    _persist_session()
     return {
         "logged_in": True,
         "current_url": current_url,

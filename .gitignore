@@ -18,3 +18,5 @@ static/uploads/avatars/*
 samples/real/
 *.tar.gz.gpg
 .docmaxxing-backup-work/
+chrome-extension/node_modules/
+chrome-extension/package*.json

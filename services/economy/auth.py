@@ -189,6 +189,22 @@ def create_user(
         )
         user_id = int(cur.lastrowid)
 
+    from .activity_log import log_activity
+
+    log_activity(
+        "user.register",
+        category="account",
+        user_id=user_id,
+        user_email=email,
+        actor_id=user_id,
+        summary=f"Registered {email}",
+        details={
+            "referrer_id": referrer_id,
+            "welcome_bonus": bool(grant_welcome),
+            "is_admin": bool(is_admin),
+        },
+        source_ref=f"users:{user_id}",
+    )
     _wallet.ensure_wallet(user_id)
     if grant_welcome and WELCOME_BONUS > 0:
         _wallet.credit(
@@ -320,6 +336,16 @@ def verify_email_otp(user_id: int, code: str) -> dict[str, Any]:
     user = get_user(user_id)
     if user is None:
         raise AuthError("User not found.")
+    from .activity_log import log_activity
+
+    log_activity(
+        "user.email_verified",
+        category="account",
+        user_id=int(user_id),
+        user_email=user.get("email"),
+        actor_id=int(user_id),
+        summary=f"Verified email {user.get('email')}",
+    )
     return user
 
 
@@ -368,7 +394,40 @@ def login_user(user_id: int) -> None:
     session.permanent = True
 
 
+def log_login_attempt(email: str, user: dict[str, Any] | None) -> None:
+    from .activity_log import log_activity
+
+    if user is None:
+        log_activity(
+            "auth.login_failed",
+            category="auth",
+            user_email=normalize_email(email) or None,
+            summary=f"Failed login for {normalize_email(email) or '(empty)'}",
+            status_code=401,
+        )
+        return
+    log_activity(
+        "auth.login",
+        category="auth",
+        user_id=int(user["id"]),
+        user_email=user.get("email"),
+        actor_id=int(user["id"]),
+        summary=f"Signed in {user.get('email')}",
+    )
+
+
 def logout_user() -> None:
+    uid = session.get(SESSION_KEY)
+    if uid:
+        from .activity_log import log_activity
+
+        log_activity(
+            "auth.logout",
+            category="auth",
+            user_id=int(uid),
+            actor_id=int(uid),
+            summary="Signed out",
+        )
     session.pop(SESSION_KEY, None)
 
 
@@ -507,6 +566,7 @@ GUEST_PREVIEW_PAGE_PATHS = frozenset(
         "/turnitin",
         "/workspace",
         "/check",
+        "/veil",
     }
 )
 

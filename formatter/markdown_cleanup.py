@@ -26,6 +26,12 @@ def strip_markdown_text(text: str) -> str | None:
     if not stripped:
         return ""
 
+    # Keep [[FIGURE:...]] intact — underscore italics would eat auto_figure filenames.
+    if "[[FIGURE:" in stripped.upper().replace(" ", "") or re.search(
+        r"\[\[\s*FIGURE\s*:", stripped, re.I
+    ):
+        return stripped
+
     if _MD_ONLY_HASHES.match(stripped):
         return None
 

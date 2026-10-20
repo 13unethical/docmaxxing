@@ -837,6 +837,67 @@
   color: #b91c1c;
 }
 
+.adm-activity-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.adm-activity-search {
+  flex: 1 1 18rem;
+  padding-left: 0.75rem;
+}
+
+.adm-activity-select {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border-muted);
+  border-radius: 10px;
+  font: inherit;
+  font-size: 0.85rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.adm-activity-meta {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.adm-activity-table td {
+  font-size: 0.82rem;
+  vertical-align: top;
+}
+
+.adm-activity-details {
+  max-width: 26rem;
+  word-break: break-word;
+}
+
+.adm-activity-user {
+  white-space: nowrap;
+}
+
+.adm-activity-user button {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.adm-activity-row--bad td {
+  background: #fef2f2;
+}
+
+.adm-activity-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
 @media (max-width: 768px) {
   .adm-toolbar {
     justify-content: stretch;

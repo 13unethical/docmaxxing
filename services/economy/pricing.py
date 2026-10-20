@@ -42,7 +42,12 @@ FEATURE_COSTS: dict[str, int] = {
     "check": _env_int("COST_CHECK", 20),
     "cite": _env_int("COST_CITE", 2),
     "turnitin": _env_int("COST_TURNITIN", 300),
+    "presentation": _env_int("COST_PRESENTATION", 30),
+    "veil": _env_int("COST_VEIL_PASS", 2200),
 }
+
+# One payment unlocks Veil for this many days. Asking questions does not cost extra.
+VEIL_PASS_DAYS = 30
 
 # Human-readable labels for ledger/UI.
 FEATURE_LABELS: dict[str, str] = {
@@ -51,6 +56,8 @@ FEATURE_LABELS: dict[str, str] = {
     "check": "Academic Check",
     "cite": "Citation",
     "turnitin": "Turnitin check",
+    "presentation": "Presentation",
+    "veil": "Veil, 30 days",
     "assignment": "Assignment project",
     "topup": "Top-up",
     "welcome_bonus": "Welcome bonus",
@@ -297,6 +304,7 @@ def pricing_cost_rows() -> list[dict[str, str]]:
     humanize = feature_cost("humanize")
     cite = int(FEATURE_COSTS["cite"])
     turnitin = int(FEATURE_COSTS["turnitin"])
+    presentation = int(FEATURE_COSTS["presentation"])
     detect_per_100 = detect_cost_credits(100)
     return [
         {"label": "Home Format & Academic Check", "value": "Free"},
@@ -315,6 +323,14 @@ def pricing_cost_rows() -> list[dict[str, str]]:
         {
             "label": "Turnitin similarity check",
             "value": f"{turnitin} credits",
+        },
+        {
+            "label": "AI presentation (.pptx)",
+            "value": f"{presentation} {_credit_word(presentation)} / deck",
+        },
+        {
+            "label": "Veil for 30 days",
+            "value": f"{feature_cost('veil'):,} {_credit_word(feature_cost('veil'))}",
         },
         {"label": "Failed paid action", "value": "Refunded"},
     ]

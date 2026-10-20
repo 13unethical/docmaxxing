@@ -27,6 +27,12 @@
     usageEvents: [],
     usageTotal: 0,
     usageUser: null,
+    activity: [],
+    activityTotal: 0,
+    activitySearch: "",
+    activityCategory: "",
+    activityUserId: null,
+    activityLoading: false,
   };
 
   var els = {
@@ -102,6 +108,16 @@
     detectorAuto: root.querySelector("[data-adm-detector-auto]"),
     detectorManual: root.querySelector("[data-adm-detector-manual]"),
     datasetRefresh: root.querySelector("[data-adm-dataset-refresh]"),
+    activitySection: root.querySelector("[data-adm-activity]"),
+    activityBody: root.querySelector("[data-adm-activity-body]"),
+    activityEmpty: root.querySelector("[data-adm-activity-empty]"),
+    activityStatus: root.querySelector("[data-adm-activity-status]"),
+    activityMeta: root.querySelector("[data-adm-activity-meta]"),
+    activitySearch: root.querySelector("[data-adm-activity-search]"),
+    activityCategory: root.querySelector("[data-adm-activity-category]"),
+    activityRefresh: root.querySelector("[data-adm-activity-refresh]"),
+    activityMore: root.querySelector("[data-adm-activity-more]"),
+    activityClearUser: root.querySelector("[data-adm-activity-clear-user]"),
   };
 
   function escapeHtml(str) {
@@ -804,6 +820,9 @@
           '<button type="button" class="adm-btn adm-btn--usage" data-adm-usage="' +
           user.id +
           '">Usage</button>' +
+          '<button type="button" class="adm-btn adm-btn--usage" data-adm-activity-user="' +
+          user.id +
+          '">Activity</button>' +
           '<button type="button" class="adm-btn adm-btn--delete" data-adm-delete="' +
           user.id +
           '" data-adm-delete-email="' +
@@ -1140,6 +1159,136 @@
     }
   }
 
+  var ACTIVITY_PAGE = 100;
+
+  function setActivityStatus(msg, isError) {
+    if (!els.activityStatus) return;
+    els.activityStatus.textContent = msg || "";
+    els.activityStatus.classList.toggle("adm-status--error", !!isError);
+  }
+
+  function activityPerson(id, email) {
+    if (!id && !email) return "—";
+    var label = escapeHtml(email || "") + (id ? " <span class=\"adm-cell-id\">#" + id + "</span>" : "");
+    if (!id) return label;
+    return '<button type="button" data-adm-activity-filter-user="' + id + '">' + label + "</button>";
+  }
+
+  function activityDetails(entry) {
+    var parts = [];
+    if (entry.summary) parts.push(escapeHtml(entry.summary));
+    var d = entry.details;
+    if (d && typeof d === "object") {
+      var extras = [];
+      Object.keys(d).forEach(function (k) {
+        var v = d[k];
+        if (v === null || v === undefined || v === "") return;
+        if (k === "endpoint") return;
+        extras.push(escapeHtml(k) + ": " + escapeHtml(typeof v === "object" ? JSON.stringify(v) : String(v)));
+      });
+      if (extras.length) parts.push('<span class="adm-ledger-subtitle">' + extras.join(" · ") + "</span>");
+    }
+    return parts.join("<br>") || "—";
+  }
+
+  function renderActivity() {
+    if (!els.activityBody) return;
+    if (els.activityEmpty) els.activityEmpty.hidden = state.activity.length > 0;
+    if (els.activityMore) els.activityMore.hidden = state.activity.length >= state.activityTotal;
+    if (els.activityClearUser) els.activityClearUser.hidden = !state.activityUserId;
+    els.activityBody.innerHTML = state.activity
+      .map(function (e) {
+        var bad =
+          (e.status_code && e.status_code >= 400) ||
+          e.action === "auth.login_failed" ||
+          e.action === "admin.user_deleted";
+        return (
+          "<tr" + (bad ? ' class="adm-activity-row--bad"' : "") + ">" +
+          "<td>" + escapeHtml(formatDate(e.created_at)) + "</td>" +
+          '<td><span class="adm-feature">' + escapeHtml(e.category || "—") + "</span></td>" +
+          "<td>" + escapeHtml(e.action || "—") + "</td>" +
+          '<td class="adm-activity-user">' + activityPerson(e.user_id, e.user_email) + "</td>" +
+          '<td class="adm-activity-user">' +
+          (e.actor_id && e.actor_id !== e.user_id ? activityPerson(e.actor_id, e.actor_email) : "—") +
+          "</td>" +
+          '<td class="adm-activity-details">' + activityDetails(e) + "</td>" +
+          "<td>" + escapeHtml(e.ip || "—") + "</td>" +
+          "</tr>"
+        );
+      })
+      .join("");
+  }
+
+  function renderActivityCategories(categories) {
+    if (!els.activityCategory) return;
+    var current = state.activityCategory;
+    els.activityCategory.innerHTML =
+      '<option value="">All categories</option>' +
+      (categories || [])
+        .map(function (c) {
+          return (
+            '<option value="' + escapeHtml(c.category) + '"' +
+            (c.category === current ? " selected" : "") + ">" +
+            escapeHtml(c.category) + " (" + formatNumber(c.count) + ")</option>"
+          );
+        })
+        .join("");
+  }
+
+  function loadActivity(reset) {
+    if (!els.activityBody || state.activityLoading) return;
+    if (reset) state.activity = [];
+    var params = ["limit=" + ACTIVITY_PAGE, "offset=" + state.activity.length];
+    if (state.activitySearch) params.push("q=" + encodeURIComponent(state.activitySearch));
+    if (state.activityCategory) params.push("category=" + encodeURIComponent(state.activityCategory));
+    if (state.activityUserId) params.push("user_id=" + state.activityUserId);
+    state.activityLoading = true;
+    setActivityStatus("Loading activity…");
+    fetch("/api/admin/activity?" + params.join("&"), { headers: { Accept: "application/json" } })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (data) {
+            return { ok: res.ok, data: data };
+          });
+      })
+      .then(function (r) {
+        if (!r.ok || !r.data || !r.data.success) {
+          setActivityStatus((r.data && r.data.error) || "Failed to load activity.", true);
+          return;
+        }
+        state.activity = state.activity.concat(r.data.entries || []);
+        state.activityTotal = r.data.total || 0;
+        renderActivityCategories(r.data.categories);
+        if (els.activityMeta) {
+          els.activityMeta.textContent =
+            formatNumber(state.activityTotal) + " entries" +
+            (state.activityUserId ? " for user #" + state.activityUserId : "") +
+            " · " + formatNumber(r.data.registered_events) + " sign-ups recorded · " +
+            formatNumber(r.data.deleted_events) + " deleted by admin";
+        }
+        setActivityStatus("");
+        renderActivity();
+      })
+      .catch(function () {
+        setActivityStatus("Network error.", true);
+      })
+      .then(function () {
+        state.activityLoading = false;
+      });
+  }
+
+  function filterActivityByUser(userId) {
+    state.activityUserId = userId;
+    loadActivity(true);
+    if (els.activitySection && els.activitySection.scrollIntoView) {
+      els.activitySection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
+
   function loadUsers() {
     var url = "/api/admin/users?limit=200";
     if (state.search) {
@@ -1461,6 +1610,14 @@
         }
         return;
       }
+      var activityBtn = e.target.closest("[data-adm-activity-user]");
+      if (activityBtn) {
+        var activityUserId = parseInt(activityBtn.getAttribute("data-adm-activity-user"), 10);
+        if (activityUserId) {
+          filterActivityByUser(activityUserId);
+        }
+        return;
+      }
       var deleteBtn = e.target.closest("[data-adm-delete]");
       if (deleteBtn) {
         var deleteUserId = parseInt(deleteBtn.getAttribute("data-adm-delete"), 10);
@@ -1572,6 +1729,48 @@
   loadPreflight(false);
   loadAnalytics();
   loadDatasetStats();
+  var activitySearchTimer = null;
+  if (els.activitySearch) {
+    els.activitySearch.addEventListener("input", function () {
+      clearTimeout(activitySearchTimer);
+      activitySearchTimer = setTimeout(function () {
+        state.activitySearch = els.activitySearch.value.trim();
+        loadActivity(true);
+      }, 300);
+    });
+  }
+  if (els.activityCategory) {
+    els.activityCategory.addEventListener("change", function () {
+      state.activityCategory = els.activityCategory.value;
+      loadActivity(true);
+    });
+  }
+  if (els.activityRefresh) {
+    els.activityRefresh.addEventListener("click", function () {
+      loadActivity(true);
+    });
+  }
+  if (els.activityMore) {
+    els.activityMore.addEventListener("click", function () {
+      loadActivity(false);
+    });
+  }
+  if (els.activityClearUser) {
+    els.activityClearUser.addEventListener("click", function () {
+      state.activityUserId = null;
+      loadActivity(true);
+    });
+  }
+  if (els.activityBody) {
+    els.activityBody.addEventListener("click", function (e) {
+      var btn = e.target.closest("[data-adm-activity-filter-user]");
+      if (!btn) return;
+      var uid = parseInt(btn.getAttribute("data-adm-activity-filter-user"), 10);
+      if (uid) filterActivityByUser(uid);
+    });
+  }
+
   loadWithdrawals();
   loadUsers();
+  loadActivity(true);
 })();

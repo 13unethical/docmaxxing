@@ -1,0 +1,137 @@
+{% extends "tools_base.html" %}
+{% set tools_active = 'presentation' %}
+{% set guest_preview = true %}
+{% block guest_auth_title %}Generate a presentation with AI{% endblock %}
+{% block guest_auth_reason %}Create a free account to generate slide decks and download them as PowerPoint files.{% endblock %}
+{% block title %}AI Presentation Maker — DocMaxxing{% endblock %}
+{% block head_extra %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ url_for('static', filename='presentation.css') }}?v=20261020-1" />
+{% endblock %}
+{% block tools_content %}
+<div class="pres-page" data-cost="{{ presentation_cost }}" data-default-theme="{{ default_theme }}" data-samples="{{ url_for('static', filename='presentation/samples/') }}">
+  <section class="pres-hero" aria-labelledby="pres-hero-title">
+    <h1 class="pres-wordmark" id="pres-hero-title">DocMaxxing <span>Slides</span></h1>
+
+    <div class="pres-composer" id="pres_composer">
+      <div class="pres-composer-main">
+        <button type="button" class="pres-composer-theme" id="pres_theme_chip" title="Change style">
+          <span class="pres-theme-thumb" id="pres_theme_chip_thumb" aria-hidden="true">
+            <span class="pres-thumb-title">Aa</span>
+          </span>
+          <span class="pres-composer-theme-name" id="pres_theme_chip_name"></span>
+        </button>
+        <textarea
+          id="pres_topic"
+          rows="2"
+          maxlength="{{ max_topic_chars }}"
+          placeholder="Turn your idea into polished slides in minutes — describe the topic…"
+          aria-label="Presentation topic"
+        ></textarea>
+      </div>
+
+      <div class="pres-details hidden" id="pres_details_wrap">
+        <textarea
+          id="pres_details"
+          rows="5"
+          maxlength="8000"
+          placeholder="Paste the assignment brief, your notes, or a source text the slides should be based on…"
+          aria-label="Brief, notes or source text"
+        ></textarea>
+      </div>
+
+      <div class="pres-composer-bar">
+        <div class="pres-composer-left">
+          <button type="button" class="pres-icon-btn" id="pres_details_toggle" title="Add brief or source text" aria-expanded="false" aria-controls="pres_details_wrap">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <span class="pres-mode-chip">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+            Slides
+          </span>
+          <label class="pres-pill">
+            <span class="sr-only">Number of slides</span>
+            <select id="pres_slide_count">
+              {% for n in range(min_slides, max_slides + 1) %}
+              <option value="{{ n }}"{% if n == 8 %} selected{% endif %}>{{ n }} slides</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="pres-pill">
+            <span class="sr-only">Tone</span>
+            <select id="pres_tone">
+              <option value="academic" selected>Academic</option>
+              <option value="business">Business</option>
+              <option value="simple">Simple</option>
+            </select>
+          </label>
+          <label class="pres-pill">
+            <span class="sr-only">Language</span>
+            <select id="pres_language">
+              <option value="auto" selected>Auto language</option>
+              <option value="en">English</option>
+              <option value="ru">Русский</option>
+              <option value="uz">O'zbek</option>
+              <option value="kk">Қазақ</option>
+              <option value="es">Español</option>
+              <option value="de">Deutsch</option>
+              <option value="fr">Français</option>
+            </select>
+          </label>
+          <label class="pres-pill">
+            <span class="sr-only">Photos</span>
+            <select id="pres_images">
+              <option value="on" selected>With photos</option>
+              <option value="off">No photos</option>
+            </select>
+          </label>
+        </div>
+        <div class="pres-composer-right">
+          <span class="pres-cost">{{ presentation_cost }} credits</span>
+          <button type="button" class="pres-send-btn" id="pres_generate_btn" title="Generate presentation" aria-label="Generate presentation">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <p class="pres-hint">Credits are refunded automatically if generation fails. You can switch styles after generating — free.</p>
+    <div id="pres_status" class="req-status pres-status" role="status"></div>
+  </section>
+
+  <section class="pres-result hidden" id="pres_result" aria-labelledby="pres-result-title">
+    <div class="pres-result-head">
+      <div>
+        <h2 class="pres-section-title" id="pres-result-title">Your deck</h2>
+        <p class="pres-result-sub">Click any text to edit it. Pick another style below to restyle instantly.</p>
+      </div>
+      <div class="pres-result-actions">
+        <button type="button" class="pres-ghost-btn" id="pres_new_btn">New deck</button>
+        <button type="button" class="pres-primary-btn" id="pres_download_btn" disabled>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M5 20h14"/></svg>
+          <span>Download .pptx</span>
+        </button>
+      </div>
+    </div>
+    <div id="pres_loading" class="pres-loading hidden" aria-hidden="true">
+      <div class="pres-skeleton"></div><div class="pres-skeleton"></div><div class="pres-skeleton"></div>
+      <div class="pres-skeleton"></div><div class="pres-skeleton"></div><div class="pres-skeleton"></div>
+    </div>
+    <div id="pres_slides" class="pres-slides" aria-live="polite"></div>
+  </section>
+
+  <section class="pres-gallery" id="pres_gallery" aria-labelledby="pres-gallery-title">
+    <h2 class="sr-only" id="pres-gallery-title">Slide styles</h2>
+    <div class="pres-tabs" role="tablist" aria-label="Style categories">
+      <button type="button" class="pres-tab is-active" role="tab" aria-selected="true" data-category="all">All</button>
+      {% for key, label in theme_categories %}
+      <button type="button" class="pres-tab" role="tab" aria-selected="false" data-category="{{ key }}">{{ label }}</button>
+      {% endfor %}
+    </div>
+    <div class="pres-theme-grid" id="pres_theme_grid"></div>
+  </section>
+</div>
+<script type="application/json" id="pres_themes_data">{{ themes|tojson }}</script>
+{% endblock %}
+{% block tools_scripts %}
+<script src="{{ url_for('static', filename='presentation.js') }}?v=20261020-1"></script>
+{% endblock %}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from services.assignment_project.requirement_analyzer import (
+    _apply_user_scope_from_note,
     _extract_section_word_budgets_from_sources,
     _extract_word_count_from_sources,
     _normalize_required_sections,
@@ -132,3 +133,54 @@ def test_required_sections_dict_strings_become_clean_titles():
         "Body paragraph 1: article main idea",
         "Reference List",
     ]
+
+
+def test_user_scope_note_keeps_only_shelter_and_transportation():
+    full = [
+        "Cover Page",
+        "Introduction",
+        "Shelter",
+        "Transportation",
+        "Food",
+        "Energy",
+        "Water",
+        "Conclusion",
+        "References",
+    ]
+    note = (
+        "Only write Shelter and Transportation for Findhorn Ecovillage, "
+        "about 2 pages each. Include the attached photos. "
+        "Do not write Food, Energy, Water, Cover, or Conclusion — teammates' parts."
+    )
+    scoped, budgets, word_count = _apply_user_scope_from_note(
+        note,
+        full,
+        section_word_budgets={},
+        word_count=5000,
+    )
+    titles = [s.split(":", 1)[0].strip() for s in scoped]
+    assert "Shelter" in titles
+    assert "Transportation" in titles
+    assert "Food" not in titles
+    assert "Energy" not in titles
+    assert "Water" not in titles
+    assert "Cover Page" not in titles
+    assert "Conclusion" not in titles
+    assert any("Reference" in t for t in titles)
+    # 2 pages × ~550 words × 2 body sections
+    assert word_count == 2200
+    assert budgets.get("Shelter") == 1100
+    assert budgets.get("Transportation") == 1100
+
+
+def test_user_scope_ignored_without_narrowing_signal():
+    sections = ["Introduction", "Body", "Conclusion", "References"]
+    scoped, budgets, word_count = _apply_user_scope_from_note(
+        "Please use a formal academic tone and APA citations.",
+        sections,
+        {"Introduction": 200},
+        1000,
+    )
+    assert scoped == sections
+    assert budgets == {"Introduction": 200}
+    assert word_count == 1000

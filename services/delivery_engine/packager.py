@@ -68,7 +68,17 @@ class RealDeliveryPackager:
             if src.is_file():
                 docx_bytes = src.read_bytes()
         if docx_bytes is None:
-            docx_bytes = _build_docx_bytes(str(draft.get("title") or title), str(draft.get("content") or ""))
+            docx_bytes = _build_docx_bytes(
+                str(draft.get("title") or title),
+                str(draft.get("content") or ""),
+                images=payload.assignment_images,
+            )
+        elif payload.assignment_images:
+            from services.assignment_figures import embed_figures_in_docx_bytes
+
+            # Re-embed in case Format Engine ran before images were synced, or
+            # markers survived as plain text in the formatted file.
+            docx_bytes = embed_figures_in_docx_bytes(docx_bytes, payload.assignment_images)
 
         docx_path = root / f"{title}.docx"
         docx_path.write_bytes(docx_bytes)
@@ -155,7 +165,11 @@ def resolve_client_format(requirement: dict[str, Any] | None) -> str:
     return "docx"
 
 
-def _build_docx_bytes(title: str, content: str) -> bytes:
+def _build_docx_bytes(
+    title: str,
+    content: str,
+    images: list[dict[str, Any]] | None = None,
+) -> bytes:
     doc = Document()
     doc.add_heading(title or "Assignment", level=1)
     for block in (content or "").split("\n\n"):
@@ -164,7 +178,12 @@ def _build_docx_bytes(title: str, content: str) -> bytes:
             doc.add_paragraph(text)
     buf = io.BytesIO()
     doc.save(buf)
-    return buf.getvalue()
+    raw = buf.getvalue()
+    if images:
+        from services.assignment_figures import embed_figures_in_docx_bytes
+
+        return embed_figures_in_docx_bytes(raw, images)
+    return raw
 
 
 def _build_pdf_bytes(title: str, content: str) -> bytes:

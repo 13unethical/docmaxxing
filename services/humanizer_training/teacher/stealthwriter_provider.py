@@ -135,6 +135,9 @@ class TrainingBrowserConfig:
             "data/humanizer_training/debug",
         )
     )
+    # Optional ChromeLauncher extra_args override (None = launcher defaults).
+    # Used by --headed-login to force headed Chrome without touching collectors.
+    chrome_extra_args: list[str] | None = None
 
 # --------------------------------------------------------------------------- result
 
@@ -1409,10 +1412,14 @@ class StealthWriterTeacherProvider:
 
     def __init__(self, config: TrainingBrowserConfig | None = None) -> None:
         self._cfg = config or TrainingBrowserConfig()
-        self._launcher = ChromeLauncher(
-            port=self._cfg.cdp_port,
-            user_data_dir=self._cfg.user_data_dir,
-        )
+        launcher_kwargs: dict[str, Any] = {
+            "port": self._cfg.cdp_port,
+            "user_data_dir": self._cfg.user_data_dir,
+        }
+        if self._cfg.chrome_extra_args is not None:
+            # Explicit list disables ChromeLauncher's auto --headless=new path.
+            launcher_kwargs["extra_args"] = list(self._cfg.chrome_extra_args)
+        self._launcher = ChromeLauncher(**launcher_kwargs)
         self._pool: BrowserPool | None = None
         self._sessions = SessionStore(base_dir=self._cfg.session_dir)
         self._started = False

@@ -101,6 +101,23 @@ class GeminiRequirementAnalyzer:
                 if words is not None and title:
                     merged_budgets.setdefault(title, words)
             normalized["section_word_budgets"] = merged_budgets
+            # USER_SCOPE post-pass: project note can narrow sections when the brief
+            # lists a full group outline but the student only wants their parts.
+            scoped_sections, scoped_budgets, scoped_wc = _apply_user_scope_from_note(
+                project.note,
+                list(normalized.get("required_sections") or []),
+                dict(normalized.get("section_word_budgets") or {}),
+                normalized.get("word_count"),
+            )
+            normalized["required_sections"] = scoped_sections
+            normalized["section_word_budgets"] = scoped_budgets
+            if scoped_wc is not None:
+                normalized["word_count"] = scoped_wc
+            normalized["missing_information"] = [
+                item
+                for item in normalized.get("missing_information", [])
+                if not _missing_item_about_skipped_sections(item, project.note)
+            ]
             return RequirementJSON(
                 id=base.id,
                 project_id=base.project_id,
@@ -189,6 +206,17 @@ def _requirement_system_prompt() -> str:
         "REQUIRED SECTIONS: use only section titles stated in the brief "
         "(e.g. Introduction, Journal Entry 1, Reflection, Reference List). "
         "Do not invent generic essay sections when the brief lists specific ones. "
+        "USER_SCOPE (critical — overrides full brief outline): "
+        "Read PROJECT_METADATA.project_note carefully. If the student note narrows the work "
+        "(e.g. 'only Shelter and Transportation', 'my parts', 'section 6 and 7', "
+        "'do not write Food/Energy', 'teammates do the rest', 'только …'), then "
+        "required_sections MUST list ONLY the sections the student asked to write — "
+        "not the full group-project outline from the brief. The brief remains context "
+        "(topic, criteria, style); the note is the delivery scope. "
+        "Recalculate word_count and section_word_budgets for the scoped sections only "
+        "(e.g. '2 pages each' ≈ 500–600 words per section). "
+        "Do not put skipped teammate sections in missing_information. "
+        "If the note does not narrow scope, keep required_sections as the brief lists them. "
         "The formatting field must be an object with keys: font_family, font_size, "
         "line_spacing, margins, alignment. "
         "Rubric must be an array of objects with keys: criterion, weight, description."
@@ -205,6 +233,10 @@ def _requirement_user_prompt(project: Project, sections: dict[str, str]) -> str:
     return (
         "Analyze assignment requirements from all provided materials.\n\n"
         f"PROJECT_METADATA:\n{json.dumps(metadata, ensure_ascii=False)}\n\n"
+        "USER_SCOPE:\n"
+        "If project_note limits which sections to write, set required_sections to only those "
+        "parts (names as in the brief when possible). Ignore the rest of the brief outline "
+        "for generation scope. Adjust word_count to the scoped work.\n\n"
         f"ASSIGNMENT_BRIEF:\n{sections['assignment_brief']}\n\n"
         f"RUBRIC:\n{sections['rubric']}\n\n"
         f"LECTURE_NOTES:\n{sections['lecture_notes']}\n\n"
@@ -215,7 +247,8 @@ def _requirement_user_prompt(project: Project, sections: dict[str, str]) -> str:
         "Also extract per-section word limits into section_word_budgets when stated "
         "(Introduction 100, journal entries 200, reflection 300, etc.). "
         "If a field is not stated, set it to null or []/{} and list it in missing_information. "
-        "Keep required_sections as ordered section titles exactly as the brief lists them. "
+        "When USER_SCOPE applies, required_sections = scoped titles only (ordered). "
+        "Otherwise keep required_sections as ordered section titles exactly as the brief lists them. "
         "Return only valid JSON with the required structure."
     )
 
@@ -544,3 +577,222 @@ def _normalize_required_sections_with_budgets(raw_sections: list[Any]) -> tuple[
 def _normalize_required_sections(raw_sections: list[Any]) -> list[str]:
     sections, _budgets = _normalize_required_sections_with_budgets(raw_sections)
     return sections
+
+
+_SCOPE_SIGNAL_RE = re.compile(
+    r"\b("
+    r"only|just|только|лишь|"
+    r"my\s+parts?|teammates?|"
+    r"do\s+not\s+write|don'?t\s+write|skip|"
+    r"without|except|exclude|"
+    r"section\s*\d+|parts?\s*\d+"
+    r")\b",
+    re.I,
+)
+
+_PAGES_EACH_RE = re.compile(
+    r"(?P<n>\d+)\s*pages?\s*(?:each|per\s+section|apiece)?",
+    re.I,
+)
+
+_WORDS_EACH_RE = re.compile(
+    r"(?P<n>\d{2,4})\s*words?\s*(?:each|per\s+section|apiece)",
+    re.I,
+)
+
+_NEGATIVE_CHUNK_RE = re.compile(
+    r"(?:do\s+not\s+write|don'?t\s+write|skip|without|except|exclude|"
+    r"teammates?\s+(?:do|handle|write)|not\s+(?:including|include))\s*[:\-]?\s*"
+    r"(?P<body>[^.!?\n]+)",
+    re.I,
+)
+
+_STOP_SECTION_WORDS = frozenset(
+    {
+        "only",
+        "just",
+        "write",
+        "writes",
+        "writing",
+        "section",
+        "sections",
+        "part",
+        "parts",
+        "about",
+        "pages",
+        "page",
+        "each",
+        "include",
+        "attached",
+        "photos",
+        "photo",
+        "images",
+        "image",
+        "figures",
+        "figure",
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "that",
+        "this",
+        "those",
+        "these",
+        "findhorn",
+        "ecovillage",
+        "arcosanti",
+    }
+)
+
+
+def _section_short_title(section: str) -> str:
+    text = str(section or "").split(":", 1)[0].strip()
+    text = re.sub(r"^\d+[\.\)]\s*", "", text)
+    return text.strip() or str(section or "").strip()
+
+
+def _has_user_scope_signal(note: str) -> bool:
+    return bool(_SCOPE_SIGNAL_RE.search(note or ""))
+
+
+def _titles_mentioned_in_text(sections: list[str], blob: str) -> list[str]:
+    """Return section titles whose short name appears in blob (preserve order)."""
+    if not blob:
+        return []
+    found: list[str] = []
+    for section in sections:
+        short = _section_short_title(section)
+        if len(short) < 3:
+            continue
+        if re.search(rf"\b{re.escape(short)}\b", blob, re.I):
+            found.append(section)
+            continue
+        # Multi-word: match on a distinctive token (Shelter in "Shelter and Housing").
+        tokens = [
+            t
+            for t in re.findall(r"[A-Za-z][A-Za-z-]{3,}", short)
+            if t.lower() not in _STOP_SECTION_WORDS
+        ]
+        if tokens and any(re.search(rf"\b{re.escape(t)}\b", blob, re.I) for t in tokens[:2]):
+            found.append(section)
+    return found
+
+
+def _excluded_section_titles(note: str, sections: list[str]) -> set[str]:
+    excluded: set[str] = set()
+    for match in _NEGATIVE_CHUNK_RE.finditer(note or ""):
+        body = match.group("body") or ""
+        for section in _titles_mentioned_in_text(sections, body):
+            excluded.add(section)
+    return excluded
+
+
+def _missing_item_about_skipped_sections(item: str, note: str | None) -> bool:
+    if not note or not _has_user_scope_signal(str(note)):
+        return False
+    text = str(item or "").lower()
+    # Only drop missing-info noise that asks for teammate/group sections.
+    return any(
+        key in text
+        for key in (
+            "cover page",
+            "food",
+            "energy",
+            "water",
+            "remaining sections",
+            "other sections",
+            "all sections",
+            "full outline",
+        )
+    )
+
+
+def _per_section_words_from_note(note: str) -> int | None:
+    words_match = _WORDS_EACH_RE.search(note or "")
+    if words_match:
+        return int(words_match.group("n"))
+    pages_match = _PAGES_EACH_RE.search(note or "")
+    if pages_match:
+        return int(pages_match.group("n")) * 550
+    return None
+
+
+def apply_user_scope_from_note(
+    note: str | None,
+    required_sections: list[str],
+    section_word_budgets: dict[str, int] | None = None,
+    word_count: int | None = None,
+) -> tuple[list[str], dict[str, int], int | None]:
+    """Narrow required_sections when the project note explicitly scopes the work.
+
+    Public alias used by tests; same as ``_apply_user_scope_from_note``.
+    """
+    return _apply_user_scope_from_note(
+        note, required_sections, section_word_budgets, word_count
+    )
+
+
+def _apply_user_scope_from_note(
+    note: str | None,
+    required_sections: list[str],
+    section_word_budgets: dict[str, int] | None = None,
+    word_count: int | None = None,
+) -> tuple[list[str], dict[str, int], int | None]:
+    budgets = dict(section_word_budgets or {})
+    sections = [str(s).strip() for s in (required_sections or []) if str(s).strip()]
+    raw_note = str(note or "").strip()
+    if not raw_note or not sections or not _has_user_scope_signal(raw_note):
+        return sections, budgets, word_count
+
+    excluded = _excluded_section_titles(raw_note, sections)
+    # Prefer sections named in the note that are not in the exclusion chunk.
+    mentioned = [
+        s for s in _titles_mentioned_in_text(sections, raw_note) if s not in excluded
+    ]
+    # If the note only excludes (e.g. "don't write Food"), keep the rest.
+    if not mentioned and excluded:
+        mentioned = [s for s in sections if s not in excluded]
+
+    if not mentioned or len(mentioned) >= len(sections):
+        return sections, budgets, word_count
+
+    # Always keep a References-like section if it was required and not excluded —
+    # academic papers usually still need citations for scoped parts.
+    refs = [
+        s
+        for s in sections
+        if s not in mentioned
+        and s not in excluded
+        and re.search(r"\b(references?|bibliography|works cited)\b", s, re.I)
+    ]
+    scoped = mentioned + refs
+
+    new_budgets: dict[str, int] = {}
+    per_note = _per_section_words_from_note(raw_note)
+    for section in scoped:
+        short = _section_short_title(section)
+        if re.search(r"\b(references?|bibliography|works cited)\b", short, re.I):
+            continue
+        matched_budget = None
+        for key, value in budgets.items():
+            if key.lower() == short.lower() or short.lower() in key.lower() or key.lower() in short.lower():
+                matched_budget = int(value)
+                break
+        if matched_budget is None and per_note is not None:
+            matched_budget = per_note
+        if matched_budget is not None:
+            new_budgets[short] = matched_budget
+
+    new_wc = word_count
+    if new_budgets:
+        new_wc = sum(new_budgets.values())
+    elif per_note is not None:
+        body_count = sum(
+            1
+            for s in scoped
+            if not re.search(r"\b(references?|bibliography|works cited)\b", s, re.I)
+        )
+        new_wc = per_note * max(1, body_count)
+
+    return scoped, new_budgets or budgets, new_wc
