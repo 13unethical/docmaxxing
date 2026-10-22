@@ -15,15 +15,23 @@ install -m 644 "$ROOT/deploy/docmaxxing-humanizer-training-export.service" \
 install -m 644 "$ROOT/deploy/docmaxxing-humanizer-training-export.timer" \
   /etc/systemd/system/docmaxxing-humanizer-training-export.timer
 
+install -m 644 "$ROOT/deploy/docmaxxing-humanizer-training-sources.service" \
+  /etc/systemd/system/docmaxxing-humanizer-training-sources.service
+install -m 644 "$ROOT/deploy/docmaxxing-humanizer-training-sources.timer" \
+  /etc/systemd/system/docmaxxing-humanizer-training-sources.timer
+
 mkdir -p "$ROOT/data/humanizer_training/synthetic_daily"
 mkdir -p "$ROOT/data/humanizer_training/real_user_raw"
+mkdir -p "$ROOT/data/humanizer_training/source_pool"
 
 systemctl daemon-reload
 # Enable + start timers (schedules next OnCalendar). Do NOT start .service oneshots here.
 systemctl enable --now docmaxxing-humanizer-training-daily.timer
 systemctl enable --now docmaxxing-humanizer-training-export.timer
+systemctl enable --now docmaxxing-humanizer-training-sources.timer
 
 echo "Humanizer training timers enabled:"
 systemctl list-timers 'docmaxxing-humanizer-training-*.timer' --no-pager
 systemctl is-enabled docmaxxing-humanizer-training-daily.timer
 systemctl is-enabled docmaxxing-humanizer-training-export.timer
+systemctl is-enabled docmaxxing-humanizer-training-sources.timer

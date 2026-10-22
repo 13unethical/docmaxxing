@@ -4,7 +4,8 @@ Retry policy (large unattended runs):
 - Collector owns a bounded attempt budget (`max_attempts_per_document`, default 2).
 - Browser provider is constructed with `max_retries=1` so each collector attempt maps
   to exactly one `_humanize_once` call (no nested collector × provider multiplication).
-- Failed documents are recorded and skipped; the run continues.
+- Failed documents are recorded and skipped; the run continues, except LOGIN_REQUIRED,
+  which stops the run because every remaining document would fail the same way.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from services.humanizer_training.teacher.documents.generator import (
     summarize_document_plan,
 )
 from services.humanizer_training.teacher.documents.quality import evaluate_teacher_document
+from services.humanizer_training.teacher.documents.source_pool import SourcePool, sampling_plan_for
 from services.humanizer_training.teacher.documents.schema import (
     DocumentCollectorConfig,
     HumanizerTeacherDocument,
@@ -139,8 +141,14 @@ class TeacherDocumentCollector:
 
     def run(self) -> DocumentCollectionResult:
         run_started = time.monotonic()
-        docs, plan = generate_documents(count=int(self.config.count), seed=int(self.config.seed))
+        pool = SourcePool(self.config.source_pool_dir) if self.config.source_pool_dir else None
+        if pool is not None:
+            docs = pool.peek(int(self.config.count))
+            plan = sampling_plan_for(docs)
+        else:
+            docs, plan = generate_documents(count=int(self.config.count), seed=int(self.config.seed))
         sampling = summarize_document_plan(plan)
+        stopped_reason: str | None = None
 
         existing_success_ids = self._load_existing_ids()
         existing_source_hashes = self._load_existing_source_hashes()
@@ -255,6 +263,8 @@ class TeacherDocumentCollector:
                     error_message="Source text already committed in this archive",
                     attempt=0,
                 )
+                if pool is not None:
+                    pool.mark_used(doc.document_id)
                 failed_ids.add(doc.document_id)
                 completed.add(doc.document_id)
                 self._save_checkpoint(completed, successful_ids, failed_ids, skipped_ids)
@@ -414,6 +424,14 @@ class TeacherDocumentCollector:
                 failed_ids.add(doc.document_id)
                 completed.add(doc.document_id)
                 self._save_checkpoint(completed, successful_ids, failed_ids, skipped_ids)
+                if last_error_code == "LOGIN_REQUIRED":
+                    stopped_reason = "LOGIN_REQUIRED"
+                    print(
+                        "[doc-collector] stopping run: teacher session expired "
+                        "(re-run scripts/login_stealthwriter_training.py --headed-login)",
+                        flush=True,
+                    )
+                    break
                 continue
 
             policy_error = self._policy_gate(
@@ -552,6 +570,7 @@ class TeacherDocumentCollector:
             payload["angle"] = getattr(doc, "angle", "") or ""
             payload["combination_key"] = getattr(doc, "combination_key", "") or ""
             payload["generation_prompt"] = getattr(doc, "generation_prompt", "") or ""
+            payload["source_kind"] = "claude_pool" if pool is not None else "template"
             payload["ratio"] = round(ratio, 6)
             payload["jaccard"] = round(jaccard, 6)
             payload["heading_preservation"] = heading_status
@@ -577,6 +596,8 @@ class TeacherDocumentCollector:
             safe_meta.setdefault("verified_level", int(self.config.level))
             payload["teacher_meta"] = safe_meta
             self._append_jsonl(self.documents_path, payload)
+            if pool is not None:
+                pool.mark_used(doc.document_id)
             success_count += 1
             successful_ids.add(doc.document_id)
             existing_source_hashes.add(source_hash)
@@ -616,6 +637,8 @@ class TeacherDocumentCollector:
             "seed": int(self.config.seed),
             "resume": bool(self.config.resume),
             "dry_run": False,
+            "stopped_reason": stopped_reason,
+            "source": "claude_pool" if pool is not None else "template",
         }
 
         word_stats = _word_stats([d.word_count for d in docs])

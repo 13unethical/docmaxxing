@@ -26,6 +26,7 @@ from services.humanizer_training.synthetic_daily import (  # noqa: E402
     DEFAULT_SYNTHETIC_ROOT,
     run_daily_backfill,
 )
+from services.humanizer_training.teacher.documents.source_pool import DEFAULT_POOL_ROOT  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,6 +60,13 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=str(DEFAULT_SYNTHETIC_ROOT),
     )
+    p.add_argument(
+        "--source",
+        choices=("pool", "template"),
+        default="pool",
+        help="pool = Claude-written documents from the source pool; template = legacy generator",
+    )
+    p.add_argument("--source-pool-root", type=str, default=str(DEFAULT_POOL_ROOT))
     return p.parse_args()
 
 
@@ -73,6 +81,7 @@ def main() -> int:
         force_window=bool(args.force_window),
         output_root=Path(args.output_root),
         execute_collector=not dry_run,
+        source_pool_root=Path(args.source_pool_root) if args.source == "pool" else None,
     )
     payload = result.as_dict()
     # Friendly dry-run summary fields at top level
@@ -89,6 +98,7 @@ def main() -> int:
                 "within_window": result.plan.within_window,
                 "documents_that_would_be_attempted": result.plan.documents_to_attempt,
                 "reason": result.plan.reason,
+                "source_pool_pending": result.plan.source_pool_pending,
                 "output_dir": str(result.plan.output_dir),
                 "full": payload,
             },

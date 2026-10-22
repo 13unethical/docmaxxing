@@ -97,3 +97,6 @@ class DocumentCollectorConfig:
     # max_retries=1.
     max_retries: int = 2
     allow_mock_provider: bool = False
+    # When set, source documents come from the Claude-written pool instead of the
+    # template generator; archived documents are moved out of the pool.
+    source_pool_dir: str | None = None

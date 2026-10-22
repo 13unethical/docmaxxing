@@ -23,6 +23,7 @@ from services.humanizer_training.daily_budget import (
     within_reset_window,
 )
 from services.humanizer_training.teacher.documents.schema import DocumentCollectorConfig
+from services.humanizer_training.teacher.documents.source_pool import SourcePool
 
 DEFAULT_SYNTHETIC_ROOT = Path("data/humanizer_training/synthetic_daily")
 DEFAULT_MINUTES_BEFORE_RESET = 10.0
@@ -97,6 +98,8 @@ class DailyBackfillPlan:
     output_dir: Path
     reason: str
     seed: int
+    source_pool_root: Path | None = None
+    source_pool_pending: int | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -109,6 +112,8 @@ class DailyBackfillPlan:
             "output_dir": str(self.output_dir),
             "reason": self.reason,
             "seed": self.seed,
+            "source": "claude_pool" if self.source_pool_root else "template",
+            "source_pool_pending": self.source_pool_pending,
             "dataset_kind": "synthetic_daily",
             "separated_from_real_user_raw": True,
             "teacher": {
@@ -150,6 +155,7 @@ def plan_daily_backfill(
     output_root: Path = DEFAULT_SYNTHETIC_ROOT,
     seed: int | None = None,
     max_documents: int | None = None,
+    source_pool_root: Path | None = None,
 ) -> DailyBackfillPlan:
     day = date or humanizer_period_date_iso()
     budget = get_humanizer_daily_budget(day=day)
@@ -159,6 +165,9 @@ def plan_daily_backfill(
     remaining = int(budget.remaining)
     if max_documents is not None:
         remaining = min(remaining, max(0, int(max_documents)))
+    pool_pending: int | None = None
+    if source_pool_root is not None:
+        pool_pending = SourcePool(source_pool_root).pending_count()
 
     out = Path(output_root) / day
     if has_daily_run_marker(out):
@@ -170,6 +179,9 @@ def plan_daily_backfill(
     elif remaining <= 0:
         reason = "no_remaining_allowance"
         attempt = 0
+    elif pool_pending == 0:
+        reason = "source_pool_empty"
+        attempt = 0
     elif not in_window:
         reason = (
             f"outside_reset_window "
@@ -178,7 +190,7 @@ def plan_daily_backfill(
         attempt = 0
     else:
         reason = "ready"
-        attempt = remaining
+        attempt = remaining if pool_pending is None else min(remaining, pool_pending)
 
     # Deterministic seed from date string for reproducible synthetic docs.
     derived_seed = seed if seed is not None else (500_000 + int(day.replace("-", "")) % 100_000)
@@ -192,6 +204,8 @@ def plan_daily_backfill(
         output_dir=out,
         reason=reason,
         seed=int(derived_seed),
+        source_pool_root=Path(source_pool_root) if source_pool_root is not None else None,
+        source_pool_pending=pool_pending,
     )
 
 
@@ -205,6 +219,7 @@ def run_daily_backfill(
     output_root: Path = DEFAULT_SYNTHETIC_ROOT,
     seed: int | None = None,
     execute_collector: bool = True,
+    source_pool_root: Path | None = None,
 ) -> DailyBackfillResult:
     """Plan and optionally execute synthetic daily collection.
 
@@ -219,6 +234,7 @@ def run_daily_backfill(
         force_window=force_window,
         output_root=output_root,
         seed=seed,
+        source_pool_root=source_pool_root,
     )
     plan.output_dir.mkdir(parents=True, exist_ok=True)
     (plan.output_dir / "plan.json").write_text(
@@ -279,6 +295,7 @@ def run_daily_backfill(
         timeout_s=150.0,
         max_attempts_per_document=2,
         max_retries=2,
+        source_pool_dir=str(source_pool_root) if source_pool_root is not None else None,
     )
     try:
         collection = TeacherDocumentCollector(cfg).run()
@@ -315,6 +332,8 @@ def run_daily_backfill(
         successful=result.successful,
         released=result.released,
         failed=result.failed,
+        stopped_reason=(collection.summary or {}).get("stopped_reason"),
+        source=plan.as_dict()["source"],
     )
     (plan.output_dir / "result.json").write_text(
         json.dumps(result.as_dict(), ensure_ascii=False, indent=2) + "\n",

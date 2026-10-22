@@ -1,0 +1,15 @@
+[Unit]
+Description=DocMaxxing Humanizer training source pool top-up (Claude)
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/docmaxxing
+EnvironmentFile=-/root/docmaxxing/.env
+# Writes Claude-written source documents to data/humanizer_training/source_pool only.
+# Never calls StealthWriter; the 04:50 collection consumes the pool.
+ExecStart=/root/docmaxxing/venv/bin/python /root/docmaxxing/scripts/fill_humanizer_source_pool.py --target 50
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

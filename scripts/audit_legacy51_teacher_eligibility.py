@@ -26,7 +26,7 @@ DEFAULT_ROOT = Path("data/humanizer_training")
 DEFAULT_OUT = Path("data/humanizer_training/legacy51_clean")
 
 # Teacher collection artifacts only (not synthetic student builds).
-_SCAN_DIR_NAMES = ("teacher_raw", "teacher_raw_documents")
+_SCAN_DIR_NAMES = ("teacher_raw", "teacher_raw_documents", "synthetic_daily")
 _PAIR_FILES = ("documents.jsonl", "teacher_pairs.jsonl")
 _FAILURE_FILES = ("failures.jsonl",)
 
