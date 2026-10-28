@@ -776,6 +776,9 @@ def _find_output_area(page: Any, input_locator: Any) -> Any:
 # <textarea>. We read that div's innerText directly.
 _RESULT_EXTRACTION_JS = r"""(cleaned) => {
     const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+    // Paragraphs come back as line breaks in the pre-wrap result; keep them.
+    const keepParas = s => (s || '').replace(/\r/g, '').split('\n')
+        .map(l => l.replace(/[ \t\u00a0]+/g, ' ').trim()).filter(Boolean).join('\n\n');
     const cleanedN = norm(cleaned);
 
     // Preferred: the result prose container inside the Humanized Result card.
@@ -784,16 +787,20 @@ _RESULT_EXTRACTION_JS = r"""(cleaned) => {
         '[class*="whitespace-pre-wrap"]',
     ];
     let best = '';
+    let bestRaw = '';
     for (const sel of selectors) {
         for (const el of Array.from(document.querySelectorAll(sel))) {
             // A <textarea> is never matched by these div selectors, so this is
             // always the rendered output, never the input.
             const tx = norm(el.innerText);
-            if (tx.length > 20 && tx !== cleanedN && tx.length > best.length) best = tx;
+            if (tx.length > 20 && tx !== cleanedN && tx.length > best.length) {
+                best = tx;
+                bestRaw = keepParas(el.innerText);
+            }
         }
         if (best) break;
     }
-    if (best) return best;
+    if (best) return bestRaw || best;
 
     // Fallback: locate the result card via its action buttons, then take the
     // longest prose block that isn't the input or the help/footer line.
