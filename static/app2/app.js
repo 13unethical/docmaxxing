@@ -2092,7 +2092,7 @@ function renderAdminOverview() {
           ${admAlertBtn(a)}
         </li>`).join('')}</ul>` : '<p class="small muted">Nothing needs your attention right now.</p>'}
       <p class="adm-okline small muted">
-        <span>${O.withdrawalsPending ? `<span class="adm-dot amber" aria-hidden="true"></span><a href="/admin#withdrawals">${O.withdrawalsPending} withdrawal request${O.withdrawalsPending > 1 ? 's' : ''}</a>`
+        <span>${O.withdrawalsPending ? `<span class="adm-dot amber" aria-hidden="true"></span><a href="/admin?classic=1#withdrawals">${O.withdrawalsPending} withdrawal request${O.withdrawalsPending > 1 ? 's' : ''}</a>`
           : '<span class="adm-dot ok" aria-hidden="true"></span>No withdrawal requests'}</span>
         <span>${!s.pre ? '<span class="adm-dot" aria-hidden="true"></span>Checking AI services…'
           : issues.length ? `<span class="adm-dot red" aria-hidden="true"></span><a href="#/admin-settings" data-act="adm-go" data-to="admin-settings" data-anchor="adm-services">${issues.length} AI service${issues.length > 1 ? 's' : ''} need attention</a>`

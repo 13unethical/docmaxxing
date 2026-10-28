@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import pytest
 from docx import Document
 
 from formatter import FormatJob, format_document_full
 from formatter.document_reconstruction import reconstruct_document_before_format
 from formatter.heading_plan import ParagraphHeadingAssignment
+
+
+@pytest.fixture(autouse=True)
+def _legacy_pages_render(monkeypatch):
+    """Page tests exercise the old templates; test_new_app_redirects turns this off."""
+    monkeypatch.setenv("LEGACY_UI", "1")
 
 
 def run_format_pipeline(

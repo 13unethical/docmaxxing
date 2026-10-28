@@ -442,6 +442,43 @@ def _assignment_project_ownership_guard():
     return _require_project_owner_response(project_id)
 
 
+# Old server-rendered pages -> screens of the single-page app at /app.
+# Auth, email verification, legal pages, Veil download and all APIs stay as they are.
+_NEW_APP_SCREENS = {
+    "/": "home",
+    "/formatter": "format",
+    "/format-v2": "format",
+    "/templates": "format",
+    "/references": "format",
+    "/check": "check",
+    "/humanizer": "humanizer",
+    "/turnitin": "turnitin",
+    "/assignment": "assignment",
+    "/assignments": "assignment",
+    "/workspace": "workspace",
+    "/editor": "workspace",
+    "/presentation": "presentation",
+    "/earn": "earn",
+    "/pricing": "pricing",
+    "/veil": "veil",
+    "/account": "account",
+    "/admin": "admin",
+}
+
+
+@app.before_request
+def _redirect_old_pages_to_new_app():
+    if request.method != "GET":
+        return None
+    screen = _NEW_APP_SCREENS.get(request.path)
+    if screen is None or request.args.get("classic") == "1":
+        return None
+    if (os.environ.get("LEGACY_UI") or "").strip().lower() in {"1", "true", "yes"}:
+        return None
+    query = request.query_string.decode("utf-8", "ignore")
+    return redirect(f"/app{'?' + query if query else ''}#/{screen}", code=302)
+
+
 @app.after_request
 def _activity_ledger_hook(response):
     from services.economy.activity_log import log_request

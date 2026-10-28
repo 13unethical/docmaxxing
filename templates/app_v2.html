@@ -3,10 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DocMaxxing</title>
-<link rel="icon" href="{{ url_for('static', filename='icon.png') }}">
-<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='app2/app.css') }}?v=20261028-2">
+<title>{{ seo.title }}</title>
+{% set seo_canonical = seo.site_url %}
+{% include "_seo_head.html" %}
+<link rel="stylesheet" href="{{ url_for('static', filename='app2/app.css') }}?v=20261028-3">
+<script defer src="https://cloud.umami.is/script.js" data-website-id="177e569c-f873-485d-9ba7-cb75a43be7b6"></script>
 </head>
 <body>
 <div class="app" id="app">
@@ -70,7 +71,7 @@
 
 <script>window.DMX_BOOT = {{ boot|tojson }};</script>
 <script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
-<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261028-2"></script>
-<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261028-2"></script>
+<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261028-3"></script>
+<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261028-3"></script>
 </body>
 </html>
