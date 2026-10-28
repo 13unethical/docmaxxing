@@ -342,6 +342,17 @@ def _visible_model_label(page: Any) -> str:
             page.evaluate(
                 r"""() => {
                     const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+                    // Model row: Ghost 5.2 Mini/Pro are tabs; the Legacy menu trigger
+                    // shows the chosen legacy model and gets bg-background when active.
+                    const tab = document.querySelector('button[role="tab"][aria-selected="true"]');
+                    if (tab && /ghost|legacy|ninja/i.test(tab.textContent || '')) {
+                        return norm(tab.innerText || tab.textContent);
+                    }
+                    const legacy = Array.from(document.querySelectorAll('button[aria-haspopup="menu"]'))
+                        .find(el => /^ghost\s*[0-9.]+\s*legacy$/i.test(norm(el.innerText || el.textContent)));
+                    if (legacy && legacy.classList.contains('bg-background')) {
+                        return norm(legacy.innerText || legacy.textContent);
+                    }
                     const nodes = Array.from(document.querySelectorAll(
                         'button, [role="button"], [role="combobox"], select, [aria-haspopup="listbox"]'
                     ));
@@ -349,7 +360,7 @@ def _visible_model_label(page: Any) -> str:
                         const t = norm(el.innerText || el.textContent || '');
                         if (!t || t.length > 80) continue;
                         if (/legacy\s*5\.1|ghost\s*5\.1|ghost\s*5\.2|ghost\s*4\.6|ninja|mini|pro/i.test(t)
-                            && !/humanize|rehumanize|sign|login|upgrade|support/i.test(t)) {
+                            && !/humanize|rehumanize|sign|login|upgrade|support|plan|@/i.test(t)) {
                             return t;
                         }
                     }
@@ -399,6 +410,18 @@ def _click_first_visible(page: Any, patterns: list[re.Pattern[str]]) -> bool:
     return False
 
 
+def _legacy_51_option_visible(page: Any) -> bool:
+    pattern = re.compile(r"ghost\s*5\.1|legacy\s*5\.1", re.I)
+    for role in ("menuitem", "menuitemradio", "option"):
+        try:
+            loc = page.get_by_role(role, name=pattern)
+            if loc.count() > 0 and loc.first.is_visible(timeout=500):
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
 def _open_model_selector(page: Any) -> bool:
     """Open the StealthWriter model dropdown if it is not already open."""
     # If an option list is already visible, nothing to open.
@@ -409,6 +432,9 @@ def _open_model_selector(page: Any) -> bool:
         pass
 
     openers = [
+        page.locator('button[aria-haspopup="menu"]').filter(
+            has_text=re.compile(r"^\s*(legacy|ghost\s*[0-9.]+\s*legacy)\s*$", re.I)
+        ),
         page.get_by_role("combobox"),
         page.locator('[aria-haspopup="listbox"]'),
         page.locator('button, [role="button"]').filter(
@@ -427,7 +453,8 @@ def _open_model_selector(page: Any) -> bool:
             if not btn.is_visible(timeout=1500):
                 continue
             label = (_read_locator_text(btn) or "").lower()
-            if label and re.search(r"humanize|rehumanize|sign|login|upgrade|support|copy", label):
+            # The account button reads "<name> Pro Plan" and is also a menu trigger.
+            if label and re.search(r"humanize|rehumanize|sign|login|upgrade|support|copy|plan|@", label):
                 continue
             btn.click(timeout=3000)
             page.wait_for_timeout(350)
@@ -467,15 +494,17 @@ def _ensure_model_selected(page: Any, model: str = DEFAULT_STEALTHWRITER_MODEL) 
 
     _open_model_selector(page)
 
-    # Expand Legacy group if the menu nests older models under it.
-    _click_first_visible(
-        page,
-        [
-            re.compile(r"^\s*legacy\s*$", re.I),
-            re.compile(r"legacy\s*models?", re.I),
-        ],
-    )
-    page.wait_for_timeout(200)
+    # Expand Legacy group if the menu nests older models under it. Clicking the
+    # "Legacy" trigger again while its menu is open would close the menu.
+    if not _legacy_51_option_visible(page):
+        _click_first_visible(
+            page,
+            [
+                re.compile(r"^\s*legacy\s*$", re.I),
+                re.compile(r"legacy\s*models?", re.I),
+            ],
+        )
+        page.wait_for_timeout(200)
 
     clicked = _click_first_visible(
         page,

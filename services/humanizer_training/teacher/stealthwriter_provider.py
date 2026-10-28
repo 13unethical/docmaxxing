@@ -721,6 +721,9 @@ def _open_model_selector(page: Any) -> bool:
         pass
 
     openers = [
+        page.locator('button[aria-haspopup="menu"]').filter(
+            has_text=re.compile(r"^\s*(legacy|ghost\s*[0-9.]+\s*legacy)\s*$", re.I)
+        ),
         page.get_by_role("combobox"),
         page.locator('[aria-haspopup="listbox"]'),
         page.locator('button, [role="button"]').filter(
@@ -739,7 +742,8 @@ def _open_model_selector(page: Any) -> bool:
             if not btn.is_visible(timeout=1500):
                 continue
             label = (_read_locator_text(btn) or "").lower()
-            if label and re.search(r"humanize|rehumanize|sign|login|upgrade|support|copy", label):
+            # The account button reads "<name> Pro Plan" and is also a menu trigger.
+            if label and re.search(r"humanize|rehumanize|sign|login|upgrade|support|copy|plan|@", label):
                 continue
             btn.click(timeout=3000)
             page.wait_for_timeout(350)
@@ -749,8 +753,25 @@ def _open_model_selector(page: Any) -> bool:
     return False
 
 
+def _legacy_options_visible(page: Any) -> bool:
+    pattern = re.compile(r"^\s*ghost\s*[0-9.]+\s*legacy\s*$", re.I)
+    for role in ("menuitem", "menuitemradio", "option"):
+        try:
+            loc = page.get_by_role(role, name=pattern)
+            if loc.count() > 0 and loc.first.is_visible(timeout=500):
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
 def _expand_legacy_group(page: Any) -> bool:
-    """Expand nested Legacy group (UI may show 'Legacy' or 'Legacy ▼')."""
+    """Expand nested Legacy group (UI may show 'Legacy' or 'Legacy ▼').
+
+    When the Legacy trigger already opened its menu, clicking it again would close it.
+    """
+    if _legacy_options_visible(page):
+        return True
     return _click_first_visible(
         page,
         [
