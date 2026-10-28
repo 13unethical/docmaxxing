@@ -4,7 +4,12 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-python3 -m venv .venv-student
+rm -rf .venv-student
+if ! python3 -m venv .venv-student 2>/dev/null; then
+  sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv
+  rm -rf .venv-student
+  python3 -m venv .venv-student
+fi
 .venv-student/bin/pip install -q --upgrade pip
 .venv-student/bin/pip install -q -r requirements-student.txt
 .venv-student/bin/python - <<'PY'

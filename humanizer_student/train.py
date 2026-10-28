@@ -74,7 +74,7 @@ def train(cfg: TrainConfig) -> dict[str, Any]:
         else None
     )
     model = AutoModelForCausalLM.from_pretrained(
-        cfg.base_model, quantization_config=quant, torch_dtype=dtype, device_map="auto", attn_implementation="sdpa"
+        cfg.base_model, quantization_config=quant, dtype=dtype, device_map="auto", attn_implementation="sdpa"
     )
     model.config.use_cache = False
 
@@ -86,7 +86,7 @@ def train(cfg: TrainConfig) -> dict[str, Any]:
         gradient_accumulation_steps=cfg.grad_accum,
         learning_rate=cfg.learning_rate,
         lr_scheduler_type="cosine",
-        warmup_ratio=cfg.warmup_ratio,
+        warmup_steps=cfg.warmup_ratio,
         max_grad_norm=1.0,
         bf16=bf16,
         fp16=not bf16,

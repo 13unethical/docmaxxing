@@ -52,7 +52,7 @@ def generate_predictions(
         else None
     )
     model = AutoModelForCausalLM.from_pretrained(
-        base_model, quantization_config=quant, torch_dtype=dtype, device_map="auto"
+        base_model, quantization_config=quant, dtype=dtype, device_map="auto"
     )
     if adapter_dir:
         from peft import PeftModel
