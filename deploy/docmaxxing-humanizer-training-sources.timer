@@ -2,8 +2,8 @@
 Description=DocMaxxing Humanizer training source pool top-up timer
 
 [Timer]
-# Well before the 04:50 Asia/Tashkent teacher collection.
-OnCalendar=*-*-* 01:00:00 Asia/Tashkent
+# Every 3 hours; each run only tops the pool up to its target.
+OnCalendar=*-*-* 00/3:00:00 Asia/Tashkent
 Persistent=true
 AccuracySec=1min
 

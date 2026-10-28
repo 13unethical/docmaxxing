@@ -160,6 +160,7 @@ NON_RETRYABLE_ERRORS: frozenset[str] = frozenset(
         "MODEL_SELECTION_FAILED",
         "LEVEL_SELECTION_FAILED",
         "LOGIN_REQUIRED",
+        "DAILY_LIMIT",
     }
 )
 
@@ -412,19 +413,27 @@ def _click_humanize_button(page: Any, button: Any) -> None:
     raise RuntimeError("Failed to click Humanize button after all fallbacks.")
 
 
+# Paragraph breaks must survive extraction: training pairs teach paragraph structure,
+# so each non-empty output line is returned as its own paragraph.
 _RESULT_EXTRACTION_JS = r"""(cleaned) => {
     const norm = s => (s || '').replace(/\s+/g, ' ').trim();
+    const keepParas = s => (s || '').replace(/\r/g, '').split('\n')
+        .map(l => l.replace(/[ \t\u00a0]+/g, ' ').trim()).filter(Boolean).join('\n\n');
     const cleanedN = norm(cleaned);
     const selectors = ['div.whitespace-pre-wrap', '[class*="whitespace-pre-wrap"]'];
     let best = '';
+    let bestRaw = '';
     for (const sel of selectors) {
         for (const el of Array.from(document.querySelectorAll(sel))) {
             const tx = norm(el.innerText);
-            if (tx.length > 20 && tx !== cleanedN && tx.length > best.length) best = tx;
+            if (tx.length > 20 && tx !== cleanedN && tx.length > best.length) {
+                best = tx;
+                bestRaw = keepParas(el.innerText);
+            }
         }
         if (best) break;
     }
-    if (best) return best;
+    if (best) return bestRaw || best;
     const marker = Array.from(document.querySelectorAll('button')).find(
         b => /rehumanize|humanize more/i.test(norm(b.innerText))
     );
@@ -1311,9 +1320,9 @@ def _humanize_once(
             if toast:
                 return {
                     "success": False,
-                    "error": "NO_CHANGE",
+                    "error": "DAILY_LIMIT",
                     "error_detail": toast,
-                    "retryable": True,
+                    "retryable": False,
                     "failed_stage": "RESULT_FOUND",
                     "last_successful_stage": tr.last_successful_stage,
                 }
@@ -1509,7 +1518,13 @@ class StealthWriterTeacherProvider:
                 "error": str(exc),
             }
 
-    def rewrite(self, source_text: str, *, document_id: str | None = None) -> TeacherResult:
+    def rewrite(
+        self,
+        source_text: str,
+        *,
+        document_id: str | None = None,
+        level: int | None = None,
+    ) -> TeacherResult:
         """Humanize source_text and return a TeacherResult.
 
         Returns immediately with error='TEXT_TOO_LONG' without hitting
@@ -1517,12 +1532,13 @@ class StealthWriterTeacherProvider:
         Returns error='LOGIN_REQUIRED' / selection failures without retry.
         Retries with exponential backoff for NO_CHANGE / TIMEOUT / other errors.
         """
+        lvl = max(1, min(10, int(level))) if level is not None else self._cfg.level
         cleaned = (source_text or "").strip()
         if not cleaned:
             return TeacherResult(
                 success=False, humanized_text=None,
                 provider="stealthwriter_training",
-                model=self._cfg.model, level=self._cfg.level,
+                model=self._cfg.model, level=lvl,
                 elapsed_seconds=0.0, error="EMPTY_INPUT",
                 meta={"retryable": False, "failed_stage": "SESSION_READY"},
             )
@@ -1531,7 +1547,7 @@ class StealthWriterTeacherProvider:
             return TeacherResult(
                 success=False, humanized_text=None,
                 provider="stealthwriter_training",
-                model=self._cfg.model, level=self._cfg.level,
+                model=self._cfg.model, level=lvl,
                 elapsed_seconds=0.0, error="TEXT_TOO_LONG",
                 error_detail=f"{_word_count(cleaned)} words > limit {self._cfg.max_text_words}",
                 meta={"retryable": False, "failed_stage": "SESSION_READY"},
@@ -1552,7 +1568,7 @@ class StealthWriterTeacherProvider:
                     page,
                     cleaned,
                     self._cfg.model,
-                    self._cfg.level,
+                    lvl,
                     self._cfg.timeout_s,
                     trace=trace,
                     debug_screenshots=bool(self._cfg.debug_screenshots),
@@ -1578,7 +1594,7 @@ class StealthWriterTeacherProvider:
                     "requested_model": result.get("requested_model", self._cfg.model),
                     "verified_model": result.get("verified_model"),
                     "ui_model_label": result.get("ui_model_label"),
-                    "requested_level": result.get("requested_level", self._cfg.level),
+                    "requested_level": result.get("requested_level", lvl),
                     "verified_level": result.get("verified_level"),
                     "selection_verified": bool(result.get("selection_verified")),
                     "last_successful_stage": result.get("last_successful_stage"),
@@ -1595,7 +1611,7 @@ class StealthWriterTeacherProvider:
                     humanized_text=result["humanized_text"],
                     provider="stealthwriter_training",
                     model=self._cfg.model,
-                    level=self._cfg.level,
+                    level=lvl,
                     elapsed_seconds=round(time.monotonic() - started, 3),
                     meta=meta,
                 )
@@ -1604,7 +1620,7 @@ class StealthWriterTeacherProvider:
                 "document_id": document_id,
                 "provider": "stealthwriter_training",
                 "requested_model": result.get("requested_model", self._cfg.model),
-                "requested_level": result.get("requested_level", self._cfg.level),
+                "requested_level": result.get("requested_level", lvl),
                 "visible_model_label": result.get("visible_model_label"),
                 "visible_level": result.get("visible_level"),
                 "failed_stage": result.get("failed_stage"),
@@ -1636,7 +1652,7 @@ class StealthWriterTeacherProvider:
                 return TeacherResult(
                     success=False, humanized_text=None,
                     provider="stealthwriter_training",
-                    model=self._cfg.model, level=self._cfg.level,
+                    model=self._cfg.model, level=lvl,
                     elapsed_seconds=round(time.monotonic() - started, 3),
                     error=error,
                     error_detail=result.get("error_detail")
@@ -1666,7 +1682,7 @@ class StealthWriterTeacherProvider:
         return TeacherResult(
             success=False, humanized_text=None,
             provider="stealthwriter_training",
-            model=self._cfg.model, level=self._cfg.level,
+            model=self._cfg.model, level=lvl,
             elapsed_seconds=round(time.monotonic() - started, 3),
             error=last_error,
             error_detail=last_detail,

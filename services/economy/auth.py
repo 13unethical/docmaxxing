@@ -65,6 +65,8 @@ def _row_to_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "qualifying_referrals_count": int(row["qualifying_referrals_count"] or 0) if "qualifying_referrals_count" in keys else 0,
         "is_pro": bool(row["is_pro"]) if "is_pro" in keys else False,
         "free_turnitin_reports": int(row["free_turnitin_reports"] or 0) if "free_turnitin_reports" in keys else 0,
+        "is_blocked": bool(row["is_blocked"]) if "is_blocked" in keys else False,
+        "account_flag": row["account_flag"] if "account_flag" in keys else None,
     }
 
 
@@ -440,7 +442,7 @@ def current_user() -> dict[str, Any] | None:
     if cached and cached.get("id") == uid:
         return cached
     user = get_user(int(uid))
-    if user is None:
+    if user is None or user.get("is_blocked"):
         session.pop(SESSION_KEY, None)
         return None
     g._economy_user = user

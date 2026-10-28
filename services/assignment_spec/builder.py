@@ -12,6 +12,7 @@ from services.assignment_spec.models import (
     SectionSpec,
     WORD_TOLERANCE,
 )
+from services.assignment_spec.titles import WORD_BUDGET_RE, budget_for, section_heading
 
 _STRUCTURAL_ZERO_WORDS = {
     "cover page",
@@ -71,9 +72,11 @@ def build_assignment_spec(requirement: dict[str, Any], *, project_id: str | None
 
     sections: list[SectionSpec] = []
     for index, raw_title in enumerate(required):
-        clean = raw_title.split("(", 1)[0].strip() or raw_title
+        clean = section_heading(raw_title).split("(", 1)[0].strip() or raw_title
         structural = _is_structural(clean)
-        target = budgets.get(raw_title, budgets.get(clean, 0))
+        target = budgets.get(raw_title, budget_for(clean, budgets) or 0)
+        if not target and (inline := WORD_BUDGET_RE.search(raw_title)):
+            target = int(inline.group(1))
         if structural:
             target = 0
         sections.append(
@@ -82,7 +85,7 @@ def build_assignment_spec(requirement: dict[str, Any], *, project_id: str | None
                 title=clean,
                 target_words=target,
                 writable=not structural and target > 0,
-                mandatory=True,
+                mandatory=not _is_appendix(clean),
                 order=index,
                 notes=raw_title if raw_title != clean else "",
                 linked_criteria=_link_section_to_criteria(clean, rubric_criteria),
@@ -285,16 +288,18 @@ def _format_spec(fmt: dict[str, Any]) -> FormatSpec:
     spacing = _parse_spacing(fmt.get("line_spacing"))
     font_size = _parse_int(fmt.get("font_size_pt") if fmt.get("font_size_pt") is not None else fmt.get("font_size"), 12)
     margins = _parse_margins(fmt.get("margins") or fmt.get("margins_inches"))
-    alignment = str(fmt.get("alignment") or "left").strip().lower()
-    if alignment not in {"left", "justify", "centre", "center"}:
-        alignment = "left"
-    if alignment in {"centre", "center"}:
+    alignment = str(fmt.get("alignment") or "").strip().lower()
+    alignment_required = alignment in {"left", "justify", "justified"}
+    if alignment == "justified":
+        alignment = "justify"
+    if alignment not in {"left", "justify"}:
         alignment = "left"
     return FormatSpec(
         font_family=str(fmt.get("font_family") or "Times New Roman"),
         font_size_pt=font_size,
         line_spacing=spacing,
         alignment=alignment,
+        alignment_required=alignment_required,
         margins_inches=margins,
         first_line_indent=bool(fmt.get("first_line_indent", False)),
         heading_size_pt=_parse_int(fmt.get("heading_size_pt"), 14),
@@ -357,15 +362,32 @@ def _slug(title: str) -> str:
     return slug or "section"
 
 
+def _name(title: str) -> str:
+    """Section name without a numbering label ("Section 8: References" -> "references")."""
+    t = title.strip().lower()
+    return t.split(":", 1)[1].strip() if ":" in t else t
+
+
+def _is_appendix(title: str) -> bool:
+    # Appendices are rendered after the References, outside the draft body.
+    return bool(re.match(r"^(?:optional\s+)?appendi", _name(title)))
+
+
 def _is_structural(title: str) -> bool:
-    return title.strip().lower() in _STRUCTURAL_ZERO_WORDS or _is_cover(title) or _is_references(title)
+    name = _name(title)
+    return (
+        name in _STRUCTURAL_ZERO_WORDS
+        or _is_appendix(title)
+        or _is_cover(title)
+        or _is_references(title)
+    )
 
 
 def _is_cover(title: str) -> bool:
-    t = title.strip().lower()
+    t = _name(title)
     return t in {"cover page", "cover", "title page"} or t.startswith("cover")
 
 
 def _is_references(title: str) -> bool:
-    t = title.strip().lower()
+    t = _name(title)
     return t in {"references", "reference list", "bibliography", "works cited"} or t.startswith("reference")

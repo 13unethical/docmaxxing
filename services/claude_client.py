@@ -210,6 +210,119 @@ def generate_json(
     return None, diag
 
 
+_WEB_SEARCH_TOOL = "web_search_20250305"
+
+
+def _response_sources(content: list[Any]) -> list[dict[str, str]]:
+    """Cited pages first (in citation order), then any other search results."""
+    cited: list[dict[str, str]] = []
+    found: list[dict[str, str]] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            for cite in part.get("citations") or []:
+                if isinstance(cite, dict) and cite.get("url"):
+                    cited.append({"url": str(cite["url"]), "title": str(cite.get("title") or "")})
+        elif part.get("type") == "web_search_tool_result" and isinstance(part.get("content"), list):
+            for result in part["content"]:
+                if isinstance(result, dict) and result.get("url"):
+                    found.append({"url": str(result["url"]), "title": str(result.get("title") or "")})
+    seen: set[str] = set()
+    sources = []
+    for item in cited + found:
+        if item["url"] not in seen:
+            seen.add(item["url"])
+            sources.append(item)
+    return sources
+
+
+def generate_with_web_search(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    max_searches: int = 5,
+    model: str | None = None,
+    max_tokens: int = 4000,
+    timeout_s: int = 180,
+    max_retries: int = 1,
+    max_continuations: int = 2,
+) -> tuple[str | None, list[dict[str, str]], dict[str, Any]]:
+    """Let Claude search the web, then return (text, sources, diagnostics).
+
+    Each search is billed by Anthropic on top of tokens, so ``max_searches`` caps the cost.
+    """
+    active_model = (model or claude_model()).strip() or claude_model()
+    diag = _base_diagnostics(model=active_model, request_chars=len(system_prompt) + len(user_prompt))
+    diag["web_searches"] = 0
+    if not claude_enabled():
+        diag["failure_reason"] = "validation_error"
+        diag["error_message"] = "ANTHROPIC_API_KEY is not set"
+        return None, [], diag
+
+    headers = {
+        "x-api-key": claude_api_key(),
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    messages: list[dict[str, Any]] = [{"role": "user", "content": user_prompt}]
+    content: list[Any] = []
+    retries = 0
+    error = ""
+    for _turn in range(max_continuations + 1):
+        body = {
+            "model": active_model,
+            "max_tokens": int(max_tokens),
+            "system": system_prompt,
+            "messages": messages,
+            "tools": [{"type": _WEB_SEARCH_TOOL, "name": "web_search", "max_uses": int(max_searches)}],
+        }
+        payload = None
+        for attempt in range(max_retries + 1):
+            started = time.monotonic()
+            try:
+                response = requests.post(_API_URL, json=body, headers=headers, timeout=timeout_s)
+            except _NETWORK_EXCEPTIONS as exc:
+                diag["latency_ms"] += int((time.monotonic() - started) * 1000)
+                error = repr(exc)
+                if attempt < max_retries:
+                    retries += 1
+                    continue
+                break
+            diag["latency_ms"] += int((time.monotonic() - started) * 1000)
+            diag["http_status"] = response.status_code
+            if response.status_code in _RETRYABLE_HTTP_STATUS and attempt < max_retries:
+                retries += 1
+                error = response.text[:500]
+                time.sleep(min(8.0, 2.0 * (2**attempt)))
+                continue
+            if not response.ok:
+                error = response.text[:800]
+                break
+            payload = response.json()
+            break
+        if payload is None:
+            break
+        turn_content = payload.get("content") or []
+        content.extend(turn_content)
+        usage = (payload.get("usage") or {}).get("server_tool_use") or {}
+        diag["web_searches"] += int(usage.get("web_search_requests") or 0)
+        if payload.get("stop_reason") != "pause_turn":
+            break
+        messages = [*messages, {"role": "assistant", "content": turn_content}]
+
+    diag["retry_count"] = retries
+    text = "".join(
+        str(part.get("text") or "") for part in content if isinstance(part, dict) and part.get("type") == "text"
+    ).strip()
+    if not text:
+        diag["failure_reason"] = "unavailable"
+        diag["error_message"] = (error or "Empty model response")[:500]
+        return None, [], diag
+    diag["api_call_success"] = True
+    return text, _response_sources(content), diag
+
+
 def generate_reply(
     *,
     system_prompt: str,
@@ -259,7 +372,9 @@ def generate_reply(
             if response.status_code in _RETRYABLE_HTTP_STATUS and attempt < max_retries:
                 total_retries += 1
                 last_error_message = response.text[:500]
-                time.sleep(min(8.0, 1.0 * (2**attempt)))
+                retry_after = (response.headers.get("retry-after") or "").strip()
+                wait_s = min(25.0, float(retry_after)) if retry_after.replace(".", "", 1).isdigit() else min(12.0, 1.5 * (2**attempt))
+                time.sleep(wait_s)
                 continue
             if not response.ok:
                 last_error_message = response.text[:800]

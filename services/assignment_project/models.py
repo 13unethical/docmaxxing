@@ -104,6 +104,8 @@ class RequirementJSON:
     academic_level: str | None = None
     missing_information: list[str] = field(default_factory=list)
     state_word_count: bool = False
+    # {"required": bool, "declaration": verbatim text the brief requires on it, "lines": [programme, module, ...]}
+    title_page: dict[str, Any] = field(default_factory=dict)
     analyzer_version: str = "mock-1.0"
     analyzed_at: datetime | None = None
 
@@ -127,6 +129,7 @@ class RequirementJSON:
             "academic_level": self.academic_level,
             "missing_information": list(self.missing_information),
             "state_word_count": bool(self.state_word_count),
+            "title_page": dict(self.title_page),
             "analyzer_version": self.analyzer_version,
             "analyzed_at": self.analyzed_at.isoformat() if self.analyzed_at else None,
         }
@@ -160,6 +163,7 @@ class RequirementJSON:
             academic_level=data.get("academic_level"),
             missing_information=list(data.get("missing_information") or []),
             state_word_count=bool(data.get("state_word_count")),
+            title_page=dict(data.get("title_page") or {}) if isinstance(data.get("title_page"), dict) else {},
             analyzer_version=str(data.get("analyzer_version") or "mock-1.0"),
             analyzed_at=analyzed_at,
         )

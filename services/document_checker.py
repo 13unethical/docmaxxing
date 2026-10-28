@@ -65,12 +65,18 @@ _IN_TEXT_CITATION = re.compile(
 )
 _DOUBLE_SPACE = re.compile(r"  +")
 _EXTRA_BLANKS = re.compile(r"\n{3,}")
-_WORD_COUNT = re.compile(r"\b(\d{1,5})\s*(?:words?|word\s*count)\b", re.I)
+# "1500" or "1,500"; "words" may be joined with a hyphen ("a 1500-word essay")
+_NUM = r"(\d{1,3}(?:[,\u00a0]\d{3})+|\d{1,5})"
+_WORD_COUNT = re.compile(rf"\b{_NUM}\s*-?\s*(?:words?|word\s*count)\b", re.I)
 _WORD_RANGE = re.compile(
-    r"(?:between|from)\s+(\d{1,5})\s+(?:and|to|-)\s+(\d{1,5})\s*words?", re.I
+    rf"(?:between|from)\s+{_NUM}\s+(?:and|to|-)\s+{_NUM}\s*-?\s*words?", re.I
 )
-_MAX_WORDS = re.compile(r"(?:max(?:imum)?|no more than|up to|at most)\s+(\d{1,5})\s*words?", re.I)
-_MIN_WORDS = re.compile(r"(?:min(?:imum)?|at least|no fewer than)\s+(\d{1,5})\s*words?", re.I)
+_MAX_WORDS = re.compile(rf"(?:max(?:imum)?|no more than|up to|at most)\s+{_NUM}\s*-?\s*words?", re.I)
+_MIN_WORDS = re.compile(rf"(?:min(?:imum)?|at least|no fewer than)\s+{_NUM}\s*-?\s*words?", re.I)
+
+
+def _num(token: str) -> int:
+    return int(re.sub(r"\D", "", token))
 SECTION_ALIASES: dict[str, set[str]] = {
     "abstract": {"abstract"},
     "executive summary": {"executive summary", "summary"},
@@ -365,19 +371,19 @@ def parse_requirements_for_check(text: str) -> dict[str, Any]:
 
     wr = _WORD_RANGE.search(text)
     if wr:
-        out["word_limit_min"] = int(wr.group(1))
-        out["word_limit_max"] = int(wr.group(2))
+        out["word_limit_min"] = _num(wr.group(1))
+        out["word_limit_max"] = _num(wr.group(2))
     else:
         mx = _MAX_WORDS.search(text)
         if mx:
-            out["word_limit_max"] = int(mx.group(1))
+            out["word_limit_max"] = _num(mx.group(1))
         mn = _MIN_WORDS.search(text)
         if mn:
-            out["word_limit_min"] = int(mn.group(1))
+            out["word_limit_min"] = _num(mn.group(1))
         if out["word_limit_min"] is None and out["word_limit_max"] is None:
             wm = _WORD_COUNT.search(text)
             if wm and any(x in low for x in ("limit", "maximum", "minimum", "exactly", "approximately", "around")):
-                n = int(wm.group(1))
+                n = _num(wm.group(1))
                 out["word_limit_min"] = n
                 out["word_limit_max"] = n
 
@@ -391,6 +397,11 @@ def parse_requirements_for_check(text: str) -> dict[str, Any]:
 
 def _extract_required_sections_for_check(text: str) -> list[str]:
     """Extract explicitly required document sections without treating rubric criteria as sections."""
+    from services.requirements_parser import explicit_section_list
+
+    explicit = [s for s in explicit_section_list(text) if normalize_paragraph_text(s) not in RUBRIC_SECTION_WORDS]
+    if len(explicit) >= 2:
+        return explicit
     found: list[str] = []
     relevant_lines = []
     for raw in (text or "").splitlines():

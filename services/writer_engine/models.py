@@ -7,6 +7,9 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+# Key in the writer session's requirement_json holding the uploaded brief/case/rubric text.
+SOURCE_MATERIALS_KEY = "source_materials"
+
 
 class WriterSectionStatus(StrEnum):
     PENDING = "pending"
@@ -295,6 +298,8 @@ class WriterEngineInput:
     research_plan: dict[str, Any]
     blueprint: dict[str, Any]
     project_id: str | None = None
+    # (title, text) of sections already written, in document order.
+    written_sections: list[tuple[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {

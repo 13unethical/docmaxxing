@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from services.assignment_pipeline.models import utc_now
 from services.assignment_llm import STAGE_RESEARCH, assignment_generate_json, assignment_llm_model
+from services.assignment_spec.titles import WORD_BUDGET_RE, budget_for, section_heading, section_name
 from services.research_engine.models import (
     ResearchEngineInput,
     ResearchPlan,
@@ -106,7 +107,7 @@ class ResearchAnalyzer:
             "Do not return objects for terminology or plain text for recommended_statistics; use string arrays."
         )
         docs_text = "\n\n".join(
-            f"[{getattr(doc, 'file_type', 'file')}] {getattr(doc, 'filename', '')}\n{str(getattr(doc, 'text', '')).strip()[:2500]}"
+            f"[{getattr(doc, 'file_type', 'file')}] {getattr(doc, 'filename', '')}\n{str(getattr(doc, 'text', '')).strip()[:8000]}"
             for doc in docs
         ) or "No parsed documents provided"
         user_prompt = (
@@ -255,13 +256,7 @@ def _is_structural_section(title: str) -> bool:
 
 
 def _lookup_budget(title: str, budgets: dict[str, int]) -> int | None:
-    if title in budgets:
-        return int(budgets[title])
-    lower = title.lower()
-    for key, value in budgets.items():
-        if key.lower() == lower or lower.startswith(key.lower()) or key.lower().startswith(lower):
-            return int(value)
-    return None
+    return budget_for(title, budgets)
 
 
 def _weights_for_required(
@@ -278,7 +273,7 @@ def _weights_for_required(
         budget = _lookup_budget(title, budgets)
         if budget is None:
             # Parse "Introduction – 100 words" / "(200 words)" from the section string itself.
-            match = re.search(r"(?:[–\-]\s*|\()\s*(\d{2,4})\s*words?\b", str(raw), re.I)
+            match = WORD_BUDGET_RE.search(str(raw))
             if match:
                 budget = int(match.group(1))
         parsed.append((title, budget))
@@ -304,7 +299,7 @@ def _weights_for_required(
             words = max(0, int(budget))
         else:
             words = max(40, default_each) if word_count > 0 else 80
-        lower = title.lower()
+        lower = section_name(title).lower()
         if lower == "introduction" or lower.startswith("introduction"):
             rows.append((title, "Opening section.", "Introduce the topic and thesis.", words))
         elif "conclusion" in lower or "concluding" in lower or "reflection" in lower:
@@ -327,10 +322,7 @@ def _weights_for_required(
 
 
 def _section_title(section: str) -> str:
-    text = str(section).strip()
-    if ":" in text:
-        return text.split(":", 1)[0].strip()
-    return text
+    return section_heading(section)
 
 
 def _structure_summary(sections: list[ResearchSection]) -> str:

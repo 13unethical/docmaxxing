@@ -7,6 +7,7 @@ from typing import Any
 
 from services.assignment_pipeline.models import utc_now
 from services.humanizer_engine.constants import MIN_HUMANIZE_CHARS
+from services.humanizer_engine.incremental import humanize_new_sentences
 from services.humanizer_engine.merge import merge_session_to_humanized_draft
 from services.humanizer_engine.mock_humanizer import MockTextHumanizer, TextHumanizer
 from services.humanizer_engine.mock_validator import (
@@ -179,8 +180,14 @@ class HumanizerEngineService:
         title: str | None = None,
         source_draft_id: str = "",
         source_draft_version: int = 1,
+        previous_content: str | None = None,
     ) -> HumanizedDraft:
-        """Run StealthWriter/ZeroGPT over the full document again (post-revision safety net)."""
+        """Run StealthWriter/ZeroGPT over the full document again (post-revision safety net).
+
+        With ``previous_content`` (the already-humanized text before an edit) only the
+        sentences that are new since then are humanized: every extra provider pass over
+        humanized prose degrades it further.
+        """
         from services.humanizer_engine.heading_utils import (
             join_body_and_references,
             normalize_markdown_headings,
@@ -198,7 +205,13 @@ class HumanizerEngineService:
 
         # Never send References/Bibliography through StealthWriter.
         body, refs = split_off_references(normalized)
-        if body.strip():
+        if body.strip() and previous_content is not None:
+            humanized_body = humanize_new_sentences(
+                body,
+                previous_content,
+                lambda text: self.humanizer.humanize(text, academic_tone=tone),
+            )
+        elif body.strip():
             humanized_body = self.humanizer.humanize(body, academic_tone=tone)
             humanized_body = normalize_markdown_headings(humanized_body)
         else:

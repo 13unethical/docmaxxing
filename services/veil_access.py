@@ -33,12 +33,18 @@ def _stamp(moment: datetime) -> str:
 
 
 def pass_status(user_id: int) -> dict[str, Any]:
-    """Whether this account can use Veil right now."""
+    """Whether this account can use Veil right now: its own pass, or a plan that includes Veil."""
+    from services.economy.plans import active_plan
+
     with connect() as conn:
         row = conn.execute("SELECT expires_at FROM veil_passes WHERE user_id = ?", (int(user_id),)).fetchone()
-    if row is None:
+    plan = active_plan(user_id)
+    plan_end = _parse(plan["expires_at"]) if plan and plan["veil"] else None
+    pass_end = _parse(row["expires_at"]) if row is not None else None
+    ends = [end for end in (pass_end, plan_end) if end is not None]
+    if not ends:
         return {"active": False, "expires_at": None, "expires_label": "", "days_left": 0}
-    expires = _parse(row["expires_at"])
+    expires = max(ends)
     active = expires > _now()
     days_left = max(0, (expires - _now()).days) if active else 0
     return {

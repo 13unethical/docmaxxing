@@ -178,6 +178,60 @@ def test_ask_needs_an_active_pass_and_does_not_charge_per_answer(economy, monkey
     assert me.get_json()["pass_active"] is False
 
 
+def test_deep_mode_routes_to_sonnet_with_images(economy, monkeypatch):
+    from services.veil_access import purchase_pass
+
+    user = _user("deep@example.com")
+    WalletService().set_balance(user["id"], 5000)
+    purchase_pass(user["id"])
+    token = issue_token(user["id"])
+    monkeypatch.setattr("services.claude_client.claude_enabled", lambda: True)
+    seen = {}
+
+    def _fake_claude(**kwargs):
+        seen.update(kwargs)
+        return "x = 4, because 2x = 8.", {"api_call_success": True}
+
+    monkeypatch.setattr("services.claude_client.generate_reply", _fake_claude)
+    png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    res = _client().post(
+        "/api/veil/ask",
+        json={"text": "Solve 2x = 8", "images": [png], "model": "deep", "extended": True},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    body = res.get_json()
+    assert res.status_code == 200, body
+    assert body["model"] == "deep"
+    assert body["answer"].startswith("x = 4")
+    assert seen["model"] == "claude-sonnet-5-5"
+    assert body["credits_used"] == 0
+
+
+def test_fast_mode_is_the_default(economy, monkeypatch):
+    from services.veil_access import purchase_pass
+
+    user = _user("fast@example.com")
+    WalletService().set_balance(user["id"], 5000)
+    purchase_pass(user["id"])
+    token = issue_token(user["id"])
+    monkeypatch.setattr("services.claude_client.claude_enabled", lambda: True)
+    seen = {}
+
+    def _fake_claude(**kwargs):
+        seen.update(kwargs)
+        return ("Claude answer", {})
+
+    monkeypatch.setattr("services.claude_client.generate_reply", _fake_claude)
+    res = _client().post(
+        "/api/veil/ask",
+        json={"text": "What is osmosis?"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    assert res.get_json()["model"] == "fast"
+    assert seen["model"] == "claude-haiku-5-5"
+
+
 def test_ask_rejects_a_missing_token(economy):
     missing = _client().post("/api/veil/ask", json={"text": "hello"})
     assert missing.status_code == 401

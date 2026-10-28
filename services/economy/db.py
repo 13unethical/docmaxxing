@@ -236,6 +236,23 @@ CREATE TABLE IF NOT EXISTS veil_passes (
     expires_at TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS user_plans (
+    user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    plan_id     TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    order_ref   TEXT,
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS plan_usage (
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    feature     TEXT NOT NULL,
+    period_key  TEXT NOT NULL,
+    used        INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, feature, period_key)
+);
 """
 
 
@@ -456,6 +473,11 @@ def _migrate_security_columns(conn: sqlite3.Connection) -> None:
             "verification_code_expires",
             "ALTER TABLE users ADD COLUMN verification_code_expires TEXT",
         ),
+        ("is_blocked", "ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0"),
+        # 'staff' | 'test': hidden from admin analytics
+        ("account_flag", "ALTER TABLE users ADD COLUMN account_flag TEXT"),
+        # an admin reviewed the suspicious-account heuristics and cleared them
+        ("flag_cleared", "ALTER TABLE users ADD COLUMN flag_cleared INTEGER NOT NULL DEFAULT 0"),
     ]
     for name, sql in alters:
         if name not in cols:

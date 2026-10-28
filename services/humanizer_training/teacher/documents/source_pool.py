@@ -39,12 +39,17 @@ MIN_WORDS = 2500
 MAX_WORDS = 4900
 MIN_SECTIONS = 3
 MIN_UNIQUE_SENTENCE_RATIO = 0.9
+# Teacher attempts (across runs) before a source document is retired to failed/.
+MAX_FAILURES = 2
 MAX_TOKENS = 9000
+# Gemini counts its thinking toward the output cap; 9000 cut documents mid-sentence.
+GEMINI_MAX_TOKENS = 20000
 TIMEOUT_S = 360
 
 _FORBIDDEN = ("stealthwriter", "turnitin", "humaniz", "as an ai", "language model", "ai detector")
 _HEADING_RE = re.compile(r"(?m)^##\s+(.+?)\s*$")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_ENDS_SENTENCE = re.compile(r"[.!?)\]\"'”’]\s*$")
 
 SYSTEM_PROMPT = (
     "You are an experienced academic writer producing coursework-style documents for "
@@ -66,6 +71,7 @@ class PoolFillResult:
     failed: int = 0
     pending_after: int = 0
     reject_reasons: dict[str, int] = field(default_factory=dict)
+    by_writer: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -91,6 +97,22 @@ def clean_source_text(raw: str) -> str:
     text = re.sub(r"(?m)^#{3,}\s+", "## ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def fit_source_length(text: str, *, limit: int = TARGET_WORDS_HIGH) -> str:
+    """Drop whole middle sections (never the first, the last body section or references)."""
+    if _wc(text) <= MAX_WORDS:
+        return text
+    body, refs = _split_refs(text)
+    starts = [m.start() for m in _HEADING_RE.finditer(body)]
+    if len(starts) < 3:
+        return text
+    sections = [body[a:b].strip() for a, b in zip(starts, starts[1:] + [len(body)])]
+    budget = limit - _wc(refs)
+    keep = list(sections)
+    while sum(_wc(s) for s in keep) > budget and len(keep) > MIN_SECTIONS:
+        del keep[-2]
+    return "\n\n".join(keep + ([refs] if refs else []))
 
 
 def validate_source_text(text: str) -> list[str]:
@@ -168,11 +190,46 @@ def _default_reply_fn() -> ReplyFn:
     return generate_reply
 
 
+def _reply_fn_for(provider: str) -> ReplyFn:
+    if provider == "gemini":
+        from services.gemini_client import generate_text
+
+        return generate_text
+    return _default_reply_fn()
+
+
+def parse_source_mix(raw: str) -> list[tuple[str, str, float]]:
+    """``"claude:claude-haiku-4-5:2,gemini:gemini-3.5-flash:3"`` -> [(provider, model, weight)]."""
+    mix: list[tuple[str, str, float]] = []
+    for part in (raw or "").split(","):
+        if not part.strip():
+            continue
+        provider, model, *weight = [p.strip() for p in part.split(":")]
+        if provider not in ("claude", "gemini") or not model:
+            raise ValueError(f"bad source mix entry: {part!r}")
+        mix.append((provider, model, float(weight[0]) if weight else 1.0))
+    if not mix:
+        raise ValueError("empty source mix")
+    return mix
+
+
+def pick_writer(combo_key: str, mix: list[tuple[str, str, float]]) -> tuple[str, str]:
+    """Weighted writer choice, stable for a brief."""
+    digest = hashlib.sha256(f"writer|{combo_key}".encode("utf-8")).digest()
+    point = int.from_bytes(digest[:8], "big") / float(1 << 64) * sum(w for *_, w in mix)
+    for provider, model, weight in mix:
+        point -= weight
+        if point < 0:
+            return provider, model
+    return mix[-1][0], mix[-1][1]
+
+
 class SourcePool:
     def __init__(self, root: Path | str = DEFAULT_POOL_ROOT) -> None:
         self.root = Path(root)
         self.pending_dir = self.root / "pending"
         self.used_dir = self.root / "used"
+        self.failed_dir = self.root / "failed"
         self.rejected_path = self.root / "rejected.jsonl"
 
     def _ensure(self) -> None:
@@ -204,9 +261,40 @@ class SourcePool:
         src.replace(self.used_dir / src.name)
         return True
 
+    def writer_of(self, document_id: str) -> str | None:
+        """Model that wrote a pending source document, if recorded."""
+        path = self.pending_dir / f"{document_id}.json"
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8")).get("source_generator") or {}
+        except (OSError, ValueError):
+            return None
+        return meta.get("model")
+
+    def record_failure(self, document_id: str, *, max_failures: int = MAX_FAILURES) -> bool:
+        """Count a failed teacher attempt; move the document to ``failed/`` at the limit.
+
+        Rewriting the file also moves it to the back of the ``peek`` queue.
+        Returns True when the document was retired.
+        """
+        path = self.pending_dir / f"{document_id}.json"
+        if not path.is_file():
+            return False
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["failure_count"] = int(data.get("failure_count") or 0) + 1
+        target = path
+        if data["failure_count"] >= max_failures:
+            self.failed_dir.mkdir(parents=True, exist_ok=True)
+            target = self.failed_dir / path.name
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(target)
+        if target != path:
+            path.unlink(missing_ok=True)
+        return target != path
+
     def used_combination_keys(self) -> set[str]:
         keys: set[str] = set()
-        for folder in (self.pending_dir, self.used_dir):
+        for folder in (self.pending_dir, self.used_dir, self.failed_dir):
             if not folder.is_dir():
                 continue
             for path in folder.glob("*.json"):
@@ -285,12 +373,14 @@ def generate_source_document(
         temperature=0.9,
         model=model,
         timeout_s=TIMEOUT_S,
-        max_tokens=MAX_TOKENS,
+        max_tokens=GEMINI_MAX_TOKENS if str(model or "").startswith("gemini") else MAX_TOKENS,
     )
     if not raw:
         return None, ["CLAUDE_FAILED"], diag
-    text = clean_source_text(raw)
+    text = fit_source_length(clean_source_text(raw))
     reasons = validate_source_text(text)
+    if diag.get("finish_reason") == "MAX_TOKENS" or not _ENDS_SENTENCE.search(text):
+        reasons.append("TRUNCATED")
     if document_type not in DOCUMENT_TYPES_ALLOWING_REFERENCES and _split_refs(text)[1]:
         reasons.append("UNEXPECTED_REFERENCES")
     if reasons:
@@ -316,6 +406,7 @@ def fill_source_pool(
     workers: int = 3,
     reply_fn: ReplyFn | None = None,
     model: str | None = None,
+    mix: list[tuple[str, str, float]] | None = None,
 ) -> PoolFillResult:
     pool = SourcePool(root)
     pending = pool.pending_count()
@@ -329,17 +420,26 @@ def fill_source_pool(
 
     active_seed = int(seed) if seed is not None else int(datetime.now(timezone.utc).strftime("%Y%m%d%H"))
     combos = pool.next_briefs(need, seed=active_seed)
-    fn = reply_fn or _default_reply_fn()
     reasons_counter: Counter[str] = Counter()
 
     def _one(combo: tuple[str, str, str, str]):
-        return combo, *generate_source_document(combo, seed=active_seed, reply_fn=fn, model=model)
+        if reply_fn is not None or not mix:
+            provider, writer = "claude", model
+            fn = reply_fn or _default_reply_fn()
+        else:
+            provider, writer = pick_writer("|".join(combo), mix)
+            fn = _reply_fn_for(provider)
+        return combo, provider, *generate_source_document(combo, seed=active_seed, reply_fn=fn, model=writer)
 
     with ThreadPoolExecutor(max_workers=max(1, int(workers))) as executor:
-        for combo, doc, reasons, diag in executor.map(_one, combos):
+        for combo, provider, doc, reasons, diag in executor.map(_one, combos):
             if doc is not None:
-                pool.add(doc, meta={"model": diag.get("model"), "latency_ms": diag.get("latency_ms")})
+                pool.add(
+                    doc,
+                    meta={"provider": provider, "model": diag.get("model"), "latency_ms": diag.get("latency_ms")},
+                )
                 result.generated += 1
+                result.by_writer[str(diag.get("model"))] = result.by_writer.get(str(diag.get("model")), 0) + 1
                 continue
             reasons_counter.update(reasons)
             if reasons == ["CLAUDE_FAILED"]:
@@ -350,6 +450,7 @@ def fill_source_pool(
                 {
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "combination_key": "|".join(combo),
+                    "writer": diag.get("model"),
                     "reasons": reasons,
                     "error_message": diag.get("error_message"),
                     "word_count": diag.get("word_count"),

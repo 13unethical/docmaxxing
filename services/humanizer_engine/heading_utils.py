@@ -20,11 +20,11 @@ _INLINE_HEADING_RE = re.compile(
 
 # "...compete. ## Journal Entry 1 Continuing..." mid-paragraph.
 _MID_HEADING_RE = re.compile(
-    rf"(?i)([.!?])\s*(##\s+(?:{_SECTION_TITLE}))[ \t]+(?=\S)"
+    rf"(?i)([.!?])[ \t]*(##\s+(?:{_SECTION_TITLE}))[ \t]+(?=\S)"
 )
 
 _BARE_MID_HEADING_RE = re.compile(
-    rf"(?i)(?<!\n)(##\s+(?:{_SECTION_TITLE}))[ \t]+(?=[A-Z(\"“\[])"
+    rf"(?i)(?<=[^\n])(##\s+(?:{_SECTION_TITLE}))[ \t]+(?=(?-i:[A-Z(\"“\[]))"
 )
 
 
@@ -63,6 +63,14 @@ def restore_markdown_headings(text: str, headings: list[str]) -> str:
     return normalize_markdown_headings(restored)
 
 
+def _split_inline_heading(match: re.Match[str]) -> str:
+    rest = match.group(2)
+    # "## Introduction to EcoNova Solutions" is one heading, not heading + body.
+    if len(rest.split()) < 8 and not rest.rstrip().endswith((".", "!", "?")):
+        return match.group(0)
+    return f"{match.group(1)}\n\n{rest}"
+
+
 def normalize_markdown_headings(text: str) -> str:
     """Force ``##`` headings onto their own lines with a blank line after."""
     if not (text or "").strip():
@@ -72,7 +80,7 @@ def normalize_markdown_headings(text: str) -> str:
     # Mid-sentence collapsed headings after punctuation.
     normalized = _MID_HEADING_RE.sub(r"\1\n\n\2\n\n", normalized)
     # Any remaining inline "## Title Body" at line start.
-    normalized = _INLINE_HEADING_RE.sub(r"\1\n\n\2", normalized)
+    normalized = _INLINE_HEADING_RE.sub(_split_inline_heading, normalized)
     # Bare mid-string headings without preceding punctuation.
     normalized = _BARE_MID_HEADING_RE.sub(r"\n\n\1\n\n", normalized)
     # Ensure blank line after heading-only lines.
@@ -83,6 +91,8 @@ def normalize_markdown_headings(text: str) -> str:
 
 def is_references_section_title(title: str) -> bool:
     t = (title or "").strip().lower()
+    if ":" in t and re.match(r"^(?:section|part|chapter)\b", t):
+        t = t.split(":", 1)[1].strip()
     return t in {"references", "reference list", "bibliography", "works cited"} or t.startswith(
         "reference"
     )

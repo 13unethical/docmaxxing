@@ -114,9 +114,11 @@ def test_citation_engine_with_mock_lookup():
         def search(self, query, *, style="APA 7", limit=3):
             return {
                 "results": [
-                    {
-                        "title": "Sample Paper",
-                        "reference": "Smith, J. (2020). Sample Paper.",
+                        {
+                            "title": "Sample Paper",
+                            "authors": ["Smith, J."],
+                            "year": "2020",
+                            "reference": "Smith, J. (2020). Sample Paper.",
                         "label": "Smith, 2020",
                         "intext": "(Smith, 2020)",
                     }
@@ -125,7 +127,7 @@ def test_citation_engine_with_mock_lookup():
 
     engine = AssignmentCitationEngine(citation_service=FakeCitations())
     pack, draft = engine.generate(
-        draft={"content": "## Intro\n\nClaim (Smith, 2020) supports this.", "version": 1},
+        draft={"content": "## Intro\n\nThe sample paper claim (Smith, 2020) supports this.", "version": 1},
         requirement_json={"citation_style": "APA 7", "title": "Digital Learning"},
         project_id="p1",
     )

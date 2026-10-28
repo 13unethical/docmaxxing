@@ -8,12 +8,19 @@ from typing import Any
 
 from services.claude_client import generate_json
 from services.presentation_images import IMAGE_ID_RE, attach_images, image_path, image_url
+from services.presentation_research import research_topic, source_label
 from services.presentation_themes import DEFAULT_THEME, THEMES, Theme, accent_split, get_theme
 
 MIN_SLIDES = 5
 MAX_SLIDES = 15
-MAX_TOPIC_CHARS = 1000
+_AUTO_SLIDES = (8, 12)
+MAX_TOPIC_CHARS = 9000
+# Longer requests are pasted material (brief, notes, source text), not a bare topic to research.
+RESEARCH_MAX_REQUEST_CHARS = 1500
 MAX_DETAILS_CHARS = 8000
+MAX_ATTACHMENTS = 3
+MAX_ATTACHMENT_CHARS = 60000
+MAX_FILENAME_CHARS = 120
 MAX_BULLETS = 6
 MAX_BULLET_CHARS = 220
 MAX_TITLE_CHARS = 120
@@ -41,7 +48,10 @@ TONES = {
 }
 
 LANGUAGES = {
-    "auto": "the same language as the topic",
+    "auto": (
+        "the language the user wrote the topic or instructions in (if there is no topic, the language of the "
+        "attached brief); if the user explicitly asks for a different language, use that one"
+    ),
     "en": "English",
     "ru": "Russian",
     "uz": "Uzbek",
@@ -219,33 +229,95 @@ def requested_minutes(text: str) -> float | None:
     return minutes if 1 <= minutes <= 60 else None
 
 
+def needs_research(*, topic: str = "", details: str = "", attachments: Any = None) -> bool:
+    """Search the web only when the user gave a bare topic or instruction and no material of their own."""
+    return (
+        len((topic or "").strip()) <= RESEARCH_MAX_REQUEST_CHARS
+        and not (details or "").strip()
+        and not clean_attachments(attachments)
+    )
+
+
+def clean_attachments(raw: Any) -> list[dict[str, str]]:
+    """Bound user files to MAX_ATTACHMENTS and MAX_ATTACHMENT_CHARS of text in total."""
+    if not isinstance(raw, list):
+        return []
+    files: list[dict[str, str]] = []
+    room = MAX_ATTACHMENT_CHARS
+    for item in raw[:MAX_ATTACHMENTS]:
+        if not isinstance(item, dict) or room <= 0:
+            continue
+        text = str(item.get("text") or "").strip()[:room]
+        if not text:
+            continue
+        name = _clean(item.get("name"), MAX_FILENAME_CHARS).replace('"', "'") or "file"
+        files.append({"name": name, "text": text})
+        room -= len(text)
+    return files
+
+
+def _sources_slide(title: str, sources: list[dict[str, str]]) -> dict[str, Any]:
+    return {
+        "layout": "bullets",
+        "title": title,
+        "bullets": [source_label(s) for s in sources[:MAX_BULLETS]],
+        "notes": " · ".join(f"{i}) {s['url']}" for i, s in enumerate(sources, start=1)),
+    }
+
+
 def generate_deck(
     *,
     topic: str,
     details: str = "",
-    slide_count: int = 8,
+    slide_count: int | None = None,
     tone: str = "academic",
     language: str = "auto",
     theme: str = DEFAULT_THEME,
     images: bool = True,
+    attachments: list[dict[str, str]] | None = None,
+    research: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Ask Claude for a deck and attach topic photos. Returns (deck, diagnostics); raises PresentationError."""
-    topic = _clean(topic, MAX_TOPIC_CHARS)
-    if not topic:
+    """Ask Claude for a deck and attach topic photos. Returns (deck, diagnostics); raises PresentationError.
+
+    ``diagnostics["research"]`` is "ok", "failed", or absent when research was not requested.
+    """
+    topic = (topic or "").strip()[:MAX_TOPIC_CHARS]
+    files = clean_attachments(attachments)
+    if not topic and not files:
         raise PresentationError("Topic is required.")
     details = (details or "").strip()[:MAX_DETAILS_CHARS]
-    slide_count = requested_slide_count(f"{topic}\n{details}") or int(slide_count)
-    slide_count = max(MIN_SLIDES, min(MAX_SLIDES, slide_count))
+    file_text = "\n".join(f["text"] for f in files)
+    request_text = f"{topic}\n{details}\n{file_text}"
+    minutes = requested_minutes(request_text)
+    slide_count = requested_slide_count(request_text) or slide_count
+    if not slide_count and minutes:
+        slide_count = round(minutes) + 1
+    if slide_count:
+        slide_count = max(MIN_SLIDES, min(MAX_SLIDES, int(slide_count)))
     tone_text = TONES.get(tone, TONES["academic"])
     language_text = LANGUAGES.get(language, LANGUAGES["auto"])
 
+    notes, sources, research_diag = None, [], {}
+    if research:
+        notes, sources, research_diag = research_topic(
+            topic or "the subject of the attached material", f"{details}\n{file_text}".strip()
+        )
+
     parts = [
-        f"Topic: {topic}",
-        f"Write exactly {slide_count - 1} slides in \"slides\" (a title slide is added automatically).",
+        (
+            f"The user's request (topic, instructions, or pasted material to build the slides from):\n{topic}"
+            if topic
+            else "Topic: take it from the attached files."
+        ),
+        (
+            f"Write exactly {slide_count - 1} slides in \"slides\" (a title slide is added automatically)."
+            if slide_count
+            else f"Choose how many slides the content needs: {_AUTO_SLIDES[0] - 1}-{_AUTO_SLIDES[1] - 1} slides in "
+            '"slides" (a title slide is added automatically).'
+        ),
         f"Audience and tone: {tone_text}.",
         f"Write all text in {language_text}.",
     ]
-    minutes = requested_minutes(f"{topic}\n{details}")
     if minutes:
         per_slide = round(minutes * _NOTES_WORDS_PER_MINUTE / (slide_count - 1) / 10) * 10
         parts.append(
@@ -259,6 +331,19 @@ def generate_deck(
             "Use this material from the user (brief, notes, or source text) as the main basis:\n"
             f"<material>\n{details}\n</material>"
         )
+    if files:
+        parts.append(
+            "The user attached these files. If one is an assignment brief or marking criteria, treat its "
+            "requirements (topic, slide count, duration, structure, required sections, audience) as binding. "
+            "Use the rest as the main source material:\n"
+            + "\n".join(f'<file name="{f["name"]}">\n{f["text"]}\n</file>' for f in files)
+        )
+    if notes:
+        parts.append(
+            "Web research notes for this deck. Prefer these facts and figures over memory, and keep every "
+            'number exactly as given. Also return "sources_title": the word "Sources" in the deck language.\n'
+            f"<research>\n{notes}\n</research>"
+        )
 
     data, diag = generate_json(
         system_prompt=_SYSTEM_PROMPT,
@@ -270,6 +355,12 @@ def generate_deck(
     if data is None:
         raise PresentationError(diag.get("error_message") or "Presentation generation failed.")
     data["theme"] = theme
+    if sources and isinstance(data.get("slides"), list) and data["slides"]:
+        sources_title = _clean(data.get("sources_title"), MAX_TITLE_CHARS) or "Sources"
+        data["slides"] = [*data["slides"], _sources_slide(sources_title, sources)]
+    if research:
+        diag["research"] = "ok" if notes else "failed"
+        diag["web_searches"] = research_diag.get("web_searches", 0)
     deck = normalize_deck(data)
     diag["images_found"] = attach_images(deck, layouts=PHOTO_LAYOUTS) if images else 0
     for slide in deck["slides"]:
@@ -1241,6 +1332,36 @@ def build_pptx(deck: dict[str, Any]) -> bytes:
     buf = io.BytesIO()
     prs.save(buf)
     return buf.getvalue()
+
+
+def extract_pptx_text(raw: bytes) -> str:
+    """Slide-by-slide text (titles, text boxes, tables, speaker notes) of an existing .pptx."""
+    from pptx import Presentation
+
+    try:
+        prs = Presentation(io.BytesIO(raw))
+    except Exception as exc:  # noqa: BLE001 - python-pptx raises many types on bad files
+        raise PresentationError("Could not open this PowerPoint file.") from exc
+
+    def shape_lines(shape) -> list[str]:
+        if shape.shape_type == 6:  # group
+            return [line for child in shape.shapes for line in shape_lines(child)]
+        if getattr(shape, "has_table", False) and shape.has_table:
+            return [" | ".join(cell.text.strip() for cell in row.cells) for row in shape.table.rows]
+        if getattr(shape, "has_text_frame", False) and shape.has_text_frame:
+            return [p.text.strip() for p in shape.text_frame.paragraphs if p.text.strip()]
+        return []
+
+    blocks = []
+    for number, slide in enumerate(prs.slides, start=1):
+        lines = [line for shape in slide.shapes for line in shape_lines(shape)]
+        if slide.has_notes_slide:
+            notes = slide.notes_slide.notes_text_frame.text.strip()
+            if notes:
+                lines.append(f"Notes: {notes}")
+        if lines:
+            blocks.append(f"Slide {number}:\n" + "\n".join(lines))
+    return "\n\n".join(blocks)
 
 
 def deck_filename(deck: dict[str, Any]) -> str:

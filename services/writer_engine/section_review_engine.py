@@ -128,7 +128,12 @@ def _review_system_prompt() -> str:
         "You are an academic section reviewer. "
         "Do NOT rewrite text. Evaluate only and return strict JSON: "
         "score,requirement_coverage,argument_quality,academic_style,citation_quality,"
-        "critical_thinking,missing_points,warnings,needs_revision,review_message."
+        "critical_thinking,missing_points,warnings,needs_revision,review_message. "
+        "requirement_json.source_materials, when present, is the uploaded brief and case study: "
+        "put in missing_points every instruction the brief gives for this section that the draft does not "
+        "cover (including required theories or frameworks), and set needs_revision when the draft "
+        "contradicts the case, presents invented facts about the organisation as given, cites 'Anon.', "
+        "or contains sentences that do not make literal sense."
     )
 
 

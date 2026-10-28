@@ -175,9 +175,11 @@ def test_numeric_variant_idempotent_redelivery(economy_db):
 def test_ignores_non_order_events(economy_db):
     uid = economy_db
     payload = _order_payload(user_id=uid)
-    payload["meta"]["event_name"] = "subscription_created"
+    payload["meta"]["event_name"] = "license_key_created"
     result = handle_webhook_event(payload)
     assert result["status"] == "ignored"
+    payload["meta"]["event_name"] = "subscription_created"
+    handle_webhook_event(payload)
     assert WalletService().get_balance(uid) == 0
 
 
@@ -194,8 +196,9 @@ def test_summarize_webhook_payload_extracts_fields(economy_db):
 
 def test_flask_route_logs_before_signature_and_credits(economy_db, monkeypatch, caplog):
     uid = economy_db
+    from app import app  # loads .env with override; set the test secret afterwards
+
     monkeypatch.setenv("LEMON_SQUEEZY_WEBHOOK_SECRET", "test-secret")
-    from app import app
 
     payload = _order_payload(
         user_id=uid,
@@ -234,8 +237,9 @@ def test_flask_route_logs_before_signature_and_credits(economy_db, monkeypatch, 
 
 def test_flask_route_signature_and_credit(economy_db, monkeypatch):
     uid = economy_db
+    from app import app  # loads .env with override; set the test secret afterwards
+
     monkeypatch.setenv("LEMON_SQUEEZY_WEBHOOK_SECRET", "test-secret")
-    from app import app
 
     payload = _order_payload(user_id=uid, order_id="ord_route_1")
     raw = json.dumps(payload).encode("utf-8")

@@ -1,0 +1,21 @@
+[Unit]
+Description=DocMaxxing bulk Humanizer teacher collection (paid StealthWriter plan)
+After=network.target docmaxxing.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/docmaxxing
+EnvironmentFile=-/root/docmaxxing/.env
+# Spends HUMANIZER_TRAINING_BULK_DAILY_LIMIT minus HUMANIZER_TRAINING_BULK_PRODUCTION_RESERVE
+# per StealthWriter day, then sleeps until the reset. Does nothing while the limit is unset.
+# Pause: touch /root/docmaxxing/data/humanizer_training/bulk/PAUSE
+ExecStart=/root/docmaxxing/venv/bin/python -u /root/docmaxxing/scripts/run_humanizer_bulk_collection.py
+Restart=on-failure
+RestartSec=60
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target

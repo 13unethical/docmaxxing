@@ -109,6 +109,17 @@ body:has(.hz) {
   margin-bottom: 1.25rem;
 }
 
+.hz-lang-segment {
+  flex: 0 0 auto;
+  width: 132px;
+  max-width: 132px;
+  margin-bottom: 0.85rem;
+}
+
+.hz-lang-segment.is-ru .dm-segment-thumb {
+  transform: translateX(100%);
+}
+
 .hz-card-title {
   margin: 0;
   font-size: 1.125rem;

@@ -233,6 +233,7 @@ def notify_unhandled_payment(
     *,
     payload: dict[str, Any] | None = None,
     detail: str | None = None,
+    title: str = "⚠️ Lemon Squeezy payment NOT credited",
 ) -> None:
     """Best-effort Telegram alert when a paid webhook cannot be fulfilled."""
     summary = summarize_webhook_payload(payload)
@@ -246,7 +247,7 @@ def notify_unhandled_payment(
         amount = "unknown"
 
     lines = [
-        "⚠️ Lemon Squeezy payment NOT credited",
+        title,
         f"Reason: {reason}",
         f"Order #: {summary.get('order_number') or '—'}",
         f"Order id: {summary.get('order_id') or '—'}",
@@ -367,12 +368,198 @@ def _credit_idempotent(
     }
 
 
+def _total_usd(payload: dict[str, Any]) -> float:
+    cents = _dig(payload, "data", "attributes", "total_usd")
+    if cents is None:
+        cents = _dig(payload, "data", "attributes", "total")
+    try:
+        return round(float(cents) / 100.0, 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _fulfill_plan(
+    *,
+    user_id: int,
+    plan_id: str,
+    order_key: str,
+    variant_id: str,
+    event_name: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Plan credits + 30-day pass, once per Lemon order / subscription invoice."""
+    from .plans import PLAN_ITEM_PREFIX, PLANS, activate_plan
+
+    plan = PLANS[plan_id]
+    email = str(_dig(payload, "data", "attributes", "user_email") or "").strip() or None
+    with connect() as conn:
+        ensure_lemon_squeezy_schema(conn)
+        conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT status FROM lemon_squeezy_payments WHERE order_id = ?", (order_key,)
+        ).fetchone()
+        if existing is not None and str(existing["status"]) == STATUS_PAID:
+            return {"status": "success", "already_credited": True, "user_id": user_id,
+                    "order_id": order_key, "plan_id": plan_id, "credits": 0}
+        credit_result = _credit_idempotent(
+            conn,
+            user_id,
+            int(plan["credits"]),
+            ref_id=f"lemon:{order_key}",
+            meta={"provider": "lemon_squeezy", "order_id": order_key, "variant_id": variant_id,
+                  "event_name": event_name, "plan_id": plan_id},
+        )
+        conn.execute(
+            "INSERT INTO lemon_squeezy_payments "
+            "(order_id, user_id, email, variant_id, package_id, credits, status, payload_json, paid_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) "
+            "ON CONFLICT(order_id) DO UPDATE SET status = excluded.status, credits = excluded.credits, "
+            "package_id = excluded.package_id, paid_at = COALESCE(lemon_squeezy_payments.paid_at, excluded.paid_at)",
+            (order_key, user_id, email, variant_id, PLAN_ITEM_PREFIX + plan_id, int(plan["credits"]),
+             STATUS_PAID, json.dumps(payload)[:100_000]),
+        )
+    already = bool(credit_result.get("already_credited"))
+    if not already:
+        activate_plan(user_id, plan_id, order_ref=f"lemon:{order_key}")
+        try:
+            from .referral import on_successful_deposit
+
+            on_successful_deposit(user_id, _total_usd(payload), payment_ref=f"lemon:{order_key}")
+        except Exception:  # noqa: BLE001
+            logger.exception("referral on_successful_deposit failed user_id=%s order=%s", user_id, order_key)
+    logger.info("lemon-squeezy plan user_id=%s plan=%s order=%s already=%s", user_id, plan_id, order_key, already)
+    return {"status": "success", "already_credited": already, "user_id": user_id, "order_id": order_key,
+            "plan_id": plan_id, "credits": 0 if already else int(plan["credits"]),
+            "balance": credit_result.get("balance")}
+
+
+def _payg_credits(payload: dict[str, Any]) -> int:
+    """Credits named in checkout custom data, accepted only if the order paid their price."""
+    from .plans import PlanError, checkout_item
+
+    raw = _dig(payload, "meta", "custom_data", "credits")
+    try:
+        item = checkout_item(credits=raw)
+    except PlanError as exc:
+        notify_unhandled_payment("payg_bad_credits", payload=payload, detail=f"credits={raw!r}")
+        raise LemonSqueezyGatewayError(f"Invalid pay-as-you-go credits {raw!r}") from exc
+    expected = int(round(item["usd"] * 100))
+    paid = _dig(payload, "data", "attributes", "subtotal")
+    try:
+        paid_cents = int(paid)
+    except (TypeError, ValueError):
+        paid_cents = -1
+    # Subtotal is before tax; a store discount code may lower it by design.
+    discount = int(_dig(payload, "data", "attributes", "discount_total", default=0) or 0)
+    if paid_cents + discount < expected:
+        notify_unhandled_payment(
+            "payg_amount_mismatch",
+            payload=payload,
+            detail=f"credits={item['coins']} expected_cents={expected} subtotal={paid!r} discount={discount}",
+        )
+        raise LemonSqueezyGatewayError("Paid amount does not match the credits ordered")
+    return int(item["coins"])
+
+
+def _handle_refund(event_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Mark the purchase refunded and stop a plan pass that this payment opened."""
+    data_id = str(_dig(payload, "data", "id") or "").strip()
+    order_key = f"invoice:{data_id}" if event_name == "subscription_payment_refunded" else data_id
+    attrs = _dig(payload, "data", "attributes", default={}) or {}
+    status = "Refunded" if str(attrs.get("status") or "") == "refunded" else "Partially refunded"
+    with connect() as conn:
+        ensure_lemon_squeezy_schema(conn)
+        row = conn.execute(
+            "SELECT user_id, package_id FROM lemon_squeezy_payments WHERE order_id = ?", (order_key,)
+        ).fetchone()
+        if row is None:
+            notify_unhandled_payment("refund_unknown_order", payload=payload, detail=f"order={order_key}",
+                                     title="↩️ Lemon Squeezy refund for an unknown order")
+            return {"status": "ignored", "reason": "unknown_order", "order_id": order_key}
+        conn.execute("UPDATE lemon_squeezy_payments SET status = ? WHERE order_id = ?", (status, order_key))
+        plan_stopped = False
+        if status == "Refunded" and str(row["package_id"] or "").startswith("plan_"):
+            cur = conn.execute(
+                "UPDATE user_plans SET expires_at = datetime('now'), updated_at = datetime('now') "
+                "WHERE user_id = ? AND order_ref = ?",
+                (row["user_id"], f"lemon:{order_key}"),
+            )
+            plan_stopped = cur.rowcount > 0
+    notify_unhandled_payment(
+        "refund_processed",
+        payload=payload,
+        detail=f"{status}; plan stopped={plan_stopped}. Credits were not taken back; adjust manually if needed.",
+        title="↩️ Lemon Squeezy refund",
+    )
+    return {"status": "success", "order_id": order_key, "refund_status": status, "plan_stopped": plan_stopped}
+
+
+def _handle_subscription_change(event_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    from .lemon_plans import plan_for_variant, save_subscription
+
+    subscription_id = str(_dig(payload, "data", "id") or "").strip()
+    if not subscription_id:
+        raise LemonSqueezyGatewayError("data.id (subscription id) is missing")
+    attrs = _dig(payload, "data", "attributes", default={}) or {}
+    plan_id = plan_for_variant(attrs.get("variant_id"))
+    save_subscription(
+        subscription_id,
+        user_id=_parse_user_id(_dig(payload, "meta", "custom_data", "user_id")),
+        plan_id=plan_id,
+        status=str(attrs.get("status") or "").strip() or None,
+        portal_url=_dig(attrs, "urls", "customer_portal"),
+        renews_at=attrs.get("renews_at"),
+    )
+    return {"status": "success", "event_name": event_name, "subscription_id": subscription_id,
+            "plan_id": plan_id, "subscription_status": attrs.get("status")}
+
+
+def _handle_subscription_payment(payload: dict[str, Any]) -> dict[str, Any]:
+    """Renewal charges extend the pass; the first charge is fulfilled by ``order_created``."""
+    from .lemon_plans import get_subscription
+
+    attrs = _dig(payload, "data", "attributes", default={}) or {}
+    reason = str(attrs.get("billing_reason") or "").strip()
+    if reason != "renewal":
+        return {"status": "ignored", "reason": f"billing_reason={reason or 'empty'}"}
+    invoice_id = str(_dig(payload, "data", "id") or "").strip()
+    subscription_id = str(attrs.get("subscription_id") or "").strip()
+    sub = get_subscription(subscription_id) if subscription_id else None
+    user_id = (sub or {}).get("user_id") or _parse_user_id(_dig(payload, "meta", "custom_data", "user_id"))
+    plan_id = (sub or {}).get("plan_id")
+    if not invoice_id or not user_id or not plan_id:
+        notify_unhandled_payment(
+            "renewal_unmatched",
+            payload=payload,
+            detail=f"subscription_id={subscription_id!r} user_id={user_id} plan_id={plan_id}",
+        )
+        raise LemonSqueezyGatewayError(f"Cannot match renewal for subscription {subscription_id!r}")
+    if _lookup_user(int(user_id)) is None:
+        notify_unhandled_payment("user_not_found", payload=payload, detail=f"user_id={user_id}")
+        raise LemonSqueezyGatewayError(f"user_id={user_id} not found")
+    return _fulfill_plan(
+        user_id=int(user_id),
+        plan_id=plan_id,
+        order_key=f"invoice:{invoice_id}",
+        variant_id=str(subscription_id),
+        event_name="subscription_payment_success",
+        payload=payload,
+    )
+
+
 def handle_webhook_event(payload: dict[str, Any]) -> dict[str, Any]:
     """Fulfill a verified Lemon Squeezy webhook payload."""
     if not isinstance(payload, dict):
         raise LemonSqueezyGatewayError("payload must be a JSON object")
 
     event_name = str(_dig(payload, "meta", "event_name") or "").strip()
+    if event_name in ("subscription_created", "subscription_updated", "subscription_cancelled",
+                      "subscription_resumed", "subscription_expired"):
+        return _handle_subscription_change(event_name, payload)
+    if event_name == "subscription_payment_success":
+        return _handle_subscription_payment(payload)
+    if event_name in ("order_refunded", "subscription_payment_refunded"):
+        return _handle_refund(event_name, payload)
     if event_name != "order_created":
         logger.info("lemon-squeezy webhook ignored event=%s", event_name or "(empty)")
         return {
@@ -403,7 +590,27 @@ def handle_webhook_event(payload: dict[str, Any]) -> dict[str, Any]:
         notify_unhandled_payment("missing_variant_id", payload=payload)
         raise LemonSqueezyGatewayError("first_order_item.variant_id is missing")
 
-    credits = resolve_variant_credits(variant_id)
+    from .lemon_plans import payg_variant_id, plan_for_variant
+
+    plan_id = plan_for_variant(variant_id)
+    if plan_id:
+        order_id = str(_dig(payload, "data", "id") or "").strip()
+        if not order_id:
+            notify_unhandled_payment("missing_order_id", payload=payload)
+            raise LemonSqueezyGatewayError("data.id (order id) is missing")
+        return _fulfill_plan(
+            user_id=user_id,
+            plan_id=plan_id,
+            order_key=order_id,
+            variant_id=variant_id,
+            event_name=event_name,
+            payload=payload,
+        )
+
+    if payg_variant_id() and variant_id == payg_variant_id():
+        credits = _payg_credits(payload)
+    else:
+        credits = resolve_variant_credits(variant_id)
     if credits is None or int(credits) <= 0:
         known = sorted(lemon_variant_coin_map().keys())
         notify_unhandled_payment(

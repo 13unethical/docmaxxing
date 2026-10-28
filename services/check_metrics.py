@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from typing import Any
 
 from docx import Document
@@ -22,6 +23,7 @@ from services.check_structure import (
 from services.check_validator import heading_label_without_number, is_references_section_name
 
 _YEARISH = re.compile(r"\(?(19|20)\d{2}[a-z]?\)?|n\.d\.")
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _SKIP_BALANCE_SECTIONS = frozenset(
     {
         "references",
@@ -72,42 +74,120 @@ def _detect_formatting_from_doc(doc: Document | None) -> dict[str, Any]:
             "font_size": None,
             "line_spacing": None,
             "has_page_numbers": None,
+            "has_cover_page": None,
             "alignment": None,
         }
     from services.document_analyzer import (
         _alignment_label,
         _approx_line_spacing_multiple,
-        _collect_explicit_fonts,
         _docx_has_page_number_field,
     )
 
-    sizes, names = _collect_explicit_fonts(doc)
-    font_size = min(sizes) if sizes else None
-    font_family = next(iter(names), None) if len(names) == 1 else (next(iter(names)) if names else None)
-    line_spacings: set[float] = set()
+    defaults = _doc_default_formatting(doc)
+    families: Counter[str] = Counter()
+    sizes: Counter[int] = Counter()
+    line_spacings: Counter[float] = Counter()
     alignments: set[str] = set()
     for p in doc.paragraphs:
         if not (p.text or "").strip():
             continue
-        ls = _approx_line_spacing_multiple(p.paragraph_format)
+        chain = _style_chain(p.style)
+        ls = _first_value(
+            [_approx_line_spacing_multiple(p.paragraph_format)]
+            + [_approx_line_spacing_multiple(s.paragraph_format) for s in chain]
+        )
+        if ls is None:
+            ls = defaults["line_spacing"]
         if ls is not None:
-            line_spacings.add(round(ls, 2))
+            line_spacings[round(ls, 2)] += len(p.text)
         al = _alignment_label(p.paragraph_format)
         if al:
             alignments.add(al)
-    line_spacing = None
-    if len(line_spacings) == 1:
-        line_spacing = next(iter(line_spacings))
-    elif line_spacings:
-        line_spacing = max(line_spacings)
+        for r in p.runs:
+            if not (r.text or "").strip():
+                continue
+            run_chain = _style_chain(r.style) if r.style is not None else []
+            name = _first_value([r.font.name] + [s.font.name for s in run_chain + chain]) or defaults["font_family"]
+            size = _first_value([r.font.size] + [s.font.size for s in run_chain + chain])
+            pt = int(round(size.pt)) if size is not None else defaults["font_size"]
+            if name:
+                families[name.strip()] += len(r.text)
+            if pt:
+                sizes[pt] += len(r.text)
     alignment = next(iter(alignments)) if len(alignments) == 1 else None
     return {
-        "font_family": font_family,
-        "font_size": font_size,
-        "line_spacing": line_spacing,
+        "font_family": _dominant(families),
+        "font_size": _dominant(sizes),
+        "line_spacing": _dominant(line_spacings),
         "has_page_numbers": _docx_has_page_number_field(doc),
+        "has_cover_page": _docx_has_cover_page(doc),
         "alignment": alignment,
     }
+
+
+def _paragraph_ends_page(p: Any) -> bool:
+    xml = p._p.xml
+    return 'w:type="page"' in xml or "<w:sectPr" in xml
+
+
+def _docx_has_cover_page(doc: Document) -> bool:
+    """A page break near the start with only short lines (title, name, course…) before it."""
+    lines: list[str] = []
+    for p in doc.paragraphs[:40]:
+        if p.paragraph_format.page_break_before and lines:
+            break
+        text = (p.text or "").strip()
+        if text:
+            if len(text.split()) > 25 or len(lines) >= 15:
+                return False
+            lines.append(text)
+        if _paragraph_ends_page(p):
+            break
+    else:
+        return False
+    return 0 < len(lines) and sum(len(t.split()) for t in lines) <= 120
+
+
+def _style_chain(style: Any) -> list[Any]:
+    chain: list[Any] = []
+    while style is not None and style not in chain:
+        chain.append(style)
+        style = style.base_style
+    return chain
+
+
+def _first_value(values: list[Any]) -> Any:
+    return next((v for v in values if v is not None), None)
+
+
+def _dominant(counter: Counter) -> Any:
+    return counter.most_common(1)[0][0] if counter else None
+
+
+def _doc_default_formatting(doc: Document) -> dict[str, Any]:
+    """Run/paragraph defaults from styles.xml docDefaults, used when no style sets a value."""
+    out: dict[str, Any] = {"font_family": None, "font_size": None, "line_spacing": None}
+    try:
+        root = doc.styles.element
+    except Exception:
+        return out
+    ns = {"w": _W_NS}
+    fonts = root.find("w:docDefaults/w:rPrDefault/w:rPr/w:rFonts", ns)
+    if fonts is not None:
+        out["font_family"] = fonts.get(f"{{{_W_NS}}}ascii") or fonts.get(f"{{{_W_NS}}}hAnsi")
+    size = root.find("w:docDefaults/w:rPrDefault/w:rPr/w:sz", ns)
+    if size is not None:
+        try:
+            out["font_size"] = int(round(int(size.get(f"{{{_W_NS}}}val")) / 2))
+        except (TypeError, ValueError):
+            pass
+    spacing = root.find("w:docDefaults/w:pPrDefault/w:pPr/w:spacing", ns)
+    if spacing is not None and spacing.get(f"{{{_W_NS}}}lineRule", "auto") == "auto":
+        try:
+            out["line_spacing"] = round(int(spacing.get(f"{{{_W_NS}}}line")) / 240, 2)
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 def _section_share_metrics(sections: list[dict[str, Any]]) -> dict[str, Any]:
@@ -260,6 +340,7 @@ def extract_document_metrics(
         "font_size": fmt["font_size"],
         "line_spacing": fmt["line_spacing"],
         "has_page_numbers": fmt["has_page_numbers"],
+        "has_cover_page": fmt["has_cover_page"],
         "alignment": fmt["alignment"],
         "grammar_signal_count": grammar_signals,
         "apa_reference_format_ok": apa_refs_ok,

@@ -17,6 +17,7 @@ class FormatSpec:
     font_size_pt: int = 12
     line_spacing: float = 2.0
     alignment: str = "left"  # left | justify
+    alignment_required: bool = False  # the brief names an alignment; otherwise any is fine
     margins_inches: float = 1.0
     first_line_indent: bool = False
     heading_size_pt: int = 14
@@ -31,6 +32,7 @@ class FormatSpec:
             "font_size_pt": self.font_size_pt,
             "line_spacing": self.line_spacing,
             "alignment": self.alignment,
+            "alignment_required": self.alignment_required,
             "margins_inches": self.margins_inches,
             "first_line_indent": self.first_line_indent,
             "heading_size_pt": self.heading_size_pt,
@@ -51,6 +53,7 @@ class FormatSpec:
             font_size_pt=int(data.get("font_size_pt") or data.get("font_size") or 12),
             line_spacing=float(data.get("line_spacing") or 2.0),
             alignment=str(data.get("alignment") or "left").lower(),
+            alignment_required=bool(data.get("alignment_required", False)),
             margins_inches=float(data.get("margins_inches") or 1.0),
             first_line_indent=bool(data.get("first_line_indent", False)),
             heading_size_pt=int(data.get("heading_size_pt") or 14),

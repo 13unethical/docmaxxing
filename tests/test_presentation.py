@@ -550,3 +550,234 @@ def test_lineart_cover_crops_photo_to_a_circle():
     with Image.open(io.BytesIO(pic.image.blob)) as im:
         assert im.size[0] == im.size[1]
         assert im.getpixel((2, 2)) == tuple(int(THEMES["paper"].cover_bg[i : i + 2], 16) for i in (0, 2, 4))
+
+
+# --- attached files + web research -------------------------------------------------
+
+
+def _capture_generate_json(monkeypatch, response=None):
+    captured = {}
+
+    def fake_generate_json(**kwargs):
+        captured.update(kwargs)
+        return dict(response or SAMPLE_DECK), {"model": "test"}
+
+    monkeypatch.setattr(pg, "generate_json", fake_generate_json)
+    return captured
+
+
+def test_clean_attachments_bounds_count_and_total_text():
+    raw = [{"name": f"f{i}.pdf", "text": "x" * 25000} for i in range(5)] + ["junk"]
+    files = pg.clean_attachments(raw)
+    assert len(files) == pg.MAX_ATTACHMENTS
+    assert sum(len(f["text"]) for f in files) == pg.MAX_ATTACHMENT_CHARS
+    assert pg.clean_attachments([{"name": 'a"b', "text": "  "}]) == []
+    assert pg.clean_attachments([{"name": 'a"b', "text": "hi"}])[0]["name"] == "a'b"
+    assert pg.clean_attachments("nope") == []
+
+
+def test_generate_deck_builds_from_attached_brief_without_topic(monkeypatch):
+    captured = _capture_generate_json(monkeypatch)
+    brief = "Assignment: a 10-slide presentation on water scarcity in Uzbekistan, 7-10 minutes."
+    deck, diag = pg.generate_deck(topic="", attachments=[{"name": "brief.pdf", "text": brief}])
+    prompt = captured["user_prompt"]
+    assert "take it from the attached files" in prompt
+    assert '<file name="brief.pdf">' in prompt and brief in prompt
+    assert "exactly 9 slides" in prompt
+    assert "words of speaker notes" in prompt
+    assert "research" not in diag
+    assert deck["slides"]
+
+
+def test_generate_deck_requires_topic_or_file():
+    with pytest.raises(pg.PresentationError):
+        pg.generate_deck(topic="  ", attachments=[{"name": "empty.txt", "text": "   "}])
+
+
+def test_generate_deck_with_research_adds_notes_and_sources_slide(monkeypatch):
+    captured = _capture_generate_json(monkeypatch, {**SAMPLE_DECK, "sources_title": "Источники"})
+    seen = {}
+
+    def fake_research(topic, context=""):
+        seen.update(topic=topic, context=context)
+        sources = [
+            {"url": "https://www.iea.org/reports/renewables", "title": "Renewables 2026"},
+            {"url": "https://irena.org/data", "title": ""},
+        ]
+        return "Solar capacity in Uzbekistan reached 4 GW in 2026.", sources, {"web_searches": 3}
+
+    monkeypatch.setattr(pg, "research_topic", fake_research)
+    deck, diag = pg.generate_deck(topic="Renewables", research=True, details="Focus on Uzbekistan")
+    assert seen == {"topic": "Renewables", "context": "Focus on Uzbekistan"}
+    assert "<research>\nSolar capacity in Uzbekistan reached 4 GW in 2026.\n</research>" in captured["user_prompt"]
+    assert diag["research"] == "ok" and diag["web_searches"] == 3
+    last = deck["slides"][-1]
+    assert last["layout"] == "bullets"
+    assert last["title"] == "Источники"
+    assert last["bullets"] == ["Renewables 2026 — iea.org", "irena.org"]
+    assert last["notes"] == "1) https://www.iea.org/reports/renewables · 2) https://irena.org/data"
+    assert len(deck["slides"]) == len(SAMPLE_DECK["slides"]) + 1
+
+
+def test_generate_deck_research_failure_still_builds_deck(monkeypatch):
+    captured = _capture_generate_json(monkeypatch)
+    monkeypatch.setattr(pg, "research_topic", lambda topic, context="": (None, [], {"web_searches": 0}))
+    deck, diag = pg.generate_deck(topic="Renewables", research=True)
+    assert diag["research"] == "failed"
+    assert "<research>" not in captured["user_prompt"]
+    assert len(deck["slides"]) == len(SAMPLE_DECK["slides"])
+
+
+def test_api_generate_accepts_files_without_topic_and_skips_research(client, monkeypatch):
+    charge = MagicMock(return_value=(7, {"balance": 50}))
+    refund = MagicMock()
+    monkeypatch.setattr(app_module, "_charge_current_user", charge)
+    monkeypatch.setattr(app_module, "_refund_safe", refund)
+    seen = {}
+
+    def fake_generate_deck(**kwargs):
+        seen.update(kwargs)
+        return pg.normalize_deck(SAMPLE_DECK), {"model": "m"}
+
+    monkeypatch.setattr(pg, "generate_deck", fake_generate_deck)
+    res = client.post(
+        "/api/presentation/generate",
+        json={"topic": "", "files": [{"name": "brief.docx", "text": "Brief text"}], "research": True},
+    )
+    body = res.get_json()
+    assert res.status_code == 200, body
+    expected = app_module.feature_cost("presentation")
+    assert charge.call_args.args[:2] == ("presentation", expected)
+    assert body["credits_used"] == expected
+    assert seen["attachments"] == [{"name": "brief.docx", "text": "Brief text"}]
+    assert seen["research"] is False
+    assert seen["slide_count"] is None
+    refund.assert_not_called()
+
+
+def test_api_generate_researches_bare_topic_automatically(client, monkeypatch):
+    charge = MagicMock(return_value=(7, {"balance": 50}))
+    monkeypatch.setattr(app_module, "_charge_current_user", charge)
+    seen = {}
+
+    def fake_generate_deck(**kwargs):
+        seen.update(kwargs)
+        return pg.normalize_deck(SAMPLE_DECK), {"model": "m", "research": "ok"}
+
+    monkeypatch.setattr(pg, "generate_deck", fake_generate_deck)
+    res = client.post("/api/presentation/generate", json={"topic": "Сделай презентацию про ИИ в медицине"})
+    body = res.get_json()
+    expected = app_module.feature_cost("presentation") + app_module.feature_cost("presentation_research")
+    assert charge.call_args.args[:2] == ("presentation", expected)
+    assert body["credits_used"] == expected
+    assert body["research"] == "ok"
+    assert seen["research"] is True
+    assert seen["language"] == "auto"
+
+
+def test_api_generate_refunds_research_surcharge_when_research_fails(client, monkeypatch):
+    monkeypatch.setattr(app_module, "_charge_current_user", MagicMock(return_value=(7, {"balance": 50})))
+    refund = MagicMock()
+    monkeypatch.setattr(app_module, "_refund_safe", refund)
+    monkeypatch.setattr(app_module.wallet, "get_balance", lambda _uid: 70)
+    monkeypatch.setattr(
+        pg, "generate_deck", lambda **_: (pg.normalize_deck(SAMPLE_DECK), {"model": "m", "research": "failed"})
+    )
+    res = client.post("/api/presentation/generate", json={"topic": "Energy"})
+    body = res.get_json()
+    research_cost = app_module.feature_cost("presentation_research")
+    refund.assert_called_once_with(7, research_cost, "presentation_research")
+    assert body["credits_used"] == app_module.feature_cost("presentation")
+    assert body["balance"] == 70
+    assert body["research"] == "failed"
+
+
+def test_api_generate_with_pasted_material_charges_base_price(client, monkeypatch):
+    charge = MagicMock(return_value=(7, {"balance": 70}))
+    monkeypatch.setattr(app_module, "_charge_current_user", charge)
+    monkeypatch.setattr(pg, "generate_deck", lambda **_: (pg.normalize_deck(SAMPLE_DECK), {"model": "m"}))
+    client.post("/api/presentation/generate", json={"topic": "Energy", "details": "My notes", "research": True})
+    assert charge.call_args.args[1] == app_module.feature_cost("presentation")
+
+
+def test_api_generate_treats_long_pasted_text_as_material(client, monkeypatch):
+    charge = MagicMock(return_value=(7, {"balance": 70}))
+    monkeypatch.setattr(app_module, "_charge_current_user", charge)
+    seen = {}
+
+    def fake_generate_deck(**kwargs):
+        seen.update(kwargs)
+        return pg.normalize_deck(SAMPLE_DECK), {"model": "m"}
+
+    monkeypatch.setattr(pg, "generate_deck", fake_generate_deck)
+    notes = "Lecture notes.\n" + "Photosynthesis converts light into chemical energy. " * 40
+    client.post("/api/presentation/generate", json={"topic": notes})
+    assert charge.call_args.args[1] == app_module.feature_cost("presentation")
+    assert seen["research"] is False
+
+
+def test_generate_deck_keeps_pasted_material_layout(monkeypatch):
+    captured = _capture_generate_json(monkeypatch)
+    pg.generate_deck(topic="Make slides from my notes:\n- point one\n- point two")
+    assert "Make slides from my notes:\n- point one\n- point two" in captured["user_prompt"]
+
+
+def test_generate_deck_picks_slide_count_automatically(monkeypatch):
+    captured = _capture_generate_json(monkeypatch)
+    pg.generate_deck(topic="История Узбекистана")
+    prompt = captured["user_prompt"]
+    assert "exactly" not in prompt
+    assert "Choose how many slides the content needs: 7-11 slides" in prompt
+    assert "the language the user wrote the topic or instructions in" in prompt
+
+    pg.generate_deck(topic="Доклад на 10 минут про климат")
+    assert "exactly 10 slides" in captured["user_prompt"]
+    assert "words of speaker notes" in captured["user_prompt"]
+
+
+def test_api_extract_reads_text_and_pptx_files(client):
+    res = client.post(
+        "/api/presentation/extract",
+        data={"file": (io.BytesIO("Тема: водные ресурсы".encode()), "brief.txt")},
+        content_type="multipart/form-data",
+    )
+    body = res.get_json()
+    assert res.status_code == 200, body
+    assert body["text"] == "Тема: водные ресурсы" and body["name"] == "brief.txt"
+    assert body["truncated"] is False
+
+    pptx = pg.build_pptx(SAMPLE_DECK)
+    res = client.post(
+        "/api/presentation/extract",
+        data={"file": (io.BytesIO(pptx), "old-deck.pptx")},
+        content_type="multipart/form-data",
+    )
+    body = res.get_json()
+    assert res.status_code == 200, body
+    assert "Slide 2:" in body["text"] and "Why it matters" in body["text"]
+    assert "Notes: Intro." in body["text"]
+
+
+def test_api_extract_rejects_bad_files(client):
+    res = client.post(
+        "/api/presentation/extract",
+        data={"file": (io.BytesIO(b"MZ"), "virus.exe")},
+        content_type="multipart/form-data",
+    )
+    assert res.status_code == 400
+    res = client.post(
+        "/api/presentation/extract",
+        data={"file": (io.BytesIO(b"not a zip"), "broken.pptx")},
+        content_type="multipart/form-data",
+    )
+    assert res.status_code == 400
+    assert client.post("/api/presentation/extract").status_code == 400
+
+
+def test_presentation_page_shows_attach_without_manual_pickers(client):
+    html = client.get("/presentation").get_data(as_text=True)
+    assert 'id="pres_attach_btn"' in html
+    for removed in ("pres_research_btn", "pres_slide_count", "pres_language", "pres-mode-chip", "pres_details"):
+        assert removed not in html
+    assert ".pptx" in html
+    assert f'data-research-cost="{app_module.feature_cost("presentation_research")}"' in html

@@ -355,12 +355,12 @@ def _transition_from(previous: str | None, current: str) -> str:
 def _transition_to(current: str, nxt: str | None) -> str:
     if not nxt:
         return "Close the section with a sentence that reinforces the research question."
-    return f"End {current} with a forward link that prepares the reader for {nxt}."
+    return f"End {current} with its own conclusion; {nxt} should build on it without announcement sentences."
 
 
 def _transition_rules(sections: list[BlueprintSection]) -> list[str]:
     return [
-        "Each section must open with a signpost linking to the previous section.",
+        "Link sections through content (build on the previous findings), not announcement sentences.",
         "Avoid repeating the same source-led opening sentence across sections.",
         "Use explicit comparative language in analysis sections (however, whereas, in contrast).",
         "Conclusion must not introduce new sources or new major claims.",
@@ -515,8 +515,8 @@ def _default_blueprint_lists(req: dict[str, Any], plan: dict[str, Any]) -> dict[
             "Integrate citations inside analytical sentences",
         ],
         "transition_plan": [
-            "Signpost each section opening with a link to the previous section",
-            "End analytical sections with a forward link to the next section",
+            "Open each section by building on the previous findings, not by announcing it",
+            "End analytical sections with their own conclusion, not a preview of the next section",
         ],
     }
 

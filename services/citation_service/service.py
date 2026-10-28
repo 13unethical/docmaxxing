@@ -68,12 +68,13 @@ def _format_reference(work: Work, style_key: str) -> str:
     issue = (work.issue or "").strip()
     pages = (work.pages or "").strip()
     doi_url = f"https://doi.org/{work.doi}" if work.doi else (work.url or "")
+    publisher = (work.publisher or "").strip()
 
     if style_key == "APA":
         vol_bit = f", {vol}" if vol else ""
         iss_bit = f"({issue})" if issue else ""
         pg_bit = f", {pages}" if pages else ""
-        src = f" {journal}{vol_bit}{iss_bit}{pg_bit}." if journal else ""
+        src = f" {journal}{vol_bit}{iss_bit}{pg_bit}." if journal else (f" {publisher}." if publisher else "")
         tail = f" {doi_url}" if doi_url else ""
         lead = f"{authors} " if authors else ""
         return f"{lead}({year}). {title}.{src}{tail}".strip()
@@ -97,7 +98,10 @@ def _format_reference(work: Work, style_key: str) -> str:
         vol_bit = f", {vol}" if vol else ""
         iss_bit = f"({issue})" if issue else ""
         pg_bit = f", pp. {pages}" if pages else ""
-        src = f" '{title}', {journal}{vol_bit}{iss_bit}{pg_bit}." if journal else f" {title}."
+        if journal:
+            src = f" '{title}', {journal}{vol_bit}{iss_bit}{pg_bit}."
+        else:
+            src = f" {title}. {publisher}." if publisher else f" {title}."
         tail = f" Available at: {doi_url}" if doi_url else ""
         lead = f"{authors} " if authors else ""
         return f"{lead}({year}).{src}{tail}".strip()

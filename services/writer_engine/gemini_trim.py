@@ -444,7 +444,7 @@ def drop_complete_sentences_to_budget(
                 already_dropped=dropped,
             )
             ranked = _expand_linked_units(ranked, sentences)
-        new_ids = [sid for sid in ranked if sid not in dropped]
+        new_ids = _just_enough([sid for sid in ranked if sid not in dropped], sentences, need_words=need + 10)
         if not new_ids:
             break
         candidate = dropped | set(new_ids)
@@ -466,6 +466,29 @@ def drop_complete_sentences_to_budget(
         }
     )
     return fitted, meta
+
+
+def _just_enough(ranked: list[str], sentences: list[_Sentence], *, need_words: int) -> list[str]:
+    """The ranked drops needed to remove ``need_words``, never a section's first or last sentence.
+
+    The ranker often proposes far more than the excess; every extra deletion loses content
+    (section conclusions, recommendations) the grade depends on.
+    """
+    by_section: dict[str, list[_Sentence]] = {}
+    for s in sentences:
+        by_section.setdefault(s.section_title, []).append(s)
+    edges = {group[0].id for group in by_section.values()} | {group[-1].id for group in by_section.values()}
+    by_id = {s.id: s for s in sentences}
+    chosen: list[str] = []
+    removed = 0
+    for sid in ranked:
+        if removed >= need_words:
+            break
+        if sid in edges or sid not in by_id or sid in chosen:
+            continue
+        chosen.append(sid)
+        removed += count_words(by_id[sid].text)
+    return chosen
 
 
 def fit_humanized_content_to_budget(

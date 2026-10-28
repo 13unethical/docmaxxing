@@ -142,6 +142,9 @@ def format_document_v2(
 
     profile = load_profile(style_name)
     resolution = resolve_format_spec(profile, overrides)
+    if model.cover is None and overrides.cover_page is not None and overrides.cover_page.enabled:
+        # The extractors never find a cover; the one the student filled in the form is the cover.
+        model.cover = resolution.spec.cover_page.model_copy(deep=True)
     built = build_document(model, resolution.spec)
 
     buffer = io.BytesIO()

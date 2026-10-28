@@ -169,8 +169,13 @@ def plan_daily_backfill(
     if source_pool_root is not None:
         pool_pending = SourcePool(source_pool_root).pending_count()
 
+    from services.humanizer_training.bulk import BulkConfig
+
     out = Path(output_root) / day
-    if has_daily_run_marker(out):
+    if BulkConfig.from_env().enabled:
+        reason = "bulk_collection_active"
+        attempt = 0
+    elif has_daily_run_marker(out):
         reason = "already_ran_today"
         attempt = 0
     elif budget.daily_limit <= 0:

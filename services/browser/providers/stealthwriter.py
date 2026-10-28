@@ -34,14 +34,15 @@ DEFAULT_STEALTHWRITER_MODEL = (
     os.environ.get("STEALTHWRITER_MODEL") or "Legacy 5.1"
 ).strip() or "Legacy 5.1"
 
-# Rewrite intensity 1–10. StealthWriter UI defaults to 8; Assignment pins 10.
+# Rewrite intensity 1–10. Level 10 garbles academic prose ("penny-in-the-candy"),
+# so Assignment uses 8 like the StealthWriter UI default.
 DEFAULT_STEALTHWRITER_LEVEL = max(
     1,
     min(10, int(os.environ.get("STEALTHWRITER_LEVEL") or "8")),
 )
 ASSIGNMENT_STEALTHWRITER_LEVEL = max(
     1,
-    min(10, int(os.environ.get("STEALTHWRITER_ASSIGNMENT_LEVEL") or "10")),
+    min(10, int(os.environ.get("STEALTHWRITER_ASSIGNMENT_LEVEL") or "8")),
 )
 
 
@@ -56,16 +57,35 @@ def _profile_path() -> str:
 
 # ------------------------------------------------------------------ login helpers
 def start_interactive_login() -> dict[str, Any]:
-    """Navigate the StealthWriter tab to sign-in for manual login."""
+    """Show the StealthWriter sign-in page for manual login, unless already signed in.
+
+    The sign-in page does not redirect a signed-in user, so opening it blindly parks the
+    provider tab on /sign-in and every health check then reports a live session as signed out.
+    """
     page = _page()
     already = BrowserService.instance().is_running()
-    page.goto(_SIGN_IN_URL, wait_until="domcontentloaded")
+    page.goto(_DASHBOARD_URL, wait_until="domcontentloaded")
+    page.wait_for_timeout(1500)
+    logged_in = (not _is_sign_in_url(page.url)) and "/dashboard" in page.url.lower()
+    if logged_in:
+        _persist_session()
+    else:
+        page.goto(_SIGN_IN_URL, wait_until="domcontentloaded")
+    try:
+        page.bring_to_front()
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "success": True,
         "already_open": already,
+        "already_logged_in": logged_in,
         "cdp_url": BrowserService.instance().cdp_url,
         "profile": _profile_path(),
-        "message": "Attached to Chrome. Please login manually in the open browser.",
+        "message": (
+            "Already logged in — session saved, nothing to do."
+            if logged_in
+            else "Attached to Chrome. Please login manually in the open browser."
+        ),
     }
 
 
@@ -1339,8 +1359,11 @@ class StealthWriterProvider(Provider):
             or page.get_by_text("Humanizer", exact=False).count()
             or page.get_by_text("Humanize", exact=False).count()
         )
-        logged_in = bool(page.locator('a[href="/dashboard/humanizer"]').count()) and not bool(
-            page.locator('a[href="/sign-in"]').count()
+        # The homepage redirects a signed-in user to the dashboard, whose footer still links
+        # to /sign-in — so the redirect, not the absence of that link, decides.
+        logged_in = (not _is_sign_in_url(final_url) and "/dashboard" in final_url.lower()) or (
+            bool(page.locator('a[href="/dashboard/humanizer"]').count())
+            and not bool(page.locator('a[href="/sign-in"]').count())
         )
 
         cookies = page.context.cookies()

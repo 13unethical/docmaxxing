@@ -1,21 +1,29 @@
 const statusEl = document.getElementById("status");
+const openPanelBtn = document.getElementById("open-panel");
 const signInBtn = document.getElementById("sign-in");
 const renewBtn = document.getElementById("renew");
 const signOutBtn = document.getElementById("sign-out");
 
-function apiBase() {
-  return "__VEIL_API_BASE__".startsWith("__") ? "http://127.0.0.1:5001" : "__VEIL_API_BASE__";
+function packedApiBase() {
+  return "__VEIL_API_BASE__".startsWith("__") ? "" : "__VEIL_API_BASE__".replace(/\/$/, "");
+}
+
+async function apiBase() {
+  const stored = await chrome.storage.local.get(["veil_api_base"]);
+  return String(stored.veil_api_base || packedApiBase() || "https://docmaxxing.com").replace(/\/$/, "");
 }
 
 async function render() {
   const stored = await chrome.storage.local.get(["veil_token", "veil_email", "veil_balance"]);
   if (!stored.veil_token) {
     statusEl.textContent = "Sign in with your DocMaxxing account. Access lasts 30 days after you pay on the site.";
+    openPanelBtn.hidden = true;
     signInBtn.hidden = false;
     renewBtn.hidden = true;
     signOutBtn.hidden = true;
     return;
   }
+  openPanelBtn.hidden = false;
   signInBtn.hidden = true;
   signOutBtn.hidden = false;
   renewBtn.hidden = true;
@@ -28,7 +36,7 @@ async function render() {
   line.textContent = " — loading balance…";
   statusEl.append(line);
   try {
-    const res = await fetch(apiBase().replace(/\/$/, "") + "/api/veil/me", {
+    const res = await fetch((await apiBase()) + "/api/veil/me", {
       headers: { Authorization: "Bearer " + stored.veil_token },
     });
     const data = await res.json().catch(() => ({}));
@@ -51,13 +59,20 @@ async function render() {
   }
 }
 
-signInBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: apiBase().replace(/\/$/, "") + "/veil/connect" });
+openPanelBtn.addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "TOGGLE_PANEL" }, () => {
+    void chrome.runtime.lastError;
+    window.close();
+  });
+});
+
+signInBtn.addEventListener("click", async () => {
+  chrome.tabs.create({ url: (await apiBase()) + "/veil/connect" });
   window.close();
 });
 
-renewBtn.addEventListener("click", () => {
-  chrome.tabs.create({ url: apiBase().replace(/\/$/, "") + "/veil#access" });
+renewBtn.addEventListener("click", async () => {
+  chrome.tabs.create({ url: (await apiBase()) + "/veil#access" });
   window.close();
 });
 
@@ -65,7 +80,7 @@ signOutBtn.addEventListener("click", async () => {
   const stored = await chrome.storage.local.get(["veil_token"]);
   if (stored.veil_token) {
     try {
-      await fetch(apiBase().replace(/\/$/, "") + "/api/veil/revoke", {
+      await fetch((await apiBase()) + "/api/veil/revoke", {
         method: "POST",
         headers: { Authorization: "Bearer " + stored.veil_token },
       });
@@ -73,7 +88,7 @@ signOutBtn.addEventListener("click", async () => {
       /* local sign-out still happens */
     }
   }
-  await chrome.storage.local.remove(["veil_token", "veil_email", "veil_balance"]);
+  await chrome.storage.local.remove(["veil_token", "veil_email", "veil_balance", "veil_api_base"]);
   render();
 });
 

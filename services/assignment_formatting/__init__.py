@@ -24,6 +24,8 @@ from formatter_v2.spec import (
     StyleName,
     UserOverrides,
 )
+from services.assignment_formatting.tables import extract_markdown_tables, insert_word_tables
+from services.assignment_formatting.title_page import add_title_page, title_page_wanted
 from services.assignment_pipeline.models import utc_now
 from services.assignment_spec.validate import count_body_words, count_words
 from services.assignment_spec.word_count_statement import (
@@ -331,6 +333,7 @@ class AssignmentFormatEngine:
         project_id: str,
         citation_pack: dict[str, Any] | None = None,
         assignment_images: list[dict[str, Any]] | None = None,
+        appendices: str = "",
     ) -> dict[str, Any]:
         del citation_pack  # references already embedded in draft content when available
         title = str(draft.get("title") or requirement_json.get("title") or "Assignment")
@@ -347,11 +350,13 @@ class AssignmentFormatEngine:
         profile = load_profile(style_name)
         resolution = resolve_format_spec(profile, overrides)
 
-        document = _docx_from_markdown(title, content)
+        full_text = f"{content.rstrip()}\n\n{appendices.strip()}" if appendices.strip() else content
+        full_text, tables = extract_markdown_tables(full_text)
+        document = _docx_from_markdown(title, full_text)
         source = io.BytesIO()
         document.save(source)
         result = format_document_v2(source.getvalue(), overrides, style_name)
-        docx_bytes = result.docx_bytes
+        docx_bytes = insert_word_tables(result.docx_bytes, tables)
         images = assignment_images
         if not images and isinstance(requirement_json.get("assignment_images"), list):
             images = requirement_json.get("assignment_images")
@@ -359,6 +364,8 @@ class AssignmentFormatEngine:
             from services.assignment_figures import embed_figures_in_docx_bytes
 
             docx_bytes = embed_figures_in_docx_bytes(docx_bytes, images)
+        if title_page_wanted(requirement_json):
+            docx_bytes = add_title_page(docx_bytes, title=title, requirement_json=requirement_json)
 
         out_dir = _storage_root() / project_id / "formatted"
         out_dir.mkdir(parents=True, exist_ok=True)

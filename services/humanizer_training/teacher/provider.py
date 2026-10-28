@@ -45,7 +45,14 @@ class MockTeacherProvider:
 
     def rewrite(self, source_text: str, **kwargs: Any) -> TeacherResult:
         text = (source_text or "").strip()
-        meta = {"provider_name": self._config.provider_name, "model": self._config.model, "level": self._config.level}
+        level = kwargs.get("level", self._config.level)
+        meta = {
+            "provider_name": self._config.provider_name,
+            "model": self._config.model,
+            "level": level,
+            "requested_level": level,
+            "verified_level": level,
+        }
         if not text:
             return TeacherResult(text="", provider=self._config.provider_name, version=self._config.model, meta=meta)
         out = text.replace("should", "ought to").replace("can", "may")
@@ -177,14 +184,19 @@ class StealthWriterBridgeProvider:
     def rewrite(self, source_text: str, **kwargs: Any) -> TeacherResult:
         self._ensure_started()
         document_id = kwargs.get("document_id")
-        result = self._sw.rewrite(source_text, document_id=document_id if isinstance(document_id, str) else None)
+        level = kwargs.get("level")
+        result = self._sw.rewrite(
+            source_text,
+            document_id=document_id if isinstance(document_id, str) else None,
+            level=int(level) if level is not None else None,
+        )
         if result.success:
             # Use actual runtime config from TrainingBrowserConfig, not CLI defaults
             actual_cfg = self._sw._cfg
             meta = {
                 "provider_name": "stealthwriter_training",
                 "model": actual_cfg.model,
-                "level": actual_cfg.level,
+                "level": result.level,
                 "timeout_s": actual_cfg.timeout_s,
                 "max_retries": actual_cfg.max_retries,
             }

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DocMaxxing</title>
+<link rel="icon" href="{{ url_for('static', filename='icon.png') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='app2/app.css') }}?v=20261028-2">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="topbar">
+    <button class="icon-btn" id="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar"></button>
+    <a class="logo" href="#/home" id="topbar-logo"></a>
+  </header>
+
+  <aside class="sidebar" id="sidebar" aria-label="Main navigation"></aside>
+  <div class="backdrop" id="backdrop"></div>
+
+  <div class="main-col">
+    <header class="app-header" id="app-header"></header>
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+<div class="sel-pop" id="sel-pop" hidden>
+  <button type="button" class="btn btn-sm btn-primary" data-act="ed-humanize-sel" data-tip-title="Humanize selection" data-tip-desc="Ctrl/⌘ + Shift + H">Humanize</button>
+  <span class="small muted" id="sel-pop-words"></span>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<dialog id="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+  <h2 id="confirm-title">Delete document?</h2>
+  <p id="confirm-text" class="muted"></p>
+  <div class="dialog-actions">
+    <button class="btn" id="confirm-cancel" type="button">Cancel</button>
+    <button class="btn btn-primary" id="confirm-ok" type="button">Delete</button>
+  </div>
+</dialog>
+
+<div class="tour" id="tour" hidden>
+  <div class="tour-blocker"></div>
+  <div class="tour-spot" id="tour-spot"></div>
+  <div class="tour-pop" id="tour-pop" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-text">
+    <div class="tour-count" id="tour-count"></div>
+    <h2 id="tour-title"></h2>
+    <p id="tour-text"></p>
+    <div class="tour-actions">
+      <button class="btn btn-ghost" type="button" data-tour="skip">Skip tour</button>
+      <span class="spacer"></span>
+      <button class="btn" type="button" data-tour="back">Back</button>
+      <button class="btn btn-primary" type="button" data-tour="next">Next</button>
+    </div>
+  </div>
+</div>
+
+<button class="support-btn" id="support-btn" type="button"></button>
+
+<dialog id="signup-dialog" aria-labelledby="signup-title"></dialog>
+
+<dialog id="tut-dialog" class="tut-dialog" aria-labelledby="tut-title"></dialog>
+
+<dialog id="withdraw-dialog" aria-labelledby="withdraw-title"></dialog>
+
+<dialog id="veil-dialog" class="veil-dialog" aria-labelledby="veil-dlg-title"></dialog>
+
+<noscript><p style="padding:24px">DocMaxxing needs JavaScript.</p></noscript>
+
+<script>window.DMX_BOOT = {{ boot|tojson }};</script>
+<script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
+<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261028-2"></script>
+<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261028-2"></script>
+</body>
+</html>

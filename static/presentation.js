@@ -27,12 +27,7 @@
   var CONTENT_LAYOUTS = { bullets: 1, image: 1, cards: 1, timeline: 1, two_column: 1 };
 
   var topicEl = document.getElementById("pres_topic");
-  var detailsEl = document.getElementById("pres_details");
-  var detailsWrap = document.getElementById("pres_details_wrap");
-  var detailsToggle = document.getElementById("pres_details_toggle");
-  var countEl = document.getElementById("pres_slide_count");
   var toneEl = document.getElementById("pres_tone");
-  var languageEl = document.getElementById("pres_language");
   var imagesEl = document.getElementById("pres_images");
   var generateBtn = document.getElementById("pres_generate_btn");
   var downloadBtn = document.getElementById("pres_download_btn");
@@ -47,9 +42,21 @@
   var galleryEl = document.getElementById("pres_gallery");
   var gridEl = document.getElementById("pres_theme_grid");
   var tabs = Array.prototype.slice.call(document.querySelectorAll(".pres-tab"));
+  var composerEl = document.getElementById("pres_composer");
+  var filesEl = document.getElementById("pres_files");
+  var fileInput = document.getElementById("pres_file_input");
+  var attachBtn = document.getElementById("pres_attach_btn");
+  var costEl = document.getElementById("pres_cost");
+
+  var BASE_COST = Number(page.dataset.cost) || 0;
+  var RESEARCH_COST = Number(page.dataset.researchCost) || 0;
+  var RESEARCH_MAX_CHARS = Number(page.dataset.researchMaxChars) || 1500;
+  var MAX_FILES = Number(page.dataset.maxFiles) || 3;
 
   var deck = null;
   var busy = false;
+  var files = [];
+  var fileSeq = 0;
   var selectedTheme = pickInitialTheme();
 
   function pickInitialTheme() {
@@ -399,7 +406,10 @@
     topicEl.style.height = Math.min(topicEl.scrollHeight, 220) + "px";
   }
 
-  topicEl.addEventListener("input", autoGrow);
+  topicEl.addEventListener("input", function () {
+    autoGrow();
+    updateCost();
+  });
   topicEl.addEventListener("keydown", function (e) {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
@@ -407,10 +417,118 @@
     }
   });
 
-  detailsToggle.addEventListener("click", function () {
-    var open = detailsWrap.classList.toggle("hidden") === false;
-    detailsToggle.setAttribute("aria-expanded", open ? "true" : "false");
-    if (open) detailsEl.focus();
+  /* ---------- research + attachments ---------- */
+
+  /* Mirrors needs_research() in services/presentation_generator.py. */
+  function researchOn() {
+    return !files.length && topicEl.value.trim().length <= RESEARCH_MAX_CHARS;
+  }
+
+  function updateCost() {
+    var total = BASE_COST + (researchOn() ? RESEARCH_COST : 0);
+    costEl.textContent = total + " credits";
+    costEl.title = researchOn()
+      ? "Includes " + RESEARCH_COST + " credits for web research. Paste or attach your own material to skip it."
+      : "";
+  }
+
+  function formatChars(n) {
+    var words = Math.round(n / 6);
+    return words >= 1000 ? (words / 1000).toFixed(1).replace(/\.0$/, "") + "k words" : words + " words";
+  }
+
+  function renderFiles() {
+    updateCost();
+    filesEl.innerHTML = "";
+    filesEl.classList.toggle("hidden", files.length === 0);
+    files.forEach(function (file) {
+      var item = el("li", "pres-file" + (file.loading ? " is-loading" : ""));
+      var name = el("span", "pres-file-name", file.name);
+      name.title = file.name;
+      item.appendChild(name);
+      var meta = file.loading ? "reading…" : formatChars(file.chars) + (file.truncated ? " (trimmed)" : "");
+      item.appendChild(el("span", "pres-file-meta", meta));
+      var remove = el("button", "pres-file-remove", "×");
+      remove.type = "button";
+      remove.title = "Remove " + file.name;
+      remove.setAttribute("aria-label", "Remove " + file.name);
+      remove.addEventListener("click", function () {
+        files = files.filter(function (f) {
+          return f.id !== file.id;
+        });
+        renderFiles();
+      });
+      item.appendChild(remove);
+      filesEl.appendChild(item);
+    });
+  }
+
+  async function uploadFile(file) {
+    var entry = { id: ++fileSeq, name: file.name, loading: true, text: "", chars: 0 };
+    files.push(entry);
+    renderFiles();
+    var fd = new FormData();
+    fd.append("file", file);
+    try {
+      var res = await fetch("/api/presentation/extract", { method: "POST", body: fd });
+      var data = {};
+      try {
+        data = await res.json();
+      } catch (_e) {
+        data = {};
+      }
+      if (!res.ok || !data.success) throw new Error(errorMessage(res, data));
+      entry.text = data.text || "";
+      entry.chars = data.chars || entry.text.length;
+      entry.truncated = !!data.truncated;
+      entry.loading = false;
+      setStatus("");
+    } catch (err) {
+      files = files.filter(function (f) {
+        return f.id !== entry.id;
+      });
+      setStatus(file.name + ": " + (err.message || "could not read the file."), "error");
+    }
+    renderFiles();
+  }
+
+  function addFiles(list) {
+    var incoming = Array.prototype.slice.call(list || []);
+    if (!incoming.length) return;
+    var room = MAX_FILES - files.length;
+    if (room <= 0) {
+      setStatus("You can attach up to " + MAX_FILES + " files.", "error");
+      return;
+    }
+    if (incoming.length > room) setStatus("Only the first " + room + " file(s) were attached.", "error");
+    incoming.slice(0, room).forEach(uploadFile);
+  }
+
+  attachBtn.addEventListener("click", function () {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", function () {
+    addFiles(fileInput.files);
+    fileInput.value = "";
+  });
+
+  ["dragenter", "dragover"].forEach(function (type) {
+    composerEl.addEventListener(type, function (e) {
+      if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types || [], "Files") < 0) return;
+      e.preventDefault();
+      composerEl.classList.add("is-dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (type) {
+    composerEl.addEventListener(type, function () {
+      composerEl.classList.remove("is-dragover");
+    });
+  });
+  composerEl.addEventListener("drop", function (e) {
+    if (!e.dataTransfer || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    addFiles(e.dataTransfer.files);
   });
 
   function setLoading(on) {
@@ -447,17 +565,30 @@
   async function generate() {
     if (busy) return;
     var topic = topicEl.value.trim();
-    if (!topic) {
-      setStatus("Describe what the presentation is about first.", "error");
+    var pending = files.some(function (f) {
+      return f.loading;
+    });
+    if (pending) {
+      setStatus("Still reading your file — one moment.", "error");
+      return;
+    }
+    var attached = files.map(function (f) {
+      return { name: f.name, text: f.text };
+    });
+    if (!topic && !attached.length) {
+      setStatus("Describe what the presentation is about, or attach your brief.", "error");
       topicEl.focus();
       return;
     }
+    var research = researchOn();
     deck = null;
     setLoading(true);
     setStatus(
-      imagesEl.value === "on"
-        ? "Writing your slides and picking photos… this usually takes 30–90 seconds."
-        : "Writing your slides… this usually takes 20–60 seconds."
+      research
+        ? "Researching the web, then writing your slides… this usually takes 1–3 minutes."
+        : imagesEl.value === "on"
+          ? "Writing your slides and picking photos… this usually takes 30–90 seconds."
+          : "Writing your slides… this usually takes 20–60 seconds."
     );
     resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
     try {
@@ -466,12 +597,10 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           topic: topic,
-          details: detailsEl.value,
-          slide_count: Number(countEl.value),
           tone: toneEl.value,
-          language: languageEl.value,
           theme: selectedTheme,
           images: imagesEl.value === "on",
+          files: attached,
         }),
       });
       var data = {};
@@ -486,7 +615,11 @@
       }
       deck = data.deck;
       updateBalance(data.balance);
-      setStatus("Done — " + (deck.slides.length + 1) + " slides. Edit any text, then download the .pptx.", "success");
+      var done = "Done — " + (deck.slides.length + 1) + " slides. Edit any text, then download the .pptx.";
+      if (data.research === "failed") {
+        done += " Web research was unavailable, so its " + RESEARCH_COST + " credits were refunded.";
+      }
+      setStatus(done, "success");
       renderDeck();
       downloadBtn.disabled = false;
     } catch (_err) {
@@ -547,6 +680,8 @@
     resultEl.classList.add("hidden");
     downloadBtn.disabled = true;
     topicEl.value = "";
+    files = [];
+    renderFiles();
     autoGrow();
     setStatus("");
     page.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -559,4 +694,5 @@
 
   renderGallery();
   selectTheme(selectedTheme);
+  updateCost();
 })();

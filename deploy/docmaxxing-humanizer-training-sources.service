@@ -7,9 +7,11 @@ Type=oneshot
 User=root
 WorkingDirectory=/root/docmaxxing
 EnvironmentFile=-/root/docmaxxing/.env
-# Writes Claude-written source documents to data/humanizer_training/source_pool only.
-# Never calls StealthWriter; the 04:50 collection consumes the pool.
-ExecStart=/root/docmaxxing/venv/bin/python /root/docmaxxing/scripts/fill_humanizer_source_pool.py --target 50
+# Writes AI-written source documents to data/humanizer_training/source_pool only.
+# Never calls StealthWriter; the teacher collection consumes the pool.
+# Writers: $HUMANIZER_SOURCE_MIX (e.g. gemini:gemini-3.5-flash:3,claude:claude-sonnet-4-6:1).
+# Target: $HUMANIZER_SOURCE_POOL_TARGET (150 keeps bulk collection fed between runs).
+ExecStart=/bin/sh -c 'exec /root/docmaxxing/venv/bin/python /root/docmaxxing/scripts/fill_humanizer_source_pool.py --target "${HUMANIZER_SOURCE_POOL_TARGET:-50}" --workers 4'
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

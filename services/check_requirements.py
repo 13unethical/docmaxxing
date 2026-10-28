@@ -9,14 +9,19 @@ from typing import Any
 from services.document_checker import parse_requirements_for_check
 from services.requirements_parser import _strict_requirements_from_text
 
-_WORD_RANGE = re.compile(
-    r"(?:between|from)\s+(\d{1,5})\s+(?:and|to|-)\s+(\d{1,5})\s*words?",
-    re.I,
-)
-_WORD_RANGE_DASH = re.compile(r"\b(\d{1,5})\s*[-–]\s*(\d{1,5})\s*words?\b", re.I)
-_MAX_WORDS = re.compile(r"(?:max(?:imum)?|no more than|up to|at most)\s+(\d{1,5})\s*words?", re.I)
-_MIN_WORDS = re.compile(r"(?:min(?:imum)?|at least|no fewer than)\s+(\d{1,5})\s*words?", re.I)
-_EXACT_WORDS = re.compile(r"\b(\d{1,5})\s*words?\b", re.I)
+# "1500" or "1,500"; "words" may be joined with a hyphen ("a 1500-word essay")
+_N = r"(\d{1,3}(?:[,\u00a0]\d{3})+|\d{1,5})"
+_W = r"\s*-?\s*words?\b"
+_WORD_RANGE = re.compile(rf"(?:between|from)\s+{_N}\s+(?:and|to|-)\s+{_N}{_W}", re.I)
+_WORD_RANGE_DASH = re.compile(rf"\b{_N}\s*[-–]\s*{_N}{_W}", re.I)
+_MAX_WORDS = re.compile(rf"(?:max(?:imum)?|no more than|up to|at most)\s+{_N}{_W}", re.I)
+_MIN_WORDS = re.compile(rf"(?:min(?:imum)?|at least|no fewer than)\s+{_N}{_W}", re.I)
+_EXACT_WORDS = re.compile(rf"\b{_N}{_W}", re.I)
+_TOLERANCE = re.compile(r"(?:±|\+/-|\+-|plus or minus)\s*(\d{1,2})\s*%", re.I)
+
+
+def _int(token: str) -> int:
+    return int(re.sub(r"\D", "", token))
 _PEER_REVIEWED = re.compile(
     r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+"
     r"(?:peer[-\s]?reviewed\s+)?(?:journal\s+)?(?:articles?|sources?|references?)\b",
@@ -104,21 +109,25 @@ def parse_word_count_spec(spec: str | None) -> tuple[int | None, int | None, flo
 
     m = _WORD_RANGE.search(text) or _WORD_RANGE_DASH.search(text)
     if m:
-        return int(m.group(1)), int(m.group(2)), 0.95
+        return _int(m.group(1)), _int(m.group(2)), 0.95
 
     m = _MAX_WORDS.search(text)
     if m:
-        n = int(m.group(1))
+        n = _int(m.group(1))
         return None, n, 0.9
 
     m = _MIN_WORDS.search(text)
     if m:
-        n = int(m.group(1))
+        n = _int(m.group(1))
         return n, None, 0.9
 
     m = _EXACT_WORDS.search(text)
     if m:
-        n = int(m.group(1))
+        n = _int(m.group(1))
+        tol = _TOLERANCE.search(text[m.end():m.end() + 30])
+        if tol:
+            pct = int(tol.group(1)) / 100
+            return int(round(n * (1 - pct))), int(round(n * (1 + pct))), 0.9
         if any(x in low for x in ("approximately", "around", "about", "roughly")):
             return int(n * 0.9), int(n * 1.1), 0.55
         if any(x in low for x in ("minimum", "min", "at least", "maximum", "max", "limit")):
@@ -176,10 +185,10 @@ def normalize_requirements(
             word_min = pmin
         if pmax is not None:
             word_max = pmax
-    if word_min is None and word_max is None and text:
-        pmin, pmax, word_conf = parse_word_count_spec(text)
-        word_min = word_min or pmin
-        word_max = word_max or pmax
+    if (word_min is None or word_max is None) and not word_spec and text:
+        pmin, pmax, pconf = parse_word_count_spec(text)
+        if pmin is not None or pmax is not None:
+            word_min, word_max, word_conf = pmin, pmax, pconf
     if word_min is not None or word_max is not None:
         word_conf = max(word_conf, 0.85)
 

@@ -323,6 +323,53 @@ def test_flat_schema_has_no_nested_objects_or_refs() -> None:
     _assert_flat(schema, root=True)
 
 
+def test_gemini_wire_schema_pairs_values_with_evidence() -> None:
+    from formatter_v2.smartform.gemini_client import gemini_response_schema
+
+    wire = gemini_response_schema(build_response_schema())
+    assert "additionalProperties" not in json.dumps(wire)
+    assert "evidence" not in wire["properties"]
+    font = wire["properties"]["font_family"]
+    assert font["required"] == ["value", "evidence"]
+    assert font["properties"]["value"]["enum"]
+    assert "nullable" not in font["properties"]["value"]
+    assert wire["properties"]["warnings"]["type"] == "array"
+
+
+def test_gemini_response_flattens_back_and_survives_postprocess() -> None:
+    from formatter_v2.smartform.gemini_client import (
+        GeminiSmartformClient,
+        flatten_gemini_response,
+    )
+
+    brief = "Use APA 7th edition. Use Arial 11 pt, double spacing."
+    wire = {
+        "style": {"value": "apa7", "evidence": "APA 7th edition"},
+        "font_family": {"value": "Arial", "evidence": "Arial 11 pt"},
+        "font_size_pt": {"value": 11, "evidence": "Arial 11 pt"},
+        "line_spacing": {"value": 2, "evidence": "double spacing"},
+        "page_size": {"value": None, "evidence": ""},
+        "warnings": [],
+    }
+    flat = flatten_gemini_response(wire)
+    assert flat["font_family"] == "Arial"
+    assert flat["page_size"] is None
+    assert flat["evidence"] == {
+        "style": "APA 7th edition",
+        "font_family": "Arial 11 pt",
+        "font_size_pt": "Arial 11 pt",
+        "line_spacing": "double spacing",
+    }
+
+    client = GeminiSmartformClient()
+    client.generate = MagicMock(return_value=flat)  # type: ignore[method-assign]
+    result = extract_requirements(brief, client)
+    assert result.style == StyleName.APA7
+    assert result.font_family is not None and result.font_family.value == "Arial"
+    assert result.line_spacing == 2.0
+    assert not result.warnings
+
+
 def test_prompt_version_matches_document() -> None:
     from formatter_v2.smartform import extract as extract_mod
 

@@ -25,7 +25,7 @@ from typing import Any
 
 import requests
 from docx import Document
-from flask import Flask, Response, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
+from flask import Flask, Response, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 
 from formatter import FormatJob, format_document_full
 from formatter.document_reconstruction import reconstruct_document_before_format
@@ -94,6 +94,7 @@ from services.economy import (
     package as economy_package,
 )
 from services.economy import auth as economy_auth
+from services.economy import plans as plans_service
 from services.economy.admin import AdminError, AdminService, bootstrap_admin_from_env
 from services.economy.avatar_upload import AvatarUploadError, validate_and_store_avatar
 from services.economy.disposable_email import DisposableEmailError
@@ -215,6 +216,7 @@ wallet = WalletService()
 paddle_purchases = PaddlePurchaseService()
 usage_service = UsageService()
 admin_service = AdminService(wallet, paddle_purchases, usage_service)
+ACCOUNT_BLOCKED_MESSAGE = "This account is blocked. Contact support if you think this is a mistake."
 turnitin_service = TurnitinService()
 
 
@@ -256,11 +258,19 @@ def _charge_current_user(feature: str, cost: int, *, ref_id: str | None = None, 
             effective = 0
             # Bust cached user so free report count refreshes
             try:
-                from flask import g
-
                 g._economy_user = None
             except RuntimeError:
                 pass
+
+    plan_free = None
+    if effective > 0:
+        from services.economy.plans import consume_free_use
+
+        plan_free = consume_free_use(int(user["id"]), feature)
+        if plan_free:
+            effective = 0
+            if plan_free == "quota":
+                g.setdefault("plan_free_uses", []).append(feature)
 
     if effective > 0:
         effective = apply_pro_discount(user, effective)
@@ -288,10 +298,18 @@ def _charge_current_user(feature: str, cost: int, *, ref_id: str | None = None, 
         {
             "amount": 0,
             "free_turnitin": used_free_turnitin,
+            "plan_free": plan_free,
             "feature": feature,
             "ref_id": ref_id,
         },
     )
+
+
+def _charged_amount(tx: Any, fallback: int) -> int:
+    """Credits actually taken by ``_charge_current_user`` (0 for free reports and plan allowances)."""
+    if isinstance(tx, dict) and "amount" in tx:
+        return abs(int(tx.get("amount") or 0))
+    return int(fallback)
 
 
 def _send_user_verification_email(user: dict, *, background: bool = False) -> str | None:
@@ -433,6 +451,20 @@ def _activity_ledger_hook(response):
 
 def _refund_safe(user_id: int, cost: int, feature: str, *, ref_id: str | None = None) -> None:
     """Best-effort refund; never raises into the request path."""
+    if int(cost) <= 0:
+        try:
+            free_uses = g.get("plan_free_uses") or []
+        except RuntimeError:
+            free_uses = []
+        if feature in free_uses:
+            free_uses.remove(feature)
+            try:
+                from services.economy.plans import release_free_use
+
+                release_free_use(int(user_id), feature)
+            except Exception:  # noqa: BLE001
+                app.logger.exception("plan allowance release failed user=%s feature=%s", user_id, feature)
+        return
     try:
         wallet.refund(user_id, int(cost), feature, ref_id=ref_id, meta={"reason": "auto-refund"})
     except Exception:  # noqa: BLE001
@@ -444,6 +476,17 @@ def _assignment_auto_refund(project_id: str, *, reason: str) -> dict[str, Any] |
     user_id = economy_auth.current_user_id()
     if not user_id:
         return None
+    try:
+        art = project_service.store.require_bundle(project_id).project.artifacts or {}
+    except KeyError:
+        return None
+    if art.get("plan_free_paper") and art.get("payment_confirmed") and not art.get("payment_refunded") \
+            and not art.get("delivery_package"):
+        from services.economy.plans import release_free_use
+
+        release_free_use(int(user_id), "assignment")
+        project_service.mark_assignment_refunded(project_id, 0)
+        return {"refunded": True, "coins_refunded": 0, "balance": wallet.get_balance(int(user_id))}
     try:
         coins = project_service.assert_assignment_refund_eligible(project_id)
     except (KeyError, ValueError):
@@ -591,6 +634,7 @@ CITATION_STYLES = frozenset({"APA", "MLA", "Harvard", "Chicago", "IEEE", "Vancou
 REQUIREMENTS_IMAGE_EXT = frozenset({".jpg", ".jpeg", ".png"})
 REQUIREMENTS_TEXT_EXT = frozenset({".txt", ".md"})
 REQUIREMENTS_DOC_EXT = frozenset({".docx", ".pdf"}) | REQUIREMENTS_TEXT_EXT | REQUIREMENTS_IMAGE_EXT
+PRESENTATION_FILE_EXT = REQUIREMENTS_DOC_EXT | {".pptx"}
 
 # Telegram Bot API: TELEGRAM_TOKEN + CHAT_ID (also accepts TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID).
 TELEGRAM_SEND_MESSAGE_TIMEOUT_S = 12
@@ -962,6 +1006,14 @@ def login():
             form={"email": email},
             next_url=next_url,
         ), 401
+    if user.get("is_blocked"):
+        return render_template(
+            "login.html",
+            nav_active=None,
+            error=ACCOUNT_BLOCKED_MESSAGE,
+            form={"email": email},
+            next_url=next_url,
+        ), 403
 
     economy_auth.login_user(user["id"])
     if not economy_auth.user_email_verified(user):
@@ -1234,6 +1286,15 @@ def api_admin_site_settings():
         return jsonify({"success": False, "error": "No settings provided."}), 400
     try:
         settings = update_site_settings(**kwargs)
+        from services.economy.activity_log import log_activity
+
+        log_activity(
+            "admin.settings_changed",
+            category="admin",
+            actor_id=int(economy_auth.current_user_id()),
+            summary="Settings changed: " + ", ".join(f"{k} = {v}" for k, v in kwargs.items()),
+            details=kwargs,
+        )
         dash = get_admin_dashboard_stats()
         return jsonify(
             {
@@ -1495,6 +1556,145 @@ def api_admin_dataset_stats():
     return jsonify({"success": True, **stats, **samples})
 
 
+def _admin_panel_call(fn, *args, **kwargs):
+    from services.economy.admin_panel import AdminPanelError
+
+    try:
+        return jsonify({"success": True, **fn(*args, **kwargs)})
+    except AdminPanelError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+
+def _admin_int(name: str, default: int = 0) -> int:
+    try:
+        return int(request.args.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+@app.get("/api/admin/panel/overview")
+@economy_auth.admin_required
+def api_admin_panel_overview():
+    from services.economy import admin_panel
+
+    return _admin_panel_call(admin_panel.overview)
+
+
+@app.get("/api/admin/panel/users")
+@economy_auth.admin_required
+def api_admin_panel_users():
+    from services.economy import admin_panel
+
+    return _admin_panel_call(
+        admin_panel.list_users,
+        query=request.args.get("q") or "",
+        filter_=request.args.get("filter") or "all",
+        limit=_admin_int("limit", 50),
+        offset=_admin_int("offset", 0),
+    )
+
+
+@app.get("/api/admin/panel/users.csv")
+@economy_auth.admin_required
+def api_admin_panel_users_csv():
+    from services.economy import admin_panel
+
+    return Response(
+        admin_panel.users_csv(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=users.csv"},
+    )
+
+
+@app.get("/api/admin/panel/users/<int:user_id>")
+@economy_auth.admin_required
+def api_admin_panel_user(user_id: int):
+    from services.economy import admin_panel
+
+    return _admin_panel_call(admin_panel.user_detail, user_id)
+
+
+@app.post("/api/admin/panel/users/<int:user_id>/credits")
+@economy_auth.admin_required
+def api_admin_panel_credits(user_id: int):
+    from services.economy import admin_panel
+
+    body = request.get_json(silent=True) or {}
+    delta = body.get("delta")
+    if isinstance(delta, bool) or not isinstance(delta, int):
+        return jsonify({"success": False, "error": "delta must be a whole number."}), 400
+    return _admin_panel_call(
+        admin_panel.adjust_credits, user_id, delta,
+        reason=str(body.get("reason") or ""), admin_id=int(economy_auth.current_user_id()),
+    )
+
+
+@app.post("/api/admin/panel/users/<int:user_id>/block")
+@economy_auth.admin_required
+def api_admin_panel_block(user_id: int):
+    from services.economy import admin_panel
+
+    body = request.get_json(silent=True) or {}
+    return _admin_panel_call(
+        admin_panel.set_blocked, user_id, bool(body.get("blocked", True)),
+        admin_id=int(economy_auth.current_user_id()), remove_bonus=bool(body.get("remove_bonus")),
+    )
+
+
+@app.post("/api/admin/panel/users/block")
+@economy_auth.admin_required
+def api_admin_panel_block_many():
+    from services.economy import admin_panel
+
+    body = request.get_json(silent=True) or {}
+    ids = body.get("ids") if isinstance(body.get("ids"), list) else []
+    return _admin_panel_call(
+        admin_panel.block_many, ids[:500],
+        admin_id=int(economy_auth.current_user_id()), remove_bonus=bool(body.get("remove_bonus", True)),
+    )
+
+
+@app.post("/api/admin/panel/users/<int:user_id>/flag")
+@economy_auth.admin_required
+def api_admin_panel_flag(user_id: int):
+    from services.economy import admin_panel
+
+    body = request.get_json(silent=True) or {}
+    return _admin_panel_call(
+        admin_panel.set_account_flag, user_id, body.get("flag"),
+        admin_id=int(economy_auth.current_user_id()),
+    )
+
+
+@app.post("/api/admin/panel/users/<int:user_id>/clear")
+@economy_auth.admin_required
+def api_admin_panel_clear(user_id: int):
+    from services.economy import admin_panel
+
+    body = request.get_json(silent=True) or {}
+    return _admin_panel_call(
+        admin_panel.set_flag_cleared, user_id, bool(body.get("cleared", True)),
+        admin_id=int(economy_auth.current_user_id()),
+    )
+
+
+@app.get("/api/admin/panel/activity")
+@economy_auth.admin_required
+def api_admin_panel_activity():
+    from services.economy import admin_panel
+
+    flag = lambda name: str(request.args.get(name, "1")).lower() not in {"0", "false", "no"}  # noqa: E731
+    return _admin_panel_call(
+        admin_panel.activity_feed,
+        category=request.args.get("cat") or "all",
+        query=request.args.get("q") or "",
+        hide_bots=flag("hide_bots"),
+        hide_staff=flag("hide_staff"),
+        limit=_admin_int("limit", 60),
+        offset=_admin_int("offset", 0),
+    )
+
+
 @app.route("/admin/dataset-stats")
 @economy_auth.admin_required
 def admin_dataset_stats_page():
@@ -1514,9 +1714,11 @@ def _auth_success_payload(user: dict) -> dict:
             "name": user.get("name"),
             "is_verified": bool(user.get("is_verified")),
             "avatar_file": user.get("avatar_file"),
+            "is_admin": bool(economy_auth.is_admin(user)),
         },
         "balance": wallet.get_balance(user["id"]),
         "welcome_bonus_granted": bool(user.get("welcome_bonus_granted")),
+        "veil": _veil_client_status(int(user["id"])),
     }
 
 
@@ -1580,6 +1782,8 @@ def api_auth_login():
     economy_auth.log_login_attempt(email, user)
     if user is None:
         return jsonify({"success": False, "error": "Incorrect email or password."}), 401
+    if user.get("is_blocked"):
+        return jsonify({"success": False, "error": "ACCOUNT_BLOCKED", "message": ACCOUNT_BLOCKED_MESSAGE}), 403
     economy_auth.login_user(user["id"])
     payload_out = _auth_success_payload(user)
     payload_out["email_verification_required"] = not economy_auth.user_email_verified(user)
@@ -1620,6 +1824,66 @@ def api_upload_avatar():
             "avatar_url": url_for("static", filename=relative),
         }
     )
+
+
+@app.post("/api/account/profile")
+@economy_auth.login_required
+def api_account_profile():
+    payload = request.get_json(silent=True) or {}
+    try:
+        user = economy_auth.update_profile(
+            int(economy_auth.current_user_id()), name=str(payload.get("name") or "")
+        )
+    except economy_auth.AuthError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True, "name": user.get("name") or ""})
+
+
+@app.post("/api/account/password")
+@economy_auth.login_required
+def api_account_password():
+    payload = request.get_json(silent=True) or {}
+    new_password = str(payload.get("new_password") or "")
+    if new_password != str(payload.get("confirm_password") or ""):
+        return jsonify({"success": False, "error": "New password and confirmation do not match."}), 400
+    try:
+        economy_auth.change_password(
+            int(economy_auth.current_user_id()),
+            current_password=str(payload.get("current_password") or ""),
+            new_password=new_password,
+        )
+    except economy_auth.AuthError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return jsonify({"success": True})
+
+
+_CONTACT_LIMIT_PER_HOUR = 5
+
+
+@app.post("/api/contact")
+def api_contact():
+    """Help page form for visitors without an account; signed-in users go through /api/feedback."""
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email") or "").strip()[:200]
+    topic = str(payload.get("topic") or "").strip()[:80]
+    message = str(payload.get("message") or "").strip()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return jsonify({"success": False, "error": "Enter a valid email so we can reply."}), 400
+    if not message:
+        return jsonify({"success": False, "error": "Write a message."}), 400
+    if len(message) > 4000:
+        return jsonify({"success": False, "error": "Message is too long (4000 characters max)."}), 400
+    now = time.time()
+    sent = [t for t in session.get("contact_sent", []) if now - t < 3600]
+    if len(sent) >= _CONTACT_LIMIT_PER_HOUR:
+        return jsonify({"success": False, "error": "Too many messages. Please try again later."}), 429
+    text = f"Help form (no account)\nEmail: {email}\nTopic: {topic or '-'}\n\n{message}"
+    _tg, err, err_status = _send_telegram_text(text)
+    if err:
+        app.logger.error("contact form: Telegram delivery failed: %s", err)
+        return jsonify({"success": False, "error": "Could not send right now. Email support@docmaxxing.com."}), err_status
+    session["contact_sent"] = sent + [now]
+    return jsonify({"success": True})
 
 
 # ------------------------------------------------------------- economy API
@@ -1842,13 +2106,48 @@ def api_payments_create():
     Only ``package`` (id) is accepted from the client. Amount and credits are
     resolved exclusively from the server-side TOPUP catalog.
     """
+    from services.economy.plans import PlanError, checkout_item
+
     user = economy_auth.current_user()
     payload = request.get_json(silent=True) or {}
-    # Ignore any client-supplied amount/credits/usd — never trusted.
+    # Prices come from the server catalog; the client only names a package, a plan or a credit amount.
     package_id = str(payload.get("package") or payload.get("package_id") or "").strip()
-    if not package_id:
+    plan_id = str(payload.get("plan") or "").strip()
+    item = None
+    if plan_id or (not package_id and payload.get("credits") is not None):
+        try:
+            item = checkout_item(
+                plan_id=plan_id or None,
+                credits=payload.get("credits"),
+                quantity=None if plan_id else payload.get("quantity"),
+            )
+        except PlanError as exc:
+            return jsonify({"error": "INVALID_ITEM", "message": str(exc)}), 400
+        from services.economy import lemon_plans
+        from services.economy.lemon_api import LemonApiError
+
+        if plan_id:
+            plan_key = item["id"][len("plan_"):]
+            subscription = lemon_plans.active_subscription(int(user["id"]))
+            if subscription and subscription.get("portal_url"):
+                return jsonify({"success": True, "provider": "lemon_squeezy",
+                                "payment_url": subscription["portal_url"], "manage": True})
+            lemon_url = lemon_plans.plan_checkout(plan_key, user_id=int(user["id"]), email=user.get("email"))
+            if lemon_url:
+                return jsonify({"success": True, "provider": "lemon_squeezy", "payment_url": lemon_url})
+        elif lemon_plans.payg_configured():
+            try:
+                lemon_url = lemon_plans.payg_checkout(
+                    int(item["coins"]), user_id=int(user["id"]), email=user.get("email")
+                )
+            except LemonApiError as exc:
+                app.logger.warning("lemon payg checkout failed: %s", exc)
+                return jsonify({"error": "CHECKOUT_FAILED",
+                                "message": "Checkout is not available right now. Please try again."}), 502
+            return jsonify({"success": True, "provider": "lemon_squeezy", "payment_url": lemon_url})
+    elif not package_id:
         return jsonify({"error": "package is required"}), 400
-    if economy_package(package_id) is None:
+    elif economy_package(package_id) is None:
         return jsonify({"error": "Unknown package"}), 400
     if not cryptomus_configured():
         return (
@@ -1861,10 +2160,21 @@ def api_payments_create():
             503,
         )
     try:
-        invoice = cryptomus_create_invoice(
-            user_id=int(user["id"]),
-            package_id=package_id,
-        )
+        if item is not None:
+            from services.economy.cryptomus_gateway import create_invoice_for_item
+
+            from_app = payload.get("return_to") == "app"
+            invoice = create_invoice_for_item(
+                user_id=int(user["id"]),
+                item=item,
+                return_path="/app#/pricing" if from_app else None,
+                success_path="/app?paid=1#/billing" if from_app else None,
+            )
+        else:
+            invoice = cryptomus_create_invoice(
+                user_id=int(user["id"]),
+                package_id=package_id,
+            )
     except CryptomusGatewayError as exc:
         app.logger.warning("cryptomus create invoice failed: %s", exc)
         return jsonify({"error": str(exc)}), 400
@@ -2043,6 +2353,19 @@ def _veil_bearer_user():
     return user_for_token(header[7:])
 
 
+def _extension_user(payload: dict | None = None):
+    """Resolve the Chrome-extension user from Bearer token or JSON ``key``."""
+    user = _veil_bearer_user()
+    if user is not None:
+        return user
+    raw = str((payload or {}).get("key") or "").strip()
+    if not raw:
+        return None
+    from services.veil_tokens import user_for_token
+
+    return user_for_token(raw)
+
+
 @app.route('/veil')
 def veil_landing():
     from services.veil_access import pass_cost, pass_days, pass_status
@@ -2094,6 +2417,50 @@ def veil_unlock():
         return redirect("/veil?error=credits#access")
     _record_usage_safe(int(user["id"]), feature="veil", credits_used=int(result["credits"]))
     return redirect("/veil?unlocked=1#access")
+
+
+@app.post("/api/veil/unlock")
+@economy_auth.email_verified_required()
+def api_veil_unlock():
+    """Unlock or extend the Veil pass from the app. Renewing adds days on top of the time left."""
+    from services.veil_access import purchase_pass
+
+    user_id = int(economy_auth.current_user_id())
+    try:
+        result = purchase_pass(user_id)
+    except InsufficientCoins as exc:
+        return jsonify({
+            "success": False,
+            "error": "INSUFFICIENT_COINS",
+            "message": f"Not enough credits. Veil needs {exc.required} credits; you have {exc.balance}.",
+            "required": exc.required,
+            "balance": exc.balance,
+        }), 402
+    _record_usage_safe(user_id, feature="veil", credits_used=int(result["credits"]))
+    return jsonify({
+        "success": True,
+        "veil": _veil_client_status(user_id),
+        "balance": int(result["balance"]),
+        "credits": int(result["credits"]),
+    })
+
+
+@app.post("/api/veil/email-link")
+@economy_auth.login_required
+def api_veil_email_link():
+    """Send the Veil page link to the user's email, to open on a computer."""
+    from services.economy.email_verify import EmailVerifyError, send_veil_link_email
+
+    user = economy_auth.current_user()
+    try:
+        sent = send_veil_link_email(to_email=user["email"], link=f"{_public_origin()}/app#/veil")
+    except EmailVerifyError:
+        return jsonify({"success": False, "error": "EMAIL_FAILED",
+                        "message": "We couldn't send the email. Please try again later."}), 502
+    if not sent:
+        return jsonify({"success": False, "error": "EMAIL_UNAVAILABLE",
+                        "message": "Email isn't available right now. Open docmaxxing.com/app on your computer."}), 503
+    return jsonify({"success": True, "email": user["email"]})
 
 
 @app.route("/veil/connect")
@@ -2150,7 +2517,20 @@ def api_veil_revoke():
 _VEIL_SYSTEM_PROMPT = """You are a study tutor inside a browser overlay. The student is reading a page and asks about a passage, or sends a cropped image of a formula, diagram, notes, or a slide.
 
 Explain the material so they understand it. When detailed mode is on, show the reasoning step by step. When it is off, answer in a short paragraph or a few bullets.
-Reply in the language of the student's question. Do not invent sources, citations, or statistics. If an image is unreadable, say so."""
+Reply in the language of the student's question. Do not invent sources, citations, or statistics. If an image is unreadable, say so.
+The overlay shows plain text only: no Markdown, no LaTeX, no $ signs. Write formulas inline with ordinary characters and Unicode symbols (x², √, ∫, π, ≈, ≤, →, ½) and number the steps as 1), 2), 3)."""
+
+
+def _veil_plain_text(answer: str) -> str:
+    """The overlay renders text verbatim, so drop Markdown the models still emit."""
+    import re
+
+    text = re.sub(r"(?m)^[ \t]*#{1,6}[ \t]+", "", answer)
+    text = re.sub(r"(?m)^[ \t]*(-{3,}|\*{3,}|_{3,})[ \t]*$\n?", "", text)
+    text = re.sub(r"\*\*(.+?)\*\*|__(.+?)__", lambda m: m.group(1) or m.group(2), text)
+    text = re.sub(r"(?m)^([ \t]*)[-*][ \t]+", r"\1• ", text)
+    text = re.sub(r"\$\$?([^$\n]+?)\$\$?", r"\1", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _veil_images(raw) -> tuple[list[dict], str | None]:
@@ -2223,16 +2603,30 @@ def api_veil_ask():
         ), 402
 
     extended = bool(payload.get("extended"))
+    mode = "deep" if str(payload.get("model") or "").strip().lower() == "deep" else "fast"
     prompt = text or "Explain this image."
     if extended:
         prompt += "\n\nGive a detailed, step-by-step explanation."
-    blocks: list[dict] = [{"type": "text", "text": prompt}, *images]
     started = time.monotonic()
+    haiku = (os.environ.get("VEIL_FAST_MODEL") or "claude-haiku-5-5").strip()
+    sonnet = (os.environ.get("VEIL_DEEP_MODEL") or "claude-sonnet-5-5").strip()
+    primary = sonnet if mode == "deep" else haiku
+    fallback = haiku if mode == "deep" else sonnet
+    max_tokens = 4000 if mode == "deep" or extended else 700
+    provider = "anthropic"
     answer, _diag = generate_reply(
         system_prompt=_VEIL_SYSTEM_PROMPT,
-        content=blocks,
-        max_tokens=1800 if extended else 700,
+        content=[{"type": "text", "text": prompt}, *images],
+        model=primary,
+        max_tokens=max_tokens,
     )
+    if not answer:
+        answer, _diag = generate_reply(
+            system_prompt=_VEIL_SYSTEM_PROMPT,
+            content=[{"type": "text", "text": prompt}, *images],
+            model=fallback,
+            max_tokens=max_tokens,
+        )
     if not answer:
         return jsonify(
             {
@@ -2246,12 +2640,236 @@ def api_veil_ask():
         user_id,
         feature="veil",
         credits_used=0,
-        provider="anthropic",
+        provider=provider,
         latency=int((time.monotonic() - started) * 1000),
     )
     return jsonify(
-        {"success": True, "answer": answer, "credits_used": 0, "balance": wallet.get_balance(user_id)}
+        {
+            "success": True,
+            "answer": _veil_plain_text(answer),
+            "model": mode,
+            "credits_used": 0,
+            "balance": wallet.get_balance(user_id),
+        }
     )
+
+
+def _run_stealthwriter_humanize_job(text: str):
+    """Run the production Humanizer job. Returns (job, error_response).
+
+    ``error_response`` is a Flask Response when the job did not complete.
+    """
+    from services.browser.jobs.retry import MAX_RETRIES
+
+    ensure_engine_started()
+    if job_manager is None or browser_worker is None:
+        resp = jsonify(
+            {
+                "ok": False,
+                "success": False,
+                "error": "UNAVAILABLE",
+                "message": "Humanizer is not available right now. Try again.",
+            }
+        )
+        resp.status_code = 503
+        return None, resp
+
+    job = job_manager.create(
+        "stealthwriter", "humanize", {"text": text}, max_retries=MAX_RETRIES
+    )
+    max_wait = (browser_worker.job_timeout + 30) * (job.max_retries + 1) + 30
+    job_manager.wait(job.id, timeout=max_wait)
+    job = job_manager.get(job.id)
+    if job is None:
+        resp = jsonify(
+            {
+                "ok": False,
+                "success": False,
+                "error": "job not found",
+                "message": "Humanizer did not finish. Credits were not kept.",
+            }
+        )
+        resp.status_code = 500
+        return None, resp
+
+    status = job.status.value
+    if status == "COMPLETED":
+        return job, None
+
+    body = {
+        "ok": False,
+        "success": False,
+        "error": job.error or status.lower(),
+        "message": job.error or "Humanizer failed. Try again.",
+        "job_id": job.id,
+    }
+    code = job.error_code
+    if status == "CANCELLED":
+        body["error"] = "cancelled"
+        return job, (jsonify(body), 409)
+    if code == "LOGIN_REQUIRED":
+        body["error"] = "LOGIN_REQUIRED"
+        body["message"] = "Humanizer is temporarily unavailable. Try again shortly."
+        return job, (jsonify(body), 401)
+    if code == "NO_CHANGE":
+        body["error"] = "NO_CHANGE"
+        return job, (jsonify(body), 409)
+    if code == "TIMEOUT":
+        body["error"] = "timeout"
+        body["message"] = "Humanizer timed out. Try a shorter selection."
+        return job, (jsonify(body), 504)
+    if not job.is_terminal:
+        body["error"] = "still running"
+        body["status"] = status
+        return job, (jsonify(body), 202)
+    return job, (jsonify(body), 500)
+
+
+@app.post("/api/extension/humanize")
+def api_extension_humanize():
+    """Quick Humanize from the Veil overlay. Charges the signed-in user's credits."""
+    from services.economy.referral import apply_pro_discount
+    from services.economy.pricing import FEATURE_COSTS
+    from services.economy.site_settings import humanize_credit_cost
+
+    payload = request.get_json(silent=True) or {}
+    user = _extension_user(payload)
+    if user is None:
+        return jsonify(
+            {
+                "ok": False,
+                "success": False,
+                "error": "AUTH_REQUIRED",
+                "message": "Sign in from the Veil icon first.",
+            }
+        ), 401
+    if not economy_auth.user_email_verified(user):
+        return jsonify(
+            {
+                "ok": False,
+                "success": False,
+                "error": "EMAIL_NOT_VERIFIED",
+                "message": "Please verify your email first.",
+            }
+        ), 403
+
+    text = payload.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify(
+            {
+                "ok": False,
+                "success": False,
+                "error": "EMPTY",
+                "message": "Highlight text first.",
+            }
+        ), 400
+    if len(text) > 80_000:
+        return jsonify(
+            {
+                "ok": False,
+                "success": False,
+                "error": "TOO_LONG",
+                "message": "Selection is too long (80000 characters max).",
+            }
+        ), 400
+
+    pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
+    cost = int(pricing["charged"])
+    user_id = int(user["id"])
+    charged_amount = apply_pro_discount(user, cost) if cost > 0 else 0
+    charge_meta = {
+        "original_price": pricing["original_price"],
+        "discount_active": pricing["discount_active"],
+        "discount_percent": pricing["discount_percent"],
+        "discount_source": pricing["discount_source"],
+        "source": "extension",
+    }
+    if charged_amount > 0:
+        try:
+            wallet.debit(user_id, charged_amount, "humanize", meta=charge_meta)
+        except InsufficientCoins as exc:
+            return jsonify(
+                {
+                    "ok": False,
+                    "success": False,
+                    "error": "INSUFFICIENT_COINS",
+                    "message": (
+                        f"Not enough credits. This requires {exc.required} credits; "
+                        f"you have {exc.balance}."
+                    ),
+                    "required": exc.required,
+                    "balance": exc.balance,
+                }
+            ), 402
+
+    def _refund_extension_humanize(**kwargs: Any) -> None:
+        if charged_amount <= 0:
+            return
+        _refund_safe(user_id, charged_amount, "humanize", **kwargs)
+
+    try:
+        job, err = _run_stealthwriter_humanize_job(text)
+        if err is not None:
+            _refund_extension_humanize(ref_id=getattr(job, "id", None))
+            return err
+        res = (job.result or {}) if job is not None else {}
+        humanized_out = res.get("humanized_text")
+        if not isinstance(humanized_out, str) or not humanized_out.strip():
+            _refund_extension_humanize(ref_id=getattr(job, "id", None))
+            return jsonify(
+                {
+                    "ok": False,
+                    "success": False,
+                    "error": "EMPTY_RESULT",
+                    "message": "Humanizer returned empty text. Try again.",
+                }
+            ), 502
+
+        elapsed = res.get("elapsed_seconds")
+        latency_ms = int(float(elapsed) * 1000) if elapsed is not None else None
+        _record_usage_safe(
+            user_id,
+            feature=FEATURE_HUMANIZER,
+            credits_used=charged_amount,
+            provider="StealthWriter",
+            latency=latency_ms,
+            request_id=job.id if job is not None else None,
+        )
+        try:
+            from services.economy.site_settings import record_humanizer_success
+
+            record_humanizer_success()
+        except Exception:
+            app.logger.exception("daily_stats humanizer increment failed")
+        try:
+            from services.dataset_logger import log_humanization_event
+
+            log_humanization_event(user_id, "standalone", text, humanized_out)
+        except Exception:
+            app.logger.exception("dataset_logger extension humanize hook failed")
+        return jsonify(
+            {
+                "ok": True,
+                "success": True,
+                "humanized_text": humanized_out,
+                "coins_charged": charged_amount,
+                "original_price": pricing["original_price"],
+                "discount_active": pricing["discount_active"],
+                "discount_percent": pricing["discount_percent"],
+                "balance": wallet.get_balance(user_id),
+                "job_id": job.id if job is not None else None,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        _refund_extension_humanize()
+        return jsonify(
+            {
+                "ok": False,
+                "success": False,
+                "error": str(exc),
+                "message": "Humanizer failed. Try again.",
+            }
+        ), 500
 
 
 @app.route("/templates")
@@ -2291,15 +2909,17 @@ def workspace():
 @economy_auth.email_verified_required(allow_guest_preview=True)
 def presentation():
     """AI presentation builder — Claude writes the deck, python-pptx renders it."""
-    from services.presentation_generator import MAX_SLIDES, MAX_TOPIC_CHARS, MIN_SLIDES
+    from services.presentation_generator import MAX_ATTACHMENTS, MAX_TOPIC_CHARS, RESEARCH_MAX_REQUEST_CHARS
     from services.presentation_themes import CATEGORIES, DEFAULT_THEME, themes_for_client
 
     return render_template(
         "presentation.html",
         nav_active="presentation",
         presentation_cost=feature_cost("presentation"),
-        min_slides=MIN_SLIDES,
-        max_slides=MAX_SLIDES,
+        research_cost=feature_cost("presentation_research"),
+        research_max_chars=RESEARCH_MAX_REQUEST_CHARS,
+        max_attachments=MAX_ATTACHMENTS,
+        attachment_accept=",".join(sorted(PRESENTATION_FILE_EXT)),
         max_topic_chars=MAX_TOPIC_CHARS,
         themes=themes_for_client(),
         theme_categories=CATEGORIES,
@@ -2311,49 +2931,69 @@ def presentation():
 @economy_auth.email_verified_required
 def api_presentation_generate():
     from services.claude_client import claude_enabled
-    from services.presentation_generator import PresentationError, generate_deck
+    from services.presentation_generator import PresentationError, clean_attachments, generate_deck, needs_research
 
     payload = request.get_json(silent=True) or {}
     topic = str(payload.get("topic") or "").strip()
-    if not topic:
-        return jsonify({"success": False, "error": "Topic is required."}), 400
+    details = str(payload.get("details") or "")
+    files = clean_attachments(payload.get("files"))
+    if not topic and not files:
+        return jsonify({"success": False, "error": "Describe the topic or attach a file."}), 400
     if not claude_enabled():
         return jsonify({"success": False, "error": "Presentation AI is not configured."}), 503
     try:
-        slide_count = int(payload.get("slide_count") or 8)
+        slide_count = int(payload.get("slide_count") or 0) or None
     except (TypeError, ValueError):
-        slide_count = 8
+        slide_count = None
+    research = needs_research(topic=topic, details=details, attachments=files)
 
-    cost = feature_cost("presentation")
-    charged = _charge_current_user("presentation", cost, meta={"slide_count": slide_count})
+    research_cost = feature_cost("presentation_research") if research else 0
+    cost = feature_cost("presentation") + research_cost
+    charged = _charge_current_user(
+        "presentation",
+        cost,
+        meta={"slide_count": slide_count, "files": len(files), "research": research},
+    )
     if not isinstance(charged, tuple):
         return charged
     user_id, tx = charged
+    charged_amount = _charged_amount(tx, cost)
 
     started = time.monotonic()
     try:
         deck, diag = generate_deck(
             topic=topic,
-            details=str(payload.get("details") or ""),
+            details=details,
             slide_count=slide_count,
             tone=str(payload.get("tone") or "academic"),
             language=str(payload.get("language") or "auto"),
             theme=str(payload.get("theme") or ""),
             images=payload.get("images") is not False,
+            attachments=files,
+            research=research,
         )
     except PresentationError as exc:
-        _refund_safe(user_id, cost, "presentation")
+        _refund_safe(user_id, charged_amount, "presentation")
         app.logger.warning("presentation generate failed: %s", exc)
         return jsonify({"success": False, "error": "Could not generate the presentation. Credits refunded."}), 502
     except Exception:  # noqa: BLE001
-        _refund_safe(user_id, cost, "presentation")
+        _refund_safe(user_id, charged_amount, "presentation")
         app.logger.exception("presentation generate crashed")
         return jsonify({"success": False, "error": "Could not generate the presentation. Credits refunded."}), 502
+
+    balance = tx.get("balance") if isinstance(tx, dict) else None
+    research_status = diag.get("research")
+    if research_status == "failed" and charged_amount:
+        research_refund = round(charged_amount * research_cost / cost)
+        _refund_safe(user_id, research_refund, "presentation_research")
+        charged_amount -= research_refund
+        balance = wallet.get_balance(user_id)
+        app.logger.warning("presentation research failed; refunded %s credits", research_refund)
 
     _record_usage_safe(
         user_id,
         feature="presentation",
-        credits_used=cost,
+        credits_used=charged_amount,
         provider="anthropic",
         latency=int((time.monotonic() - started) * 1000),
     )
@@ -2361,9 +3001,53 @@ def api_presentation_generate():
         {
             "success": True,
             "deck": deck,
-            "credits_used": cost,
-            "balance": tx.get("balance") if isinstance(tx, dict) else None,
+            "credits_used": charged_amount,
+            "balance": balance,
             "model": diag.get("model"),
+            "research": research_status,
+        }
+    )
+
+
+@app.post("/api/presentation/extract")
+@economy_auth.email_verified_required
+def api_presentation_extract():
+    """Text of one file the deck should be based on (brief, notes, source, or an old .pptx)."""
+    from services.presentation_generator import MAX_ATTACHMENT_CHARS, PresentationError, extract_pptx_text
+
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"success": False, "error": "Choose a file to attach."}), 400
+    ext = os.path.splitext(f.filename.lower())[1]
+    if ext not in PRESENTATION_FILE_EXT:
+        return jsonify({"success": False, "error": "Supported files: PDF, DOCX, PPTX, TXT, MD, JPG, PNG."}), 400
+    try:
+        if ext == ".pptx":
+            raw = f.read()
+            if not raw:
+                return jsonify({"success": False, "error": "The file is empty."}), 400
+            text = extract_pptx_text(raw)
+        else:
+            text = _extract_requirement_text_from_upload(f)
+    except (ValueError, PresentationError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    except RuntimeError as exc:
+        app.logger.warning("presentation extract: %s", exc)
+        return jsonify({"success": False, "error": "Could not read this file right now. Try again."}), 503
+    except Exception:  # noqa: BLE001
+        app.logger.exception("presentation extract failed")
+        return jsonify({"success": False, "error": "Could not read this file."}), 400
+
+    text = text.strip()
+    if not text:
+        return jsonify({"success": False, "error": "No text found in this file."}), 400
+    return jsonify(
+        {
+            "success": True,
+            "name": f.filename,
+            "text": text[:MAX_ATTACHMENT_CHARS],
+            "chars": len(text),
+            "truncated": len(text) > MAX_ATTACHMENT_CHARS,
         }
     )
 
@@ -2540,6 +3224,110 @@ def humanizer():
         is_discount_active=is_discount_active,
         discount_percent=discount_percent,
         discounted_cost=discounted_cost,
+    )
+
+
+def _veil_client_status(user_id: int) -> dict[str, Any]:
+    """Veil pass for the app: active now, and when it ends or ended (None if never unlocked)."""
+    from services.veil_access import pass_status
+
+    status = pass_status(user_id)
+    return {"active": bool(status["active"]), "expiresAt": status["expires_at"]}
+
+
+def _app_v2_boot() -> dict[str, Any]:
+    """Server state the new single-page app needs before its first render."""
+    from services.economy.pricing import FEATURE_COSTS, VEIL_PASS_DAYS
+    from services.economy.site_settings import humanize_credit_cost
+    from services.presentation_generator import RESEARCH_MAX_REQUEST_CHARS
+    from services.presentation_themes import CATEGORIES, DEFAULT_THEME, themes_for_client
+
+    user = economy_auth.current_user()
+    humanize = humanize_credit_cost(FEATURE_COSTS["humanize"])
+    boot: dict[str, Any] = {
+        "user": None,
+        "balance": 0,
+        "signupCredits": int(WELCOME_BONUS),
+        "costs": {
+            "humanizer": int(humanize["charged"]),
+            "humanizerOriginal": int(humanize["original_price"]),
+            "humanizerDiscount": int(humanize["discount_percent"]) if humanize["discount_active"] else 0,
+            "turnitin": int(FEATURE_COSTS["turnitin"]),
+            "presentation": int(feature_cost("presentation")),
+            "presentationResearch": int(feature_cost("presentation_research")),
+            "cite": int(feature_cost("cite")),
+            "veil": int(feature_cost("veil")),
+        },
+        "veilDays": int(VEIL_PASS_DAYS),
+        "slides": {
+            "themes": themes_for_client(),
+            "categories": [label for _, label in CATEGORIES],
+            "defaultTheme": DEFAULT_THEME,
+            "researchMaxChars": RESEARCH_MAX_REQUEST_CHARS,
+        },
+        "guestHumanizeUsed": bool(session.get("guest_humanize_used")),
+    }
+    if user:
+        avatar = user.get("avatar_file")
+        boot["user"] = {
+            "id": user["id"],
+            "email": user["email"],
+            "name": user.get("name") or str(user["email"]).split("@")[0],
+            "isVerified": bool(economy_auth.user_email_verified(user)),
+            "avatarUrl": url_for("static", filename=avatar) if avatar else None,
+            "isAdmin": bool(economy_auth.is_admin(user)),
+        }
+        boot["balance"] = wallet.get_balance(user["id"])
+        boot["plan"] = plans_service.plan_summary(int(user["id"]))
+        boot["veil"] = _veil_client_status(int(user["id"]))
+    boot["catalog"] = plans_service.catalog()
+    boot["formatProfiles"] = _app_v2_format_profiles()
+    return boot
+
+
+def _app_v2_format_profiles() -> dict[str, Any] | None:
+    """Formatter V2 style defaults keyed by the app's style ids (None when V2 is off)."""
+    if not formatter_v2_enabled():
+        return None
+    from formatter_v2.web_api import profile_payload
+
+    out: dict[str, Any] = {}
+    for app_id, style in (("harvard", "harvard"), ("apa", "apa7"), ("mla", "mla9"),
+                          ("chicago", "chicago17"), ("ieee", "ieee")):
+        try:
+            payload = profile_payload(style)
+        except Exception:  # noqa: BLE001
+            app.logger.exception("format profile %s failed", style)
+            continue
+        profile = payload["profile"]
+        out[app_id] = {
+            **payload["form"],
+            "page_numbering": profile["page_numbering"],
+            "citations": profile["citations"],
+        }
+    return out
+
+
+@app.route("/app")
+def app_v2():
+    return render_template("app_v2.html", boot=_app_v2_boot())
+
+
+@app.get("/api/billing")
+@economy_auth.login_required
+def api_billing():
+    from services.economy import lemon_plans
+
+    user_id = int(economy_auth.current_user_id())
+    return jsonify(
+        {
+            "success": True,
+            "plan": plans_service.plan_summary(user_id),
+            "subscription": lemon_plans.billing_subscription(user_id),
+            "provider": "lemon_squeezy" if lemon_plans.lemon_checkout_enabled() else "cryptomus",
+            "payments": plans_service.payment_history(user_id),
+            "catalog": plans_service.catalog(),
+        }
     )
 
 
@@ -2787,6 +3575,32 @@ def api_assignment_project_pricing(project_id: str):
     return jsonify(_project_api_payload(bundle))
 
 
+@app.post("/api/assignment/projects/<project_id>/brief")
+@economy_auth.login_required
+def api_assignment_project_update_brief(project_id: str):
+    """Student corrections to the parsed brief before payment; returns the new price."""
+    payload = request.get_json(silent=True) or {}
+    fields: dict[str, Any] = {}
+    for key in ("assignment_type", "citation_style", "deadline", "instructions"):
+        if key in payload:
+            value = payload.get(key)
+            if value is not None and not isinstance(value, str):
+                return jsonify({"error": f"{key} must be a string"}), 400
+            fields[key] = value or ""
+    if payload.get("word_count") not in (None, ""):
+        try:
+            fields["word_count"] = int(str(payload["word_count"]).replace(",", "").strip())
+        except ValueError:
+            return jsonify({"error": "Length must be a number of words."}), 400
+    try:
+        bundle = project_service.update_brief(project_id, **fields)
+    except KeyError as exc:
+        return _assignment_not_found("brief", project_id, exc)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(_project_api_payload(bundle))
+
+
 @app.post("/api/assignment/projects/<project_id>/confirm-payment")
 @economy_auth.login_required
 def api_assignment_project_confirm_payment(project_id: str):
@@ -2812,13 +3626,19 @@ def api_assignment_project_confirm_payment(project_id: str):
         return _assignment_not_found("confirm-payment", project_id, exc)
 
     charged_here = False
+    plan_free_paper = False
     if not already_paid and coins > 0:
+        from services.economy.plans import consume_free_use
         from services.economy.referral import apply_pro_discount
 
+        if consume_free_use(int(user_id), "assignment"):
+            plan_free_paper = True
+            coins = 0
         user = economy_auth.current_user()
-        coins = apply_pro_discount(user, coins)
+        coins = apply_pro_discount(user, coins) if coins > 0 else 0
         try:
-            wallet.debit(user_id, coins, "assignment", ref_id=project_id)
+            if coins > 0:
+                wallet.debit(user_id, coins, "assignment", ref_id=project_id)
             charged_here = True
         except InsufficientCoins as exc:
             return (
@@ -2833,15 +3653,21 @@ def api_assignment_project_confirm_payment(project_id: str):
                 402,
             )
 
+    def _undo_charge() -> None:
+        if plan_free_paper:
+            from services.economy.plans import release_free_use
+
+            release_free_use(int(user_id), "assignment")
+        elif charged_here:
+            _refund_safe(user_id, coins, "assignment", ref_id=project_id)
+
     try:
         bundle = project_service.confirm_payment(project_id)
     except KeyError as exc:
-        if charged_here:
-            _refund_safe(user_id, coins, "assignment", ref_id=project_id)
+        _undo_charge()
         return _assignment_not_found("confirm-payment", project_id, exc)
     except ValueError as exc:
-        if charged_here:
-            _refund_safe(user_id, coins, "assignment", ref_id=project_id)
+        _undo_charge()
         trace(
             "api.confirm_payment.failed",
             error=str(exc),
@@ -2849,13 +3675,14 @@ def api_assignment_project_confirm_payment(project_id: str):
         )
         return jsonify({"error": str(exc)}), 400
     except Exception:
-        if charged_here:
-            _refund_safe(user_id, coins, "assignment", ref_id=project_id)
+        _undo_charge()
         raise
-    if charged_here and coins > 0:
+    if charged_here and (coins > 0 or plan_free_paper):
         try:
             project = bundle.project
             project.artifacts["coins_charged"] = int(coins)
+            if plan_free_paper:
+                project.artifacts["plan_free_paper"] = True
             project_service.store.save_project(project)
             bundle = project_service.store.require_bundle(project_id)
         except Exception:  # noqa: BLE001
@@ -2887,6 +3714,18 @@ def api_assignment_project_confirm_payment(project_id: str):
 def api_assignment_project_refund_failed(project_id: str):
     """Refund coins when payment succeeded but delivery never completed."""
     user_id = economy_auth.current_user_id()
+    try:
+        art = project_service.store.require_bundle(project_id).project.artifacts or {}
+    except KeyError as exc:
+        return _assignment_not_found("refund-failed", project_id, exc)
+    if art.get("plan_free_paper"):
+        refund = _assignment_auto_refund(project_id, reason="user-refund-failed-assignment")
+        if refund is None:
+            return jsonify({"error": "Nothing to refund for this project."}), 400
+        payload = _project_api_payload(project_service.store.require_bundle(project_id))
+        if isinstance(payload, dict):
+            payload.update(refund)
+        return jsonify(payload)
     try:
         coins = project_service.assert_assignment_refund_eligible(project_id)
     except KeyError as exc:
@@ -3300,6 +4139,7 @@ def api_browser_stealthwriter_login():
                 "profile": result.get("profile"),
                 "cdp_url": result.get("cdp_url"),
                 "already_open": result.get("already_open", False),
+                "already_logged_in": bool(result.get("already_logged_in")),
             }
         )
     except Exception as exc:  # noqa: BLE001
@@ -3349,6 +4189,87 @@ def api_browser_stealthwriter_check_login():
             ),
             500,
         )
+
+
+@app.post("/api/browser/providers/ru/humanize")
+def api_humanizer_ru():
+    """Replace lookalike Cyrillic letters. Credits match the English humanizer."""
+    from services.humanizer_engine.ru_humanizer import humanize_ru
+
+    payload = request.get_json(silent=True) or {}
+    text = payload.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify({"success": False, "error": "text is required"}), 400
+    if len(text) > 80_000:
+        return jsonify({"success": False, "error": "text is too long"}), 400
+
+    user = economy_auth.current_user()
+    guest_trial = False
+
+    if user is None:
+        if session.get("guest_humanize_used"):
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "REGISTER_REQUIRED",
+                        "message": "Create a free account to humanize more text.",
+                    }
+                ),
+                403,
+            )
+        guest_trial = True
+        session["guest_humanize_used"] = True
+    elif not economy_auth.user_email_verified(user):
+        blocked = economy_auth.email_verification_gate()
+        if blocked is not None:
+            return blocked
+
+    from services.economy.pricing import FEATURE_COSTS
+    from services.economy.site_settings import humanize_credit_cost
+
+    pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
+    cost = 0 if guest_trial else int(pricing["charged"])
+    user_id = 0 if guest_trial else None
+    if not guest_trial:
+        charged = _charge_current_user(
+            "humanize",
+            cost,
+            meta={
+                "original_price": pricing["original_price"],
+                "discount_active": pricing["discount_active"],
+                "discount_percent": pricing["discount_percent"],
+                "discount_source": pricing["discount_source"],
+                "humanizer": "ru",
+            },
+        )
+        if not isinstance(charged, tuple):
+            return charged
+        user_id, _tx = charged
+        cost = _charged_amount(_tx, cost)
+
+    started = time.monotonic()
+    humanized = humanize_ru(text)
+    if not guest_trial and user_id:
+        _record_usage_safe(
+            int(user_id),
+            feature=FEATURE_HUMANIZER,
+            credits_used=cost,
+            provider="ru",
+            latency=int((time.monotonic() - started) * 1000),
+        )
+    return jsonify(
+        {
+            "success": True,
+            "humanized_text": humanized,
+            "coins_charged": cost,
+            "guest_trial": guest_trial,
+            "original_price": pricing["original_price"],
+            "discount_active": pricing["discount_active"],
+            "discount_percent": pricing["discount_percent"],
+            "balance": wallet.get_balance(int(user_id)) if user_id else 0,
+        }
+    )
 
 
 @app.post("/api/browser/providers/stealthwriter/humanize")
@@ -3418,9 +4339,10 @@ def api_browser_stealthwriter_humanize():
             _release_guest_trial()
             return charged
         user_id, _tx = charged
+        cost = _charged_amount(_tx, cost)
 
     def _refund_humanize(**kwargs: Any) -> None:
-        if guest_trial or not user_id or cost <= 0:
+        if guest_trial or not user_id:
             return
         _refund_safe(int(user_id), cost, "humanize", **kwargs)
 
@@ -3690,6 +4612,7 @@ def api_browser_stealthwriter_open():
                 "message": result["message"],
                 "profile": result.get("profile"),
                 "already_open": result.get("already_open", False),
+                "already_logged_in": bool(result.get("already_logged_in")),
             }
         )
     except Exception as exc:  # noqa: BLE001
@@ -4630,6 +5553,7 @@ def api_workspace_detect():
     if not isinstance(charged, tuple):
         return charged
     user_id, _tx = charged
+    cost = _charged_amount(_tx, cost)
 
     started = time.monotonic()
     try:
@@ -4738,6 +5662,7 @@ def api_workspace_citations_use():
     if not isinstance(charged, tuple):
         return charged
     user_id, _tx = charged
+    cost = _charged_amount(_tx, cost)
     return jsonify(
         {
             "success": True,
@@ -4745,6 +5670,26 @@ def api_workspace_citations_use():
             "coins_charged": cost,
             "balance": wallet.get_balance(user_id),
         }
+    )
+
+
+@app.post("/api/workspace/export")
+@economy_auth.login_required
+def api_workspace_export():
+    """Editor document (HTML) -> .docx. Free."""
+    from services.editor_export import EditorExportError, export_filename, html_to_docx
+
+    payload = request.get_json(silent=True) or {}
+    title = str(payload.get("title") or "").strip()
+    try:
+        data = html_to_docx(title, str(payload.get("html") or ""))
+    except EditorExportError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    return send_file(
+        io.BytesIO(data),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        as_attachment=True,
+        download_name=export_filename(title),
     )
 
 
@@ -5775,6 +6720,7 @@ def api_turnitin_check():
     if not isinstance(charged, tuple):
         return charged
     user_id, _tx = charged
+    cost = _charged_amount(_tx, cost)
 
     use_tca = prefer_official_api()
     use_pd_api = (not use_tca) and prefer_plagdetect_api()

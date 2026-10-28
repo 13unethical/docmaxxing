@@ -43,6 +43,8 @@ FEATURE_COSTS: dict[str, int] = {
     "cite": _env_int("COST_CITE", 2),
     "turnitin": _env_int("COST_TURNITIN", 300),
     "presentation": _env_int("COST_PRESENTATION", 30),
+    # Surcharge on a deck when the user turns on web research (paid web searches + longer prompts).
+    "presentation_research": _env_int("COST_PRESENTATION_RESEARCH", 20),
     "veil": _env_int("COST_VEIL_PASS", 2200),
 }
 
@@ -57,6 +59,7 @@ FEATURE_LABELS: dict[str, str] = {
     "cite": "Citation",
     "turnitin": "Turnitin check",
     "presentation": "Presentation",
+    "presentation_research": "Presentation web research",
     "veil": "Veil, 30 days",
     "assignment": "Assignment project",
     "topup": "Top-up",
@@ -305,6 +308,7 @@ def pricing_cost_rows() -> list[dict[str, str]]:
     cite = int(FEATURE_COSTS["cite"])
     turnitin = int(FEATURE_COSTS["turnitin"])
     presentation = int(FEATURE_COSTS["presentation"])
+    research = int(FEATURE_COSTS["presentation_research"])
     detect_per_100 = detect_cost_credits(100)
     return [
         {"label": "Home Format & Academic Check", "value": "Free"},
@@ -327,6 +331,10 @@ def pricing_cost_rows() -> list[dict[str, str]]:
         {
             "label": "AI presentation (.pptx)",
             "value": f"{presentation} {_credit_word(presentation)} / deck",
+        },
+        {
+            "label": "Presentation web research",
+            "value": f"+{research} {_credit_word(research)} / deck",
         },
         {
             "label": "Veil for 30 days",

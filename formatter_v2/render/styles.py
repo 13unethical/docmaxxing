@@ -278,9 +278,11 @@ def apply_page_setup(document: DocxDocument, spec: FormatSpec) -> None:
 
 
 def _add_field(paragraph, instruction: str, placeholder: str = "1") -> None:
-    """Вставляет поле Word. API python-docx полей не умеет вовсе."""
-    run = paragraph.add_run()
+    """Вставляет поле Word. API python-docx полей не умеет вовсе.
 
+    Каждая часть поля — в своём run: Google Docs, Pages и конвертеры в PDF
+    теряют поле, собранное в одном run.
+    """
     begin = OxmlElement("w:fldChar")
     begin.set(qn("w:fldCharType"), "begin")
 
@@ -299,7 +301,7 @@ def _add_field(paragraph, instruction: str, placeholder: str = "1") -> None:
     end.set(qn("w:fldCharType"), "end")
 
     for element in (begin, instr, separate, placeholder_el, end):
-        run._r.append(element)
+        paragraph.add_run()._r.append(element)
 
 
 def _set_page_number_start(section, start_at: int, number_format: NumberFormat) -> None:

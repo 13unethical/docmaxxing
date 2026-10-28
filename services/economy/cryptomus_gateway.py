@@ -214,8 +214,8 @@ def _clamp_url(value: str, *, field: str) -> str | None:
     return url
 
 
-def _callback_urls() -> dict[str, str]:
-    """Callback URLs from env only — never from the client request."""
+def _callback_urls(*, return_path: str | None = None, success_path: str | None = None) -> dict[str, str]:
+    """Callback URLs from env or server-chosen paths — never from the client request."""
     base = _env("PUBLIC_BASE_URL", "https://docmaxxing.com").rstrip("/")
     out: dict[str, str] = {}
     cb = _clamp_url(
@@ -223,11 +223,11 @@ def _callback_urls() -> dict[str, str]:
         field="url_callback",
     )
     ret = _clamp_url(
-        _env("CRYPTOMUS_URL_RETURN") or f"{base}/pricing",
+        (f"{base}{return_path}" if return_path else _env("CRYPTOMUS_URL_RETURN") or f"{base}/pricing"),
         field="url_return",
     )
     ok = _clamp_url(
-        _env("CRYPTOMUS_URL_SUCCESS") or f"{base}/pricing?paid=1",
+        (f"{base}{success_path}" if success_path else _env("CRYPTOMUS_URL_SUCCESS") or f"{base}/pricing?paid=1"),
         field="url_success",
     )
     if cb:
@@ -266,6 +266,22 @@ def create_invoice(*, user_id: int, package_id: str) -> dict[str, Any]:
     pkg = get_package(package_id)
     if pkg is None:
         raise CryptomusGatewayError(f"Unknown package: {package_id}")
+    return create_invoice_for_item(user_id=user_id, item=pkg)
+
+
+def create_invoice_for_item(
+    *,
+    user_id: int,
+    item: dict[str, Any],
+    return_path: str | None = None,
+    success_path: str | None = None,
+) -> dict[str, Any]:
+    """Invoice for a server-priced item: a TOPUP package, a plan or pay-as-you-go credits."""
+    if not cryptomus_configured():
+        raise CryptomusGatewayError(
+            "Cryptomus is not configured (set CRYPTOMUS_API_KEY and CRYPTOMUS_MERCHANT_ID)"
+        )
+    pkg = item
 
     user_id = int(user_id)
     if user_id <= 0:
@@ -292,7 +308,7 @@ def create_invoice(*, user_id: int, package_id: str) -> dict[str, Any]:
         "order_id": order_id,
         "additional_data": additional_data,
     }
-    payload.update(_callback_urls())
+    payload.update(_callback_urls(return_path=return_path, success_path=success_path))
     lifetime = _invoice_lifetime()
     if lifetime is not None:
         payload["lifetime"] = lifetime
@@ -623,6 +639,14 @@ def fulfill_paid_webhook(payload: dict[str, Any]) -> dict[str, Any]:
         cryptomus_uuid,
         status,
     )
+    from .plans import activate_plan, plan_id_from_item
+
+    plan_id = plan_id_from_item(package_id)
+    if plan_id:
+        try:
+            activate_plan(user_id, plan_id, order_ref=f"cryptomus:{order_id}")
+        except Exception:
+            logger.exception("plan activation failed user_id=%s order_id=%s", user_id, order_id)
     try:
         from .referral import on_successful_deposit
 

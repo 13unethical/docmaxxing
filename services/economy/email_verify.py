@@ -119,6 +119,56 @@ def send_verification_otp_email(
         )
         return False
 
+    logger.info(
+        "Sending OTP verification email to=%s subject=%r code=%s",
+        to_email,
+        subject,
+        code,
+    )
+    try:
+        _smtp_send(to_email, subject, text_body, html_body)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send OTP email to %s", to_email)
+        raise EmailVerifyError(f"Could not send verification email: {exc}") from exc
+    return True
+
+
+def send_veil_link_email(*, to_email: str, link: str) -> bool:
+    """Email the Veil page link so the user can install it from a computer. False when SMTP is off."""
+    to_email = (to_email or "").strip()
+    if not to_email:
+        raise EmailVerifyError("Missing recipient email")
+    if not smtp_configured():
+        logger.warning("MAIL_SERVER not set — Veil link for %s not emailed", to_email)
+        return False
+    subject = "Your Veil download link"
+    text_body = (
+        "Hi,\n\n"
+        "Here is the link to install Veil, the DocMaxxing study panel for Chrome.\n"
+        "Open it on your computer in Chrome:\n\n"
+        f"{link}\n\n"
+        "— DocMaxxing\n"
+    )
+    safe_link = escape(link, quote=True)
+    html_body = f"""\
+<html>
+  <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; color: #0f172a;">
+    <p>Hi,</p>
+    <p>Here is the link to install Veil, the DocMaxxing study panel for Chrome. Open it on your computer in Chrome:</p>
+    <p><a href="{safe_link}" style="color: #2563eb;">{safe_link}</a></p>
+    <p>— DocMaxxing</p>
+  </body>
+</html>
+"""
+    try:
+        _smtp_send(to_email, subject, text_body, html_body)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to send Veil link email to %s", to_email)
+        raise EmailVerifyError(f"Could not send the email: {exc}") from exc
+    return True
+
+
+def _smtp_send(to_email: str, subject: str, text_body: str, html_body: str) -> None:
     host = _mail_setting("MAIL_SERVER")
     port_raw = _mail_setting("MAIL_PORT", "587")
     try:
@@ -145,24 +195,12 @@ def send_verification_otp_email(
     msg.set_content(text_body)
     msg.add_alternative(html_body, subtype="html")
 
-    logger.info(
-        "Sending OTP verification email to=%s subject=%r code=%s",
-        to_email,
-        subject,
-        code,
-    )
-
-    try:
-        with smtplib.SMTP(host, port, timeout=20) as smtp:
-            if use_tls:
-                smtp.starttls()
-            if username:
-                smtp.login(username, password)
-            smtp.send_message(msg)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to send OTP email to %s", to_email)
-        raise EmailVerifyError(f"Could not send verification email: {exc}") from exc
-    return True
+    with smtplib.SMTP(host, port, timeout=20) as smtp:
+        if use_tls:
+            smtp.starttls()
+        if username:
+            smtp.login(username, password)
+        smtp.send_message(msg)
 
 
 def send_verification_email(*args, **kwargs):  # noqa: ANN002, ANN003

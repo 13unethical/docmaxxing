@@ -11,7 +11,7 @@ from typing import Any
 import requests
 
 from services.writer_engine.mock_writer import SectionWriter
-from services.writer_engine.models import WriterEngineInput, WriterSection
+from services.writer_engine.models import SOURCE_MATERIALS_KEY, WriterEngineInput, WriterSection
 
 _CLAUDE_MODEL = "claude-sonnet-4-6"
 _CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
@@ -51,7 +51,8 @@ class LLMSectionWriter(SectionWriter):
                 "Set ANTHROPIC_API_KEY (or Claude_API_Key)."
             )
         prompt = _build_section_prompt(section=section, payload=payload, revision=revision)
-        result = _generate_with_claude(prompt=prompt, claude_key=claude_key)
+        materials = _source_materials(payload)
+        result = _generate_with_claude(prompt=prompt, claude_key=claude_key, materials=materials)
         target = int(section.estimated_words or result.get("target_words") or 0)
         # Hard word budget: expand until within ±10% (or max attempts).
         from services.assignment_spec import needs_expansion, section_bounds
@@ -66,7 +67,7 @@ class LLMSectionWriter(SectionWriter):
                 payload=payload,
                 short_draft=draft_text,
             )
-            expanded = _generate_with_claude(prompt=expand_prompt, claude_key=claude_key)
+            expanded = _generate_with_claude(prompt=expand_prompt, claude_key=claude_key, materials=materials)
             warnings = list(expanded.get("warnings") or [])
             warnings.append(
                 f"Expanded short draft from {_draft_word_count(draft_text)} "
@@ -116,22 +117,49 @@ def _build_expansion_prompt(*, section: WriterSection, payload: WriterEngineInpu
         f"(minimum {int(target * 0.9)}).\n"
         "Expand the draft with more analysis, evidence, and explanation. "
         "Keep the same section title/purpose and academic tone. "
-        "Do not add new document sections. Do not invent a different structure.\n"
+        "Do not add new document sections. Do not invent a different structure. "
+        "Take any new facts about the case only from the assignment materials.\n"
         "Return ONE strict JSON object only with keys: "
         "title, purpose, target_words, draft, citations_used, warnings, generation_time, model_used.\n"
         f"PREVIOUS_DRAFT:\n{short_draft}\n\n"
-        f"SECTION_CONTEXT:\n{json.dumps({'title': section.title, 'purpose': section.objective, 'target_words': target, 'requirement_json': payload.requirement_json}, ensure_ascii=False)}"
+        f"SECTION_CONTEXT:\n{json.dumps({'title': section.title, 'purpose': section.objective, 'target_words': target, 'requirement_json': _requirement_view(payload)}, ensure_ascii=False)}"
     )
 
 
-def _generate_with_claude(*, prompt: str, claude_key: str) -> dict[str, Any]:
+def _source_materials(payload: WriterEngineInput) -> str:
+    return str(payload.requirement_json.get(SOURCE_MATERIALS_KEY) or "").strip()
+
+
+def _requirement_view(payload: WriterEngineInput) -> dict[str, Any]:
+    """requirement_json without the raw materials, which travel in the cached system prompt."""
+    return {k: v for k, v in payload.requirement_json.items() if k != SOURCE_MATERIALS_KEY}
+
+
+def materials_system_blocks(materials: str) -> list[dict[str, Any]]:
+    # Identical for every call on a project, so Anthropic caches it after the first one.
+    return [
+        {
+            "type": "text",
+            "text": (
+                "ASSIGNMENT MATERIALS uploaded by the student (brief, case study, rubric, notes). "
+                "They are the authority on the task and on every fact about the case.\n"
+                f"<materials>\n{materials}\n</materials>"
+            ),
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+def _generate_with_claude(*, prompt: str, claude_key: str, materials: str = "") -> dict[str, Any]:
     started = time.monotonic()
-    body = {
+    body: dict[str, Any] = {
         "model": _CLAUDE_MODEL,
         "max_tokens": _CLAUDE_MAX_TOKENS,
         "temperature": 0.3,
         "messages": [{"role": "user", "content": prompt}],
     }
+    if materials:
+        body["system"] = materials_system_blocks(materials)
     headers = {
         "x-api-key": claude_key,
         "anthropic-version": "2023-06-01",
@@ -197,10 +225,21 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "target_words": section.estimated_words,
         "blueprint_section": blueprint_section,
         "research_plan": payload.research_plan,
-        "requirement_json": payload.requirement_json,
+        "requirement_json": _requirement_view(payload),
         "assignment_spec_grade_contract": grade_contract,
         "revision": revision,
     }
+    if payload.written_sections:
+        blueprint_guard["REPORT_SO_FAR"] = [
+            {"section": title, "text": text} for title, text in payload.written_sections
+        ]
+    review = getattr(section, "last_review", None)
+    if revision and review is not None:
+        blueprint_guard["reviewer_feedback_to_fix"] = {
+            "missing_points": list(review.missing_points),
+            "warnings": list(review.warnings),
+            "message": review.review_message,
+        }
     global_word_count = payload.requirement_json.get("word_count") or payload.blueprint.get("total_target_words")
     from services.assignment_spec.validate import is_references_section_title
 
@@ -217,8 +256,9 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "7) Required keys: title, purpose, target_words, draft, citations_used, warnings, generation_time, model_used.\n"
         "8) The draft field must be a single JSON string with escaped quotes (\\\") and \\n for line breaks.\n"
         f"9) Hard word budget: this section must be about {section.estimated_words} words "
-        f"(stay between {max(40, int(section.estimated_words * 0.9))} and "
-        f"{max(int(section.estimated_words * 0.9), int(round(section.estimated_words * 1.1)))} words), "
+        f"(stay between {max(40, int(section.estimated_words * 0.92))} and "
+        f"{max(int(section.estimated_words * 0.92), int(round(section.estimated_words * 1.03)))} words; "
+        "later editing adds a few words, so do not go over), "
         f"and the full assignment target is {global_word_count or 'the provided blueprint total'} words. "
         "Do not write a short stub — meet the minimum. Do not exceed the maximum.\n"
         "10) citations_used must be a list of citation placeholders like [Author, Year] used in the draft.\n"
@@ -230,14 +270,69 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
         "12) Never include forbidden content listed in the grade contract.\n"
         "13) warnings should flag any requirement/rubric conflict or missing input.\n"
         "14) generation_time must be numeric and model_used must be string (they may be overridden by caller).\n"
+        "15) LANGUAGE: clear, plain academic English. Short-to-medium sentences, precise everyday words, "
+        "no idioms, metaphors, or decorative phrasing. Every sentence must make literal sense.\n"
+        "16) SOURCES: cite only real works you are sure exist, with the real author and year. Prefer the "
+        "source types the brief recommends (e.g. government departments, ONS, OECD, Financial Times) and "
+        "standard textbooks for theories. For organisational reports use the organisation as author "
+        "(e.g. Department for Energy Security and Net Zero, 2024). Never write 'Anon.' and never cite a "
+        "source for a claim it does not support. Cite a theory to its originator (e.g. Ansoff, 1957; "
+        "Porter, 1980; Elkington, 1997; Barney, 1991) or to a standard textbook, never to a summary or "
+        "a book review. Never invent statistics: use a figure only if it comes from the materials or "
+        "the verified facts, with the citation given there.\n"
+        "17) SUBSTANCE OVER SIGNPOSTING: do not spend sentences announcing structure ('In the next "
+        "section…', 'this will be summarised in the conclusion'); only an introduction that the brief "
+        "asks to explain the report structure may outline it once. Use one term per framework "
+        "throughout (e.g. always 'PESTLE' if the brief says PESTLE).\n"
+        "18) ANALYSIS DEPTH: when applying a framework with named components (PESTLE's six factors, "
+        "SWOT's four quadrants, Porter's five forces), give every component at least one specific, "
+        "case-linked point in the prose itself, not only in an appendix. Keep judgements consistent "
+        "with the rest of the report (never call something a strength that the analysis treats as a "
+        "weakness).\n"
+        "19) CRITICAL EVALUATION: for each recommendation or strategic response, state why it follows "
+        "from the analysis, its main risk or trade-off, and what is deliberately postponed. If the brief "
+        "or rubric assesses ethics, sustainability or responsibility, give concrete responsible-practice "
+        "measures (e.g. community benefit, affordability for lower-income customers, ethical sourcing, "
+        "fair employment and training), not just the name of a framework. A conclusion must state the "
+        "final decision in one clear sentence (what is done first, what is deferred).\n"
+        "20) FRAMEWORK ACCURACY: apply each model as defined. PESTLE: Political = government policy, "
+        "grants, targets; Legal = binding laws, regulations, mandatory standards, certification and "
+        "consumer-protection duties (a target or grant is not Legal); Environmental = climate and "
+        "environmental impacts of the organisation's own products and operations. SWOT: strengths and "
+        "weaknesses are internal, opportunities and threats are external. Resource-based view/VRIN/VRIO: "
+        "valuable, rare, inimitable (never 'imitable'), non-substitutable/organised. Ansoff: market "
+        "penetration, market development, product development, diversification. Every policy, scheme or "
+        "statistic you use must concern the organisation's own products, services or customers.\n"
+        "21) ONE STORY: the report is one argument. Keep every fact, problem, figure and decision "
+        "identical to the sections already written (REPORT_SO_FAR in INPUT): never introduce a different "
+        "problem, number or final choice. If this is a summary or conclusion, summarise exactly what "
+        "those sections found and decided, including any change of plan in a later section, and state "
+        "the single final decision. Do not repeat paragraphs from other sections.\n"
     )
+    if _source_materials(payload):
+        rules += (
+            "22) CASE FACTS: the ASSIGNMENT MATERIALS in the system prompt are the uploaded brief and case. "
+            "Every statement about the organisation (history, location, staff, products, customers, "
+            "resources, partners, finances, problems) must agree with them. Never contradict them and never "
+            "invent such facts; if you must assume something, say clearly that it is an assumption. "
+            "Use concrete case details (names, places, years, numbers) where they are relevant.\n"
+            "23) BRIEF INSTRUCTIONS: find this section in the brief and cover every bullet point listed "
+            "for it (e.g. if it asks for a new product or service, propose one concretely). Apply by name "
+            "the theories, models, and frameworks the brief requires for this section, briefly explaining "
+            "each and applying it to the case. Copy case facts exactly (e.g. 'about 55 employees' stays "
+            "'about 55', never 'less than 55').\n"
+            "24) MISSING MATERIALS: if the brief relies on material that is not in the materials (e.g. "
+            "later updates, memos, or lecture content), do not present invented specifics as if they were "
+            "given. Base the discussion on the scenarios the brief itself describes, phrase them as such, "
+            "and add a warning naming the missing material.\n"
+        )
     if is_references_section_title(section.title):
         rules += (
-            "15) REFERENCES SECTION: put EACH bibliographic entry on its own line, "
+            "25) REFERENCES SECTION: put EACH bibliographic entry on its own line, "
             "separated by a blank line. Do not glue entries into one paragraph.\n"
-            "16) Do not use markdown (*italics*, **bold**, or # headings) in citations. "
+            "26) Do not use markdown (*italics*, **bold**, or # headings) in citations. "
             "Write book and article titles as plain text.\n"
-            "17) Never write placeholder notes such as '(This is a placeholder for a relevant work…)'. "
+            "27) Never write placeholder notes such as '(This is a placeholder for a relevant work…)'. "
             "If the brief names a required reading, cite that work with a complete real reference "
             "(author, year, title, publisher or journal). Do not invent fake sources.\n"
         )
@@ -260,7 +355,7 @@ def _build_section_prompt(*, section: WriterSection, payload: WriterEngineInput,
             named.append(label)
         if named:
             rules += (
-                "18) FIGURES: illustrative photos are available (auto-fetched or attached). "
+                "28) FIGURES: illustrative photos are available (auto-fetched or attached). "
                 "Where a photo fits this section, insert a marker on its own line:\n"
                 "[[FIGURE:filename|short caption]]\n"
                 f"Available files: {'; '.join(named)}. "

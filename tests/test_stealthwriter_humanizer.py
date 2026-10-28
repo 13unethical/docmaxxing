@@ -23,9 +23,9 @@ def test_default_model_is_legacy_5_1():
     assert DEFAULT_STEALTHWRITER_MODEL == "Legacy 5.1"
 
 
-def test_assignment_default_level_is_10():
-    assert ASSIGNMENT_STEALTHWRITER_LEVEL == 10
-    assert StealthWriterTextHumanizer().level == 10
+def test_assignment_default_level_is_8():
+    assert ASSIGNMENT_STEALTHWRITER_LEVEL == 8
+    assert StealthWriterTextHumanizer().level == 8
 
 
 def test_model_match_labels_include_ghost_alias():
@@ -56,7 +56,7 @@ def test_stealthwriter_humanizer_passes_legacy_model():
     out = humanizer.humanize(sample)
     assert out.startswith("human::")
     assert calls and calls[0]["model"] == "Legacy 5.1"
-    assert calls[0]["level"] == 10
+    assert calls[0]["level"] == 8
 
 
 def test_stealthwriter_humanizer_chunks_long_input():

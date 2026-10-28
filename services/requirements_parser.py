@@ -286,19 +286,22 @@ def _normalize_requirements_payload(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def _extract_word_count(text: str) -> str | None:
+    # "1500" or "1,500"; "words" may be joined with a hyphen ("a 1500-word essay")
+    n = r"(\d{1,3}(?:[,\u00a0]\d{3})+|\d{2,5})"
+    w = r"\s*-?\s*words?\b"
     patterns = (
-        r"\b(?:between|from)\s+(\d{2,5})\s+(?:and|to|-)\s+(\d{2,5})\s*words?\b",
-        r"\b(\d{2,5})\s*[-–]\s*(\d{2,5})\s*words?\b",
-        r"\b(?:max(?:imum)?|no more than|up to|at most)\s+(\d{2,5})\s*words?\b",
-        r"\b(?:min(?:imum)?|at least|no fewer than)\s+(\d{2,5})\s*words?\b",
-        r"\b(?:word count|length)\s*:?\s*(?:approximately|around|about)?\s*(\d{2,5})\s*words?\b",
-        r"\b(\d{2,5})\s*words?\s*(?:maximum|max|minimum|min|limit|required)?\b",
+        rf"\b(?:between|from)\s+{n}\s+(?:and|to|-)\s+{n}{w}",
+        rf"\b{n}\s*[-–]\s*{n}{w}",
+        rf"\b(?:max(?:imum)?|no more than|up to|at most)\s+{n}{w}",
+        rf"\b(?:min(?:imum)?|at least|no fewer than)\s+{n}{w}",
+        rf"\b(?:word count|length)\s*:?\s*(?:approximately|around|about)?\s*{n}{w}",
+        rf"\b{n}{w}\s*(?:maximum|max|minimum|min|limit|required)?\b",
     )
     for pat in patterns:
         m = re.search(pat, text, re.I)
         if not m:
             continue
-        groups = [g for g in m.groups() if g]
+        groups = [re.sub(r"\D", "", g) for g in m.groups() if g]
         if len(groups) == 2:
             return f"{groups[0]}-{groups[1]} words"
         prefix = m.group(0).lower()
@@ -306,11 +309,63 @@ def _extract_word_count(text: str) -> str | None:
             return f"maximum {groups[0]} words"
         if "min" in prefix or "at least" in prefix or "no fewer" in prefix:
             return f"minimum {groups[0]} words"
+        tol = re.search(r"(?:±|\+/-|\+-|plus or minus)\s*(\d{1,2})\s*%", text[m.end():m.end() + 30], re.I)
+        if tol:
+            return f"{groups[0]} words (±{tol.group(1)}%)"
         return f"{groups[0]} words"
     return None
 
 
+_SECTION_LIST_LEAD = re.compile(
+    r"\b(?:required sections?|sections? required|include (?:the )?(?:following )?sections?|"
+    r"must include (?:the )?(?:following )?sections?|section headings?)\b"
+    r"\s*(?:are|should be|must be)?\s*:?[ \t]*",
+    re.I,
+)
+_LIST_BULLET = re.compile(r"^\s*(?:[-*•●▪–]|\d+[.)]|[a-z][.)])\s*", re.I)
+
+
+def explicit_section_list(text: str) -> list[str]:
+    """Sections a brief lists explicitly ("Required sections: A, B, C" or a bulleted list).
+
+    Taken literally, in order: keyword scans add sections the brief never asked for and
+    drop ones they don't know (e.g. "Findings").
+    """
+    for m in _SECTION_LIST_LEAD.finditer(text or ""):
+        rest = text[m.end():]
+        first_line, _, after = rest.partition("\n")
+        if first_line.strip():
+            chunk = re.split(r"(?<!\b[A-Z])\.(?:\s|$)", first_line, maxsplit=1)[0]
+            parts = re.split(r",|;|/|\s+and\s+|\s+&\s+", chunk)
+        else:
+            parts = []
+            for line in after.splitlines():
+                if not line.strip():
+                    if parts:
+                        break
+                    continue
+                if not _LIST_BULLET.match(line):
+                    break
+                parts.append(_LIST_BULLET.sub("", line))
+        labels: list[str] = []
+        for part in parts:
+            label = re.sub(r"^(?:and|the|a)\s+", "", part.strip(" -:.()\t"), flags=re.I).strip()
+            if not label or len(label) > 40 or not 1 <= len(label.split()) <= 5:
+                continue
+            if IGNORE_SECTION_HEADINGS.match(label):
+                continue
+            label = label[0].upper() + label[1:]
+            if label.lower() not in {x.lower() for x in labels}:
+                labels.append(label)
+        if len(labels) >= 2:
+            return labels[:12]
+    return []
+
+
 def _extract_required_sections(text: str) -> list[str]:
+    explicit = explicit_section_list(text)
+    if explicit:
+        return explicit
     found: list[str] = []
     known = (
         "abstract",

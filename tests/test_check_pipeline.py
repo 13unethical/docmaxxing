@@ -574,3 +574,63 @@ def test_unknown_citation_mode_reports_cannot_verify():
         if v["id"] in applied
     )
 
+
+def test_word_count_reads_thousands_separator_hyphen_and_tolerance() -> None:
+    assert parse_word_count_spec("Write a 1500-word report.") == (1500, 1500, 0.75)
+    assert parse_word_count_spec("Word count: 1,500 words (±10%).")[:2] == (1350, 1650)
+    assert parse_word_count_spec("between 2,000 and 2,500 words")[:2] == (2000, 2500)
+    assert parse_word_count_spec("Use 5 sources.")[:2] == (None, None)
+    req = normalize_requirements("Word count: 1,500 words (±10%).")
+    assert (req.word_min, req.word_max) == (1350, 1650)
+    assert normalize_requirements("Write a 1500-word report.").word_max == 1500
+
+
+def test_explicit_section_list_is_taken_literally() -> None:
+    inline = normalize_requirements(
+        "Required sections: Introduction, Literature Review, Methodology, Findings, Conclusion."
+    )
+    assert inline.required_sections == [
+        "Introduction", "Literature Review", "Methodology", "Findings", "Conclusion",
+    ]
+    bulleted = normalize_requirements(
+        "Required sections:\n- Executive Summary\n- Introduction\n- Analysis and Discussion\n\nUse Harvard."
+    )
+    assert bulleted.required_sections == ["Executive Summary", "Introduction", "Analysis and Discussion"]
+
+
+def _styled_docx(*, cover: bool):
+    from docx import Document
+    from docx.enum.text import WD_BREAK
+    from docx.shared import Pt
+
+    doc = Document()
+    normal = doc.styles["Normal"]
+    normal.font.name = "Arial"
+    normal.font.size = Pt(11)
+    normal.paragraph_format.line_spacing = 2.0
+    if cover:
+        doc.add_paragraph("Daily Routines and Study Habits")
+        doc.add_paragraph("Jane Doe")
+        doc.add_paragraph("EDU101").add_run().add_break(WD_BREAK.PAGE)
+    doc.add_heading("Introduction", level=1)
+    doc.add_paragraph("Students who keep a fixed routine report better focus during the term. " * 4)
+    return doc
+
+
+def test_docx_formatting_is_read_from_styles_and_cover_page_detected() -> None:
+    from services.check_metrics import _detect_formatting_from_doc
+
+    fmt = _detect_formatting_from_doc(_styled_docx(cover=True))
+    assert (fmt["font_family"], fmt["font_size"], fmt["line_spacing"]) == ("Arial", 11, 2.0)
+    assert fmt["has_cover_page"] is True
+    assert _detect_formatting_from_doc(_styled_docx(cover=False))["has_cover_page"] is False
+    assert _detect_formatting_from_doc(None)["has_cover_page"] is None
+
+
+def test_formatting_validation_names_each_missed_rule() -> None:
+    req = normalize_requirements("Use Arial 12 pt, double spacing and include a title page.")
+    metrics = {"font_family": "Arial", "font_size": 11, "line_spacing": 2.0, "has_cover_page": False}
+    fmt = next(v for v in validate_all_requirements(req, metrics) if v["id"] == "formatting")
+    assert fmt["detected"] == "2/4 matched"
+    assert fmt["fix"] == "Set body text to the required point size. Add a cover page."
+    assert {i["item"]: i["detected"] for i in fmt["details"]["items"]}["cover page"] == "Missing"

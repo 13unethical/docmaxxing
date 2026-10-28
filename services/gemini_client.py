@@ -153,6 +153,7 @@ def generate_json(
     models: list[str] | None = None,
     max_retries: int = _DEFAULT_MAX_RETRIES,
     timeout_s: int = _DEFAULT_TIMEOUT_S,
+    response_schema: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """
     Call Gemini and parse a JSON object from the response.
@@ -202,6 +203,8 @@ def generate_json(
                 "responseMimeType": "application/json",
             },
         }
+        if response_schema:
+            body["generationConfig"]["responseSchema"] = response_schema
 
         for attempt in range(max_retries + 1):
             started = time.monotonic()
@@ -394,6 +397,78 @@ def generate_json(
             "retry_count": total_retries,
             "latency_ms": total_latency_ms,
             "error_message": (last_error_message or str(last_exc) or "Unknown Gemini failure")[:500],
+        }
+    )
+    return None, diag
+
+
+def generate_text(
+    *,
+    system_prompt: str,
+    content: str,
+    temperature: float = 0.7,
+    model: str | None = None,
+    max_retries: int = _DEFAULT_MAX_RETRIES,
+    timeout_s: int = _DEFAULT_PRO_TIMEOUT_S,
+    max_tokens: int = 8192,
+) -> tuple[str | None, dict[str, Any]]:
+    """Plain-text call to one model; same shape as ``claude_client.generate_reply``."""
+    active_model = (model or gemini_model()).strip() or _DEFAULT_MODEL
+    request_chars = len(system_prompt) + len(content)
+    diag = _base_diagnostics(
+        model=active_model,
+        request_chars=request_chars,
+        token_usage_estimate=estimate_tokens(system_prompt + content),
+    )
+    if not gemini_enabled():
+        diag.update({"enabled": False, "failure_reason": "validation_error", "error_message": "GOOGLE_API_KEY is not set"})
+        return None, diag
+
+    body = {
+        "systemInstruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"parts": [{"text": content}]}],
+        "generationConfig": {"temperature": temperature, "maxOutputTokens": int(max_tokens)},
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{active_model}:generateContent"
+    started = time.monotonic()
+    http_status: int | None = None
+    error = ""
+    for attempt in range(max_retries + 1):
+        try:
+            params, headers = _gemini_auth(gemini_api_key())
+            res = requests.post(url, params=params, headers=headers, json=body, timeout=timeout_s)
+            http_status = res.status_code
+            if res.ok:
+                payload = res.json()
+                text = _extract_text_from_response(payload)
+                if text:
+                    usage = payload.get("usageMetadata") or {}
+                    diag.update(
+                        {
+                            "api_call_success": True,
+                            "http_status": http_status,
+                            "retry_count": attempt,
+                            "latency_ms": int((time.monotonic() - started) * 1000),
+                            "token_usage_estimate": usage.get("totalTokenCount") or diag.get("token_usage_estimate"),
+                            "finish_reason": ((payload.get("candidates") or [{}])[0] or {}).get("finishReason"),
+                        }
+                    )
+                    return text, diag
+                error = "Empty model response text"
+            else:
+                error = res.text[:500]
+                if res.status_code not in _RETRYABLE_HTTP_STATUS:
+                    break
+        except _NETWORK_EXCEPTIONS as exc:
+            error = repr(exc)
+        if attempt < max_retries:
+            time.sleep(min(_MAX_BACKOFF_S, _INITIAL_BACKOFF_S * (2**attempt)) + random.uniform(0, 0.35))
+    diag.update(
+        {
+            "failure_reason": _classify_failure(http_status=http_status, error_message=error, exc=None),
+            "http_status": http_status,
+            "latency_ms": int((time.monotonic() - started) * 1000),
+            "error_message": error[:500],
         }
     )
     return None, diag

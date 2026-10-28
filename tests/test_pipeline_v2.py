@@ -158,6 +158,20 @@ def test_route_returns_json_and_download_when_flag_enabled() -> None:
         assert doc.data[:2] == b"PK"
 
 
+def test_cover_from_form_is_rendered_only_when_enabled() -> None:
+    lines = ["Introduction", "Some text about the topic.", "Conclusion", "Closing text."]
+
+    def texts(overrides: dict) -> list[str]:
+        result = format_document_v2(lines, UserOverrides.model_validate(overrides), StyleName.HARVARD)
+        doc = Document(io.BytesIO(result.docx_bytes))
+        return [p.text for p in doc.paragraphs if p.text.strip()]
+
+    with_cover = texts({"cover_page": {"enabled": True, "title": "My Essay", "student_name": "Ann"}})
+    assert with_cover[:2] == ["My Essay", "Ann"]
+    assert texts({"cover_page": {"enabled": False}})[0] == "Introduction"
+    assert texts({})[0] == "Introduction"
+
+
 def test_pipeline_output_opens_as_valid_docx() -> None:
     result = format_document_v2(
         _styled_docx_bytes(),

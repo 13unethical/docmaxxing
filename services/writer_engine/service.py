@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from typing import Any
 
@@ -92,7 +93,9 @@ class WriterEngineService:
             id=str(uuid.uuid4()),
             project_id=project_id,
             sections=sections,
-            current_section_id=sections[0].id,
+            current_section_id=next(
+                (s.id for s in sections if not _SUMMARY_TITLE_RE.search(s.title)), sections[0].id
+            ),
             completed_section_ids=[],
             remaining_section_ids=[section.id for section in sections],
             progress=0,
@@ -140,6 +143,11 @@ class WriterEngineService:
             research_plan=session.research_plan,
             blueprint=session.blueprint,
             project_id=session.project_id,
+            written_sections=[
+                (s.title, s.generated_text)
+                for s in session.sections
+                if s.id != section.id and s.status == WriterSectionStatus.COMPLETED and s.generated_text.strip()
+            ],
         )
 
         # WRITING means a previous attempt died mid-call — rewrite instead of no-op.
@@ -322,11 +330,14 @@ class WriterEngineService:
         return section
 
 
+_SUMMARY_TITLE_RE = re.compile(r"(?i)\b(?:executive\s+summary|abstract|summary)\b")
+
+
 def _active_section(session: WriterSession) -> WriterSection | None:
-    for section in session.sections:
-        if section.status != WriterSectionStatus.COMPLETED:
-            return section
-    return None
+    """Next section to write: summaries wait until the sections they summarise exist."""
+    pending = [s for s in session.sections if s.status != WriterSectionStatus.COMPLETED]
+    body = [s for s in pending if not _SUMMARY_TITLE_RE.search(s.title)]
+    return (body or pending or [None])[0]
 
 
 def _complete_section_in_session(session: WriterSession, section: WriterSection) -> None:

@@ -33,7 +33,8 @@ from services.assignment_project.session_sync import pick_freshest, rank_of
 from services.assignment_project.store import ProjectStore
 from services.assignment_project.trace_log import trace
 from services.research_engine.models import ResearchPlan
-from services.research_engine.parsed_documents import build_parsed_documents
+from services.research_engine.parsed_documents import build_parsed_documents, writer_source_material
+from services.writer_engine.models import SOURCE_MATERIALS_KEY
 from services.research_engine.service import ResearchEngineService
 from services.blueprint_engine.models import Blueprint
 from services.blueprint_engine.service import BlueprintEngineService
@@ -56,7 +57,9 @@ from services.ai_detection_engine.models import (
 )
 from services.delivery_engine.service import DeliveryEngineService
 from services.project_engine import ProjectEngine, ProjectLifecycleStatus
-from services.assignment_citations import AssignmentCitationEngine
+from services.assignment_citations import AssignmentCitationEngine, repair_citation_names
+from services.assignment_facts import FACTS_ARTIFACT, facts_material, facts_wanted, gather_verified_facts
+from services.humanizer_engine.fidelity import repair_humanizer_meaning
 from services.assignment_formatting import AssignmentFormatEngine
 from services.requirement_validation import GeminiRequirementValidator
 from services.assignment_pipeline.stages import PIPELINE_STAGES
@@ -382,6 +385,7 @@ class ProjectService:
 
     def _persist_humanized_draft(self, project_id: str, draft: HumanizedDraft) -> HumanizedDraft:
         draft.project_id = project_id
+        draft.content = repair_citation_names(draft.content or "")
         saved = self.humanizer.drafts.save(draft)
         project = self.store.require_project(project_id)
         project.artifacts["humanized_draft_id"] = saved.id
@@ -860,6 +864,51 @@ class ProjectService:
         )
         return saved
 
+    BRIEF_MIN_WORDS = 100
+    BRIEF_MAX_WORDS = 20000
+
+    def update_brief(
+        self,
+        project_id: str,
+        *,
+        assignment_type: str | None = None,
+        word_count: int | None = None,
+        citation_style: str | None = None,
+        deadline: str | None = None,
+        instructions: str | None = None,
+    ) -> ProjectBundle:
+        """Apply the student's corrections to the analyzed brief and re-price it."""
+        bundle = self.store.require_bundle(project_id)
+        project, requirement = bundle.project, bundle.requirement
+        if project.artifacts.get("payment_confirmed"):
+            raise ValueError("The brief can't be changed after payment.")
+        if not requirement.analyzed_at and not requirement.assignment_type:
+            raise ValueError("Requirement analysis must complete before editing the brief.")
+
+        if assignment_type is not None:
+            requirement.assignment_type = assignment_type.strip()[:120] or None
+        if word_count is not None:
+            if not self.BRIEF_MIN_WORDS <= int(word_count) <= self.BRIEF_MAX_WORDS:
+                raise ValueError(
+                    f"Length must be between {self.BRIEF_MIN_WORDS} and {self.BRIEF_MAX_WORDS:,} words."
+                )
+            requirement.word_count = int(word_count)
+        if citation_style is not None:
+            requirement.citation_style = citation_style.strip()[:60] or None
+        if deadline is not None:
+            requirement.deadline = deadline.strip()[:120] or None
+            project.deadline = _parse_deadline(requirement.deadline)
+        if instructions is not None:
+            instructions = instructions.strip()[:4000]
+            base_note = project.artifacts.setdefault("original_note", project.note or "")
+            project.artifacts["brief_instructions"] = instructions
+            extra = f"Additional instructions from the student:\n{instructions}" if instructions else ""
+            project.note = "\n\n".join(part for part in (base_note, extra) if part) or None
+
+        self.store.save_requirement(requirement)
+        self._apply_requirement_to_project(project, requirement)
+        return self.calculate_pricing(project_id)
+
     def confirm_payment(self, project_id: str) -> ProjectBundle:
         bundle = self.store.require_bundle(project_id)
         trace(
@@ -912,6 +961,8 @@ class ProjectService:
 
         bundle = self.store.require_bundle(project_id)
         art = bundle.project.artifacts if isinstance(bundle.project.artifacts, dict) else {}
+        if art.get("plan_free_paper"):
+            return 0
         for key in ("coins_charged",):
             raw = art.get(key)
             if raw is not None:
@@ -1107,6 +1158,11 @@ class ProjectService:
             # Attached or auto-fetched images are available for [[FIGURE:...]] markers.
             requirement["assignment_images"] = images
             requirement["include_assignment_images"] = True
+        requirement[SOURCE_MATERIALS_KEY] = writer_source_material(bundle.files, note=bundle.project.note or "")
+        facts = self._verified_facts(project_id, requirement[SOURCE_MATERIALS_KEY])
+        if facts:
+            block = facts_material(facts, style=str(requirement.get("citation_style") or "Harvard"))
+            requirement[SOURCE_MATERIALS_KEY] = f"{requirement[SOURCE_MATERIALS_KEY].rstrip()}\n\n{block}"
         research_plan = self._load_research_plan(project_id).to_dict()
         blueprint = self._load_blueprint(project_id).to_dict()
 
@@ -1128,6 +1184,25 @@ class ProjectService:
             model_used=saved.engine_version,
         )
         return saved
+
+    def _verified_facts(self, project_id: str, materials: str) -> list[dict[str, str]]:
+        """Best-effort web-verified statistics for the brief, gathered once per project."""
+        project = self.store.require_project(project_id)
+        cached = project.artifacts.get(FACTS_ARTIFACT)
+        if isinstance(cached, list):
+            return cached
+        if not facts_wanted(materials):
+            return []
+        try:
+            facts = gather_verified_facts(materials)
+        except Exception as exc:  # noqa: BLE001
+            trace("facts.failed", project_id=project_id, error=str(exc)[:300])
+            return []
+        trace("facts.gathered", project_id=project_id, count=len(facts), sources=[f.get("url") for f in facts])
+        project = self.store.require_project(project_id)
+        project.artifacts[FACTS_ARTIFACT] = facts
+        self.store.save_project(project)
+        return facts
 
     def advance_writer(self, project_id: str, *, writer_session: dict[str, Any] | None = None):
         # Cross-worker lock: overlapping /writer/advance (retries, dual tabs) used to
@@ -1190,6 +1265,7 @@ class ProjectService:
         bundle = self.store.require_bundle(project_id)
         title = bundle.project.title or bundle.requirement.title or "Assignment Draft"
         draft = self.writer.merge_draft(session.id, title=title)
+        draft.content = self._attach_appendices(project_id, draft.content)
 
         self._ensure_pipeline_project(project_id)
         self.pipeline.complete_stage(
@@ -1218,6 +1294,32 @@ class ProjectService:
         )
         self._sync_pipeline_state(project_id)
         return saved_draft
+
+    def _attach_appendices(self, project_id: str, content: str) -> str:
+        """Build appendix tables when the brief allows appendices; best effort."""
+        from services.assignment_appendices import (
+            APPENDICES_ARTIFACT,
+            appendices_markdown,
+            appendices_wanted,
+            generate_appendices,
+            link_appendices,
+        )
+
+        bundle = self.store.require_bundle(project_id)
+        materials = writer_source_material(bundle.files, note=bundle.project.note or "")
+        if not appendices_wanted(bundle.requirement.to_dict(), materials):
+            return content
+        try:
+            appendices = generate_appendices(materials=materials, draft_content=content)
+        except Exception as exc:  # noqa: BLE001
+            trace("appendices.failed", project_id=project_id, error=str(exc))
+            return content
+        if not appendices:
+            return content
+        project = self.store.require_project(project_id)
+        project.artifacts[APPENDICES_ARTIFACT] = appendices_markdown(appendices)
+        self.store.save_project(project)
+        return link_appendices(content, appendices)
 
     def get_writer_session(self, project_id: str):
         return self._load_writer_session(project_id)
@@ -1395,7 +1497,9 @@ class ProjectService:
 
         # Gemini revision rewrites prose and undoes StealthWriter — re-humanize immediately.
         try:
-            self._rehumanize_current_prose(project_id, reason="post_revision")
+            self._rehumanize_current_prose(
+                project_id, reason="post_revision", previous_content=str(draft.get("content") or "")
+            )
         except Exception as exc:  # noqa: BLE001
             trace("rehumanize.post_revision_failed", project_id=project_id, error=str(exc))
 
@@ -1465,6 +1569,11 @@ class ProjectService:
         # If StealthWriter inflated length, trim body only (keep References intact).
         # Soft: never fail the pipeline — always continue with best-effort budget fit.
         humanized = self._fit_humanized_word_budget(project_id, humanized)
+        try:
+            source = self._load_draft(project_id).content
+        except KeyError:
+            source = ""
+        humanized = self._repair_humanized_meaning(project_id, source, humanized, reason="humanization")
 
         self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.HUMANIZATION, force=True)
@@ -1487,6 +1596,18 @@ class ProjectService:
         )
         self._sync_pipeline_state(project_id)
         return saved
+
+    def _repair_humanized_meaning(
+        self, project_id: str, original: str, humanized: HumanizedDraft, *, reason: str
+    ) -> HumanizedDraft:
+        """Fix terms, facts and nonsense phrases the humanizer garbled (small edits only)."""
+        if not original.strip() or original.strip() == (humanized.content or "").strip():
+            return humanized
+        fixed, edits = repair_humanizer_meaning(original, humanized.content or "")
+        if edits:
+            humanized.content = fixed
+            trace("humanizer.meaning_repair", project_id=project_id, reason=reason, edits=edits[:40])
+        return humanized
 
     def _fit_humanized_word_budget(self, project_id: str, humanized: HumanizedDraft) -> HumanizedDraft:
         """Post-humanize: delete complete coherent sentences only — never Gemini-rewrite SW prose."""
@@ -1537,9 +1658,13 @@ class ProjectService:
         draft = self._load_draft(project_id).to_dict()
         self._ensure_pipeline_project(project_id)
         self.pipeline.start_stage(project_id, PipelineStage.CITATION_GENERATION, force=True)
+        requirement = bundle.requirement.to_dict()
+        facts = bundle.project.artifacts.get(FACTS_ARTIFACT)
+        if isinstance(facts, list) and facts:
+            requirement[FACTS_ARTIFACT] = facts
         pack, updated_draft = self.citation_engine.generate(
             draft=draft,
-            requirement_json=bundle.requirement.to_dict(),
+            requirement_json=requirement,
             project_id=project_id,
         )
         saved_draft = self._persist_draft(project_id, Draft.from_dict(updated_draft))
@@ -1600,6 +1725,7 @@ class ProjectService:
             project_id=project_id,
             citation_pack=citation_pack,
             assignment_images=images or None,
+            appendices=str(bundle.project.artifacts.get("assignment_appendices") or ""),
         )
         project = self.store.require_project(project_id)
         project.artifacts["formatted_document"] = formatted
@@ -1654,11 +1780,14 @@ class ProjectService:
             llm_repair=llm_rubric_repair,
         )
         if gate.content != text:
+            before_gate = text
             text = gate.content
             self._persist_repaired_draft_content(project_id, text)
-            # Template/LLM repairs after humanization raise AI score — re-humanize.
+            # LLM repairs after humanization raise AI score — re-humanize the new sentences.
             try:
-                self._rehumanize_current_prose(project_id, reason="post_grade_gate")
+                self._rehumanize_current_prose(
+                    project_id, reason="post_grade_gate", previous_content=before_gate
+                )
                 try:
                     text = self._load_humanized_draft(project_id).content
                 except KeyError:
@@ -1741,8 +1870,14 @@ class ProjectService:
             project.artifacts["formatted_document"] = formatted
             self.store.save_project(project)
 
-    def _rehumanize_current_prose(self, project_id: str, *, reason: str) -> HumanizedDraft:
-        """Re-run StealthWriter after Gemini/grade-gate rewrites that undo humanization."""
+    def _rehumanize_current_prose(
+        self, project_id: str, *, reason: str, previous_content: str | None = None
+    ) -> HumanizedDraft:
+        """Re-run StealthWriter after Gemini/grade-gate rewrites that undo humanization.
+
+        ``previous_content`` is the humanized text before the rewrite; only new sentences
+        are sent to the provider then.
+        """
         bundle = self.store.require_bundle(project_id)
         try:
             current = self._load_humanized_draft(project_id)
@@ -1772,8 +1907,10 @@ class ProjectService:
             title=title,
             source_draft_id=source_id,
             source_draft_version=source_ver,
+            previous_content=previous_content,
         )
         fresh = self._fit_humanized_word_budget(project_id, fresh)
+        fresh = self._repair_humanized_meaning(project_id, content, fresh, reason=reason)
         saved = self._persist_humanized_draft(project_id, fresh)
         project = self.store.require_project(project_id)
         formatted = project.artifacts.get("formatted_document")
@@ -1958,6 +2095,7 @@ class ProjectService:
             llm_repair=llm_rubric_repair,
         )
         if gate.content != str(final_draft.get("content") or ""):
+            before_gate = str(final_draft.get("content") or "")
             final_draft = {
                 **final_draft,
                 "content": gate.content,
@@ -1965,7 +2103,9 @@ class ProjectService:
             }
             self._persist_repaired_draft_content(project_id, gate.content)
             try:
-                humanized = self._rehumanize_current_prose(project_id, reason="post_delivery_grade_gate")
+                humanized = self._rehumanize_current_prose(
+                    project_id, reason="post_delivery_grade_gate", previous_content=before_gate
+                )
                 final_draft = {
                     **final_draft,
                     "content": humanized.content,
@@ -2432,7 +2572,9 @@ class ProjectService:
 
         self._persist_repaired_draft_content(project_id, updated)
         try:
-            self._rehumanize_current_prose(project_id, reason="client_revision_chat")
+            self._rehumanize_current_prose(
+                project_id, reason="client_revision_chat", previous_content=content
+            )
         except Exception as exc:  # noqa: BLE001
             trace("revision_chat.rehumanize_skipped", project_id=project_id, error=str(exc))
 

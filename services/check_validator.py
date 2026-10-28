@@ -366,11 +366,14 @@ def validate_all_requirements(
         fmt_parts.append(("line spacing", str(req.line_spacing), metrics.get("line_spacing"), "Set line spacing to match the brief."))
     if req.page_numbers_required:
         fmt_parts.append(("page numbers", "Required", metrics.get("has_page_numbers"), "Insert page numbers."))
+    if req.cover_page_required:
+        fmt_parts.append(("cover page", "Required", metrics.get("has_cover_page"), "Add a cover page."))
 
     if fmt_parts:
         hits = 0
         checked = 0
         fmt_details: list[dict[str, Any]] = []
+        fmt_fixes: list[str] = []
         for name, required, detected, fix_hint in fmt_parts:
             if detected is None:
                 fmt_details.append({"item": name, "required": str(required), "detected": "Unknown (upload .docx)", "ok": None})
@@ -386,11 +389,15 @@ def validate_all_requirements(
                     ok = abs(float(detected) - float(required)) < 0.11
                 except (TypeError, ValueError):
                     ok = False
-            elif name == "page numbers":
+            elif name in ("page numbers", "cover page"):
                 ok = bool(detected)
             if ok:
                 hits += 1
-            fmt_details.append({"item": name, "required": str(required), "detected": str(detected), "ok": ok})
+            else:
+                fmt_fixes.append(fix_hint)
+            if isinstance(detected, bool):
+                detected = "Yes" if detected else "Missing"
+            fmt_details.append({"item": name, "required": str(required), "detected": str(detected), "ok": bool(ok)})
         if checked > 0:
             completion = hits / checked
             status = "PASS" if completion >= 0.9 else "PARTIAL" if completion >= 0.5 else "FAIL"
@@ -406,7 +413,7 @@ def validate_all_requirements(
                     priority="medium" if completion < 0.85 else "low",
                     category="formatting",
                     details={"items": fmt_details},
-                    fix="Fix formatting items flagged above.",
+                    fix=" ".join(fmt_fixes),
                 )
             )
 
@@ -523,7 +530,7 @@ def validate_all_requirements(
     analytical_n = int(metrics.get("analytical_paragraphs") or 0)
     if analytical_n == 0:
         completion, status = 0.35, "PARTIAL"
-        detected = "No analytical paragraphs to check"
+        detected = "No analytical paragraphs found"
     elif uncited_share <= 0.35:
         completion, status = 1.0, "PASS"
         detected = f"{int(round((1 - uncited_share) * 100))}% of analytical paragraphs cite a source"
@@ -548,7 +555,13 @@ def validate_all_requirements(
                 "share_without_citation": uncited_share,
                 "analytical_paragraphs": analytical_n,
             },
-            fix="Add in-text citations to analytical paragraphs that currently have none." if completion < 1.0 else "",
+            fix=(
+                "Add paragraphs that analyse your sources and cite them in the text."
+                if analytical_n == 0
+                else "Add in-text citations to analytical paragraphs that currently have none."
+            )
+            if completion < 1.0
+            else "",
         )
     )
 

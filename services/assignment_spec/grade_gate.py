@@ -14,6 +14,7 @@ from services.assignment_spec.validate import (
     count_words,
     parse_markdown_sections,
     render_structured_markdown,
+    section_bounds,
     validate_draft_against_spec,
 )
 
@@ -131,223 +132,112 @@ def apply_repairs(
     rubric: RubricCoverageReport,
     llm_repair: Callable[[str, AssignmentSpec, list[str]], str] | None = None,
 ) -> str:
-    """Deterministic repairs first; optional LLM repair for deep rubric gaps."""
+    """Trim over-long sections at sentence boundaries; content gaps go to the LLM repair.
+
+    No canned sentences are ever appended: template filler reads as nonsense on
+    any brief other than the one it was written for.
+    """
     sections = parse_markdown_sections(content)
     by_title = {s["title"].strip().lower(): s for s in sections}
     changed = False
 
+    def find(title: str) -> dict[str, str] | None:
+        key = title.strip().lower()
+        return by_title.get(key) or next((s for t, s in by_title.items() if key in t or t in key), None)
+
+    limits: dict[str, int] = {}
     for repair in repairs:
-        if repair.startswith("expand_section:") or repair.startswith("trim_section:"):
+        if repair.startswith("trim_section:"):
             title = repair.split(":", 1)[1]
-            section = by_title.get(title.strip().lower())
             target_spec = spec.section_by_title(title)
-            target = target_spec.target_words if target_spec else 0
-            if section and target:
-                new_body = _expand_body(section.get("body") or "", title, target, spec)
-                if new_body != (section.get("body") or ""):
-                    section["body"] = new_body
-                    changed = True
-        elif repair == "expand_total" or repair == "trim_total":
-            for section_spec in spec.writable_sections:
-                section = by_title.get(section_spec.title.lower())
-                if not section:
-                    continue
-                new_body = _expand_body(
-                    section.get("body") or "",
-                    section_spec.title,
-                    section_spec.target_words,
-                    spec,
-                )
-                if new_body != (section.get("body") or ""):
-                    section["body"] = new_body
-                    changed = True
-        elif repair == "add_lecture_seminar_refs":
-            entry_sections = [
-                s
-                for s in sections
-                if re.search(r"journal\s*entry|\bentry\s*\d|\bbody\b", s["title"], re.I)
-            ]
-            targets = entry_sections or [
-                s
-                for s in sections
-                if s["title"].lower()
-                not in {"references", "cover page", "preamble", "document", "reflection"}
-                and not s["title"].lower().startswith("reference")
-            ]
-            for section in targets:
-                body = section.get("body") or ""
-                if not re.search(r"lecture|seminar", body, re.I):
-                    section["body"] = (
-                        body.rstrip()
-                        + " This insight was reinforced during the related lecture and seminar discussion, "
-                        "where the historical trajectory of the concept was examined in applied detail."
-                    ).strip()
-                    changed = True
-        elif repair == "strengthen_reflection":
-            section = next((s for s in sections if s["title"].lower() == "reflection"), None)
-            if section:
-                body = section.get("body") or ""
-                if not re.search(r"personal|major|choice|interest", body, re.I):
-                    section["body"] = (
-                        body.rstrip()
-                        + " Reflecting on these entries, my personal interest aligns most strongly with "
-                        "one of the three majors offered, and this informed decision follows from the "
-                        "historical and entrepreneurial patterns examined above."
-                    ).strip()
-                    changed = True
-        elif repair == "add_comparison":
-            section = next(
-                (s for s in sections if "journal entry 4" in s["title"].lower() or "entry 4" in s["title"].lower()),
-                None,
-            )
-            if section is None:
-                section = next((s for s in sections if "journal entry" in s["title"].lower()), None)
-            if section:
-                body = section.get("body") or ""
-                if not re.search(r"compar|whereas|in contrast", body, re.I):
-                    section["body"] = (
-                        body.rstrip()
-                        + " Comparing these two historical concepts across different fields clarifies how "
-                        "each shaped present practice and may influence future entrepreneurial strategy."
-                    ).strip()
-                    changed = True
-        elif repair.startswith("strengthen_criterion:") or repair.startswith("cover_learning_outcome:"):
-            key = repair.split(":", 1)[1].strip().lower()
-            for section in sections:
-                title = section["title"].lower()
-                if title in {"references", "cover page", "preamble", "document"}:
-                    continue
-                body = section.get("body") or ""
-                additions: list[str] = []
-                if "lo1" in key or "historical concept" in key:
-                    if "historical concept" not in body.lower():
-                        additions.append(
-                            "This develops a key historical concept in marketing and digital innovation, "
-                            "tracing its origin and development across international business practice."
-                        )
-                if "lo2" in key or "historical stage" in key:
-                    if "historical stage" not in body.lower() and "business evolution" not in body.lower():
-                        additions.append(
-                            "The historical stage of business evolution examined here shaped current "
-                            "organisational practice and competitive behaviour."
-                        )
-                if "lo4" in key or "entrepreneur" in key:
-                    if "entrepreneur" not in body.lower():
-                        additions.append(
-                            "From an entrepreneurial perspective, firms responded to change by reconfiguring "
-                            "capabilities and pursuing innovation under uncertainty."
-                        )
-                if "lo5" in key or "personal" in key or "learning outcome" in key:
-                    if title == "reflection" and "personal" not in body.lower():
-                        additions.append(
-                            "My personal interest and major choice follow directly from these insights, "
-                            "supporting an informed academic decision."
-                        )
-                if "paper" in key or "quality" in key:
-                    if not re.search(r"lecture|seminar", body, re.I) and (
-                        "journal entry" in title or "body" in title
-                    ):
-                        additions.append(
-                            "This point was reinforced in the related lecture and seminar."
-                        )
-                if additions:
-                    section["body"] = (body.rstrip() + " " + " ".join(additions)).strip()
-                    changed = True
-        elif repair == "raise_overall_grade":
-            for section in sections:
-                if "journal entry" in section["title"].lower() or section["title"].lower() == "reflection":
-                    body = section.get("body") or ""
-                    if "top-band" not in body.lower():
-                        section["body"] = (
-                            body.rstrip()
-                            + " Explicit evaluation of historical concepts, evolutionary stages, and "
-                            "entrepreneurial responses strengthens criterion coverage for a higher band."
-                        ).strip()
-                        changed = True
-                        break
-        elif repair == "improve_references":
-            refs = next((s for s in sections if "reference" in s["title"].lower()), None)
-            if refs is None:
-                sections.append(
-                    {
-                        "title": "References",
-                        "body": "Academic sources cited in the journal should appear here in the required style.",
-                    }
-                )
-                changed = True
+            if target_spec and target_spec.target_words:
+                limits[title] = section_bounds(target_spec.target_words, tolerance=spec.word_tolerance)[1]
+    if "trim_total" in repairs:
+        excess = count_body_words(content) - spec.max_total_words
+        over = sorted(
+            (
+                (count_words(found["body"]) - s.target_words, s, found)
+                for s in spec.writable_sections
+                if s.target_words and (found := find(s.title))
+            ),
+            key=lambda row: row[0],
+            reverse=True,
+        )
+        for surplus, section_spec, found in over:
+            if excess <= 0 or surplus <= 0:
+                break
+            cut = min(surplus, excess)
+            actual = count_words(found["body"])
+            limits[section_spec.title] = min(limits.get(section_spec.title, actual), actual - cut)
+            excess -= cut
+    for title, max_words in limits.items():
+        section = find(title)
+        if not section:
+            continue
+        new_body = _trim_to_sentences(section.get("body") or "", max_words)
+        if new_body != (section.get("body") or ""):
+            section["body"] = new_body
+            changed = True
 
-    # Content-adding repairs can push totals over band — clamp sections last.
-    if count_body_words(render_structured_markdown(sections) if sections else content) > spec.max_total_words:
-        for section_spec in spec.writable_sections:
-            section = by_title.get(section_spec.title.lower())
-            if not section or not section_spec.target_words:
-                continue
-            new_body = _expand_body(
-                section.get("body") or "",
-                section_spec.title,
-                section_spec.target_words,
-                spec,
-            )
-            if new_body != (section.get("body") or ""):
-                section["body"] = new_body
-                changed = True
-
-    text = render_structured_markdown(sections) if sections else content
+    text = render_structured_markdown(sections) if (sections and changed) else content
     if llm_repair is not None:
         weak = [c for c in rubric.criteria if c.coverage_percent < spec.min_rubric_coverage]
-        if weak or any(r.startswith("strengthen_criterion:") for r in repairs):
+        content_repairs = [r for r in repairs if not r.startswith("trim_")]
+        if weak or content_repairs:
             try:
                 improved = llm_repair(text, spec, repairs)
                 if improved and count_words(improved) >= count_words(text) * 0.9:
                     return improved
             except Exception:  # noqa: BLE001
                 pass
-    return text if changed else content
-
-
-def _expand_body(body: str, title: str, target: int, spec: AssignmentSpec) -> str:
-    """Expand or trim a section toward its word target (±10%)."""
-    from services.assignment_spec.validate import section_bounds
-
-    lo, hi = section_bounds(target, tolerance=spec.word_tolerance)
-    words = re.findall(r"\b[\w']+\b", body or "")
-    current = len(words)
-    if lo <= current <= hi:
-        return body
-    if current > hi:
-        # Rebuild from the same tokenizer used by count_words.
-        kept = words[:hi]
-        # Prefer ending on a sentence boundary when possible.
-        text = body
-        # Approximate trim by cutting trailing tokens from original whitespace-split text.
-        raw_tokens = (body or "").split()
-        while raw_tokens and len(re.findall(r"\b[\w']+\b", " ".join(raw_tokens))) > hi:
-            raw_tokens.pop()
-        trimmed = " ".join(raw_tokens).rstrip(" ,;:")
-        if trimmed and trimmed[-1] not in ".!?":
-            trimmed += "."
-        return trimmed or " ".join(kept)
-    linked = []
-    section = spec.section_by_title(title)
-    if section:
-        linked = section.linked_criteria
-    criteria = [c for c in spec.rubric_criteria if c.id in linked] or spec.rubric_criteria[:2]
-    text = body
-    guard = 0
-    while count_words(text) < lo and guard < 50:
-        guard += 1
-        room = hi - count_words(text)
-        if room <= 0:
-            break
-        c = criteria[guard % len(criteria)]
-        # Avoid meta boilerplate ("Further analysis for X advances LO…") — detectors flag it.
-        guidance = (c.top_band_guidance or c.description or "the core assessment focus").split(".")[0]
-        piece_words = (
-            f"This also clarifies how {guidance.lower()} appears in practice, "
-            "linking the evidence above to entrepreneurial judgement and informed decision-making."
-        ).split()
-        text = (text.rstrip() + " " + " ".join(piece_words[: max(1, room)])).strip()
-    # Final clamp if slightly over.
-    if count_words(text) > hi:
-        return _expand_body(text, title, target, spec)
     return text
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z(\"“\[])")
+_SIGNPOST_RE = re.compile(
+    r"\b(?:in the (?:next|following) section|(?:the )?(?:next|following) section|section that follows"
+    r"|this (?:section|report|part) (?:will|aims to|sets out)|as (?:discussed|mentioned|noted|shown) "
+    r"(?:above|earlier|previously)|will be (?:summari[sz]ed|discussed|examined|addressed|explored)"
+    r"|the conclusion will|is (?:examined|discussed) (?:next|below))\b",
+    re.I,
+)
+_PROTECTED_RE = re.compile(r"\(\D{0,80}\d{4}[a-z]?\)|\bAppendix\b|\d")
+
+
+def _significant(sentence: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]{5,}", sentence.lower())}
+
+
+def _trim_to_sentences(body: str, max_words: int) -> str:
+    """Delete whole sentences until the body fits: signposting first, then the most redundant.
+
+    The first sentence of each paragraph, its closing sentence (unless it is only a
+    signpost) and any sentence carrying a citation, a figure or an appendix pointer are
+    kept: cutting from the end used to drop whole PESTLE factors and section conclusions.
+    """
+    if count_words(body) <= max_words:
+        return body
+    paragraphs = [_SENTENCE_SPLIT_RE.split(p.strip()) for p in re.split(r"\n\s*\n", body or "") if p.strip()]
+    candidates: list[tuple[int, float, int, int]] = []
+    for pi, sentences in enumerate(paragraphs):
+        for si, sentence in enumerate(sentences):
+            signpost = bool(_SIGNPOST_RE.search(sentence))
+            if si == 0 or (si == len(sentences) - 1 and not signpost) or _PROTECTED_RE.search(sentence):
+                continue
+            words = _significant(sentence)
+            others = set().union(*(_significant(s) for j, s in enumerate(sentences) if j != si))
+            redundancy = len(words & others) / len(words) if words else 1.0
+            candidates.append((0 if signpost else 1, -redundancy, pi, si))
+    removed: set[tuple[int, int]] = set()
+    for _kind, _redundancy, pi, si in sorted(candidates):
+        if count_words(_render_paragraphs(paragraphs, removed)) <= max_words:
+            break
+        removed.add((pi, si))
+    return _render_paragraphs(paragraphs, removed)
+
+
+def _render_paragraphs(paragraphs: list[list[str]], removed: set[tuple[int, int]]) -> str:
+    return "\n\n".join(
+        " ".join(s for si, s in enumerate(sentences) if (pi, si) not in removed)
+        for pi, sentences in enumerate(paragraphs)
+    )

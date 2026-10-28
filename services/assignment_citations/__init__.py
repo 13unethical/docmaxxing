@@ -12,6 +12,7 @@ from services.assignment_llm import (
     assignment_generate_json,
     assignment_llm_configured,
 )
+from services.assignment_facts import FACTS_ARTIFACT, facts_as_works
 from services.assignment_pipeline.models import utc_now
 from services.assignment_spec.validate import count_body_words
 from services.citation_service import CitationService, CrossrefProvider
@@ -36,15 +37,62 @@ Return ONLY JSON:
 Rules:
 - Keep every ## section that is not References/Bibliography/Works Cited.
 - Every in-text citation must match one of the provided works (author + year).
-- Replace invented or mismatched (Author, Year) with the closest provided work's in-text form.
+- Rewrite a citation into a provided work's in-text form ONLY when it is the same source (same author or
+  organisation and year, perhaps spelled or abbreviated differently).
+- A citation with no matching provided work must be removed (keep the sentence). Never attribute a claim
+  to a different source, and never replace one author's name with another's (e.g. never turn
+  "Ansoff (1957)" into a later author who summarises Ansoff).
+- Change only citations; leave every other word of the draft exactly as it is.
 - Do NOT invent new sources. Do NOT add a References section (caller appends it).
 - Preserve meaning, structure, and complete sentences. Academic tone only.
 """
+
+_WEB_VERIFY_SYSTEM = """You verify citations from a student's report by searching the web.
+For each citation (author or organisation + year) you get the sentence it supports. Find the specific
+titled work by that author in that year that supports that sentence.
+Return ONLY JSON, no prose:
+{"items":[{"cite":"as given","found":true,"authors":["Barney, J."],"organisation":false,"year":"1991",
+"title":"...","container":"journal or website name or null","volume":null,"issue":null,"pages":null,
+"publisher":"book or report publisher or null","edition":"11th or null","place":"Harlow or null",
+"url":"https://..."}]}
+Rules:
+- found=true only when a search result confirms a specific titled work by that author/organisation in
+  that year (one year either way is fine) whose topic fits the sentence. If you cannot name one specific
+  title (e.g. an organisation publishes many reports that year and none clearly fits), found=false.
+- Never substitute a different author, a summary of the work, or a review of it.
+- authors as "Surname, I." for people, listing every author; for an organisation set organisation=true and
+  put its full name as the only author (e.g. "Department for Energy Security and Net Zero").
+- url must be the publisher, DOI or official page for the work — never a bookshop or file-sharing site
+  (Amazon, AbeBooks, Google Books, ResearchGate...). For a book with no such page, url=null and give
+  publisher, edition and place instead.
+"""
+
+# Bookshop / file-sharing pages are not citable locations; a book is cited by publisher instead.
+_RETAIL_DOMAINS = (
+    "amazon.", "abebooks.", "waterstones.", "ebay.", "goodreads.", "books.google.", "researchgate.",
+    "dokumen.pub", "slideshare.", "anyflip.", "pageplace.", "scribd.", "academia.edu", "bookshop.org",
+    "blackwells.", "wordery.", "worldofbooks.", "biblio.", "thriftbooks.",
+)
 
 _REF_HEADING_RE = re.compile(r"(?im)^\s*##\s*(references|bibliography|works cited)\s*$")
 _CLAIMED_CITE_RE = re.compile(
     r"\b([A-Z][A-Za-z''\-]+(?:\s+(?:and|&)\s+[A-Z][A-Za-z''\-]+)?(?:\s+et\s+al\.?)?)\s*\((\d{4}[a-z]?)\)"
 )
+_PAREN_GROUP_RE = re.compile(r"\(([^()]{4,240})\)")
+_PAREN_CITE_RE = re.compile(
+    r"^\s*(?:see\s+|e\.g\.,?\s+|cf\.\s+)?(?P<author>[A-Z][^;()\d]{1,90}?),?\s+(?P<year>(?:19|20)\d{2})[a-z]?"
+    r"(?:\s*,\s*pp?\.\s*[\d\-–]+)?\s*$"
+)
+_STOPWORDS = {
+    "the", "and", "for", "with", "from", "into", "that", "this", "their", "about", "between", "within",
+    "analysis", "study", "review", "approach", "role", "impact", "effects", "using",
+}
+_NOT_AUTHOR_WORDS = {
+    "in", "by", "from", "since", "until", "before", "after", "around", "about", "circa", "during",
+    "up", "to", "as", "at", "of", "for", "between", "q1", "q2", "q3", "q4", "fy",
+}
+_WEB_VERIFY_MAX = 8
+WEB_VERIFY_MODEL_ENV = "ASSIGNMENT_CITATION_WEB_MODEL"
 
 
 _INSERT_CITES_SYSTEM = """You insert a FEW additional in-text citations into an academic draft
@@ -56,7 +104,9 @@ using ONLY the provided allowed works. Return ONLY JSON:
 
 Rules:
 - Use ONLY the exact in_text forms from allowed_in_text / works.
-- Insert cites where claims need scholarly support — do not invent sources.
+- Cite a work only after a sentence that its title shows it directly supports. If no sentence fits a
+  work, do not cite it. Inserting nothing is fine.
+- Do not invent sources.
 - Do NOT add unused bibliography entries (caller builds References from used cites).
 - Keep meaning, structure, and complete sentences. Do not rewrite the whole essay.
 - Prefer adding up to target_additional new citation occurrences if natural; fewer is OK.
@@ -193,12 +243,17 @@ class AssignmentCitationEngine:
 
         # 1) Prefer cites already claimed in the draft — so refs match the prose.
         claimed = _extract_claimed_cites(content)
+        contexts = _cite_contexts(content, claimed)
+        cited_names = _cited_surnames(claimed)
         queries = list(claimed)
-        for q in _extract_queries(content, requirement_json=requirement_json, max_queries=query_cap):
-            if q not in queries:
-                queries.append(q)
-            if len(queries) >= query_cap:
-                break
+        # Topic searches only when the writer cited too little: their hits (model summaries,
+        # book reviews) otherwise displace the originals the writer cited.
+        if len(claimed) < max(settings.minimum_sources, 1):
+            for q in _extract_queries(content, requirement_json=requirement_json, max_queries=query_cap):
+                if q not in queries:
+                    queries.append(q)
+                if len(queries) >= query_cap:
+                    break
 
         works: list[dict[str, Any]] = []
         in_text: list[str] = []
@@ -206,10 +261,22 @@ class AssignmentCitationEngine:
         unresolved: list[str] = []
         seen_refs: set[str] = set()
 
+        verified = facts_as_works(
+            [f for f in requirement_json.get(FACTS_ARTIFACT) or [] if isinstance(f, dict)], style=settings.style
+        )
+        crossref_matched: list[str] = []
         for query in queries:
             if len(references) >= settings.maximum_sources:
                 break
-            work = self._lookup(query, style=settings.style)
+            work = _best_verified_work(query, verified, context=contexts.get(query, ""))
+            # An author-year hit is only trusted when its title fits the citing sentence;
+            # anything else goes to web verification, which reads that sentence.
+            if not work and (contexts.get(query) or not _author_year_query(query)):
+                work = self._lookup(
+                    query, style=settings.style, context=contexts.get(query, ""), other_cited_names=cited_names
+                )
+            if work:
+                crossref_matched.append(f"{query} -> {work.get('title')}")
             if not work:
                 unresolved.append(query)
                 continue
@@ -219,6 +286,31 @@ class AssignmentCitationEngine:
                 seen_refs.add(ref)
                 references.append(ref)
                 works.append(work)
+            if label and label not in in_text:
+                in_text.append(label)
+
+        # Author-year cites Crossref cannot confirm (reports, books, web sources): verify on the web.
+        from services.assignment_project.trace_log import trace
+
+        pending = [q for q in unresolved if q in claimed]
+        web_confirmed = self._verify_on_web(pending, style=settings.style, contexts=contexts)
+        trace(
+            "citations.resolved",
+            project_id=project_id,
+            claimed=claimed,
+            crossref=crossref_matched,
+            web=[f"{q} -> {w.get('title')}" for q, w in web_confirmed],
+            unresolved=[q for q in pending if q not in {q2 for q2, _ in web_confirmed}],
+        )
+        for query, work in web_confirmed:
+            ref = str(work.get("reference") or "").strip()
+            label = str(work.get("label") or "").strip()
+            if not ref or ref in seen_refs or len(references) >= settings.maximum_sources:
+                continue
+            seen_refs.add(ref)
+            references.append(ref)
+            works.append(work)
+            unresolved.remove(query)
             if label and label not in in_text:
                 in_text.append(label)
 
@@ -317,11 +409,7 @@ class AssignmentCitationEngine:
             label = str(work.get("label") or work.get("intext") or work.get("in_text") or "").strip()
             if not ref or ref in seen_refs or not label:
                 continue
-            # Only keep if we can place the cite in the body.
-            placed = _try_insert_cite(body, label)
-            if not placed:
-                continue
-            body = placed
+            # Candidate only: the LLM pass below cites it where a claim fits, unused ones are dropped.
             seen_refs.add(ref)
             references.append(ref)
             works.append(work)
@@ -341,22 +429,278 @@ class AssignmentCitationEngine:
             )
         return body, works, references, in_text, queries
 
-    def _lookup(self, query: str, *, style: str) -> dict[str, Any] | None:
+    def _lookup(
+        self,
+        query: str,
+        *,
+        style: str,
+        context: str = "",
+        other_cited_names: frozenset[str] = frozenset(),
+    ) -> dict[str, Any] | None:
         try:
-            result = self.citations.search(query, style=style, limit=2)
+            result = self.citations.search(query, style=style, limit=3)
         except Exception:  # noqa: BLE001
             return None
         found = list(result.get("results") or result.get("works") or [])
-        return found[0] if found else None
+        return next(
+            (
+                work
+                for work in found
+                if _work_matches_query(query, work, context=context, other_cited_names=other_cited_names)
+            ),
+            None,
+        )
+
+    def _verify_on_web(
+        self, queries: list[str], *, style: str, contexts: dict[str, str] | None = None
+    ) -> list[tuple[str, dict[str, Any]]]:
+        return _web_verify_citations(queries, style=style, contexts=contexts)
 
 
 def _extract_claimed_cites(content: str) -> list[str]:
+    """Author-year queries for every citation in the text: "Barney (1991)" and "(Barney, 1991; DESNZ, 2024)"."""
     found: list[str] = []
     for match in _CLAIMED_CITE_RE.finditer(content or ""):
-        q = f"{match.group(1)} {match.group(2)}"
+        # "Porter's (1980) five forces" cites Porter.
+        author = re.sub(r"['’]s$", "", match.group(1))
+        q = f"{author} {match.group(2)}"
         if q not in found:
             found.append(q)
+    for group in _PAREN_GROUP_RE.finditer(content or ""):
+        for part in group.group(1).split(";"):
+            match = _PAREN_CITE_RE.match(part)
+            if not match or match.group("author").split()[0].lower() in _NOT_AUTHOR_WORDS:
+                continue
+            q = f"{match.group('author').strip()} {match.group('year')}"
+            if q not in found:
+                found.append(q)
     return found
+
+
+def _author_year_query(query: str) -> tuple[str, int] | None:
+    match = re.match(r"^(?P<author>.+?)\s+(?P<year>(?:19|20)\d{2})[a-z]?$", (query or "").strip())
+    if not match:
+        return None
+    author = re.sub(r"\s+et\s+al\.?$", "", match.group("author")).strip()
+    return author, int(match.group("year"))
+
+
+def _acronym(name: str) -> str:
+    """'department for energy security and net zero' -> 'desnz'."""
+    words = [w for w in re.findall(r"[a-z]+", name.lower()) if w not in {"and", "for", "of", "the", "on", "in"}]
+    return "".join(w[0] for w in words) if len(words) > 1 else ""
+
+
+def _significant_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]{4,}", (text or "").lower()) if w not in _STOPWORDS}
+
+
+def _work_matches_query(
+    query: str,
+    work: dict[str, Any],
+    *,
+    context: str = "",
+    other_cited_names: frozenset[str] = frozenset(),
+) -> bool:
+    """Accept a hit only if it is plausibly the cited work (never an author-less record).
+
+    ``context`` is the sentence that cites the work: a Crossref record must share a topic
+    word with it (a "Worthington 2015" on Akkadian is not the business textbook). A work whose
+    title names another cited author is a summary or review of that author's work.
+    """
+    authors = [str(a) for a in (work.get("authors") or []) if str(a).strip()]
+    label = str(work.get("label") or "")
+    if not authors or "Anon." in label:
+        return False
+    title = str(work.get("title") or "")
+    families = [a.split(",")[0].strip().lower() for a in authors]
+    for name in other_cited_names:
+        if name not in families and re.search(rf"\b{re.escape(name)}\b", title.lower()):
+            return False
+    author_year = _author_year_query(query)
+    if author_year:
+        author, year = author_year
+        try:
+            work_year = int(str(work.get("year") or "")[:4])
+        except ValueError:
+            return False
+
+        def named(name: str) -> bool:
+            return any(name in (f, _acronym(f)) or name in f.split() for f in families)
+
+        names = [n.strip().lower() for n in re.split(r",|\s+(?:and|&)\s+", author) if n.strip()]
+        if not (named(author.lower()) or all(named(n) for n in names)):
+            return False
+        if abs(work_year - year) > 1:
+            return False
+        # "Porter (1980)" is one author: "Porter, A. & Porter, J." (1980) is another work.
+        if re.search(r"\bet\s+al\b", query):
+            if len(authors) < 3:
+                return False
+        elif all(" " not in n for n in names) and len(authors) != len(names):
+            return False
+        return not context or bool(_significant_words(title) & _significant_words(context))
+    wanted = _significant_words(query)
+    if not wanted:
+        return False
+    overlap = len(wanted & _significant_words(title))
+    return overlap >= max(1, -(-len(wanted) * 3 // 5))
+
+
+def _best_verified_work(query: str, verified: list[dict[str, Any]], *, context: str) -> dict[str, Any] | None:
+    """The pre-verified work (web facts pack) a cite refers to; the closest topic wins on ties."""
+    candidates = [w for w in verified if _work_matches_query(query, w)]
+    if not candidates:
+        return None
+    topic = _significant_words(context)
+    return max(candidates, key=lambda w: len(topic & _significant_words(str(w.get("title") or ""))))
+
+
+def _cite_contexts(content: str, queries: list[str]) -> dict[str, str]:
+    """The sentence(s) where each author-year citation appears, for relevance checks."""
+    sentences = re.split(r"(?<=[.!?])\s+", re.sub(r"\s+", " ", content or ""))
+    out: dict[str, str] = {}
+    for query in queries:
+        author_year = _author_year_query(query)
+        if not author_year:
+            continue
+        first = re.split(r",|\s+(?:and|&)\s+|\s+et\s+al", author_year[0])[0].strip()
+        hits = [
+            s for s in sentences
+            if re.search(rf"\b{re.escape(first)}\b", s) and str(author_year[1]) in s
+        ]
+        if hits:
+            out[query] = " ".join(hits)[:600]
+    return out
+
+
+def _cited_surnames(queries: list[str]) -> frozenset[str]:
+    names = set()
+    for query in queries:
+        author_year = _author_year_query(query)
+        if author_year:
+            first = re.split(r",|\s+(?:and|&)\s+", author_year[0])[0].strip().lower()
+            if " " not in first:
+                names.add(first)
+    return frozenset(names)
+
+
+def _is_retail_url(url: str) -> bool:
+    domain = _domain(url)
+    return any(marker in domain for marker in _RETAIL_DOMAINS)
+
+
+def _url_backed_by_sources(url: str, title: str, sources: list[dict[str, str]]) -> bool:
+    """The URL came from the search, or the work's title matches a page the search returned."""
+    if "doi.org" in url:
+        return True
+    if _domain(url) in {_domain(s.get("url") or "") for s in sources}:
+        return True
+    wanted = _significant_words(title)
+    if not wanted:
+        return False
+    need = max(1, -(-len(wanted) * 3 // 5))
+    return any(len(wanted & _significant_words(s.get("title") or "")) >= need for s in sources)
+
+
+def _book_publisher(item: dict[str, Any], style_key: str) -> str | None:
+    publisher = str(item.get("publisher") or "").strip()
+    if not publisher or style_key != "Harvard":
+        return publisher or None
+    edition = str(item.get("edition") or "").strip()
+    place = str(item.get("place") or "").strip()
+    if edition and not re.match(r"(?i)^(1st|first)\b", edition):
+        edition = re.sub(r"(?i)\s*(edition|edn\.?|ed\.?)$", "", edition)
+        lead = f"{edition} edn. "
+    else:
+        lead = ""
+    return f"{lead}{place}: {publisher}" if place else f"{lead}{publisher}"
+
+
+def _web_verify_citations(
+    queries: list[str], *, style: str, contexts: dict[str, str] | None = None
+) -> list[tuple[str, dict[str, Any]]]:
+    """Confirm author-year cites with Claude web search; returns (query, work) for each confirmed one."""
+    import json
+    import os
+
+    from services.citation_service.models import Work
+    from services.citation_service.service import _format_reference, _intext, _label, _normalize_style
+    from services.claude_client import generate_with_web_search
+
+    queries = [q for q in queries if _author_year_query(q)][:_WEB_VERIFY_MAX]
+    if not queries:
+        return []
+    model = (os.environ.get(WEB_VERIFY_MODEL_ENV) or "").strip() or None
+    contexts = contexts or {}
+    lines = []
+    for q in queries:
+        context = contexts.get(q, "").strip()
+        lines.append(f"- {q}" + (f"\n  Sentence: {context[:400]}" if context else ""))
+    text, sources, _diag = generate_with_web_search(
+        system_prompt=_WEB_VERIFY_SYSTEM,
+        user_prompt="Citations to verify:\n" + "\n".join(lines),
+        max_searches=len(queries) + 2,
+        model=model,
+        max_tokens=3000,
+    )
+    if not text:
+        return []
+    raw = text[text.find("{") : text.rfind("}") + 1]
+    try:
+        items = json.loads(raw).get("items") or []
+    except (ValueError, AttributeError):
+        return []
+    _label_style, style_key = _normalize_style(style)
+    out: list[tuple[str, dict[str, Any]]] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("found") is not True:
+            continue
+        query = str(item.get("cite") or "").strip()
+        url = str(item.get("url") or "").strip()
+        title = str(item.get("title") or "").strip()
+        if query not in queries or not title or title.lower() in {"null", "none", "unknown"}:
+            continue
+        if not url.startswith("http") or _is_retail_url(url):
+            url = ""
+        if url and not _url_backed_by_sources(url, title, sources):
+            continue
+        publisher = _book_publisher(item, style_key)
+        if not url and not publisher:
+            continue
+        names = [str(a).strip() for a in (item.get("authors") or []) if str(a).strip()]
+        if item.get("organisation") and names:
+            # Trailing comma keeps an organisation name whole in the reference formatter.
+            names = [names[0].rstrip(",") + ","]
+        work = Work(
+            title=title,
+            authors=names,
+            year=str(item.get("year") or "n.d."),
+            journal=(str(item.get("container") or "").strip() or None),
+            url=url or None,
+            volume=(str(item.get("volume") or "").strip() or None),
+            issue=(str(item.get("issue") or "").strip() or None),
+            pages=(str(item.get("pages") or "").strip() or None),
+            publisher=publisher,
+        )
+        reference = _format_reference(work, style_key)
+        if style_key == "Harvard" and url and "doi.org" not in url:
+            reference += f" (Accessed: {utc_now():%-d %B %Y})."
+        presented = {
+            **work.to_dict(),
+            "intext": _intext(work, style_key),
+            "reference": reference,
+            "label": _label(work),
+            "verified_via": "web",
+        }
+        if _work_matches_query(query, presented):
+            out.append((query, presented))
+    return out
+
+
+def _domain(url: str) -> str:
+    match = re.match(r"^https?://([^/]+)", (url or "").strip().lower())
+    return match.group(1).removeprefix("www.") if match else ""
 
 
 def _work_cite_keys(work: dict[str, Any]) -> list[str]:
@@ -623,7 +967,54 @@ def _reconcile_body_with_works(
     # Never accept a reconcile that drops all section headings.
     if content.count("## ") >= 2 and updated.count("## ") < 2:
         return content
+    if _introduces_new_cited_authors(content, updated):
+        return content
     return _strip_references_section(updated)
+
+
+def repair_citation_names(content: str) -> str:
+    """Respell in-text cited surnames that drifted from the reference list ("Juerissen" -> "Jeurissen")."""
+    import difflib
+
+    match = _REF_HEADING_RE.search(content or "")
+    if not match:
+        return content
+    body, refs = content[: match.start()], content[match.start() :]
+    known = set()
+    for line in refs.splitlines()[1:]:
+        lead = re.match(r"^\s*(?:[-*]\s+|\d+\.\s+)?([A-Z][A-Za-z'’\-]+)", line)
+        if lead:
+            known.add(lead.group(1))
+        known.update(re.findall(r"(?:,|&|\band)\s+([A-Z][A-Za-z'’\-]{2,}),\s+[A-Z]\.", line))
+    if not known:
+        return content
+    fixes: dict[str, str] = {}
+    for cite in _extract_claimed_cites(body):
+        author_year = _author_year_query(cite)
+        if not author_year:
+            continue
+        for name in re.split(r",|\s+(?:and|&)\s+", author_year[0]):
+            name = name.strip()
+            if not name or " " in name or name in known or name in fixes:
+                continue
+            close = difflib.get_close_matches(name, known, n=1, cutoff=0.75)
+            if close and close[0][0].lower() == name[0].lower():
+                fixes[name] = close[0]
+    for wrong, right in fixes.items():
+        body = re.sub(rf"\b{re.escape(wrong)}\b", right, body)
+    return body + refs
+
+
+def _introduces_new_cited_authors(before: str, after: str) -> bool:
+    """True when ``after`` cites a surname that ``before`` never mentioned (a swapped author)."""
+    for cite in _extract_claimed_cites(_strip_references_section(after)):
+        author_year = _author_year_query(cite)
+        if not author_year:
+            continue
+        first = re.split(r",|\s+(?:and|&)\s+|\s+et\s+al", author_year[0])[0].strip()
+        if first and not re.search(rf"\b{re.escape(first)}\b", before):
+            return True
+    return False
 
 
 def _strip_references_section(content: str) -> str:

@@ -13,7 +13,7 @@
   href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
   rel="stylesheet"
 />
-<link rel="stylesheet" href="{{ url_for('static', filename='humanizer.css') }}?v=20260813-dm-segment" />
+<link rel="stylesheet" href="{{ url_for('static', filename='humanizer.css') }}?v=20261020-ru2" />
 
 <div class="hz" data-humanizer-page data-dm-tour-page="humanizer" data-tour="hz-page">
   <div class="hz-drop-overlay" data-hz-drop-overlay hidden>
@@ -27,6 +27,11 @@
     <section class="hz-card hz-card--input" data-tour="hz-input">
       <div class="hz-card-head">
         <div>
+          <div class="dm-segment hz-lang-segment" role="tablist" aria-label="Humanizer language" data-hz-lang-segment>
+            <span class="dm-segment-thumb" aria-hidden="true"></span>
+            <button type="button" class="dm-segment-btn is-active" role="tab" aria-selected="true" data-hz-lang="eng">eng</button>
+            <button type="button" class="dm-segment-btn" role="tab" aria-selected="false" data-hz-lang="ru">ru</button>
+          </div>
           <h2 class="hz-card-title">Your text</h2>
         </div>
       </div>
@@ -117,7 +122,7 @@
     <div class="hz-stage" data-hz-stage data-stage="idle" aria-live="polite">
       <div class="hz-loading" data-hz-loading hidden>
         <p class="hz-loading-title">Humanizing your text...</p>
-        <p class="hz-loading-sub">This usually takes under 10 seconds</p>
+        <p class="hz-loading-sub" data-hz-loading-sub>This usually takes under 10 seconds</p>
         <div class="hz-loading-dots" aria-hidden="true">
           <span></span><span></span><span></span>
         </div>
@@ -188,5 +193,5 @@
 </div>
 {% endblock %}
 {% block tools_scripts %}
-<script src="{{ url_for('static', filename='humanizer-page.js') }}?v=20260813-dm-states"></script>
+<script src="{{ url_for('static', filename='humanizer-page.js') }}?v=20261020-ru2"></script>
 {% endblock %}

@@ -113,7 +113,7 @@ def build_not_checked(
         candidates.append("in_text_citations")
     if any(
         structured.get(k)
-        for k in ("font_family", "font_size", "line_spacing", "page_numbers_required")
+        for k in ("font_family", "font_size", "line_spacing", "page_numbers_required", "cover_page_required")
     ):
         candidates.append("formatting")
     candidates.append("academic_style")

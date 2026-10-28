@@ -24,6 +24,7 @@ from services.assignment_project.models import (
     RequirementJSON,
     RubricCriterion,
 )
+from services.assignment_spec.titles import WORD_BUDGET_RE, section_heading
 from services.assignment_spec.word_count_statement import text_asks_to_state_word_count
 from services.check_requirements import parse_word_count_spec
 
@@ -109,7 +110,13 @@ class GeminiRequirementAnalyzer:
                 dict(normalized.get("section_word_budgets") or {}),
                 normalized.get("word_count"),
             )
-            normalized["required_sections"] = scoped_sections
+            normalized["required_sections"] = _restore_section_labels(
+                scoped_sections,
+                "\n".join(
+                    str(sections.get(key) or "")
+                    for key in ("assignment_brief", "rubric", "lecture_notes", "uploaded_files")
+                ),
+            )
             normalized["section_word_budgets"] = scoped_budgets
             if scoped_wc is not None:
                 normalized["word_count"] = scoped_wc
@@ -136,6 +143,7 @@ class GeminiRequirementAnalyzer:
                 academic_level=normalized.get("academic_level"),
                 missing_information=normalized.get("missing_information", []),
                 state_word_count=bool(normalized.get("state_word_count")),
+                title_page=normalized.get("title_page") or {},
                 analyzer_version=self.VERSION,
                 analyzed_at=utc_now(),
             )
@@ -172,7 +180,7 @@ def _requirement_system_prompt() -> str:
         "Return one strict JSON object only, no markdown, no code fences, no commentary. "
         "Required top-level keys: assignment_type, title, word_count, citation_style, "
         "required_sections, section_word_budgets, rubric, learning_outcomes, minimum_sources, "
-        "formatting, deadline, difficulty, academic_level, missing_information, state_word_count. "
+        "formatting, deadline, difficulty, academic_level, missing_information, state_word_count, title_page. "
         "word_count and minimum_sources must be integers or null; never use descriptive text for them. "
         "academic_level must be exactly one of: 'high_school', 'undergraduate', "
         "'postgraduate', 'phd' (infer from wording like module code, 'Level 7', "
@@ -219,7 +227,12 @@ def _requirement_system_prompt() -> str:
         "If the note does not narrow scope, keep required_sections as the brief lists them. "
         "The formatting field must be an object with keys: font_family, font_size, "
         "line_spacing, margins, alignment. "
-        "Rubric must be an array of objects with keys: criterion, weight, description."
+        "Rubric must be an array of objects with keys: criterion, weight, description. "
+        "TITLE PAGE: also return title_page = {required, declaration, lines}. required is true when the brief "
+        "asks for a title/cover page or says some text must appear on it. declaration is the exact text the "
+        "brief says must be included on the title/cover page (e.g. an academic integrity statement), copied "
+        "verbatim, or null. lines lists up to 4 short identifying lines the brief gives for the paper "
+        "(programme title, module name and code, assessment title), or []."
     )
 
 
@@ -334,21 +347,12 @@ def _parse_section_word_budget(text: str) -> tuple[str, int | None]:
     raw = str(text or "").strip()
     if not raw:
         return "", None
-    title = raw.split(":", 1)[0].strip() if ":" in raw else raw
-    # Prefer trailing "– N words" / "(N words)" on the full string.
+    # Prefer trailing "– N words" / "(N words)" / "(Approx. N words)" on the full string.
     match = _SECTION_BUDGET_INLINE.search(raw)
     words = int(match.group("words")) if match else None
-    if words is not None and match:
-        # Title may include the budget suffix — strip it.
-        title = re.sub(
-            r"\s*(?:[–\-]\s*|\()\s*\d{2,4}\s*words?\s*\)?\s*$",
-            "",
-            title,
-            flags=re.I,
-        ).strip() or title
-    if ":" in title:
-        title = title.split(":", 1)[0].strip()
-    return title, words
+    if words is None and (loose := WORD_BUDGET_RE.search(raw)):
+        words = int(loose.group(1))
+    return section_heading(raw), words
 
 
 def _extract_section_word_budgets_from_sources(sections: dict[str, str]) -> dict[str, int]:
@@ -445,6 +449,21 @@ def _normalize_requirement_json(raw: dict[str, Any]) -> dict[str, Any]:
     missing_information = pick("missing_information", "missingInformation")
     state_word_count = pick("state_word_count", "stateWordCount")
 
+    # Briefs without these items come back as null or a lone string rather than [].
+    def as_list(value: Any) -> Any:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value] if value.strip() else []
+        return value
+
+    required_sections = as_list(required_sections)
+    rubric = [] if rubric is None else rubric
+    learning_outcomes = as_list(learning_outcomes)
+    missing_information = as_list(missing_information)
+    if formatting is None:
+        formatting = {}
+
     if not isinstance(required_sections, list):
         raise ValueError("required_sections must be an array")
     if not isinstance(rubric, list):
@@ -516,6 +535,20 @@ def _normalize_requirement_json(raw: dict[str, Any]) -> dict[str, Any]:
         "academic_level": _normalize_academic_level(academic_level),
         "missing_information": [str(v) for v in missing_information if str(v).strip()],
         "state_word_count": _coerce_bool(state_word_count),
+        "title_page": _coerce_title_page(pick("title_page", "titlePage")),
+    }
+
+
+def _coerce_title_page(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    declaration = re.sub(r"\s+", " ", str(raw.get("declaration") or "")).strip()[:1500]
+    lines = raw.get("lines") if isinstance(raw.get("lines"), list) else []
+    clean_lines = [re.sub(r"\s+", " ", str(v)).strip()[:150] for v in lines]
+    return {
+        "required": _coerce_bool(raw.get("required")) or bool(declaration),
+        "declaration": declaration or None,
+        "lines": [v for v in clean_lines if v][:4],
     }
 
 
@@ -560,7 +593,7 @@ def _normalize_required_sections_with_budgets(raw_sections: list[Any]) -> tuple[
             budget_raw = value.get("word_count") or value.get("estimated_words") or value.get("words")
             if budget_raw is not None and title:
                 try:
-                    budgets[title.split(":", 1)[0].strip()] = int(budget_raw)
+                    budgets[section_heading(text)] = int(budget_raw)
                 except (TypeError, ValueError):
                     pass
         else:
@@ -572,6 +605,27 @@ def _normalize_required_sections_with_budgets(raw_sections: list[Any]) -> tuple[
             budgets.setdefault(short_title, parsed_budget)
         sections.append(text)
     return sections, budgets
+
+
+def _restore_section_labels(sections: list[str], brief: str) -> list[str]:
+    """Put back "Section N:" when the brief numbers the section but the model dropped the label."""
+    from services.assignment_spec.titles import section_heading, strip_word_budget
+
+    out: list[str] = []
+    for raw in sections:
+        text = str(raw).strip()
+        name = strip_word_budget(text)
+        if not name or ":" in section_heading(text):
+            out.append(text)
+            continue
+        match = re.search(
+            rf"(?im)^[ \t]*((?:section|part)[ \t]*\d{{1,2}})[ \t]*[:.\-–][ \t]*{re.escape(name)}\b", brief or ""
+        )
+        if match:
+            label = re.sub(r"\s+", " ", match.group(1)).strip()
+            text = f"{label[0].upper()}{label[1:]}: {text}"
+        out.append(text)
+    return out
 
 
 def _normalize_required_sections(raw_sections: list[Any]) -> list[str]:

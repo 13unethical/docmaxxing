@@ -4,12 +4,14 @@ Retry policy (large unattended runs):
 - Collector owns a bounded attempt budget (`max_attempts_per_document`, default 2).
 - Browser provider is constructed with `max_retries=1` so each collector attempt maps
   to exactly one `_humanize_once` call (no nested collector × provider multiplication).
-- Failed documents are recorded and skipped; the run continues, except LOGIN_REQUIRED,
-  which stops the run because every remaining document would fail the same way.
+- Failed documents are recorded and skipped; the run continues, except LOGIN_REQUIRED
+  and DAILY_LIMIT, which stop the run because every remaining document would fail the
+  same way. A DAILY_LIMIT document is not marked failed and stays in the source pool.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections import Counter
@@ -54,6 +56,7 @@ _NON_RETRYABLE = frozenset(
         "MODEL_SELECTION_FAILED",
         "LEVEL_SELECTION_FAILED",
         "LOGIN_REQUIRED",
+        "DAILY_LIMIT",
         "HEADING_RESTORE_FAILED",
         "WRONG_MODEL",
         "WRONG_LEVEL",
@@ -235,10 +238,13 @@ class TeacherDocumentCollector:
         flags_counter: Counter[str] = Counter()
         failure_codes: Counter[str] = Counter()
         failure_stages: Counter[str] = Counter()
+        level_counts: Counter[int] = Counter()
+        provider_calls = 0
         ratio_sum = 0.0
         ratio_n = 0
         heading_exact = 0
         heading_total = 0
+        paragraph_scores: list[float] = []
         refs_ok = 0
         refs_total = 0
         max_attempts = self._attempt_budget()
@@ -318,6 +324,7 @@ class TeacherDocumentCollector:
 
             # Training-only: protect ## headings before StealthWriter, restore after.
             protected_body, protected_headings = protect_training_headings(body)
+            level = self._level_for(doc.document_id)
 
             teacher_body: str | None = None
             provider_name = "stealthwriter_training"
@@ -330,8 +337,9 @@ class TeacherDocumentCollector:
                 attempt_started = time.monotonic()
                 try:
                     assert self.provider is not None
+                    provider_calls += 1
                     result = self.provider.rewrite(
-                        protected_body, document_id=doc.document_id
+                        protected_body, document_id=doc.document_id, level=level
                     )
                     try:
                         teacher_body = restore_training_headings(
@@ -415,6 +423,10 @@ class TeacherDocumentCollector:
                     time.sleep(min(15.0, 1.0 * (2 ** (attempt - 1))))
 
             if teacher_body is None:
+                if last_error_code == "DAILY_LIMIT":
+                    stopped_reason = "DAILY_LIMIT"
+                    print("[doc-collector] stopping run: StealthWriter daily limit reached", flush=True)
+                    break
                 self._record_failed_document(
                     doc=doc,
                     error_code=last_error_code or "PROVIDER_FAILED",
@@ -432,12 +444,15 @@ class TeacherDocumentCollector:
                         flush=True,
                     )
                     break
+                if pool is not None:
+                    pool.record_failure(doc.document_id)
                 continue
 
             policy_error = self._policy_gate(
                 provider_name=provider_name,
                 provider_model=provider_model,
                 provider_meta=provider_meta,
+                expected_level=level,
             )
             if policy_error is not None:
                 code, message = policy_error
@@ -464,6 +479,8 @@ class TeacherDocumentCollector:
                 failed_ids.add(doc.document_id)
                 completed.add(doc.document_id)
                 self._save_checkpoint(completed, successful_ids, failed_ids, skipped_ids)
+                if pool is not None:
+                    pool.record_failure(doc.document_id)
                 continue
 
             merged = join_body_and_references(teacher_body, refs)
@@ -513,6 +530,8 @@ class TeacherDocumentCollector:
                 failed_ids.add(doc.document_id)
                 completed.add(doc.document_id)
                 self._save_checkpoint(completed, successful_ids, failed_ids, skipped_ids)
+                if pool is not None:
+                    pool.record_failure(doc.document_id)
                 continue
 
             flags_counter.update(quality.flags)
@@ -535,6 +554,9 @@ class TeacherDocumentCollector:
             heading_total += 1
             if heading_status == "exact":
                 heading_exact += 1
+            paragraph_score = _paragraph_preservation(body, teacher_body)
+            if paragraph_score is not None:
+                paragraph_scores.append(paragraph_score)
 
             ratio_sum += ratio
             ratio_n += 1
@@ -549,7 +571,7 @@ class TeacherDocumentCollector:
                 seed=int(doc.seed),
                 teacher_provider=provider_name,
                 teacher_model=provider_model,
-                teacher_level=int(self.config.level),
+                teacher_level=int(level),
                 teacher_timeout=float(self.config.timeout_s),
                 source_word_count=src_wc,
                 teacher_word_count=tgt_wc,
@@ -571,9 +593,13 @@ class TeacherDocumentCollector:
             payload["combination_key"] = getattr(doc, "combination_key", "") or ""
             payload["generation_prompt"] = getattr(doc, "generation_prompt", "") or ""
             payload["source_kind"] = "claude_pool" if pool is not None else "template"
+            payload["source_writer"] = pool.writer_of(doc.document_id) if pool is not None else None
             payload["ratio"] = round(ratio, 6)
             payload["jaccard"] = round(jaccard, 6)
             payload["heading_preservation"] = heading_status
+            payload["paragraph_preservation"] = (
+                round(paragraph_score, 4) if paragraph_score is not None else None
+            )
             payload["references_preservation"] = references_status
             payload["elapsed_seconds"] = elapsed_s
             safe_meta = {
@@ -593,12 +619,13 @@ class TeacherDocumentCollector:
             safe_meta.setdefault("last_successful_stage", _REQUIRED_RESULT_STAGE)
             safe_meta.setdefault("verified_model", provider_model)
             safe_meta.setdefault("ui_model_label", _CANONICAL_UI_LABEL)
-            safe_meta.setdefault("verified_level", int(self.config.level))
+            safe_meta.setdefault("verified_level", int(level))
             payload["teacher_meta"] = safe_meta
             self._append_jsonl(self.documents_path, payload)
             if pool is not None:
                 pool.mark_used(doc.document_id)
             success_count += 1
+            level_counts[level] += 1
             successful_ids.add(doc.document_id)
             existing_source_hashes.add(source_hash)
             completed.add(doc.document_id)
@@ -627,6 +654,9 @@ class TeacherDocumentCollector:
             "reference_preservation_rate": (
                 round(refs_ok / refs_total, 4) if refs_total else None
             ),
+            "paragraph_preservation_rate": (
+                round(sum(paragraph_scores) / len(paragraph_scores), 4) if paragraph_scores else None
+            ),
             "quality_flag_counts": dict(sorted(flags_counter.items())),
             "elapsed_wall_seconds": wall_s,
             "estimated_avg_seconds_per_successful": (
@@ -639,6 +669,8 @@ class TeacherDocumentCollector:
             "dry_run": False,
             "stopped_reason": stopped_reason,
             "source": "claude_pool" if pool is not None else "template",
+            "successful_by_level": {str(k): v for k, v in sorted(level_counts.items())},
+            "provider_calls": int(provider_calls),
         }
 
         word_stats = _word_stats([d.word_count for d in docs])
@@ -669,6 +701,19 @@ class TeacherDocumentCollector:
         return DocumentCollectionResult(
             manifest=manifest, sampling_plan=sampling, summary=summary
         )
+
+    def _level_for(self, document_id: str) -> int:
+        """Rewrite level for a document; weighted pick stable across resumes."""
+        weights = {int(k): float(v) for k, v in (self.config.level_weights or {}).items() if float(v) > 0}
+        if not weights:
+            return int(self.config.level)
+        digest = hashlib.sha256(f"level|{document_id}".encode("utf-8")).digest()
+        point = int.from_bytes(digest[:8], "big") / float(1 << 64) * sum(weights.values())
+        for lvl in sorted(weights):
+            point -= weights[lvl]
+            if point < 0:
+                return lvl
+        return max(weights)
 
     def _attempt_budget(self) -> int:
         # Prefer explicit max_attempts_per_document; fall back to legacy max_retries.
@@ -709,6 +754,7 @@ class TeacherDocumentCollector:
         provider_name: str,
         provider_model: str,
         provider_meta: dict[str, Any],
+        expected_level: int | None = None,
     ) -> tuple[str, str] | None:
         name = (provider_name or "").lower()
         if "mock" in name and not self.config.allow_mock_provider:
@@ -740,16 +786,18 @@ class TeacherDocumentCollector:
                 f"ui_model_label={ui_label!r} expected={_CANONICAL_UI_LABEL!r}",
             )
 
-        verified_level = provider_meta.get("verified_level", self.config.level)
+        wanted = int(expected_level if expected_level is not None else self.config.level)
+        verified_level = provider_meta.get("verified_level", wanted)
         try:
             level_i = int(verified_level)
         except (TypeError, ValueError):
             return "WRONG_LEVEL", f"verified_level={verified_level!r}"
-        if level_i != _CANONICAL_LEVEL or int(self.config.level) != _CANONICAL_LEVEL:
+        allowed = set(self.config.level_weights or {}) or {_CANONICAL_LEVEL}
+        if level_i != wanted or wanted not in allowed:
             return (
                 "WRONG_LEVEL",
-                f"verified_level={level_i} config_level={self.config.level} "
-                f"expected={_CANONICAL_LEVEL}",
+                f"verified_level={level_i} requested_level={wanted} "
+                f"allowed={sorted(allowed)}",
             )
 
         if not bool(provider_meta.get("selection_verified")):
@@ -959,6 +1007,7 @@ class TeacherDocumentCollector:
                 "model": self.config.model,
                 "ui_model_label": _CANONICAL_UI_LABEL,
                 "level": int(self.config.level),
+                "level_weights": {str(k): v for k, v in (self.config.level_weights or {}).items()} or None,
                 "timeout_s": float(self.config.timeout_s),
                 "max_attempts_per_document": self._attempt_budget(),
                 "provider_internal_retries": _PROVIDER_INTERNAL_RETRIES,
@@ -1029,6 +1078,19 @@ def _source_hash(text: str) -> str:
     import hashlib
 
     return hashlib.sha256(_normalize(text).encode("utf-8")).hexdigest()
+
+
+def _paragraph_preservation(source_body: str, teacher_body: str) -> float | None:
+    """Share of multi-paragraph sections whose paragraph count survived the teacher."""
+    from services.humanizer_training.section_sft import _paragraphs, split_sections
+
+    src, tgt = split_sections(source_body), split_sections(teacher_body)
+    if len(src) != len(tgt):
+        return None
+    pairs = [(a, b) for (_, a), (_, b) in zip(src, tgt) if len(_paragraphs(a)) > 1]
+    if not pairs:
+        return None
+    return sum(len(_paragraphs(a)) == len(_paragraphs(b)) for a, b in pairs) / len(pairs)
 
 
 def _token_jaccard(left: str, right: str) -> float:

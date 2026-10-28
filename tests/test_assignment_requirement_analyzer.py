@@ -122,6 +122,23 @@ def test_normalize_keeps_section_word_budgets():
     assert normalized["state_word_count"] is False
 
 
+def test_null_or_string_list_fields_are_accepted():
+    raw = {
+        "assignment_type": "Essay",
+        "word_count": 300,
+        "required_sections": None,
+        "rubric": None,
+        "learning_outcomes": "Reflect on personal experience",
+        "formatting": None,
+        "missing_information": None,
+    }
+    normalized = _normalize_requirement_json(raw)
+    assert normalized["required_sections"] == []
+    assert normalized["rubric"] == []
+    assert normalized["learning_outcomes"] == ["Reflect on personal experience"]
+    assert normalized["missing_information"] == []
+
+
 def test_required_sections_dict_strings_become_clean_titles():
     raw = [
         "{'section_name': 'Introduction', 'content': 'title, author and overview'}",

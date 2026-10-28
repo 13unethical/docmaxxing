@@ -67,6 +67,8 @@ def count_words(text: str) -> int:
 
 def is_references_section_title(title: str) -> bool:
     t = (title or "").strip().lower()
+    if ":" in t and re.match(r"^(?:section|part|chapter)\b", t):
+        t = t.split(":", 1)[1].strip()
     return t in {"references", "reference list", "bibliography", "works cited"} or t.startswith(
         "reference"
     )
@@ -173,7 +175,9 @@ def validate_draft_against_spec(
             continue
         key = section.title.strip().lower()
         found = by_title.get(key)
-        if found is None and not _is_references(section.title):
+        if found is None and _is_references(section.title):
+            found = next((s for t, s in by_title.items() if _is_references(t)), None)
+        elif found is None:
             found = next((s for t, s in by_title.items() if key in t or t in key), None)
         if found is None:
             missing.append(section.title)
@@ -250,7 +254,7 @@ def _check_formatting(spec: AssignmentSpec, profile: dict[str, Any] | None) -> l
     if spacing is not None and abs(float(spacing) - float(fmt.line_spacing)) > 0.05:
         issues.append(f"Line spacing mismatch: expected {fmt.line_spacing}, got {spacing}")
     align = str(profile.get("alignment") or "").lower()
-    if align and align != fmt.alignment.lower():
+    if fmt.alignment_required and align and align != fmt.alignment.lower():
         issues.append(f"Alignment mismatch: expected {fmt.alignment}, got {align}")
     return issues
 
