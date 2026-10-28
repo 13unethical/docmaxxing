@@ -64,6 +64,9 @@ class BulkConfig:
     batch_size: int = 10
     level_weights: dict[int, float] = field(default_factory=lambda: parse_level_weights(DEFAULT_LEVEL_WEIGHTS))
     reset_utc_hour: int = 0
+    # In the last N minutes before the reset, training may spend the unused production
+    # reserve too; StealthWriter's own limit message stops it if users spent it.
+    reserve_release_minutes: int = 60
     reuse_production_session: bool = True
     timeout_s: float = 300.0
     root: Path = DEFAULT_BULK_ROOT
@@ -79,6 +82,7 @@ class BulkConfig:
                 os.environ.get("HUMANIZER_TRAINING_BULK_LEVELS") or DEFAULT_LEVEL_WEIGHTS
             ),
             reset_utc_hour=_env_int("HUMANIZER_TRAINING_BULK_RESET_UTC_HOUR", 0) % 24,
+            reserve_release_minutes=max(0, _env_int("HUMANIZER_TRAINING_BULK_RESERVE_RELEASE_MIN", 60)),
             reuse_production_session=(os.environ.get("HUMANIZER_TRAINING_BULK_REUSE_SESSION", "1").strip() != "0"),
         )
 
@@ -90,11 +94,21 @@ class BulkConfig:
     def enabled(self) -> bool:
         return self.training_limit > 0
 
+    def release_starts(self, now: datetime) -> datetime:
+        return next_reset(now, self.reset_utc_hour) - timedelta(minutes=self.reserve_release_minutes)
+
+    def limit_at(self, now: datetime) -> int:
+        """Training share now: the whole daily limit inside the release window."""
+        if self.reserve_release_minutes > 0 and now >= self.release_starts(now):
+            return self.daily_limit
+        return self.training_limit
+
     def safe_dict(self) -> dict[str, Any]:
         return {
             "daily_limit": self.daily_limit,
             "production_reserve": self.production_reserve,
             "training_limit": self.training_limit,
+            "reserve_release_minutes": self.reserve_release_minutes,
             "batch_size": self.batch_size,
             "level_weights": {str(k): v for k, v in self.level_weights.items()},
             "reset_utc_hour": self.reset_utc_hour,
@@ -215,7 +229,9 @@ def status(cfg: BulkConfig, now: datetime) -> dict[str, Any]:
         "paused": (cfg.root / "PAUSE").exists(),
         "sw_day": day,
         "used_today": used,
-        "remaining_today": max(0, cfg.training_limit - used),
+        "limit_now": cfg.limit_at(now),
+        "remaining_today": max(0, cfg.limit_at(now) - used),
+        "reserve_release_at": cfg.release_starts(now).isoformat(),
         "limit_hit_at": ledger.read().get("limit_hit_at"),
         "next_reset": next_reset(now, cfg.reset_utc_hour).isoformat(),
         "pool_pending": pool.pending_count(),
@@ -247,9 +263,13 @@ def run_cycle(
         wait = min(until_reset, (hit_at + LIMIT_RECHECK - now).total_seconds())
         return CycleResult("limit_wait", wait, {"limit_message": ledger.read().get("limit_message")})
 
-    remaining = cfg.training_limit - ledger.used()
+    limit = cfg.limit_at(now)
+    remaining = limit - ledger.used()
     if remaining <= 0:
-        return CycleResult("quota_done", until_reset, {"used": ledger.used()})
+        wait = until_reset
+        if limit < cfg.daily_limit and cfg.reserve_release_minutes > 0:
+            wait = min(wait, (cfg.release_starts(now) - now).total_seconds() + 5)
+        return CycleResult("quota_done", wait, {"used": ledger.used()})
 
     pool = SourcePool(cfg.pool_root)
     pending = pool.pending_count()
@@ -278,7 +298,7 @@ def run_cycle(
             timeout_s=cfg.timeout_s,
             max_attempts_per_document=2,
         ),
-        provider=QuotaProvider(provider, ledger, cfg.training_limit, clock),
+        provider=QuotaProvider(provider, ledger, limit, clock),
     )
     summary = dict(collector.run().summary or {})
     stopped = summary.get("stopped_reason")

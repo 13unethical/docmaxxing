@@ -181,9 +181,32 @@ def test_cycle_spends_only_the_training_share(tmp_path: Path):
     assert QuotaLedger(cfg.root, sw_day(NOW)).used() == 3
     second = run_cycle(cfg, provider=provider, now=NOW, clock=lambda: NOW)
     assert second.action == "quota_done"
-    assert second.wait_s == pytest.approx((next_reset(NOW) - NOW).total_seconds() + 120)
+    # Sleeps until the reserve is released an hour before the reset, not until the reset.
+    release = next_reset(NOW) - timedelta(minutes=60)
+    assert second.wait_s == pytest.approx((release - NOW).total_seconds() + 5)
     assert len(provider.calls) == 3
     assert SourcePool(cfg.pool_root).pending_count() == 5
+
+
+def test_unused_reserve_is_spent_in_the_last_hour_before_the_reset(tmp_path: Path):
+    _pool(tmp_path / "pool", 20)
+    cfg = _cfg(tmp_path, level_weights={8: 1})
+    provider = _Provider()
+    assert run_cycle(cfg, provider=provider, now=NOW, clock=lambda: NOW).detail["requested"] == 3
+    late = next_reset(NOW) - timedelta(minutes=30)
+    result = run_cycle(cfg, provider=provider, now=late, clock=lambda: late)
+    assert result.action == "batch_done"
+    assert result.detail["requested"] == 10
+    assert QuotaLedger(cfg.root, sw_day(NOW)).used() == 13
+    done = run_cycle(cfg, provider=provider, now=late, clock=lambda: late)
+    assert done.action == "quota_done"
+    assert done.wait_s == pytest.approx((next_reset(NOW) - late).total_seconds() + 120)
+
+
+def test_reserve_release_can_be_turned_off(tmp_path: Path):
+    cfg = _cfg(tmp_path, reserve_release_minutes=0)
+    late = next_reset(NOW) - timedelta(minutes=5)
+    assert cfg.limit_at(late) == cfg.training_limit
 
 
 def test_retries_that_use_up_the_share_end_the_day_without_a_limit_alert(tmp_path: Path):

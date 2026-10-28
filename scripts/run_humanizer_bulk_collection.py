@@ -120,9 +120,10 @@ def run(cfg: BulkConfig, *, once: bool) -> int:
                     holder.stop()
                     st = status(cfg, _now())
                     _alert(
-                        f"daily share used ({st['used_today']}/{st['training_limit']}), "
-                        f"pool pending {st['pool_pending']}, next reset {st['next_reset']}",
-                        f"done:{st['sw_day']}",
+                        f"daily share used ({st['used_today']}/{st['limit_now']}), "
+                        f"pool pending {st['pool_pending']}, reserve released {st['reserve_release_at']}, "
+                        f"next reset {st['next_reset']}",
+                        f"done:{st['sw_day']}:{st['limit_now']}",
                         20 * 3600,
                     )
                 elif result.action == "paused_quality":
