@@ -114,6 +114,16 @@ def test_sections_with_merged_paragraphs_are_dropped(tmp_path):
     assert manifest["section_rejects"] == {"PARAGRAPHS_MERGED": 1}
 
 
+def test_sections_with_tables_or_lists_are_dropped(tmp_path):
+    doc = _doc("d1", titles=("Introduction",))
+    body = _para("aa") + "\n\n| Factor | Effect |\n|---|---|\n| Cost | High |"
+    doc["source_text"] = f"## Introduction\n\n{body}"
+    doc["teacher_text"] = f"## Introduction\n\n{_rewrite(_para('aa'))}\n\n| Factor | Effect |\n\n|---|---|\n\n| Cost | High |"
+    _write_run(tmp_path, [doc])
+    manifest = build_section_sft(root=tmp_path, output_dir=tmp_path / "out")
+    assert manifest["section_rejects"] == {"NON_PROSE": 1}
+
+
 def test_long_sections_chunk_on_matching_paragraphs():
     paras = [_para(f"p{i}", 250) for i in range(4)]
     source = "\n\n".join(paras)

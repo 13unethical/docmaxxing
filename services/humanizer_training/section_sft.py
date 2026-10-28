@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from services.humanizer_engine.heading_utils import split_off_references
+from services.humanizer_training.teacher.documents.source_pool import is_plain_prose
 
 DEFAULT_INPUT_GLOBS = (
     "data/humanizer_training/bulk/*/batch-*/documents.jsonl",
@@ -147,6 +148,8 @@ def _section_reject(source: str, target: str) -> str | None:
         return "EMPTY_TARGET"
     if _HEADING.search(target):
         return "HEADING_IN_TARGET"
+    if not is_plain_prose(source):
+        return "NON_PROSE"
     if len(_paragraphs(source)) > 1 and len(_paragraphs(target)) == 1:
         return "PARAGRAPHS_MERGED"
     ratio = _wc(target) / _wc(source)

@@ -56,7 +56,9 @@ SYSTEM_PROMPT = (
     "university students. Write original, substantive prose with specific examples, "
     "varied sentence structure, and a clear argument. Output only the document in "
     "Markdown: start directly with the first `##` section heading, use `##` for every "
-    "section heading, no title line, no preamble, no closing notes, no word count."
+    "section heading, no title line, no preamble, no closing notes, no word count. "
+    "Write continuous prose paragraphs only, separated by a blank line: no tables, "
+    "no bullet or numbered lists, no code blocks, no diagrams or figures."
 )
 
 ReplyFn = Callable[..., tuple[str | None, dict[str, Any]]]
@@ -135,7 +137,20 @@ def validate_source_text(text: str) -> list[str]:
     ]
     if sentences and len(set(sentences)) / len(sentences) < MIN_UNIQUE_SENTENCE_RATIO:
         reasons.append("REPETITIVE")
+    if not is_plain_prose(body):
+        reasons.append("NON_PROSE")
     return reasons
+
+
+def is_plain_prose(body: str) -> bool:
+    """Every block is one line of prose: tables, lists and diagrams break section pairing."""
+    for block in (body or "").split("\n\n"):
+        lines = [ln for ln in block.split("\n") if ln.strip() and not ln.lstrip().startswith("## ")]
+        if len(lines) > 1:
+            return False
+        if lines and re.match(r"^\s*(\||```|[-*•+]\s|\d+[.)]\s)", lines[0]):
+            return False
+    return True
 
 
 def _document_id(combination_key: str, text: str) -> str:

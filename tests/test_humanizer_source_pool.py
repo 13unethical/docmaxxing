@@ -68,6 +68,20 @@ def test_validate_rejects_short_and_forbidden():
     assert "FORBIDDEN_TERM" in validate_source_text(text)
 
 
+def test_validate_rejects_tables_lists_and_diagrams():
+    essay = _essay()
+    first_break = essay.index("\n\n", essay.index("\n\n") + 2)
+    for extra in (
+        "| Factor | Effect |\n|---|---|\n| Cost | High |",
+        "- first point\n- second point",
+        "1. First step",
+        "```\n+-----+\n| box |\n+-----+\n```",
+    ):
+        text = essay[:first_break] + "\n\n" + extra + essay[first_break:]
+        assert "NON_PROSE" in validate_source_text(text), extra
+    assert "NON_PROSE" not in validate_source_text(essay)
+
+
 def test_fill_pool_tops_up_to_target_with_unique_briefs(tmp_path: Path):
     reply = _fake_reply(_essay())
     first = fill_source_pool(target_pending=4, root=tmp_path, workers=2, reply_fn=reply, seed=7)
