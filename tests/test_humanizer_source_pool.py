@@ -15,6 +15,7 @@ from services.humanizer_training.teacher.documents.schema import (
 from services.humanizer_training.teacher.documents.source_pool import (
     SourcePool,
     clean_source_text,
+    drop_non_prose_blocks,
     fill_source_pool,
     validate_source_text,
 )
@@ -80,6 +81,29 @@ def test_validate_rejects_tables_lists_and_diagrams():
         text = essay[:first_break] + "\n\n" + extra + essay[first_break:]
         assert "NON_PROSE" in validate_source_text(text), extra
     assert "NON_PROSE" not in validate_source_text(essay)
+
+
+def test_drop_non_prose_blocks_keeps_only_prose():
+    text = (
+        "## Model\n\nThe model has three parts:\n\n1. First part\n2. Second part\n\n"
+        "Each part matters for the outcome.\n\n```\n[ A ]\n\n  |\n[ B ]\n```\n\n"
+        "## Table Only\n\n| a | b |\n|---|---|\n\n"
+        "## End\n\nClosing prose stays here.\n\n## References\n\nSmith, J. (2020). Book.\nJones, K. (2021). Paper."
+    )
+    assert drop_non_prose_blocks(text) == (
+        "## Model\n\nEach part matters for the outcome.\n\n"
+        "## End\n\nClosing prose stays here.\n\n## References\n\nSmith, J. (2020). Book.\nJones, K. (2021). Paper."
+    )
+
+
+def test_generated_source_with_diagrams_is_salvaged(tmp_path: Path):
+    essay = _essay()
+    first_break = essay.index("\n\n", essay.index("\n\n") + 2)
+    noisy = essay[:first_break] + "\n\n```\n+---+\n\n| x |\n+---+\n```\n\n- a\n- b" + essay[first_break:]
+    result = fill_source_pool(target_pending=1, root=tmp_path, workers=1, reply_fn=_fake_reply(noisy), seed=5)
+    assert result.generated == 1
+    (doc,) = SourcePool(tmp_path).peek(1)
+    assert doc.source_text == essay
 
 
 def test_fill_pool_tops_up_to_target_with_unique_briefs(tmp_path: Path):

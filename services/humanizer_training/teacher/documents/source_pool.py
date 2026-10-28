@@ -101,6 +101,35 @@ def clean_source_text(raw: str) -> str:
     return text.strip()
 
 
+_FENCE_RE = re.compile(r"(?ms)^[ \t]*```.*?^[ \t]*```[ \t]*$")
+
+
+def drop_non_prose_blocks(text: str) -> str:
+    """Remove tables, lists, code fences and diagrams that writers add despite the prompt.
+
+    A prose line ending with ``:`` that introduced a removed block goes too, and so does
+    a heading left without any prose. The references block is kept as is.
+    """
+    body, refs = _split_refs(_FENCE_RE.sub("", text))
+    out: list[str] = []
+    for block in re.split(r"\n\s*\n", body):
+        lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
+        out.extend(ln for ln in lines if ln.startswith("## "))
+        rest = [ln for ln in lines if not ln.startswith("## ")]
+        if not rest:
+            continue
+        if is_plain_prose("\n".join(rest)):
+            out.append(rest[0])
+        elif out and not out[-1].startswith("## ") and out[-1].endswith(":"):
+            out.pop()
+    kept = [
+        b
+        for i, b in enumerate(out)
+        if not (b.startswith("## ") and (i + 1 == len(out) or out[i + 1].startswith("## ")))
+    ]
+    return "\n\n".join(kept + ([refs] if refs else []))
+
+
 def fit_source_length(text: str, *, limit: int = TARGET_WORDS_HIGH) -> str:
     """Drop whole middle sections (never the first, the last body section or references)."""
     if _wc(text) <= MAX_WORDS:
@@ -392,7 +421,7 @@ def generate_source_document(
     )
     if not raw:
         return None, ["CLAUDE_FAILED"], diag
-    text = fit_source_length(clean_source_text(raw))
+    text = fit_source_length(drop_non_prose_blocks(clean_source_text(raw)))
     reasons = validate_source_text(text)
     if diag.get("finish_reason") == "MAX_TOKENS" or not _ENDS_SENTENCE.search(text):
         reasons.append("TRUNCATED")
