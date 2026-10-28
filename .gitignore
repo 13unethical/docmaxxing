@@ -1,4 +1,5 @@
 .venv/
+.venv-student/
 venv/
 __pycache__/
 *.pyc

@@ -1,0 +1,8 @@
+# Student humanizer training/eval on a CUDA GPU host (not the web app).
+torch>=2.5
+transformers>=4.51
+peft>=0.15
+trl>=0.20
+bitsandbytes>=0.45
+accelerate>=1.6
+datasets>=3.5
