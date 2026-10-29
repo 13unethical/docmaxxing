@@ -646,7 +646,7 @@ def test_api_generate_accepts_files_without_topic_and_skips_research(client, mon
     )
     body = res.get_json()
     assert res.status_code == 200, body
-    expected = app_module.feature_cost("presentation")
+    expected = app_module.feature_cost("presentation", slide_count=pg.AUTO_MAX_SLIDES)
     assert charge.call_args.args[:2] == ("presentation", expected)
     assert body["credits_used"] == expected
     assert seen["attachments"] == [{"name": "brief.docx", "text": "Brief text"}]
@@ -665,39 +665,57 @@ def test_api_generate_researches_bare_topic_automatically(client, monkeypatch):
         return pg.normalize_deck(SAMPLE_DECK), {"model": "m", "research": "ok"}
 
     monkeypatch.setattr(pg, "generate_deck", fake_generate_deck)
-    res = client.post("/api/presentation/generate", json={"topic": "Сделай презентацию про ИИ в медицине"})
+    res = client.post(
+        "/api/presentation/generate", json={"topic": "Сделай презентацию про ИИ в медицине", "slide_count": 8}
+    )
     body = res.get_json()
-    expected = app_module.feature_cost("presentation") + app_module.feature_cost("presentation_research")
+    expected = app_module.feature_cost("presentation", slide_count=8)
+    assert expected == 34
     assert charge.call_args.args[:2] == ("presentation", expected)
     assert body["credits_used"] == expected
     assert body["research"] == "ok"
     assert seen["research"] is True
     assert seen["language"] == "auto"
+    assert seen["tone"] == "auto"
 
 
-def test_api_generate_refunds_research_surcharge_when_research_fails(client, monkeypatch):
+def test_api_generate_keeps_price_when_research_fails(client, monkeypatch):
     monkeypatch.setattr(app_module, "_charge_current_user", MagicMock(return_value=(7, {"balance": 50})))
     refund = MagicMock()
     monkeypatch.setattr(app_module, "_refund_safe", refund)
-    monkeypatch.setattr(app_module.wallet, "get_balance", lambda _uid: 70)
     monkeypatch.setattr(
         pg, "generate_deck", lambda **_: (pg.normalize_deck(SAMPLE_DECK), {"model": "m", "research": "failed"})
     )
-    res = client.post("/api/presentation/generate", json={"topic": "Energy"})
+    res = client.post("/api/presentation/generate", json={"topic": "Energy", "slide_count": 6})
     body = res.get_json()
-    research_cost = app_module.feature_cost("presentation_research")
-    refund.assert_called_once_with(7, research_cost, "presentation_research")
-    assert body["credits_used"] == app_module.feature_cost("presentation")
-    assert body["balance"] == 70
+    refund.assert_not_called()
+    assert body["credits_used"] == app_module.feature_cost("presentation", slide_count=6)
     assert body["research"] == "failed"
 
 
-def test_api_generate_with_pasted_material_charges_base_price(client, monkeypatch):
+def test_api_generate_charges_for_slide_count_written_in_request(client, monkeypatch):
     charge = MagicMock(return_value=(7, {"balance": 70}))
     monkeypatch.setattr(app_module, "_charge_current_user", charge)
     monkeypatch.setattr(pg, "generate_deck", lambda **_: (pg.normalize_deck(SAMPLE_DECK), {"model": "m"}))
-    client.post("/api/presentation/generate", json={"topic": "Energy", "details": "My notes", "research": True})
-    assert charge.call_args.args[1] == app_module.feature_cost("presentation")
+    client.post("/api/presentation/generate", json={"topic": "Energy, 12 слайдов", "slide_count": 6})
+    assert charge.call_args.args[1] == app_module.feature_cost("presentation", slide_count=12)
+
+
+def test_api_generate_refunds_unused_slides_when_model_picks_count(client, monkeypatch):
+    monkeypatch.setattr(app_module, "_charge_current_user", MagicMock(return_value=(7, {"balance": 50})))
+    refund = MagicMock()
+    monkeypatch.setattr(app_module, "_refund_safe", refund)
+    monkeypatch.setattr(app_module.wallet, "get_balance", lambda _uid: 59)
+    monkeypatch.setattr(
+        pg, "generate_deck", lambda **_: (pg.normalize_deck(SAMPLE_DECK), {"model": "m", "slide_count": 9})
+    )
+    res = client.post("/api/presentation/generate", json={"topic": "Energy", "details": "My notes"})
+    body = res.get_json()
+    full = app_module.feature_cost("presentation", slide_count=pg.AUTO_MAX_SLIDES)
+    unused = full - app_module.feature_cost("presentation", slide_count=9)
+    refund.assert_called_once_with(7, unused, "presentation")
+    assert body["credits_used"] == full - unused
+    assert body["balance"] == 59
 
 
 def test_api_generate_treats_long_pasted_text_as_material(client, monkeypatch):
@@ -712,8 +730,28 @@ def test_api_generate_treats_long_pasted_text_as_material(client, monkeypatch):
     monkeypatch.setattr(pg, "generate_deck", fake_generate_deck)
     notes = "Lecture notes.\n" + "Photosynthesis converts light into chemical energy. " * 40
     client.post("/api/presentation/generate", json={"topic": notes})
-    assert charge.call_args.args[1] == app_module.feature_cost("presentation")
+    assert charge.call_args.args[1] == app_module.feature_cost("presentation", slide_count=pg.AUTO_MAX_SLIDES)
     assert seen["research"] is False
+
+
+def test_decks_use_presentation_models(monkeypatch):
+    monkeypatch.delenv("PRESENTATION_MODEL", raising=False)
+    captured = _capture_generate_json(monkeypatch)
+    pg.generate_deck(topic="Energy")
+    assert captured["model"] == "claude-sonnet-5-5"
+    monkeypatch.setenv("PRESENTATION_MODEL", "claude-opus-5-5")
+    pg.generate_deck(topic="Energy")
+    assert captured["model"] == "claude-opus-5-5"
+
+    from services import presentation_research
+
+    monkeypatch.delenv("PRESENTATION_RESEARCH_MODEL", raising=False)
+    seen = {}
+    monkeypatch.setattr(
+        presentation_research, "generate_with_web_search", lambda **kw: (seen.update(kw), ("notes", [], {}))[1]
+    )
+    presentation_research.research_topic("Energy")
+    assert seen["model"] == "claude-haiku-5-5"
 
 
 def test_generate_deck_keeps_pasted_material_layout(monkeypatch):
@@ -780,4 +818,4 @@ def test_presentation_page_shows_attach_without_manual_pickers(client):
     for removed in ("pres_research_btn", "pres_slide_count", "pres_language", "pres-mode-chip", "pres_details"):
         assert removed not in html
     assert ".pptx" in html
-    assert f'data-research-cost="{app_module.feature_cost("presentation_research")}"' in html
+    assert 'data-research-cost="0"' in html

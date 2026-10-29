@@ -74,3 +74,16 @@ def test_generate_with_web_search_needs_api_key(monkeypatch):
     monkeypatch.delenv("Claude_API_Key", raising=False)
     text, _sources, diag = claude_client.generate_with_web_search(system_prompt="s", user_prompt="u")
     assert text is None and diag["failure_reason"] == "validation_error"
+
+
+def test_temperature_is_sent_only_to_models_that_accept_it(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    post = MagicMock(return_value=_response({"content": [{"type": "text", "text": '{"ok": true}'}]}))
+    monkeypatch.setattr(claude_client.requests, "post", post)
+    claude_client.generate_json(system_prompt="s", user_prompt="u", model="claude-sonnet-4-6", temperature=0.5)
+    assert post.call_args.kwargs["json"]["temperature"] == 0.5
+    claude_client.generate_json(system_prompt="s", user_prompt="u", model="claude-sonnet-5-5", temperature=0.5)
+    assert "temperature" not in post.call_args.kwargs["json"]
+    assert claude_client.accepts_temperature("claude-haiku-4-5")
+    assert not claude_client.accepts_temperature("claude-haiku-5-5")
+    assert not claude_client.accepts_temperature("claude-opus-5-5")

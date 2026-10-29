@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 from urllib.parse import urlparse
 
 from services.claude_client import generate_with_web_search
 
+DEFAULT_RESEARCH_MODEL = "claude-haiku-5-5"
 MAX_SEARCHES = 5
 MAX_SOURCES = 8
 MAX_NOTES_CHARS = 12000
@@ -42,6 +44,7 @@ def research_topic(topic: str, context: str = "") -> tuple[str | None, list[dict
     notes, sources, diag = generate_with_web_search(
         system_prompt=_SYSTEM_PROMPT,
         user_prompt=prompt,
+        model=(os.environ.get("PRESENTATION_RESEARCH_MODEL") or "").strip() or DEFAULT_RESEARCH_MODEL,
         max_searches=MAX_SEARCHES,
         max_tokens=3000,
     )

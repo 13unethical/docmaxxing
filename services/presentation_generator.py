@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 import re
 from typing import Any
 
@@ -11,9 +12,12 @@ from services.presentation_images import IMAGE_ID_RE, attach_images, image_path,
 from services.presentation_research import research_topic, source_label
 from services.presentation_themes import DEFAULT_THEME, THEMES, Theme, accent_split, get_theme
 
+DEFAULT_PRESENTATION_MODEL = "claude-sonnet-5-5"
 MIN_SLIDES = 5
 MAX_SLIDES = 15
 _AUTO_SLIDES = (8, 12)
+# A deck with no slide count is charged for the most the model may write; unused slides are refunded.
+AUTO_MAX_SLIDES = _AUTO_SLIDES[1]
 MAX_TOPIC_CHARS = 9000
 # Longer requests are pasted material (brief, notes, source text), not a bare topic to research.
 RESEARCH_MAX_REQUEST_CHARS = 1500
@@ -42,6 +46,10 @@ PHOTO_LAYOUTS = ("image", "section")
 ITEM_LAYOUTS = {"cards": 4, "timeline": MAX_ITEMS}
 
 TONES = {
+    "auto": (
+        "the audience and tone the user's request implies (a school or university assignment, a business pitch, "
+        "a talk for a general audience); if it is unclear, a university audience with precise, evidence-based wording"
+    ),
     "academic": "an academic audience (university seminar or lecture); precise, evidence-based wording",
     "business": "a professional business audience; concise, outcome-focused wording",
     "simple": "a general audience; plain, easy-to-follow wording with no jargon",
@@ -107,6 +115,10 @@ Rules:
 
 class PresentationError(Exception):
     """Raised when a deck cannot be generated or rendered."""
+
+
+def presentation_model() -> str:
+    return (os.environ.get("PRESENTATION_MODEL") or "").strip() or DEFAULT_PRESENTATION_MODEL
 
 
 def _clean(value: Any, limit: int) -> str:
@@ -229,6 +241,23 @@ def requested_minutes(text: str) -> float | None:
     return minutes if 1 <= minutes <= 60 else None
 
 
+def planned_slide_count(
+    *, topic: str = "", details: str = "", attachments: Any = None, slide_count: int | None = None
+) -> int | None:
+    """Slides in the deck, title included: the count written in the request, else the picker's count,
+    else one slide per talk minute plus the title. None means the model decides."""
+    files = clean_attachments(attachments)
+    request_text = "\n".join(
+        [(topic or "").strip()[:MAX_TOPIC_CHARS], (details or "").strip()[:MAX_DETAILS_CHARS]]
+        + [f["text"] for f in files]
+    )
+    count = requested_slide_count(request_text) or slide_count
+    minutes = requested_minutes(request_text)
+    if not count and minutes:
+        count = round(minutes) + 1
+    return max(MIN_SLIDES, min(MAX_SLIDES, int(count))) if count else None
+
+
 def needs_research(*, topic: str = "", details: str = "", attachments: Any = None) -> bool:
     """Search the web only when the user gave a bare topic or instruction and no material of their own."""
     return (
@@ -270,7 +299,7 @@ def generate_deck(
     topic: str,
     details: str = "",
     slide_count: int | None = None,
-    tone: str = "academic",
+    tone: str = "auto",
     language: str = "auto",
     theme: str = DEFAULT_THEME,
     images: bool = True,
@@ -287,14 +316,9 @@ def generate_deck(
         raise PresentationError("Topic is required.")
     details = (details or "").strip()[:MAX_DETAILS_CHARS]
     file_text = "\n".join(f["text"] for f in files)
-    request_text = f"{topic}\n{details}\n{file_text}"
-    minutes = requested_minutes(request_text)
-    slide_count = requested_slide_count(request_text) or slide_count
-    if not slide_count and minutes:
-        slide_count = round(minutes) + 1
-    if slide_count:
-        slide_count = max(MIN_SLIDES, min(MAX_SLIDES, int(slide_count)))
-    tone_text = TONES.get(tone, TONES["academic"])
+    minutes = requested_minutes(f"{topic}\n{details}\n{file_text}")
+    slide_count = planned_slide_count(topic=topic, details=details, attachments=files, slide_count=slide_count)
+    tone_text = TONES.get(tone, TONES["auto"])
     language_text = LANGUAGES.get(language, LANGUAGES["auto"])
 
     notes, sources, research_diag = None, [], {}
@@ -349,13 +373,16 @@ def generate_deck(
         system_prompt=_SYSTEM_PROMPT,
         user_prompt="\n".join(parts),
         temperature=0.5,
+        model=presentation_model(),
         max_tokens=16000,
         timeout_s=300,
     )
     if data is None:
         raise PresentationError(diag.get("error_message") or "Presentation generation failed.")
     data["theme"] = theme
-    if sources and isinstance(data.get("slides"), list) and data["slides"]:
+    written = data.get("slides") if isinstance(data.get("slides"), list) else []
+    diag["slide_count"] = min(MAX_SLIDES, len(written) + 1)
+    if sources and written:
         sources_title = _clean(data.get("sources_title"), MAX_TITLE_CHARS) or "Sources"
         data["slides"] = [*data["slides"], _sources_slide(sources_title, sources)]
     if research:

@@ -1096,15 +1096,12 @@ const CONFIG = {
   slides: {
     price: '30 credits',
     topicPlaceholder: 'Turn your idea into polished slides in minutes — describe the topic…',
-    defaults: { count: 8, tone: 'Academic', language: 'Auto language', photos: true },
+    // Tone and language are picked by the model from the request
+    defaults: { count: 8, photos: true },
     counts: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-    tones: ['Academic', 'Business', 'Simple'],
-    languages: ['Auto language', 'English', 'Русский', "O'zbek", 'Қазақ', 'Español', 'Deutsch', 'Français'],
-    // Language label -> code the presentation API expects
-    languageCodes: { 'Auto language': 'auto', English: 'en', 'Русский': 'ru', "O'zbek": 'uz', 'Қазақ': 'kk', 'Español': 'es', Deutsch: 'de', 'Français': 'fr' },
     fileAccept: '.pdf,.docx,.pptx,.txt,.md,.jpg,.jpeg,.png',
     fileTypes: 'PDF, DOCX, PPTX, TXT or a photo',
-    researchPrice: 0,           // extra credits when a bare topic is researched on the web first
+    perSlidePrice: 3,           // price = base + per slide (title included); web research and photos are included
     researchMaxChars: 1500,     // longer requests count as pasted material, not a bare topic
     trustNote: 'Credits are refunded automatically if generation fails. You can switch styles after generating — free.',
     designCategories: ['Academic', 'Work', 'Finance', 'Promotion', 'Consulting'],
@@ -1304,7 +1301,7 @@ const CONFIG = {
       { target: '#sl-topic-block', title: 'Describe your topic',
         text: 'Type what the presentation is about. The card on the left is your design. Press + to turn a document into slides instead.' },
       { target: '#sl-settings-block', title: 'Settings are ready',
-        text: 'Number of slides, tone, language and photos are already set. Change them only if you want to.' },
+        text: 'Number of slides and photos are already set. Tone and language follow your request.' },
       { target: '#sl-generate', title: 'See the price, then generate',
         text: 'Generating costs 30 credits, shown before you start. If generation fails, credits come back automatically.' },
       { target: '#sl-viewer', title: 'Click any text to edit',
@@ -1508,9 +1505,9 @@ const API = window.DMX.api;
   Object.assign(item('turnitin'), { price: cr(c.turnitin) });
   Object.assign(item('humanizer'), { price: cr(c.humanizer), badge: c.humanizerDiscount ? `-${c.humanizerDiscount}%` : '' });
   Object.assign(item('workspace'), { price: `${cr(c.humanizer)} per humanize` });
-  Object.assign(item('presentation'), { price: cr(c.presentation) });
   CONFIG.slides.price = cr(c.presentation);
-  CONFIG.slides.researchPrice = c.presentationResearch || 0;
+  CONFIG.slides.perSlidePrice = c.presentationPerSlide ?? CONFIG.slides.perSlidePrice;
+  Object.assign(item('presentation'), { price: `from ${cr(c.presentation + CONFIG.slides.perSlidePrice * CONFIG.slides.counts[0])}` });
   // The gallery shows the real slide themes, so the preview and the downloaded .pptx share one palette
   const sl = BOOT.slides;
   if (sl && sl.themes && sl.themes.length) {
@@ -4978,7 +4975,7 @@ function edAddReference(ref) {
 /* ---------- Slides: topic → (optional settings) → generate → edit text & switch design for free ---------- */
 // The generated deck is kept in this browser (one per account) so it survives reloads and "Continue" on Home
 const slKey = () => 'slides-' + (BOOT.user ? BOOT.user.id : 'guest');
-const SL_SAVED = ['topic', 'count', 'tone', 'language', 'photos', 'designId', 'deck', 'meta', 'current'];
+const SL_SAVED = ['topic', 'count', 'photos', 'designId', 'deck', 'meta', 'current'];
 const slState = () => {
   if (state.slides) return state.slides;
   const s = state.slides = {
@@ -5001,11 +4998,21 @@ const slSave = () => {
 };
 const slDesign = () => CONFIG.slides.designs.find(d => d.id === slState().designId) || CONFIG.slides.designs[0];
 const slTitle = () => { const s = slState(); return s.topic.trim() || (s.file ? s.file.name.replace(/\.[^.]+$/, '') : ''); };
-// A short bare topic is researched on the web first (extra credits); an attached file or long pasted text is not
+// A short bare topic is researched on the web first; an attached file or long pasted text is not
 const slResearch = (s) => !s.file && !!s.topic.trim() && s.topic.trim().length <= CONFIG.slides.researchMaxChars;
+// Mirrors the server: a count written in the request ("10 slides", "12 слайдов") wins over the picker
+const SL_COUNT_RE = /(?<!\d)(\d{1,2})\s*[- ]?\s*(?:slides?\b|слайд)/gi;
+const slCount = (s) => {
+  const S = CONFIG.slides, [min, max] = [S.counts[0], S.counts[S.counts.length - 1]];
+  for (const m of `${s.topic}\n${s.file?.text || ''}`.matchAll(SL_COUNT_RE)) {
+    const n = Number(m[1]);
+    if (n >= min && n <= max) return n;
+  }
+  return Number(s.count);
+};
 const slPrice = (s) => {
   const base = parseInt(CONFIG.slides.price, 10);
-  return Number.isNaN(base) ? CONFIG.slides.price : `${base + (slResearch(s) ? CONFIG.slides.researchPrice : 0)} credits`;
+  return Number.isNaN(base) ? CONFIG.slides.price : `${base + CONFIG.slides.perSlidePrice * slCount(s)} credits`;
 };
 
 // The API deck has the title slide in deck.title / subtitle / cover_image; the viewer treats it as slide 1
@@ -5096,15 +5103,13 @@ function slSetupHtml() {
         <input type="file" id="sl-file" accept="${esc(S.fileAccept)}" hidden>
         <span class="sl-mode">${icon('slides')} Slides</span>
         ${select('count', 'Number of slides', S.counts.map(n => ({ value: n, label: `${n} slides` })), s.count)}
-        ${select('tone', 'Writing tone', S.tones.map(t => ({ value: t, label: t })), s.tone)}
-        ${select('language', 'Language', S.languages.map(l => ({ value: l, label: l })), s.language)}
         ${select('photos', 'Photos', [{ value: 'true', label: 'With photos' }, { value: 'false', label: 'No photos' }], String(s.photos))}
       </div>
       <div class="sl-comp-foot" id="sl-generate">
         ${generating
           ? `<span class="sl-progress" role="status"><span class="spinner" aria-hidden="true"></span>${esc(progress)}</span>`
-          : `<span class="muted small" id="sl-price" data-tip-title="${slResearch(s) ? 'Includes web research' : 'Price'}"
-              data-tip-desc="${slResearch(s) ? 'A short topic is researched on the web first. Attach a document to skip it.' : 'Charged when you generate'}" data-tip-pos="bottom">${esc(price)}</span>`}
+          : `<span class="muted small" id="sl-price" data-tip-title="Price for ${slCount(s)} slides"
+              data-tip-desc="${esc(`${CONFIG.slides.price} + ${CONFIG.slides.perSlidePrice} per slide. Web research and photos are included.`)}" data-tip-pos="bottom">${esc(price)}</span>`}
         <button class="sl-send" data-act="${state.signedIn ? 'sl-generate' : 'signup'}" id="sl-generate-btn"
           aria-label="${state.signedIn ? `Generate slides, ${esc(price)}` : 'Sign up to generate slides'}"
           data-tip-title="${state.signedIn ? 'Generate slides' : 'Sign up to generate'}" data-tip-desc="${esc(price)} · Enter" data-tip-pos="bottom"
@@ -5121,7 +5126,7 @@ function slDoneHtml() {
   const s = slState(), d = slDesign(), cur = s.deck[s.current];
   return `<section class="card sl-head" aria-label="Your presentation">
       <div><h2>${esc(s.deck[0].title)}</h2>
-        <span class="small muted">${s.deck.length} slides · ${esc(s.tone)} tone · ${esc(d.name)}</span></div>
+        <span class="small muted">${s.deck.length} slides · ${esc(d.name)}</span></div>
       <div class="sl-head-actions">
         <button class="btn btn-ghost" data-act="sl-new">${icon('plus')} New presentation</button>
         <button class="btn btn-primary" id="sl-download" data-act="sl-download" ${s.downloading ? 'disabled' : ''}
@@ -5172,8 +5177,6 @@ async function slGenerate() {
       topic: s.topic.trim(),
       files: s.file?.text ? [{ name: s.file.name, text: s.file.text }] : [],
       slide_count: s.count,
-      tone: s.tone.toLowerCase(),
-      language: CONFIG.slides.languageCodes[s.language] || 'auto',
       theme: s.designId,
       images: s.photos,
     });
@@ -5185,7 +5188,7 @@ async function slGenerate() {
     renderHeader();
     loadCredits();
     toast(research && data.research === 'failed'
-      ? `Your slides are ready. Web research was unavailable, so its ${CONFIG.slides.researchPrice} credits were refunded.`
+      ? 'Your slides are ready. Web research was unavailable, so they are written from general knowledge.'
       : 'Your slides are ready. Click any text to edit it.');
   } catch (err) {
     s.stage = 'setup';
@@ -5245,21 +5248,23 @@ function rerenderSlides(focusSel) {
   if (focusSel) $(focusSel)?.focus({ preventScroll: true });
 }
 
+function slUpdatePrice() {
+  const s = slState(), btn = $('#sl-generate-btn'), price = $('#sl-price'), p = slPrice(s);
+  if (!price || price.textContent === p) return;
+  price.textContent = p;
+  price.dataset.tipTitle = `Price for ${slCount(s)} slides`;
+  if (btn && state.signedIn) { btn.setAttribute('aria-label', `Generate slides, ${p}`); btn.dataset.tipDesc = `${p} · Enter`; }
+}
+
 function bindSlides() {
   const s = slState();
   const topic = $('#sl-topic');
   if (topic) {
     topic.addEventListener('input', () => {
       s.topic = topic.value;
-      const btn = $('#sl-generate-btn'), price = $('#sl-price');
+      const btn = $('#sl-generate-btn');
       if (btn && state.signedIn) btn.disabled = !slTitle() || !!s.file?.reading;
-      if (price && price.textContent !== slPrice(s)) {
-        const p = slPrice(s), research = slResearch(s);
-        price.textContent = p;
-        price.dataset.tipTitle = research ? 'Includes web research' : 'Price';
-        price.dataset.tipDesc = research ? 'A short topic is researched on the web first. Attach a document to skip it.' : 'Charged when you generate';
-        if (btn && state.signedIn) { btn.setAttribute('aria-label', `Generate slides, ${p}`); btn.dataset.tipDesc = `${p} · Enter`; }
-      }
+      slUpdatePrice();
     });
     // Enter starts generation, Shift + Enter adds a new line (like a chat box)
     topic.addEventListener('keydown', (e) => {
@@ -5271,6 +5276,7 @@ function bindSlides() {
   $$('[data-setting]', $('#sl-settings-block') || document.createElement('div')).forEach(el => el.addEventListener('change', () => {
     const key = el.dataset.setting, v = el.value;
     s[key] = key === 'count' ? Number(v) : key === 'photos' ? v === 'true' : v;
+    slUpdatePrice();
   }));
   // Inline text editing on the big slide
   const main = $('#sl-main');

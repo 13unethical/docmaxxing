@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -26,6 +27,12 @@ _NETWORK_EXCEPTIONS = (
 
 def claude_model() -> str:
     return (os.environ.get("ANTHROPIC_MODEL") or os.environ.get("CLAUDE_MODEL") or _DEFAULT_MODEL).strip() or _DEFAULT_MODEL
+
+
+def accepts_temperature(model: str) -> bool:
+    """Claude 5.x models reject the ``temperature`` parameter."""
+    match = re.match(r"claude-[a-z]+-(\d+)", (model or "").strip())
+    return not (match and int(match.group(1)) >= 5)
 
 
 def claude_api_key() -> str:
@@ -95,10 +102,11 @@ def generate_json(
     body = {
         "model": active_model,
         "max_tokens": int(max_tokens),
-        "temperature": temperature,
         "system": system_prompt,
         "messages": [{"role": "user", "content": user_prompt}],
     }
+    if accepts_temperature(active_model):
+        body["temperature"] = temperature
     headers = {
         "x-api-key": claude_api_key(),
         "anthropic-version": "2023-06-01",
@@ -347,10 +355,11 @@ def generate_reply(
     body = {
         "model": active_model,
         "max_tokens": int(max_tokens),
-        "temperature": temperature,
         "system": system_prompt,
         "messages": [{"role": "user", "content": blocks}],
     }
+    if accepts_temperature(active_model):
+        body["temperature"] = temperature
     headers = {
         "x-api-key": claude_api_key(),
         "anthropic-version": "2023-06-01",

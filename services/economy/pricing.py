@@ -42,9 +42,9 @@ FEATURE_COSTS: dict[str, int] = {
     "check": _env_int("COST_CHECK", 20),
     "cite": _env_int("COST_CITE", 2),
     "turnitin": _env_int("COST_TURNITIN", 300),
-    "presentation": _env_int("COST_PRESENTATION", 30),
-    # Surcharge on a deck when the user turns on web research (paid web searches + longer prompts).
-    "presentation_research": _env_int("COST_PRESENTATION_RESEARCH", 20),
+    # A deck costs the base plus a price per slide (title slide included); web research and photos are included.
+    "presentation": _env_int("COST_PRESENTATION_BASE", 10),
+    "presentation_slide": _env_int("COST_PRESENTATION_SLIDE", 3),
     "veil": _env_int("COST_VEIL_PASS", 2200),
 }
 
@@ -202,6 +202,8 @@ def feature_cost(feature: str, **params: Any) -> int:
         if "word_count" in params:
             return detect_cost_credits(int(params.get("word_count") or 0))
         return detect_cost_credits(0)
+    if feature == "presentation":
+        return presentation_cost(int(params.get("slide_count") or 0))
     if feature not in FEATURE_COSTS:
         raise KeyError(f"Unknown paid feature: {feature!r}")
     cost = int(FEATURE_COSTS[feature])
@@ -210,6 +212,11 @@ def feature_cost(feature: str, **params: Any) -> int:
 
         cost = apply_humanizer_site_discount(cost)
     return int(cost)
+
+
+def presentation_cost(slide_count: int) -> int:
+    """Base price plus the per-slide price for a deck of ``slide_count`` slides (title included)."""
+    return int(FEATURE_COSTS["presentation"]) + int(FEATURE_COSTS["presentation_slide"]) * max(0, int(slide_count))
 
 
 def assignment_cost_coins(
@@ -308,7 +315,7 @@ def pricing_cost_rows() -> list[dict[str, str]]:
     cite = int(FEATURE_COSTS["cite"])
     turnitin = int(FEATURE_COSTS["turnitin"])
     presentation = int(FEATURE_COSTS["presentation"])
-    research = int(FEATURE_COSTS["presentation_research"])
+    per_slide = int(FEATURE_COSTS["presentation_slide"])
     detect_per_100 = detect_cost_credits(100)
     return [
         {"label": "Home Format & Academic Check", "value": "Free"},
@@ -330,11 +337,7 @@ def pricing_cost_rows() -> list[dict[str, str]]:
         },
         {
             "label": "AI presentation (.pptx)",
-            "value": f"{presentation} {_credit_word(presentation)} / deck",
-        },
-        {
-            "label": "Presentation web research",
-            "value": f"+{research} {_credit_word(research)} / deck",
+            "value": f"{presentation} {_credit_word(presentation)} + {per_slide} / slide",
         },
         {
             "label": "Veil for 30 days",

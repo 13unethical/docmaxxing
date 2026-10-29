@@ -2946,14 +2946,19 @@ def workspace():
 @economy_auth.email_verified_required(allow_guest_preview=True)
 def presentation():
     """AI presentation builder — Claude writes the deck, python-pptx renders it."""
-    from services.presentation_generator import MAX_ATTACHMENTS, MAX_TOPIC_CHARS, RESEARCH_MAX_REQUEST_CHARS
+    from services.presentation_generator import (
+        AUTO_MAX_SLIDES,
+        MAX_ATTACHMENTS,
+        MAX_TOPIC_CHARS,
+        RESEARCH_MAX_REQUEST_CHARS,
+    )
     from services.presentation_themes import CATEGORIES, DEFAULT_THEME, themes_for_client
 
     return render_template(
         "presentation.html",
         nav_active="presentation",
-        presentation_cost=feature_cost("presentation"),
-        research_cost=feature_cost("presentation_research"),
+        presentation_cost=feature_cost("presentation", slide_count=AUTO_MAX_SLIDES),
+        research_cost=0,
         research_max_chars=RESEARCH_MAX_REQUEST_CHARS,
         max_attachments=MAX_ATTACHMENTS,
         attachment_accept=",".join(sorted(PRESENTATION_FILE_EXT)),
@@ -2968,7 +2973,14 @@ def presentation():
 @economy_auth.email_verified_required
 def api_presentation_generate():
     from services.claude_client import claude_enabled
-    from services.presentation_generator import PresentationError, clean_attachments, generate_deck, needs_research
+    from services.presentation_generator import (
+        AUTO_MAX_SLIDES,
+        PresentationError,
+        clean_attachments,
+        generate_deck,
+        needs_research,
+        planned_slide_count,
+    )
 
     payload = request.get_json(silent=True) or {}
     topic = str(payload.get("topic") or "").strip()
@@ -2983,13 +2995,13 @@ def api_presentation_generate():
     except (TypeError, ValueError):
         slide_count = None
     research = needs_research(topic=topic, details=details, attachments=files)
+    planned = planned_slide_count(topic=topic, details=details, attachments=files, slide_count=slide_count)
 
-    research_cost = feature_cost("presentation_research") if research else 0
-    cost = feature_cost("presentation") + research_cost
+    cost = feature_cost("presentation", slide_count=planned or AUTO_MAX_SLIDES)
     charged = _charge_current_user(
         "presentation",
         cost,
-        meta={"slide_count": slide_count, "files": len(files), "research": research},
+        meta={"slide_count": planned, "files": len(files), "research": research},
     )
     if not isinstance(charged, tuple):
         return charged
@@ -3002,7 +3014,7 @@ def api_presentation_generate():
             topic=topic,
             details=details,
             slide_count=slide_count,
-            tone=str(payload.get("tone") or "academic"),
+            tone=str(payload.get("tone") or "auto"),
             language=str(payload.get("language") or "auto"),
             theme=str(payload.get("theme") or ""),
             images=payload.get("images") is not False,
@@ -3020,12 +3032,14 @@ def api_presentation_generate():
 
     balance = tx.get("balance") if isinstance(tx, dict) else None
     research_status = diag.get("research")
-    if research_status == "failed" and charged_amount:
-        research_refund = round(charged_amount * research_cost / cost)
-        _refund_safe(user_id, research_refund, "presentation_research")
-        charged_amount -= research_refund
-        balance = wallet.get_balance(user_id)
-        app.logger.warning("presentation research failed; refunded %s credits", research_refund)
+    made = int(diag.get("slide_count") or AUTO_MAX_SLIDES)
+    if planned is None and made < AUTO_MAX_SLIDES and charged_amount:
+        unused = feature_cost("presentation", slide_count=AUTO_MAX_SLIDES) - feature_cost("presentation", slide_count=made)
+        unused_refund = round(charged_amount * unused / cost)
+        if unused_refund > 0:
+            _refund_safe(user_id, unused_refund, "presentation")
+            charged_amount -= unused_refund
+            balance = wallet.get_balance(user_id)
 
     _record_usage_safe(
         user_id,
@@ -3290,8 +3304,8 @@ def _app_v2_boot() -> dict[str, Any]:
             "humanizerOriginal": int(humanize["original_price"]),
             "humanizerDiscount": int(humanize["discount_percent"]) if humanize["discount_active"] else 0,
             "turnitin": int(FEATURE_COSTS["turnitin"]),
-            "presentation": int(feature_cost("presentation")),
-            "presentationResearch": int(feature_cost("presentation_research")),
+            "presentation": int(FEATURE_COSTS["presentation"]),
+            "presentationPerSlide": int(FEATURE_COSTS["presentation_slide"]),
             "cite": int(feature_cost("cite")),
             "veil": int(feature_cost("veil")),
         },
