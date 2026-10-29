@@ -61,6 +61,13 @@ def test_score_rewrite_checks_structure_and_markers():
     assert score_rewrite(source, "## Intro\n\n" + good)["heading_leak"]
 
 
+def test_citations_survive_ampersand_and_accent_rewrites():
+    source = "Effort matters (Ericsson, Krampe, & Tesch-Römer, 1993) and (UNAMID from 2007) helped."
+    rewrite = "Practice counts (Ericsson, Krampe, and Tesch-Roemer, 1993) and UNAMID helped after 2007."
+    assert score_rewrite(source, rewrite)["citations_kept"] == 1.0
+    assert score_rewrite(source, "Practice counts.")["citations_kept"] == 0.0
+
+
 def test_chrf_orders_closer_rewrites_higher():
     ref = "The economy grew quickly during the decade."
     assert chrf(ref, ref) == 100.0

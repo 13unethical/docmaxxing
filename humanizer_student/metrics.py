@@ -9,12 +9,13 @@ profile is to StealthWriter's, per rewrite level. Detector scores are separate.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from statistics import mean
 from typing import Any, Iterable
 
 _WORD = re.compile(r"[a-z0-9']+")
-_CITATION = re.compile(r"\([A-Z][^()]{0,80}?\d{4}[a-z]?\)")
+_CITATION = re.compile(r"\([A-Z][^()]{0,80}?,\s*(?:\d{4}[a-z]?|n\.d\.)\)")
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)*%?")
 _HEADING = re.compile(r"(?m)^\s*#")
 UNCHANGED_JACCARD = 0.9
@@ -57,10 +58,18 @@ def chrf(hypothesis: str, reference: str, *, max_n: int = 6, beta: float = 2.0) 
     return 100 * (1 + b2) * p * r / (b2 * p + r)
 
 
+def _loose(text: str) -> str:
+    """Citation text compared modulo ``&``/``and`` and accents, which the teacher rewrites."""
+    plain = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    plain = re.sub(r"([aouAOU])e", r"\1", plain)
+    return re.sub(r"\s+", " ", plain.replace("&", "and"))
+
+
 def _kept(markers: list[str], text: str) -> float | None:
     if not markers:
         return None
-    return sum(1 for m in markers if m in text) / len(markers)
+    loose = _loose(text)
+    return sum(1 for m in markers if m in text or _loose(m) in loose) / len(markers)
 
 
 def score_rewrite(source: str, output: str, teacher: str | None = None) -> dict[str, Any]:
