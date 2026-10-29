@@ -1049,12 +1049,13 @@ const CONFIG = {
     price: '[N] credits',
     formats: 'DOCX or PDF',
     maxFileSizeMb: '[N]',
-    highlightsMinAi: 20,                 // "See which parts look AI" is available above this AI score
+    highlightsMinAi: 20,                 // at or below this AI score the next step is formatting, not humanizing
+    lowAiHighlightsNote: 'Turnitin shows AI from 1 to 19% as *%. Downloads a PDF of your document with those parts highlighted.',
     // Levels: value < low → Low, value ≥ high → High, otherwise Medium
     levels: { ai: { low: 20, high: 50 }, similarity: { low: 15, high: 30 } },
     verdicts: {
-      High:   { title: 'Likely AI-written', text: 'Most of this text looks AI-generated. See which parts, or humanize the text before you submit.' },
-      Medium: { title: 'Some parts may look AI-written', text: 'Part of this text looks AI-generated. See which parts before you submit.' },
+      High:   { title: 'Likely AI-written', text: 'Most of this text looks AI-generated. The AI report shows which parts. Humanize the text before you submit.' },
+      Medium: { title: 'Some parts may look AI-written', text: 'Part of this text looks AI-generated. The AI report shows which parts.' },
       Low:    { title: 'Looks human-written', text: 'We found little or no AI-generated text.' },
     },
     highSimilarityNote: 'Similarity is high: check your quotes and citations.',
@@ -3635,6 +3636,9 @@ const scanValue = (scan, kind) => {
   if (v != null) return v;
   return kind === 'ai' && scan.aiDisplay === '*%' ? 10 : null;
 };
+// Only "*%" (1–19% AI) needs separate highlights: at 0% there is nothing to show,
+// and above 20% the AI report itself already marks the AI parts
+const canSeeAiParts = (scan) => scan.hasHl || scan.aiDisplay === '*%';
 const scanDisplay = (scan, kind) => {
   const v = kind === 'ai' ? scan.ai : scan.sim, d = kind === 'ai' ? scan.aiDisplay : scan.simDisplay;
   return v != null ? `${v}%` : d || '—';
@@ -3811,18 +3815,18 @@ function scanResultHtml(scan) {
         ${icon('download')} ${ready ? `Download ${report} report` : 'Report is on the way…'}</button>
     </div>`;
   };
-  const canHighlight = (aiValue ?? 0) > S.highlightsMinAi || scan.hasHl;
+  const canHighlight = canSeeAiParts(scan);
   const hlBusy = scan.hlStatus === 'queued' || scan.hlStatus === 'running';
   return `${head}
     <h2 class="verdict" id="scan-result-h" tabindex="-1">${esc(v.title)}</h2>
     <p class="muted" style="margin:0">${esc(v.text)}${simHigh ? ' ' + esc(S.highSimilarityNote) : ''}</p>
     <div class="scores">${score('ai', 'AI score', 'AI')}${score('similarity', 'Similarity', 'similarity')}</div>
     <div class="scan-actions">
-      <button class="btn btn-primary" data-act="scan-highlights" data-id="${scan.id}" ${canHighlight && !hlBusy ? '' : 'disabled'}>
-        ${hlBusy ? 'Finding AI parts…' : 'See which parts look AI'} <span class="badge badge-inverse">Free</span></button>
+      ${canHighlight ? `<button class="btn btn-primary" data-act="scan-highlights" data-id="${scan.id}" ${hlBusy ? 'disabled' : ''}>
+        ${hlBusy ? 'Finding AI parts…' : 'See which parts look AI'} <span class="badge badge-inverse">Free</span></button>` : ''}
       <button class="btn" data-act="scan-humanize" data-id="${scan.id}">${icon('sparkles')} Humanize this text</button>
     </div>
-    <p class="small muted" style="margin:12px 0 0">Available when AI is above ${S.highlightsMinAi}%. Downloads a PDF of your document with the AI parts highlighted.</p>`;
+    ${canHighlight ? `<p class="small muted" style="margin:12px 0 0">${esc(S.lowAiHighlightsNote)}</p>` : ''}`;
 }
 
 function scanHistoryHtml() {
@@ -3844,7 +3848,7 @@ function scanHistoryHtml() {
       <td><span class="cell">${levelPill('similarity', s, true)}${dl(s, 'similarity')}</span></td>
       ${date}
       <td><div class="row-actions">
-        ${(scanValue(s, 'ai') ?? 0) > S.highlightsMinAi || s.hasHl ? `<button class="btn btn-sm btn-outline-accent" data-act="scan-highlights" data-id="${s.id}">See AI parts <span class="badge">Free</span></button>` : ''}
+        ${canSeeAiParts(s) ? `<button class="btn btn-sm btn-outline-accent" data-act="scan-highlights" data-id="${s.id}">See AI parts <span class="badge">Free</span></button>` : ''}
         ${more(s)}</div></td></tr>`;
   };
   const menuScan = state.scanMenu && findScan(state.scanMenu);
