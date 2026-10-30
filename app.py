@@ -2691,12 +2691,35 @@ def api_veil_ask():
     )
 
 
+def _student_humanize(text: str) -> dict[str, Any] | None:
+    """Our own model for its configured share of requests; None means use StealthWriter."""
+    try:
+        from services.humanizer_engine.student_humanizer import try_student_humanize
+
+        return try_student_humanize(text)
+    except Exception:  # noqa: BLE001
+        app.logger.exception("student humanizer routing failed")
+        return None
+
+
+def _is_student_result(result: dict[str, Any]) -> bool:
+    from services.humanizer_engine.student_humanizer import PROVIDER
+
+    return result.get("provider") == PROVIDER
+
+
 def _run_stealthwriter_humanize_job(text: str):
     """Run the production Humanizer job. Returns (job, error_response).
 
     ``error_response`` is a Flask Response when the job did not complete.
     """
+    from types import SimpleNamespace
+
     from services.browser.jobs.retry import MAX_RETRIES
+
+    student = _student_humanize(text)
+    if student is not None:
+        return SimpleNamespace(id=student["request_id"], result=student), None
 
     ensure_engine_started()
     if job_manager is None or browser_worker is None:
@@ -2868,7 +2891,7 @@ def api_extension_humanize():
             user_id,
             feature=FEATURE_HUMANIZER,
             credits_used=charged_amount,
-            provider="StealthWriter",
+            provider=res.get("provider") or "StealthWriter",
             latency=latency_ms,
             request_id=job.id if job is not None else None,
         )
@@ -2878,12 +2901,14 @@ def api_extension_humanize():
             record_humanizer_success()
         except Exception:
             app.logger.exception("daily_stats humanizer increment failed")
-        try:
-            from services.dataset_logger import log_humanization_event
+        # Training pairs must come from the teacher, never from the student itself.
+        if not _is_student_result(res):
+            try:
+                from services.dataset_logger import log_humanization_event
 
-            log_humanization_event(user_id, "standalone", text, humanized_out)
-        except Exception:
-            app.logger.exception("dataset_logger extension humanize hook failed")
+                log_humanization_event(user_id, "standalone", text, humanized_out)
+            except Exception:
+                app.logger.exception("dataset_logger extension humanize hook failed")
         return jsonify(
             {
                 "ok": True,
@@ -4397,7 +4422,58 @@ def api_browser_stealthwriter_humanize():
             return
         _refund_safe(int(user_id), cost, "humanize", **kwargs)
 
+    def _humanize_success(res: dict[str, Any], request_id: str):
+        elapsed = res.get("elapsed_seconds")
+        latency_ms = int(float(elapsed) * 1000) if elapsed is not None else None
+        humanized_out = res.get("humanized_text")
+        if not guest_trial and user_id:
+            _record_usage_safe(
+                int(user_id),
+                feature=FEATURE_HUMANIZER,
+                credits_used=cost,
+                provider=res.get("provider") or "StealthWriter",
+                latency=latency_ms,
+                request_id=request_id,
+            )
+        try:
+            from services.economy.site_settings import record_humanizer_success
+
+            record_humanizer_success()
+        except Exception:
+            app.logger.exception("daily_stats humanizer increment failed")
+        # Training pairs must come from the teacher, never from the student itself.
+        if not guest_trial and user_id and not _is_student_result(res):
+            try:
+                from services.dataset_logger import log_humanization_event
+
+                log_humanization_event(
+                    int(user_id),
+                    dataset_source,
+                    text,
+                    humanized_out if isinstance(humanized_out, str) else "",
+                )
+            except Exception:
+                app.logger.exception("dataset_logger stealthwriter hook failed")
+        return jsonify(
+            {
+                "success": True,
+                "humanized_text": humanized_out,
+                "elapsed_seconds": elapsed,
+                "job_id": request_id,
+                "coins_charged": cost,
+                "guest_trial": guest_trial,
+                "original_price": pricing["original_price"],
+                "discount_active": pricing["discount_active"],
+                "discount_percent": pricing["discount_percent"],
+                "balance": wallet.get_balance(int(user_id)) if user_id else 0,
+            }
+        )
+
     try:
+        student = _student_humanize(text)
+        if student is not None:
+            return _humanize_success(student, student["request_id"])
+
         ensure_engine_started()
         job = job_manager.create(
             "stealthwriter", "humanize", {"text": text}, max_retries=MAX_RETRIES
@@ -4412,51 +4488,7 @@ def api_browser_stealthwriter_humanize():
 
         status = job.status.value
         if status == "COMPLETED":
-            res = job.result or {}
-            elapsed = res.get("elapsed_seconds")
-            latency_ms = int(float(elapsed) * 1000) if elapsed is not None else None
-            humanized_out = res.get("humanized_text")
-            if not guest_trial and user_id:
-                _record_usage_safe(
-                    int(user_id),
-                    feature=FEATURE_HUMANIZER,
-                    credits_used=cost,
-                    provider="StealthWriter",
-                    latency=latency_ms,
-                    request_id=job.id,
-                )
-            try:
-                from services.economy.site_settings import record_humanizer_success
-
-                record_humanizer_success()
-            except Exception:
-                app.logger.exception("daily_stats humanizer increment failed")
-            if not guest_trial and user_id:
-                try:
-                    from services.dataset_logger import log_humanization_event
-
-                    log_humanization_event(
-                        int(user_id),
-                        dataset_source,
-                        text,
-                        humanized_out if isinstance(humanized_out, str) else "",
-                    )
-                except Exception:
-                    app.logger.exception("dataset_logger stealthwriter hook failed")
-            return jsonify(
-                {
-                    "success": True,
-                    "humanized_text": humanized_out,
-                    "elapsed_seconds": res.get("elapsed_seconds"),
-                    "job_id": job.id,
-                    "coins_charged": cost,
-                    "guest_trial": guest_trial,
-                    "original_price": pricing["original_price"],
-                    "discount_active": pricing["discount_active"],
-                    "discount_percent": pricing["discount_percent"],
-                    "balance": wallet.get_balance(int(user_id)) if user_id else 0,
-                }
-            )
+            return _humanize_success(job.result or {}, job.id)
 
         # Any non-completed terminal/failure state refunds the charge.
         _refund_humanize(ref_id=job.id)
