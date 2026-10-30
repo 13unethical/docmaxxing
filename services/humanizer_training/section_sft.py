@@ -130,6 +130,9 @@ def _document_reject(doc: dict[str, Any]) -> str | None:
         return "NOT_ACCEPTED"
     if doc.get("source_kind") == "template":
         return "TEMPLATE_SOURCE"
+    # Early synthetic batches have no writer: their sources are templated filler and their targets lost paragraph breaks.
+    if not doc.get("source_writer"):
+        return "NO_SOURCE_WRITER"
     meta = doc.get("teacher_meta") or {}
     if not meta.get("selection_verified"):
         return "SELECTION_NOT_VERIFIED"

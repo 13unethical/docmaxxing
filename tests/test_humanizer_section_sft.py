@@ -80,7 +80,15 @@ def test_rejects_unverified_template_and_mismatched_documents(tmp_path):
     differ["teacher_text"] = differ["teacher_text"].replace("## Analysis", "## Discussion")
     _write_run(
         tmp_path,
-        [bad_level, _doc("d2", source_kind="template"), _doc("d3", status="rejected"), differ, _doc("d5"), _doc("d5")],
+        [
+            bad_level,
+            _doc("d2", source_kind="template"),
+            _doc("d3", status="rejected"),
+            differ,
+            _doc("d5"),
+            _doc("d5"),
+            _doc("d6", source_writer=None),
+        ],
     )
     manifest = build_section_sft(root=tmp_path, output_dir=tmp_path / "out")
     assert manifest["documents_used"] == 1
@@ -90,6 +98,7 @@ def test_rejects_unverified_template_and_mismatched_documents(tmp_path):
         "NOT_ACCEPTED": 1,
         "HEADINGS_DIFFER": 1,
         "DUPLICATE_DOCUMENT": 1,
+        "NO_SOURCE_WRITER": 1,
     }
 
 
