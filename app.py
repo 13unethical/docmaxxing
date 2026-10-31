@@ -2702,6 +2702,19 @@ def _student_humanize(text: str) -> dict[str, Any] | None:
         return None
 
 
+@app.post("/api/humanize/warmup")
+def api_humanize_warmup():
+    """Wake our humanizer model while the user is still pasting text."""
+    try:
+        from services.humanizer_engine.student_humanizer import warm_up
+
+        sent = warm_up()
+    except Exception:  # noqa: BLE001
+        app.logger.exception("student humanizer warm-up failed")
+        sent = False
+    return jsonify({"success": True, "sent": sent})
+
+
 def _is_student_result(result: dict[str, Any]) -> bool:
     from services.humanizer_engine.student_humanizer import PROVIDER
 

@@ -93,6 +93,7 @@
       const url = isCyrillic(text) ? '/api/browser/providers/ru/humanize' : '/api/browser/providers/stealthwriter/humanize';
       return request('POST', url, { json: { text, source } });
     },
+    humanizeWarmup: () => request('POST', '/api/humanize/warmup', { json: {} }).catch(() => null),
 
     editor: {
       detect: (text) => request('POST', '/api/workspace/detect', { json: { text }, timeoutMs: 180000 }),

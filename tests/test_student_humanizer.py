@@ -170,6 +170,43 @@ def test_requests_use_the_trained_prompt_and_sampling(monkeypatch):
     assert body["chat_template_kwargs"] == {"enable_thinking": False}
 
 
+def test_routed_requests_are_logged_with_outcome_and_speed(tmp_path, monkeypatch):
+    import json
+
+    log_path = tmp_path / "events.jsonl"
+    cfg = _config(events_log=str(log_path))
+    try_student_humanize(PARA, humanizer=StudentTextHumanizer(cfg, complete_fn=_rewrite))
+    try_student_humanize(PARA, humanizer=StudentTextHumanizer(cfg, complete_fn=lambda _c: ""))
+    monkeypatch.setattr(sh.requests, "get", lambda *a, **k: (_ for _ in ()).throw(sh.requests.Timeout("boot")))
+    try_student_humanize(PARA, humanizer=StudentTextHumanizer(cfg))
+
+    rows = [json.loads(line) for line in log_path.read_text().splitlines()]
+    assert [r["outcome"] for r in rows] == ["served", "failed", "cold"]
+    assert rows[0]["words"] == len(PARA.split()) and rows[0]["elapsed"] >= 0
+    assert "Chunk rejected" in rows[1]["error"]
+
+
+def test_warm_up_wakes_the_model_at_most_once_a_minute(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(sh, "_last_warmup", float("-inf"))
+    pinged = threading.Event()
+    now = [1000.0]
+
+    def ping(cfg):
+        assert cfg.url == "https://student.test"
+        pinged.set()
+
+    assert sh.warm_up(_config(), clock=lambda: now[0], ping=ping)
+    assert pinged.wait(2)
+    now[0] += 30
+    assert not sh.warm_up(_config(), clock=lambda: now[0], ping=ping)
+    now[0] += 31
+    assert sh.warm_up(_config(), clock=lambda: now[0], ping=ping)
+    assert not sh.warm_up(_config(share=0.0), clock=lambda: now[0] + 999, ping=ping)
+    assert not sh.warm_up(_config(url=""), clock=lambda: now[0] + 999, ping=ping)
+
+
 def test_system_prompt_matches_training_prompt():
     from services.humanizer_training.section_sft import system_prompt as training_prompt
 
@@ -252,3 +289,13 @@ def test_site_humanize_uses_student_for_guest(economy, monkeypatch):
     assert body["humanized_text"] == "Rewritten by our model."
     assert body["job_id"] == "student-abc"
     assert body["guest_trial"] is True
+
+
+def test_warmup_endpoint_is_open_to_guests(economy, monkeypatch):
+    calls = []
+    monkeypatch.setattr(sh, "warm_up", lambda: calls.append(1) or True)
+
+    res = _client().post("/api/humanize/warmup", json={})
+    assert res.status_code == 200
+    assert res.get_json() == {"success": True, "sent": True}
+    assert calls == [1]

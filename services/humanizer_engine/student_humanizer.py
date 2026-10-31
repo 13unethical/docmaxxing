@@ -8,14 +8,18 @@ raises so the caller can fall back to StealthWriter.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
 import re
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 import requests
@@ -34,6 +38,9 @@ ATTEMPTS = 3
 # Sampling the Turnitin checks were run with; greedy decoding scored 40% AI.
 TEMPERATURE = 1.0
 TOP_P = 0.9
+WARMUP_EVERY_SECONDS = 60.0
+# Long enough for a scaled-to-zero server to boot, so the wake-up is never cut short.
+WARMUP_TIMEOUT_SECONDS = 300.0
 
 _WORD = re.compile(r"[a-z0-9']+")
 _CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
@@ -55,6 +62,7 @@ class StudentConfig:
     timeout: float
     chunk_words: int = CHUNK_WORDS
     probe_timeout: float = 3.0
+    events_log: str = ""
 
     @property
     def configured(self) -> bool:
@@ -77,6 +85,7 @@ def student_config() -> StudentConfig:
         timeout=max(10.0, _float("HUMANIZER_STUDENT_TIMEOUT", 90.0)),
         chunk_words=max(1, int(_float("HUMANIZER_STUDENT_CHUNK_WORDS", CHUNK_WORDS))),
         probe_timeout=max(0.5, _float("HUMANIZER_STUDENT_PROBE_TIMEOUT", 3.0)),
+        events_log=(os.environ.get("HUMANIZER_STUDENT_EVENTS_LOG") or "").strip(),
     )
 
 
@@ -266,6 +275,59 @@ def pick_student(config: StudentConfig | None = None, *, rng: Callable[[], float
     return cfg.configured and cfg.share > 0 and rng() < cfg.share
 
 
+_warmup_lock = threading.Lock()
+_last_warmup = float("-inf")
+
+
+def warm_up(
+    config: StudentConfig | None = None,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    ping: Callable[[StudentConfig], None] | None = None,
+) -> bool:
+    """Wake the model in the background when a user opens a humanizer page.
+
+    The boot takes ~2 minutes, about the time it takes to paste a text. At most one wake-up
+    per ``WARMUP_EVERY_SECONDS`` per process; returns True when one was sent.
+    """
+    global _last_warmup
+    cfg = config or student_config()
+    if not cfg.configured or cfg.share <= 0:
+        return False
+    with _warmup_lock:
+        now = clock()
+        if now - _last_warmup < WARMUP_EVERY_SECONDS:
+            return False
+        _last_warmup = now
+    threading.Thread(target=ping or _ping, args=(cfg,), daemon=True, name="student-warmup").start()
+    return True
+
+
+def _ping(cfg: StudentConfig) -> None:
+    try:
+        requests.get(
+            f"{cfg.url}/v1/models",
+            headers={"Authorization": f"Bearer {cfg.api_key}"},
+            timeout=WARMUP_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        log.info("student humanizer wake-up failed: %s", exc)
+
+
+def record_event(cfg: StudentConfig, outcome: str, **fields: Any) -> None:
+    """One JSON line per routed request, so speed and fallback rate can be measured."""
+    if not cfg.events_log:
+        return
+    row = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "outcome": outcome, **fields}
+    try:
+        path = Path(cfg.events_log)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        log.exception("student humanizer event log write failed")
+
+
 def try_student_humanize(
     text: str,
     *,
@@ -277,24 +339,33 @@ def try_student_humanize(
     Returns a job-like result dict, or None when the caller should use StealthWriter.
     """
     engine = humanizer or StudentTextHumanizer()
-    if not force and not pick_student(engine.config):
+    cfg = engine.config
+    if not force and not pick_student(cfg):
         return None
     if not is_english(text):
         return None
+    words = _wc(text)
     if not engine.is_warm():
         log.info("student humanizer is cold; using StealthWriter while it boots")
+        record_event(cfg, "cold", words=words)
         return None
     started = time.monotonic()
     try:
         output = engine.humanize(text)
     except Exception as exc:  # noqa: BLE001
         log.warning("student humanizer failed, falling back to StealthWriter: %s", exc)
+        record_event(
+            cfg, "failed", words=words, elapsed=round(time.monotonic() - started, 2), error=str(exc)[:200]
+        )
         return None
+    elapsed = round(time.monotonic() - started, 2)
     if not output.strip() or output.strip() == text.strip():
+        record_event(cfg, "failed", words=words, elapsed=elapsed, error="UNCHANGED")
         return None
+    record_event(cfg, "served", words=words, elapsed=elapsed)
     return {
         "humanized_text": output,
-        "elapsed_seconds": round(time.monotonic() - started, 2),
+        "elapsed_seconds": elapsed,
         "provider": PROVIDER,
         "engine": engine.VERSION,
         "request_id": f"student-{uuid.uuid4().hex[:12]}",

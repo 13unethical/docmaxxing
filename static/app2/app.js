@@ -2653,6 +2653,7 @@ function render() {
   else if (isAdminRoute(route) !== !!state.admMode) renderSidebar();
   state.admMode = isAdminRoute(route);
   main.innerHTML = (PAGES[item.id] || (() => renderStub(item)))();
+  if (item.id === 'humanizer' || item.id === 'workspace') warmHumanizer();
   document.title = `${item.label} — ${CONFIG.brand}`;
   markActive();
   bindPage(item.id);
@@ -2666,6 +2667,14 @@ function render() {
 }
 
 function go(route) { location.hash = '#/' + route; }
+
+// Our humanizer model sleeps when idle and needs ~2 minutes to boot; wake it while the user pastes.
+let lastHumanizerWarmup = 0;
+function warmHumanizer() {
+  if (Date.now() - lastHumanizerWarmup < 60000) return;
+  lastHumanizerWarmup = Date.now();
+  API.humanizeWarmup();
+}
 
 /* =========================================================
    Pages

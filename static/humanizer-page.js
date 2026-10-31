@@ -20,6 +20,8 @@
   var root = $("[data-humanizer-page]");
   if (!root) return;
 
+  fetch("/api/humanize/warmup", { method: "POST", credentials: "same-origin" }).catch(function () {});
+
   var editorIn = $("[data-hz-input]", root);
   var editorOut = $("[data-hz-output]", root);
   var countIn = $("[data-hz-wordcount]", root);
