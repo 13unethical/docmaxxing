@@ -284,15 +284,17 @@ def warm_up(
     *,
     clock: Callable[[], float] = time.monotonic,
     ping: Callable[[StudentConfig], None] | None = None,
+    force: bool = False,
 ) -> bool:
     """Wake the model in the background when a user opens a humanizer page.
 
-    The boot takes ~2 minutes, about the time it takes to paste a text. At most one wake-up
-    per ``WARMUP_EVERY_SECONDS`` per process; returns True when one was sent.
+    The boot takes about a minute, roughly the time it takes to paste a text. At most one
+    wake-up per ``WARMUP_EVERY_SECONDS`` per process; returns True when one was sent.
+    ``force`` wakes it even when its share is 0 (StealthWriter is down).
     """
     global _last_warmup
     cfg = config or student_config()
-    if not cfg.configured or cfg.share <= 0:
+    if not cfg.configured or (cfg.share <= 0 and not force):
         return False
     with _warmup_lock:
         now = clock()
@@ -328,27 +330,49 @@ def record_event(cfg: StudentConfig, outcome: str, **fields: Any) -> None:
         log.exception("student humanizer event log write failed")
 
 
+def _wait_until_warm(engine: StudentTextHumanizer, budget: float, sleep: Callable[[float], None]) -> bool:
+    if engine.is_warm():
+        return True
+    if budget <= 0:
+        return False
+    warm_up(engine.config, force=True)
+    deadline = time.monotonic() + budget
+    while time.monotonic() < deadline:
+        sleep(5)
+        if engine.is_warm():
+            return True
+    return False
+
+
 def try_student_humanize(
     text: str,
     *,
     humanizer: StudentTextHumanizer | None = None,
     force: bool = False,
+    wait_for_boot: float = 0.0,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any] | None:
     """Humanize with the student model when this request falls into its share.
 
+    ``force`` skips the share draw; ``wait_for_boot`` waits up to that many seconds for a
+    sleeping model instead of giving up at once (used when StealthWriter cannot answer).
     Returns a job-like result dict, or None when the caller should use StealthWriter.
     """
     engine = humanizer or StudentTextHumanizer()
     cfg = engine.config
+    if not cfg.configured and engine._complete_fn is None:
+        return None
     if not force and not pick_student(cfg):
         return None
     if not is_english(text):
         return None
     words = _wc(text)
-    if not engine.is_warm():
+    started = time.monotonic()
+    if not _wait_until_warm(engine, wait_for_boot, sleep):
         log.info("student humanizer is cold; using StealthWriter while it boots")
-        record_event(cfg, "cold", words=words)
+        record_event(cfg, "cold", words=words, waited=round(time.monotonic() - started, 1))
         return None
+    waited = round(time.monotonic() - started, 1)
     started = time.monotonic()
     try:
         output = engine.humanize(text)
@@ -362,7 +386,7 @@ def try_student_humanize(
     if not output.strip() or output.strip() == text.strip():
         record_event(cfg, "failed", words=words, elapsed=elapsed, error="UNCHANGED")
         return None
-    record_event(cfg, "served", words=words, elapsed=elapsed)
+    record_event(cfg, "served", words=words, elapsed=elapsed, **({"waited": waited} if waited >= 1 else {}))
     return {
         "humanized_text": output,
         "elapsed_seconds": elapsed,

@@ -207,6 +207,26 @@ def test_warm_up_wakes_the_model_at_most_once_a_minute(monkeypatch):
     assert not sh.warm_up(_config(url=""), clock=lambda: now[0] + 999, ping=ping)
 
 
+def test_rescue_waits_for_a_sleeping_model_to_boot(monkeypatch):
+    probes = iter([False, False, True])
+    engine = StudentTextHumanizer(_config(share=0.0), complete_fn=_rewrite)
+    monkeypatch.setattr(engine, "is_warm", lambda: next(probes))
+    woken = []
+    monkeypatch.setattr(sh, "warm_up", lambda cfg, force=False: woken.append(force) or True)
+    slept = []
+
+    result = try_student_humanize(PARA, humanizer=engine, force=True, wait_for_boot=150, sleep=slept.append)
+    assert result["provider"] == PROVIDER
+    assert woken == [True]
+    assert slept == [5, 5]
+
+
+def test_unconfigured_model_never_waits(monkeypatch):
+    engine = StudentTextHumanizer(_config(url=""))
+    monkeypatch.setattr(engine, "is_warm", lambda: pytest.fail("must not probe an unconfigured model"))
+    assert try_student_humanize(PARA, humanizer=engine, force=True, wait_for_boot=150) is None
+
+
 def test_system_prompt_matches_training_prompt():
     from services.humanizer_training.section_sft import system_prompt as training_prompt
 
@@ -255,7 +275,7 @@ def test_extension_humanize_uses_student_and_skips_training_log(economy, monkeyp
     from services import dataset_logger
 
     logged = []
-    monkeypatch.setattr(app_mod, "_student_humanize", lambda _t: _student_result())
+    monkeypatch.setattr(app_mod, "_student_humanize", lambda _t, **_k: _student_result())
     monkeypatch.setattr(dataset_logger, "log_humanization_event", lambda *a, **k: logged.append(a))
     _no_stealthwriter(monkeypatch)
 
@@ -276,7 +296,7 @@ def test_extension_humanize_uses_student_and_skips_training_log(economy, monkeyp
 def test_site_humanize_uses_student_for_guest(economy, monkeypatch):
     import app as app_mod
 
-    monkeypatch.setattr(app_mod, "_student_humanize", lambda _t: _student_result())
+    monkeypatch.setattr(app_mod, "_student_humanize", lambda _t, **_k: _student_result())
     _no_stealthwriter(monkeypatch)
 
     res = _client().post(
@@ -289,6 +309,83 @@ def test_site_humanize_uses_student_for_guest(economy, monkeypatch):
     assert body["humanized_text"] == "Rewritten by our model."
     assert body["job_id"] == "student-abc"
     assert body["guest_trial"] is True
+
+
+class _FailedJob:
+    id = "sw-1"
+    error_code = "LOGIN_REQUIRED"
+    error = "StealthWriter session is not logged in."
+    error_details = None
+    is_terminal = True
+    max_retries = 0
+
+    class status:  # noqa: N801
+        value = "FAILED"
+
+
+def _stealthwriter_logged_out(monkeypatch):
+    import app as app_mod
+
+    class _Jobs:
+        def create(self, *a, **k):
+            return _FailedJob()
+
+        def wait(self, *a, **k):
+            return None
+
+        def get(self, _id):
+            return _FailedJob()
+
+    class _Worker:
+        job_timeout = 1
+
+    monkeypatch.setattr(app_mod, "ensure_engine_started", lambda: None)
+    monkeypatch.setattr(app_mod, "job_manager", _Jobs())
+    monkeypatch.setattr(app_mod, "browser_worker", _Worker())
+    monkeypatch.setattr(app_mod, "health_monitor", None)
+    monkeypatch.setattr(app_mod, "_stealthwriter_down_until", 0.0)
+
+
+def test_site_humanize_falls_back_to_student_when_stealthwriter_is_logged_out(economy, monkeypatch):
+    import app as app_mod
+
+    _stealthwriter_logged_out(monkeypatch)
+    calls = []
+
+    def fake_student(_text, *, rescue=False):
+        calls.append(rescue)
+        return _student_result() if rescue else None
+
+    monkeypatch.setattr(app_mod, "_student_humanize", fake_student)
+    payload = {"text": "Please rewrite this paragraph for a human reader."}
+
+    res = _client().post("/api/browser/providers/stealthwriter/humanize", json=payload)
+    assert res.status_code == 200, res.get_json()
+    assert res.get_json()["humanized_text"] == "Rewritten by our model."
+    assert calls == [False, True]
+    assert app_mod._stealthwriter_down()
+
+    _client().post("/api/browser/providers/stealthwriter/humanize", json=payload)
+    assert calls[2] is True
+
+
+def test_extension_humanize_falls_back_to_student_when_stealthwriter_is_logged_out(economy, monkeypatch):
+    import app as app_mod
+
+    _stealthwriter_logged_out(monkeypatch)
+    monkeypatch.setattr(
+        app_mod, "_student_humanize", lambda _t, *, rescue=False: _student_result() if rescue else None
+    )
+    user = economy_auth.create_user("student-rescue@example.com", "secret123")
+    economy_auth.mark_email_verified(user["id"], user["email"])
+    WalletService().set_balance(user["id"], 200)
+
+    res = _client().post(
+        "/api/extension/humanize",
+        json={"text": "Please rewrite this paragraph for a human reader.", "key": issue_token(user["id"])},
+    )
+    assert res.status_code == 200, res.get_json()
+    assert res.get_json()["humanized_text"] == "Rewritten by our model."
 
 
 def test_warmup_endpoint_is_open_to_guests(economy, monkeypatch):

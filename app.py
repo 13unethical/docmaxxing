@@ -2691,15 +2691,47 @@ def api_veil_ask():
     )
 
 
-def _student_humanize(text: str) -> dict[str, Any] | None:
-    """Our own model for its configured share of requests; None means use StealthWriter."""
+STUDENT_RESCUE_WAIT_SECONDS = 150
+_STEALTHWRITER_DOWN_SECONDS = 600
+_stealthwriter_down_until = 0.0
+
+
+def _stealthwriter_down() -> bool:
+    """A recent job hit the sign-in page, or the health monitor sees the session logged out."""
+    if time.monotonic() < _stealthwriter_down_until:
+        return True
+    return health_monitor is not None and health_monitor.last.get("stealthwriter_logged_in") is False
+
+
+def _mark_stealthwriter_down() -> None:
+    global _stealthwriter_down_until
+    _stealthwriter_down_until = time.monotonic() + _STEALTHWRITER_DOWN_SECONDS
+
+
+def _student_humanize(text: str, *, rescue: bool = False) -> dict[str, Any] | None:
+    """Our own model for its configured share of requests; None means use StealthWriter.
+
+    ``rescue``: StealthWriter cannot answer, so our model is the only option and the
+    request waits for it to boot.
+    """
     try:
         from services.humanizer_engine.student_humanizer import try_student_humanize
 
+        if rescue:
+            return try_student_humanize(text, force=True, wait_for_boot=STUDENT_RESCUE_WAIT_SECONDS)
         return try_student_humanize(text)
     except Exception:  # noqa: BLE001
         app.logger.exception("student humanizer routing failed")
         return None
+
+
+def _student_rescue_after(job: Any, text: str) -> dict[str, Any] | None:
+    """Our model's answer when a StealthWriter job failed, else None."""
+    if job is None or job.status.value in ("COMPLETED", "CANCELLED") or not job.is_terminal:
+        return None
+    if job.error_code == "LOGIN_REQUIRED":
+        _mark_stealthwriter_down()
+    return _student_humanize(text, rescue=True)
 
 
 @app.post("/api/humanize/warmup")
@@ -2730,7 +2762,7 @@ def _run_stealthwriter_humanize_job(text: str):
 
     from services.browser.jobs.retry import MAX_RETRIES
 
-    student = _student_humanize(text)
+    student = _student_humanize(text, rescue=_stealthwriter_down())
     if student is not None:
         return SimpleNamespace(id=student["request_id"], result=student), None
 
@@ -2768,6 +2800,9 @@ def _run_stealthwriter_humanize_job(text: str):
     status = job.status.value
     if status == "COMPLETED":
         return job, None
+    student = _student_rescue_after(job, text)
+    if student is not None:
+        return SimpleNamespace(id=student["request_id"], result=student), None
 
     body = {
         "ok": False,
@@ -4483,7 +4518,7 @@ def api_browser_stealthwriter_humanize():
         )
 
     try:
-        student = _student_humanize(text)
+        student = _student_humanize(text, rescue=_stealthwriter_down())
         if student is not None:
             return _humanize_success(student, student["request_id"])
 
@@ -4502,6 +4537,9 @@ def api_browser_stealthwriter_humanize():
         status = job.status.value
         if status == "COMPLETED":
             return _humanize_success(job.result or {}, job.id)
+        student = _student_rescue_after(job, text)
+        if student is not None:
+            return _humanize_success(student, student["request_id"])
 
         # Any non-completed terminal/failure state refunds the charge.
         _refund_humanize(ref_id=job.id)

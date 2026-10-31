@@ -22,6 +22,19 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def stealthwriter_session_expiry(state: dict[str, Any] | None) -> datetime | None:
+    """When the saved StealthWriter login runs out: the expiry of its session-token cookie."""
+    for cookie in (state or {}).get("cookies") or []:
+        if "stealthwriter" not in str(cookie.get("domain") or ""):
+            continue
+        if not str(cookie.get("name") or "").endswith("session_token"):
+            continue
+        expires = cookie.get("expires")
+        if isinstance(expires, (int, float)) and expires > 0:
+            return datetime.fromtimestamp(expires, timezone.utc)
+    return None
+
+
 class HealthMonitor(threading.Thread):
     def __init__(
         self,
@@ -46,6 +59,9 @@ class HealthMonitor(threading.Thread):
         # dashboard periodically slides the expiry and re-snapshots cookies.
         self._sw_keepalive_s = _env_int("STEALTHWRITER_KEEPALIVE_HOURS", 6) * 3600
         self._sw_last_keepalive: float | None = None
+        # The login itself does not slide: it ends 7 days after sign-in, so warn ahead.
+        self._sw_expiry_warn_s = _env_int("STEALTHWRITER_EXPIRY_WARN_HOURS", 24) * 3600
+        self._sw_last_expiry_check: float | None = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -112,9 +128,32 @@ class HealthMonitor(threading.Thread):
             current_url=sw_url,
             active_jobs=active_jobs,
         )
+        self._warn_if_session_expiring()
 
         with self._lock:
             self._last = snapshot
+
+    def _warn_if_session_expiring(self, *, now: datetime | None = None, state: dict[str, Any] | None = None) -> bool:
+        """Telegram reminder in the last day of the saved login; returns True when one was sent."""
+        if self._sw_expiry_warn_s <= 0:
+            return False
+        last = self._sw_last_expiry_check
+        if state is None and last is not None and time.monotonic() - last < 600:
+            return False
+        self._sw_last_expiry_check = time.monotonic()
+        if state is None:
+            from services.browser.session_store import SessionStore
+
+            state = SessionStore().load("stealthwriter")
+        expires = stealthwriter_session_expiry(state)
+        if expires is None:
+            return False
+        left = (expires - (now or datetime.now(timezone.utc))).total_seconds()
+        if not 0 < left <= self._sw_expiry_warn_s:
+            return False
+        from services.alerts.telegram_alerts import notify_stealthwriter_session_expiring
+
+        return notify_stealthwriter_session_expiring(expires_at=expires, hours_left=left / 3600)
 
     def _stealthwriter_keepalive(self, *, active_jobs: int) -> dict[str, Any]:
         if self._sw_keepalive_s <= 0 or active_jobs > 0 or self._worker is None or self._service is None:

@@ -7,6 +7,8 @@ import os
 import socket
 import threading
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -105,6 +107,22 @@ def notify_stealthwriter_session_down(*, current_url: str | None, active_jobs: i
     return send_telegram_alert(
         "\n".join(lines),
         key="stealthwriter_session_down",
+        cooldown_sec=cooldown,
+    )
+
+
+def notify_stealthwriter_session_expiring(*, expires_at: datetime, hours_left: float) -> bool:
+    cooldown = _env_int("TELEGRAM_SESSION_EXPIRY_COOLDOWN_SEC", 6 * 3600)
+    local = expires_at.astimezone(ZoneInfo("Asia/Tashkent"))
+    lines = [
+        f"StealthWriter login expires in {max(1, round(hours_left))} h",
+        f"Expires: {local:%Y-%m-%d %H:%M} Tashkent",
+        f"Host: {_host_label()}",
+        "Action: log in again (scripts/bootstrap_stealthwriter_login.py on the Mac), push the session, restart the service.",
+    ]
+    return send_telegram_alert(
+        "\n".join(lines),
+        key=f"stealthwriter_session_expiring:{expires_at.isoformat()}",
         cooldown_sec=cooldown,
     )
 
