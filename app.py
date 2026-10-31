@@ -2697,7 +2697,7 @@ _stealthwriter_down_until = 0.0
 
 
 def _stealthwriter_down() -> bool:
-    """A recent job hit the sign-in page, or the health monitor sees the session logged out."""
+    """A recent job failed (signed out, daily limit spent, hung), or the monitor sees it logged out."""
     if time.monotonic() < _stealthwriter_down_until:
         return True
     return health_monitor is not None and health_monitor.last.get("stealthwriter_logged_in") is False
@@ -2729,8 +2729,8 @@ def _student_rescue_after(job: Any, text: str) -> dict[str, Any] | None:
     """Our model's answer when a StealthWriter job failed, else None."""
     if job is None or job.status.value in ("COMPLETED", "CANCELLED") or not job.is_terminal:
         return None
-    if job.error_code == "LOGIN_REQUIRED":
-        _mark_stealthwriter_down()
+    # A failed job usually costs minutes of retries; skip StealthWriter for a while.
+    _mark_stealthwriter_down()
     return _student_humanize(text, rescue=True)
 
 

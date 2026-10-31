@@ -7,7 +7,9 @@ import multiprocessing
 # Production nginx proxies to 127.0.0.1:8000 (local dev Flask uses 5001).
 bind = "127.0.0.1:8000"
 workers = max(2, min(4, multiprocessing.cpu_count()))
-worker_class = "sync"
+# Humanizer and LLM requests can block for minutes; threads keep the rest of the site answering.
+worker_class = "gthread"
+threads = 8
 timeout = 600
 graceful_timeout = 120
 keepalive = 5

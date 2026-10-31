@@ -209,6 +209,8 @@ class StudentTextHumanizer:
 
     def _rewrite_chunk(self, chunk: str) -> str:
         problem = "NOT_RUN"
+        # A paragraph the model only lightly edits should not sink the whole text.
+        lightest: tuple[float, str] | None = None
         for attempt in range(1, ATTEMPTS + 1):
             try:
                 output = self._complete(chunk).strip()
@@ -218,7 +220,13 @@ class StudentTextHumanizer:
                 problem = chunk_problem(chunk, output) or ""
                 if not problem:
                     return output
+                if problem == "UNCHANGED" and output.strip() != chunk.strip():
+                    similarity = _jaccard(chunk, output)
+                    if lightest is None or similarity < lightest[0]:
+                        lightest = (similarity, output)
             log.info("student humanizer attempt %s failed: %s", attempt, problem)
+        if lightest is not None:
+            return lightest[1]
         raise StudentHumanizerError(f"Chunk rejected after {ATTEMPTS} attempts: {problem}")
 
     def _complete(self, chunk: str) -> str:

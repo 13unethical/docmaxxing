@@ -102,6 +102,14 @@ def test_bad_chunk_is_retried_then_raises():
     assert len(calls) == sh.ATTEMPTS
 
 
+def test_lightly_edited_paragraph_keeps_the_most_changed_attempt():
+    light = PARA.replace("study", "paper")
+    lighter = PARA.replace("study", "paper").replace("sharply", "steeply")
+    outputs = iter([light, PARA, lighter])
+    out = StudentTextHumanizer(_config(), complete_fn=lambda _c: next(outputs)).humanize(PARA)
+    assert out == lighter
+
+
 def test_flaky_chunk_recovers_on_retry():
     outputs = iter(["", _rewrite(PARA)])
     out = StudentTextHumanizer(_config(), complete_fn=lambda _c: next(outputs)).humanize(PARA)
