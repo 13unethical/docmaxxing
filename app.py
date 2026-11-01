@@ -2691,6 +2691,8 @@ def api_veil_ask():
     )
 
 
+# A cold model restores from its snapshot in ~10 s, far quicker than a StealthWriter job.
+STUDENT_COLD_WAIT_SECONDS = 30
 STUDENT_RESCUE_WAIT_SECONDS = 150
 _STEALTHWRITER_DOWN_SECONDS = 600
 _stealthwriter_down_until = 0.0
@@ -2719,7 +2721,7 @@ def _student_humanize(text: str, *, rescue: bool = False) -> dict[str, Any] | No
 
         if rescue:
             return try_student_humanize(text, force=True, wait_for_boot=STUDENT_RESCUE_WAIT_SECONDS)
-        return try_student_humanize(text)
+        return try_student_humanize(text, wait_for_boot=STUDENT_COLD_WAIT_SECONDS)
     except Exception:  # noqa: BLE001
         app.logger.exception("student humanizer routing failed")
         return None
@@ -2732,19 +2734,6 @@ def _student_rescue_after(job: Any, text: str) -> dict[str, Any] | None:
     # A failed job usually costs minutes of retries; skip StealthWriter for a while.
     _mark_stealthwriter_down()
     return _student_humanize(text, rescue=True)
-
-
-@app.post("/api/humanize/warmup")
-def api_humanize_warmup():
-    """Wake our humanizer model while the user is still pasting text."""
-    try:
-        from services.humanizer_engine.student_humanizer import warm_up
-
-        sent = warm_up()
-    except Exception:  # noqa: BLE001
-        app.logger.exception("student humanizer warm-up failed")
-        sent = False
-    return jsonify({"success": True, "sent": sent})
 
 
 def _is_student_result(result: dict[str, Any]) -> bool:

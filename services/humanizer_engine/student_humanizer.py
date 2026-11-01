@@ -41,6 +41,8 @@ TOP_P = 0.9
 WARMUP_EVERY_SECONDS = 60.0
 # Long enough for a scaled-to-zero server to boot, so the wake-up is never cut short.
 WARMUP_TIMEOUT_SECONDS = 300.0
+# A memory-snapshot restore takes ~10 s, so poll often while waiting for it.
+BOOT_POLL_SECONDS = 2.0
 
 _WORD = re.compile(r"[a-z0-9']+")
 _CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
@@ -246,6 +248,9 @@ class StudentTextHumanizer:
                 ],
                 "temperature": TEMPERATURE,
                 "top_p": TOP_P,
+                # A memory-snapshot restore brings back the server's RNG state too, so without
+                # a per-request seed every first request after a cold start samples identically.
+                "seed": random.randrange(2**31),
                 "max_tokens": int(_wc(chunk) * 1.35 * 2) + 64,
                 "chat_template_kwargs": {"enable_thinking": False},
             },
@@ -258,8 +263,8 @@ class StudentTextHumanizer:
     def is_warm(self) -> bool:
         """True when the model answers right away.
 
-        A scaled-to-zero server takes ~2 minutes to boot; the probe itself starts that boot,
-        so requests in the next minutes find the model ready.
+        A scaled-to-zero server restores from its snapshot in ~10 s; the probe itself starts
+        that boot, so requests a few seconds later find the model ready.
         """
         if self._complete_fn is not None:
             return True
@@ -294,10 +299,9 @@ def warm_up(
     ping: Callable[[StudentConfig], None] | None = None,
     force: bool = False,
 ) -> bool:
-    """Wake the model in the background when a user opens a humanizer page.
+    """Wake the model in the background.
 
-    The boot takes about a minute, roughly the time it takes to paste a text. At most one
-    wake-up per ``WARMUP_EVERY_SECONDS`` per process; returns True when one was sent.
+    At most one wake-up per ``WARMUP_EVERY_SECONDS`` per process; returns True when one was sent.
     ``force`` wakes it even when its share is 0 (StealthWriter is down).
     """
     global _last_warmup
@@ -346,7 +350,7 @@ def _wait_until_warm(engine: StudentTextHumanizer, budget: float, sleep: Callabl
     warm_up(engine.config, force=True)
     deadline = time.monotonic() + budget
     while time.monotonic() < deadline:
-        sleep(5)
+        sleep(BOOT_POLL_SECONDS)
         if engine.is_warm():
             return True
     return False
@@ -363,7 +367,7 @@ def try_student_humanize(
     """Humanize with the student model when this request falls into its share.
 
     ``force`` skips the share draw; ``wait_for_boot`` waits up to that many seconds for a
-    sleeping model instead of giving up at once (used when StealthWriter cannot answer).
+    sleeping model instead of giving up at once.
     Returns a job-like result dict, or None when the caller should use StealthWriter.
     """
     engine = humanizer or StudentTextHumanizer()

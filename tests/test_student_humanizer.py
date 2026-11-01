@@ -226,7 +226,7 @@ def test_rescue_waits_for_a_sleeping_model_to_boot(monkeypatch):
     result = try_student_humanize(PARA, humanizer=engine, force=True, wait_for_boot=150, sleep=slept.append)
     assert result["provider"] == PROVIDER
     assert woken == [True]
-    assert slept == [5, 5]
+    assert slept == [sh.BOOT_POLL_SECONDS, sh.BOOT_POLL_SECONDS]
 
 
 def test_unconfigured_model_never_waits(monkeypatch):
@@ -396,11 +396,15 @@ def test_extension_humanize_falls_back_to_student_when_stealthwriter_is_logged_o
     assert res.get_json()["humanized_text"] == "Rewritten by our model."
 
 
-def test_warmup_endpoint_is_open_to_guests(economy, monkeypatch):
-    calls = []
-    monkeypatch.setattr(sh, "warm_up", lambda: calls.append(1) or True)
+def test_regular_requests_wait_briefly_for_a_cold_model(monkeypatch):
+    import app as app_mod
 
-    res = _client().post("/api/humanize/warmup", json={})
-    assert res.status_code == 200
-    assert res.get_json() == {"success": True, "sent": True}
-    assert calls == [1]
+    seen = {}
+
+    def fake_try(_text, **kwargs):
+        seen.update(kwargs)
+        return None
+
+    monkeypatch.setattr(sh, "try_student_humanize", fake_try)
+    assert app_mod._student_humanize("Some text.") is None
+    assert seen == {"wait_for_boot": app_mod.STUDENT_COLD_WAIT_SECONDS}
