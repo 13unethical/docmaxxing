@@ -213,9 +213,13 @@ class StudentTextHumanizer:
         problem = "NOT_RUN"
         # A paragraph the model only lightly edits should not sink the whole text.
         lightest: tuple[float, str] | None = None
+        single_paragraph = len(_paragraphs(chunk)) == 1
         for attempt in range(1, ATTEMPTS + 1):
             try:
                 output = self._complete(chunk).strip()
+                if single_paragraph:
+                    # The model sometimes splits a long paragraph in two; keep the source layout.
+                    output = " ".join(_paragraphs(output))
             except (requests.RequestException, StudentHumanizerError, KeyError, ValueError) as exc:
                 problem = f"REQUEST_FAILED: {exc}"
             else:

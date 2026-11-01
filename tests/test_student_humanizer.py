@@ -110,6 +110,19 @@ def test_lightly_edited_paragraph_keeps_the_most_changed_attempt():
     assert out == lighter
 
 
+def test_paragraph_split_in_two_by_the_model_is_joined_back():
+    first, second = _rewrite(PARA).split(". ", 1)
+    out = StudentTextHumanizer(_config(), complete_fn=lambda _c: f"{first}.\n\n{second}").humanize(PARA)
+    assert out == _rewrite(PARA)
+
+
+def test_multi_paragraph_chunk_must_keep_its_paragraph_count():
+    text = f"{PARA}\n\n{PARA}"
+    engine = StudentTextHumanizer(_config(chunk_words=sh.CHUNK_WORDS), complete_fn=lambda c: _rewrite(c).replace("\n\n", " "))
+    with pytest.raises(StudentHumanizerError, match="PARAGRAPHS_CHANGED"):
+        engine.humanize(text)
+
+
 def test_flaky_chunk_recovers_on_retry():
     outputs = iter(["", _rewrite(PARA)])
     out = StudentTextHumanizer(_config(), complete_fn=lambda _c: next(outputs)).humanize(PARA)
