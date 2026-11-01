@@ -48,6 +48,23 @@ def test_plan_chunks_groups_prose_and_keeps_structure_verbatim():
     ]
 
 
+def test_titles_and_headings_of_any_level_stay_verbatim():
+    blocks = [
+        "# Artificial Intelligence: Its Impact on Modern Society",
+        "### Ethical Concerns",
+        "Artificial Intelligence and the Future of Work",
+        PARA,
+        "AI is changing how people work.",
+    ]
+    assert plan_chunks("\n\n".join(blocks), "\n\n", chunk_words=1) == [
+        (blocks[0], False),
+        (blocks[1], False),
+        (blocks[2], False),
+        (PARA, True),
+        (blocks[4], True),
+    ]
+
+
 def test_plan_chunks_splits_long_prose_at_paragraph_breaks():
     body = "\n\n".join([PARA] * 30)
     chunks = [text for text, rewrite in plan_chunks(body, "\n\n") if rewrite]

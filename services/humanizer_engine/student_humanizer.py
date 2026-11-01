@@ -47,7 +47,10 @@ BOOT_POLL_SECONDS = 2.0
 _WORD = re.compile(r"[a-z0-9']+")
 _CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
 _LETTER = re.compile(r"[^\W\d_]")
-_VERBATIM_LINE = re.compile(r"^\s*(##\s|\||```|[-*•+]\s|\d+[.)]\s)")
+_VERBATIM_LINE = re.compile(r"^\s*(#{1,6}\s|\||```|[-*•+]\s|\d+[.)]\s)")
+_SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*\s*$")
+# Given a bare title, the model writes a whole paragraph after it.
+TITLE_MAX_WORDS = 12
 
 
 class StudentHumanizerError(RuntimeError):
@@ -125,6 +128,7 @@ def _is_verbatim(block: str) -> bool:
         or bool(_VERBATIM_LINE.match(lines[0]))
         or "[[" in block
         or _wc(block) < 3
+        or (_wc(block) <= TITLE_MAX_WORDS and not _SENTENCE_END.search(block))
     )
 
 
