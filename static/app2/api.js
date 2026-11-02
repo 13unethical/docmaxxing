@@ -115,6 +115,20 @@
       },
     },
 
+    detectFree: (text) => request('POST', '/api/detector/free', { json: { text }, timeoutMs: 120000 }),
+
+    async exportText(text, title, format) {
+      const res = await fetch('/api/text/export', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ text, title, format }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new ApiError(data.message || `Download failed (HTTP ${res.status})`, { code: data.error || '', status: res.status, data });
+      }
+      return res.blob();
+    },
+
     turnitin: {
       list: () => request('GET', '/api/turnitin/reports'),
       get: (id) => request('GET', `/api/turnitin/submissions/${encodeURIComponent(id)}`),

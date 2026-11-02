@@ -324,10 +324,18 @@ def test_server_footer_has_real_links():
 
 def test_spa_landing_footer_has_real_links():
     js = (REPO / "static" / "app2" / "app.js").read_text(encoding="utf-8")
-    block = js.split("publicFooter: [", 1)[1].split("],", 1)[0]
+    footer = js.split("function landFooterHtml(", 1)[1].split("\n}\n", 1)[0]
+    links = js.split("footer: {", 1)[1].split("socials:", 1)[0]
+    # Landing footer: policy/company links are rendered as real paths, tools as /<route>
+    assert "if (!inApp) return `<a href=\"${esc(l.path)}\">" in footer
+    assert "<a href=\"/${i.route === 'format' ? 'formatter' : i.route}\">" in footer
     for href in FOOTER_LINKS:
-        assert f"path: '{href}'" in block, href
-    assert "/ru/humanizer" not in block
+        if href in ("/humanizer", "/pricing", "/blog"):
+            assert f'href="{href}"' in footer or href == "/humanizer", href
+        else:
+            assert f"path: '{href}'" in links, href
+    assert "route: 'humanizer'" in js
+    assert "/ru/humanizer" not in footer
     assert "Terms · Privacy · Contact" not in js
 
 

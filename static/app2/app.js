@@ -10,12 +10,6 @@ const CONFIG = {
   wordLimit: 5000,
   pricePlaceholder: '[N] credits',          // replace with real prices per tool below
   freeNote: 'Formatting and Work Review are free',
-  // Landing footer: real page links (crawlable server-rendered pages).
-  publicFooter: [
-    { label: 'AI Humanizer', path: '/humanizer' },
-    { label: 'Pricing', path: '/pricing' }, { label: 'Blog', path: '/blog' }, { label: 'FAQ', path: '/faq' },
-    { label: 'Terms', path: '/terms' }, { label: 'Privacy', path: '/privacy' }, { label: 'Contact', path: '/contact' },
-  ],
   // Veil page (menu → Information → Veil). Copy from the Veil design canvas.
   veil: {
     price: 2200, days: 30,                    // credits for 30 days of access, no auto-renewal (from the server)
@@ -48,7 +42,7 @@ const CONFIG = {
     {
       id: 'check', label: 'Check & improve',
       items: [
-        { id: 'turnitin', label: 'AI Detector', title: 'AI Detector — Turnitin', route: 'turnitin', icon: 'scan', primary: true,
+        { id: 'turnitin', label: 'AI Detector', title: 'AI Detector', route: 'turnitin', icon: 'scan', primary: true,
           price: '[N] credits',
           description: 'Check your text for AI-generated content and plagiarism' },
         { id: 'humanizer', label: 'Humanizer', route: 'humanizer', icon: 'sparkles', primary: true,
@@ -950,7 +944,7 @@ const CONFIG = {
           { label: '+ 4 unlimited tools', hint: 'Format, Academic Check, Citations, Workspace' },
         ] },
       { id: 'max', name: 'Max', sub: 'Exam pass', price: 39, tagline: 'Everything for exam season', cta: 'Get Max',
-        badges: [{ text: '35% OFF', kind: 'green' }, { text: 'Best value', kind: 'accent' }],
+        badges: [{ text: '35% OFF', kind: 'green' }],
         credits: 2500, perks: ['= 100 extra Humanize runs', '= 8 Official Turnitin scans'],
         free: [
           { label: 'Humanizer (EN/RU)', value: '40 free / day' },
@@ -1051,6 +1045,18 @@ const CONFIG = {
 
   // Assignment screen: one input (files + instructions) → parsed brief + price → chat
   // AI Detector checks whole documents (Turnitin-style). price = per document, placeholder for now.
+  // Our own AI detector (the default mode on the AI Detector page): pasted text in, one AI % out. Files go to Turnitin.
+  // Word limits and the daily allowance match /api/detector/free (FREE_DETECT_* on the server).
+  detector: {
+    minWords: 40,
+    maxWords: 5000,
+    guestMaxWords: 1500,
+    switch: {
+      quick:    { title: 'DocMaxxing Detector', sub: 'AI % in seconds' },
+      turnitin: { title: 'Turnitin report',     sub: 'Official AI + similarity' },
+    },
+  },
+
   scan: {
     price: '[N] credits',
     formats: 'DOCX or PDF',
@@ -1251,21 +1257,61 @@ const CONFIG = {
     },
   },
 
+  // Landing page (draft structure). Sections top to bottom; numbers are real (Oct 2026).
   landing: {
-    eyebrow: 'For essays, reports and dissertations',
-    title: 'Check your essay for AI, then make it sound like you',
-    subtitle: 'Run an AI and plagiarism check before you submit, humanize the flagged parts and format your references. Start with 50 free credits.',
+    nav: [['tools', 'Tools'], ['how', 'How it works'], ['pricing-land', 'Pricing'], ['veil-land', 'Veil'], ['faq', 'FAQ']],
+    title: 'Pass the AI check. Sound like you.',
+    subtitle: 'AI and plagiarism check before you submit, humanizing for flagged parts and free reference formatting. All in one place.',
     cta: 'Start free with 50 credits',
     secondaryCta: 'Try without an account',
-    tasksTitle: 'What do you need right now?',
-    tasksSub: 'Pick a task. We’ll set up your account around it.',
-    creditsTitle: 'How credits work',
-    creditsSub: 'You always see the cost before anything runs.',
-    facts: [
-      { big: '50', text: 'free credits when you sign up.' },
-      { big: '0',  text: 'credits for Formatting and Work Review. They are always free.' },
-      { big: '1',  text: 'free Humanizer run, even without an account.' },
+    stats: [['500+', 'documents checked', 'fileCheck'], ['300', 'students', 'users'], ['50', 'free credits to start', 'gift']],
+    howTitle: 'How it works',
+    steps: [
+      { icon: 'scan', shot: 'check', title: 'Check', text: 'Upload your essay. Get AI and plagiarism scores and see which parts look AI-written.' },
+      { icon: 'sparkles', shot: 'humanize', title: 'Humanize', text: 'Rewrite only the flagged parts so they read naturally, then check again in one click.' },
+      { icon: 'align', shot: 'format', title: 'Format & submit', text: 'Apply APA, MLA, Harvard or Chicago to the whole document. Free, always.' },
     ],
+    toolsTitle: 'Every tool for your paper',
+    toolsSub: 'Open any tool. You see the cost before anything runs.',
+    videoTitle: 'See it in 2 minutes',
+    videoText: 'A quick walkthrough of checking, humanizing and formatting a real essay.',
+    veilTitle: 'Veil: DocMaxxing in your browser',
+    veilText: 'Check and humanize text right where you write: Google Docs, Canvas, Moodle. No copy-paste.',
+    pricingTitle: 'Simple pricing',
+    pricingSub: 'Pick a plan or buy credits once. Credits come back if a run fails.',
+    reviewsTitle: 'What students say',
+    reviewsSub: 'Real messages from our Telegram channel.',
+    // Real Telegram chats, retyped as bubbles: names, avatars and file names that carry names are left out
+    reviews: [
+      { tag: 'Case study', quote: 'Thanks a lot, bro, for the work and for your patience!', msgs: [
+        { me: true, file: 'Case_part_2.docx', size: '20.6 KB', time: '20:54' },
+        { me: true, text: 'работа готова 2 части кейса', time: '20:54' },
+        { text: 'спасибо большое брат, за работу и за терпение!', time: '23:18' },
+        { me: true, text: 'Обращайтесь брат 🤝', time: '13:04', react: '🤝' } ] },
+      { tag: 'Midterm report', quote: 'Thank you so much!', msgs: [
+        { me: true, file: 'Midterm_Workbook.xlsx', size: '29.9 KB', time: '19:36' },
+        { me: true, file: 'Midterm_Report.docx', size: '360.1 KB', time: '19:52' },
+        { text: 'Спасибо большое вам', time: '23:11' },
+        { me: true, text: 'всегда пожалуйста!', time: '23:11' } ] },
+      { tag: 'Economics task', quote: 'Thank you very much', msgs: [
+        { me: true, text: 'Three people are also below 2.5 (1, 1, 2), so the poverty rate is 3/5 = 60%. Thus on a headcount measure, the countries are equal in terms of poverty.', time: '12:06' },
+        { text: 'спасибо большое', time: '12:52', react: '🤝' } ] },
+      { tag: 'Assignment', quote: 'All spot on, bro. Thanks', msgs: [
+        { text: 'Все четко брат', time: '19:41' },
+        { text: 'Спасибо', time: '19:41' },
+        { me: true, text: 'всегда пожалуйста 🙏', time: '20:08', react: '❤️' } ] },
+    ],
+    reviewsUrl: 'https://t.me/docmaxxing',
+    faqTitle: 'Questions',
+    faq: [
+      ['Are my documents private?', 'Your files are used only to run the tool you picked. We don’t publish them or share them with your university.'],
+      ['How is your AI check different from my university’s?', 'We run the same kind of AI and similarity check, so you see the result before you submit, not after.'],
+      ['What if a check fails?', 'Credits for a failed run come back to your balance automatically.'],
+      ['How do credits work?', 'Each paid run costs credits, shown before you start. Formatting and Work Review are free. You get 50 credits when you sign up.'],
+      ['Can I get a refund?', 'Yes, see our Refund Policy. Write to support and we’ll sort it out.'],
+    ],
+    finalTitle: 'Ready to check your essay?',
+    finalText: '50 free credits. No card needed.',
   },
 
   signup: {
@@ -1411,91 +1457,113 @@ const CONFIG = {
 const LOGO_SVG = `<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAeGVYSWZNTQAqAAAACAAEARoABQAAAAEAAAA+ARsABQAAAAEAAABGASgAAwAAAAEAAgAAh2kABAAAAAEAAABOAAAAAAAABaAAAAABAAAFoAAAAAEAA6ABAAMAAAABAAEAAKACAAQAAAABAAAAgKADAAQAAAABAAAAgAAAAACPIgiLAAAACXBIWXMAAN11AADddQGsh8ODAAABWWlUWHRYTUw6Y29tLmFkb2JlLnhtcAAAAAAAPHg6eG1wbWV0YSB4bWxuczp4PSJhZG9iZTpuczptZXRhLyIgeDp4bXB0az0iWE1QIENvcmUgNi4wLjAiPgogICA8cmRmOlJERiB4bWxuczpyZGY9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkvMDIvMjItcmRmLXN5bnRheC1ucyMiPgogICAgICA8cmRmOkRlc2NyaXB0aW9uIHJkZjphYm91dD0iIgogICAgICAgICAgICB4bWxuczp4bXA9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC8iPgogICAgICAgICA8eG1wOkNyZWF0b3JUb29sPkZpZ21hPC94bXA6Q3JlYXRvclRvb2w+CiAgICAgIDwvcmRmOkRlc2NyaXB0aW9uPgogICA8L3JkZjpSREY+CjwveDp4bXBtZXRhPgoE/1zIAAAbN0lEQVR4Ae1de4xdxX2emXP3ae/T9q4XP1k/UpIQcHg2gUAbFyWhalq1BKRWFFUp+av9o0qD0v5jqaoiaFWpVJWKU1ogfaWoJbRN0hIqQCQEUCWTkogUbMDYCGxgvbu293nPmX7fb86ce+7u3fXeffiec/eMfXfmzpmZM/P7vt9v5szjXK3Wyh2y5vJTqmcyVP3GzvZHKuq3KupT1nQbY7erSO20Wm3VSiFO9URadRurWpW2OlK6VyttFC40jbNojLajbB6C09ros2jbOFr4Aa6c1lqdwIXjyphxtHssKEcjoTIjna1tH7w8qMbUIYhlDRzkvzpu9122t1SauhK4Xad0dEBZvQ8lE+AeNHiDNi1K6QCf+H4WTbdoE3z+c2DHgPNaMzqg7Bx9UJzCYJzEg++MFlGEEM0sk04gchT+OyDPUSjPEaXM8+XZcz9686E+xq/Y8ZYrcFbvuXvqZqOC3wCIB1HZnSZokTaoKAK2IcpGiwTQJgV1BdJbPKsnBmhCxTFG+BGFJEb0llbmySgK//7Y9nufVocOLds6LJsAe7409RkA/2Vro0/roBV1KoO1MeCLt6y4uiIJsHMkIUrKhjMoST9jdHTfqw+0f2c5xdZNgOHfHt9vTPsfQbG/QLNuw2nct9Du5Qh/5XlAhqAt7i7sozac+oNjD/Ycrafcugiw/4uTd0ZB6U+0KQ3YcgF8PYJe27QgQglECMunrCrfc+xwx8NLvd+SCLD3d15r09M77sNdfpfabmHuC5c9CUAxUSmtIlu+X7e1feXoX2hq6aLuggTYfdeZ3lJr59+aoPWXo0LrFxVmNi5ieAhrAKweL89O3nWhp4VFCeDA7/imCdpuicpT2WhfUYslScC0tJMET5RnJm9fjAR4+Kztdt/1Rnuppe3hAvza8sl6bDQ7pYhdqaXjIWK5UH0XJEBQGrzXlDp+qdD8hUSX/Xhih+7g88RyodrW7AL2fPHcnSZof9gN9opHvIWEl494zhtgziCavfPo1zu+MbfO8wiw/7emhqOSeh6zT1uK0f5cceXzuxDAhu9jYvZnjz3YXjVPMKcLwEpFEN2HyYUC/HxiXbPWVGRgulmb6Gt4jK9S+qovbnq39G1kADEK019TmrmNlK4gsrb82aOH25/wzUgswM0325KJoj9Eh1GA76XTVD4UmthG9qu33WaxmOBcQoCTe8s3KNPyCbfA4C8XfjNJQLA1wU1HeqZu9O1KCKBU+U4MFgrt95JpSt9ibqAFU4XqTt88IcDw3SM9iDwYFXP8Xi5N6wvG1v7C8N22h40UAhjbcaVSAbZpFYs8TYu8bxgx1i3bjMXuLU8AjPivF9PgExV+U0vABCWttb2OjXRjAKsOFA99TY15VeMEa6sPOALwkUCrfdzDV7h1IgHu11R6vwL25vLNY92YIhhyGzjXiQDWeTOJNbb1DBF7MzHTvglswIiw6ATWDy+AOLbrE3vsL4360fAOt3V7/YhgXbdUtunrjsCYPhOWTD8mgECIwgKsH1LAAgBzntbCU0DUIyd21k/ri5ZSAjhsYo3uxeKA7pYjJ4VY1pcEuA4c2h6c01S7Cuu/vrCX1rLH1+EOg+0BO4r+fx0SAFpvrNlRgvkfwIaxppbA3MPGtYa7tIjJ4d2mlkbcOGDO4/kc/m9qRgsQgtMEuh2n0tt4Mh3/sB0GIGM1FEPfQLswJkSE/7M41zqFs5YzXCuBUAI3Sd7EVJCW9/MsUbedqyI5bjZesiBj2l0DWl06GKnuDqtKGOiwidJMgEuAdTzwYRy+4n0VWpVDrUYntDr+nlYn33fxzWoViLnRursEtehCZ5BjyCtVp9b3btDquv2R6movq/NTkZqYjIGvJFswZMCErjalrttr1PBAST33fxgoo0wSpPkcNQJvZUHDcGok/wQgUAM9Wh28IlSBmlUjZyM1G29vEI2n1l/gQykwD/P2ds6qa/Y6AjQf+GwRCWBb+RSQe4LTjG8EjW/4cKjOni+rabxEg9q8XMe8ZyetGuotq629zUwCTAhCL3rzvg4QggBX441EsxjBlTGYW41+mySYmI7U5TtpF5rQQWus5kxgzrs4Dvq2dCu1uStU53EafjXA93CzO+jfGKqdW7BlFl1MEzo+EOXbse/fBYBmZsJVBZ9EKmH3/NSMFSuwki4lyxLOPQFaANKWPivP8Cvo9qswYjkEHI9JeEjCiwxhBYbxwjt2L83mck0A7mIbwIJmP7qAMgcCq+RkogiS8f40rMCVl0ZiEVbpFpkpJtcEoPnft80oWoHVcgTdfbTMBnJGkPtnejsi9aFtWnHGsJlcbglAfW/HpA37fzfwW3kHQLMfxKZ/LhGmZ636+LCVqWU+djaLyy0B+E7Koc0GM36RasOJNgK2EkcSVWm+kAFWQAjhrEAXrMDlu5vLCqxQbCsR+cryUgn3XgJ0MEprxXG3jnaz7OkMgk9TH8AEpDXfhwOwgNdnYAUOXGrVxg5Ooq2s/lnJnUsCUPgbAMJ2rGPKXD0i+nqwxWmZoMiIPwafGi8fSMYTQLoGSgrXNsLiXDXcPFYglwQg6DsGjNrY6hAP8QTQtxGDQViCejlAzSbQ3tQ70GEJalgFWghOM398D+8nxicrirzseuSSANREmv8I5p972ugI4JZ+bHIHOZbqBHiCD2DTYdcdgBjoG4QQQgbXDZAY7SDe9R9qjnmB3BGAEzO9G7Ua6oMGAmzgIdpaLls10FvCkwGswBLMgGg4MhsEvBVg2FmAVHwMPtM7ksD8Y4qYY4FB/KxFPYRbKjEvZrrcESDE6H83ZuXaStzR4x8Bna+B/I7B+PcKFpFiesSfAIvIWkSgdahlEVqxy+jGD+d/jSB3BAgw6SPmHxqPI84JCcAFxbFAT6dRm3oDGRzW4gDBd4DWBjYgEajt8klbBJ/PWQdagY/tVmrnZr3gvWrdP2txuSIAze0WmF2u/rErIOj8pF15NlLbNregn57fFTCt0/g0sCki4KLvArw18H4yHoDEfFxLYNXPfWz+fdL1yXo4VwTg6H8Ppn5LKc2ngKnV3rH754bPnUMtEp8eDvg+PNFwtN4RglpdAdaRwBGD18Uq+LS4mYvj+oNWH92FOg3ld0CYKwK04pdphrdC8DD/JkWCFP5iEfh00NWu1fYBjAdiBnjN9r5oMc29Bz4FbFrb0wPDqvGAtxaoxy0HsK0qXQnPxhz4uSEAB3+c+u3b4GbhKHDKPC13CccRHA9s6THSHRAHB3TFxFeN/gk+NVw+MSlQjgfcx89Lg/Qhfu/usu1afWRnPieHckMA9vn7IWh2/mntn88Ap3bkAc8BDGG5eNtmnn9xWkrzL8DCTwPrCZJYBGo406TSV675vI5YnH767FU6l8vFuSAAzXgnpn658kfzLzsZHc4J/mkTDMzc0wF8Hn8gCXYMBrJsLAdDYvCrRvzepIsVqAAsJInTO0LAQpAU/MR5ODbZj4mpq7GdnAdL8uRyQQAKeOcgpn7bAD6k6yvtQWecdwxL9yAB10VwGLCpy2D+oKQ2YGzA63P7dgGX4PMaEnht9yCnrUUSRloZUCITqqhuvRqLUhin+HGHr1OWfS/LLNdR6rZ/BwxtjWd/uUiw4egl4CPMxlW+a9WJFcOdgyUZG3C/nyMCyeBMeVqrBVgkSK4B5IVIwXger9w9qNUnL8uXFcg8AahN3Zj63Y4X2XBPHjXUAw18BUTxfTgmg6RjWvlURukEazMmirZtCVQ3ThFRwytEqADuB4lpIrBMbzkcGaoHj5yn+MVrjeruzI8VyDwBCPqleM5ux6SLn/kjA/BfgCP4dPyejnfAM40bzFW+MyEXdLQa7CupoU2BzB62AGlPmrmPgQI2biDdAXwhAn1IL00EdjU7MDN48MpATedkLMDDoZl2FDBH/yE25nuACGbayXfEMVqA9j6+yHdem/uJCyAROrGAFOGIFMca3Fw6i40fHD5W9/9pwGNLgDKFLPAdEZyVuvUao579cahGz7s88a0y6WXaAtCk9uO831a8xC7E418CLkTJMB0bwKB88KfK53XG4cN0SVjinMYjGs49wnVgj2Ev9hUMwCpwVZH53LgAeZHZDf5c2APufZZNMtAN4TjZrdcECkcVMu8yTQBq5F5of3rqlzKO5Sxg8498pw9xM+yATmk/49FSyStpqs29xMf55dg0tL97QyDlONArj35zieBJQWvhyTCLKeLPXR1gx1L2F4oyTYASOiiu/LmpXwewQz0GMwUqG5IAiQDDQgTEe18Igi+VdC6PXCcB4jzzQGY8bsB4sQj47scDMkhEPMvwaVjOJixY/donAxm4ogqZdZklALV/KzRoE7ZeWZp/iFCAo5/+4EsaUJrh6u9zrvu8yJdOmyYQt5adnwzxYolYq5G2ejzgAKfGJ6TAY2WaOJwQ+vQVRu3N+EJRZgnA/n/fdqMCPGB7QIFdhQgxC8TDH5eGAR92fuU7iZG2DKkw80AS8ND3GwGf284FYERWzLwjgjf1Pl58pPPWgdaAj688sn7bjdimxjFlRl1mCcBDH1z544jcE6DKh0BZ+SQO8BFACp9xc/10nCeCzytpkZfby7mSOIl3A5SAJoF1YMcaH5fL9O6asxCOCC49w97xUfBTHzHq8l0meVmFv5YVP1XdrFTJPUpt22JUb/zuEgJFJ54Pw/cAzgWUSSrXGHYAMs4/tgloqTJovkmAsbN4wwjCDlQC7cKJuYfEXF5XJsngB4AMpx2tQCvGMbfDCsy9lk7XyHAmCUDBydQv+gEKzn8EVEhLhOnBw3fKnSac8QwTIJ/WkwPRCSmYSPLgj8/DNYKz5/HqNMwHiNbLtflEYNkJ4HE4XT/eJ+24jfza/Vgo2pfNKWI0IVtO+s5OXVn5S4EloBI5uCqA0Qo2hHECPsP4yCDPh5HAk2EuYHzmn8VE0+QUJn9kMMdyKkRIVg15H8SLBUDYWwoShvdeyPHaHZ9yq5FZGw6g6tlyHP3vwq7fDfGhDwGawsUn9hzQjMJFuS5hB4KkYVoA5fO6NAAO6Qi+j2eYfX0r3pY4epb9vuvzPcje7KcBTw/0fDzLW8zxiYBnCm/8KKwALEKWXOYIQOHsw+RPxG1fqF0CGOI9cM6vAOzTeF+up9Inj3soL10GvuGcn1Zn0O/T4ccTxGoIyLw3PtIdxGGW70GXboDfLwC+FIw/fKr5AuYFNnBckyEzgKZlx1EwPV1abcOhD27pSgNZBS4upIGcH3YDNGIz7xrifFkbAP7ktJXjXqL9KYAd2NXm3lkEkqASv1Tp8b0C+/B+gYNXYKEoQ1YgUwTgyt8wV/78oY9aAAJRDyDB9WHv+26BwLjp3xRZkjilWmD2qelj59ybP5xmx/2+aL67D8tNPzn4ASDJUK/jWYJfvSFQfV1uW3u9+dci/TKasRbVcGWmD33UNP8w2cAj0WpWvlrDY9AQL4RIpU8IInlg+jHqHxkPnZlHoX5A54lA35l/RwpXnwopUEzdjuObHZjdlIWijFiBzBCAfeQmrPwNYuWPM2ce6ApwTpMdsPF11J7pHBHcdUakNZ/AeZL4vOz3z01Ymad3Zt0B6/p+ZxnSRHBkqFgHlrdcN4OxzeevC9TWvmwsFGWGANSO4UuMwrtLBTCncQ68hAQJuF7D4RNgJJDugGRgGv6jL2FPEFzE9zas/3MUdnbSmX5v0hPAcVkAR2YSwsVXfJa5Esd2bgHJf+UTeKEtuoRGu8wQoAUzZnsGof0Y/InQIWkBUPw4TLAhMRfvfcIdgyzXXVoSgeVIWvj8TrC5+WNkPBLznga3uguoAC5WAYWIpeCNVsFN47X0n7nKyB7CRr96DqJpvBOtwJk/WflDdQiWA86ZZg84K8uwv5483vn0uJi+TrwcmVwbu2D6xzHbxy7GaX4FWJbpwPbX6LtwugxX0sr+8v492OZ+GwaEbHsjXSYIQIEMD+ENH6Z625cH2hOgls8GiKYjsQCekKFCFAq4A6t83O41gdk+PvJ5UAV4/HFgMx6kQ6Hu48K8ttqOP07x81guvgy7nRv56rk1aFp9ogL28uq13QPx4A8AEhR+EsCRxn+v+E7bJQ2gR/JKep8freMVzvbxl0NG8Rp4PmnM6/dTgAsRkD+Z/mXBa+Ck3ej27rgJfxroGk4Ajv4H+vC2z40USax5EHoCPsEkkPTjeG/63XdHBIb99SQv4Ud8F9YWRvG8Tyd9PdOiTA8yQa+l+f6+knEN/nBC6Jp9uqGbRhpOAM7+DWPwx591SYMoYQgdWFWRwU/0JCAjQTqcLoPxXOXjq175oSVwYJMsKVOPsGh+TApn/l25a4B7UiQp34mTRAf2sHtKoi9qoKEEIPgcle+C+cc+zPkaHGsqSeC0uzIodFagov1pEjDM63yy4Gtk3WxfBXDfBVRpvuRBPiGBu9/FQIIy2Izfb2+UaygBOPjbinn/3g0IwDngPNixZsfxF9J8n9eDT5+zfWfQ79O8VzTfgey1PNF8SCLdDUiFLsIftuvMOdf+i3C7ebdoKAHI/kvwskeCkAbQh53WVwjhv6fJIHFoFvM4517Z0gnwJ/CjURz5e/DlMY9kQFp+km6AYcYLCXw5F8fntrEfvdG4N5E3lAAErQvPw/CqzH8F6NgKICHTMD1DrLSEGUnnfQRIqhIWenhm/1y8t89reVrDE8CRV+LFTxXlSl7Tv53Y9/j8TyP105Pu0XRNb7ZA4Y0lACpFTRQA4XtQq33Xz3vwxUetfTbfLgIvH0R0Ys2dEz4JsAQXGWsRIT0eYJkXy/EU0vH3lPqr75alLRfrvnPvw4dQPh81hAgcA9AEUl8FULxvJ9FuVIqm3lsDN+iLLYVcw5/YcR8fHay9DKgsptd42JMHSxzoFfDTgPuXQIvpRxHIXpfjXevJ49roJn6eeyVSf/ntsjo1alf19w7qagCqj1NXdtQa09+obSo8QOngY9URcv8XsAYkhfukG0rN55Qq9/b9+LhVx087k8o4ls2dub5clSYZCmN5/pp/Z0C67FphZqnXkSh8zxF/ju7lNy3q6eYlVvPHLuqqExtuo1GKph4S13WPCyVmHd4dwd5/CIYgJRVBPK/hv/hV2s/I2Dmzj2VVZCR4J9636s8ew+8GilXxqRb2k/v5QKrshXPVuML8zOvLqZEkHcXZyIYBn6oIdMHi7Ukas9J11D5VwEqDfBQ7PWbVB2fx7l+8ACItQNbIkSA1BkgBRFnzSDe7Ec4mzqIN//BU2VkCTPsW7kISEGFOGcht3BHgQhlW/zqrwOnQV044FSKg1GrnCHwFfI4F6DwH2O8TfM6g8Szff7wYJqbfpSz+Li4BSNLoswYCH6OgG+U4ACMBTo85jSewflDHOvmuQML4Q34I+NB6gk/T/5O3rPr+T/DTMYXmU0xLcjHm4xx0n6no1ZLyrmoiAjyBX/zk8zABFZMOlBNDwLshTYWiTvM5wKO1ODul1WM/QMbC1SkBzpSoD/jOxXexp6rOzKubnFr86tsWM2LuGDj7dH4IMD+saewJQQg+yRJgwuffXwgxhnCzfatbqyYvjZjD8JpIRyfS+tWoZrOPfxZm/I3TqAHCBNmTgFaBRIjwWlY+SonpB/gvHrXqyNHIPeY1quK5vS/GV1adwE9tBSdS9rVhzWFXwAHhd/4nwuSIM/j8wWYSQTQe4PM7wad7F0PX775Ylg0eLqb4W5cEIGKI9DjewKDHxL7WlXttEnNAOIqVsW/9MFTv4dGQWs85Ar6WncAzLB8MFB//YRnn+N3M4NrUpslLZZ9q7LjRkR1VNlarDLSZ44HTmB79p2dCdfIMBypa3r/LQ5W0ENwC/gy6imMYM3Cqt3DLlIBgbsYwF2NGLE9iZqEfiNtCEoyMW/WPT4Xqlbc5VnHz5xwnvHYKj3z/G2ZiJm2Zos9ANigWMA/K0UgJg8AR2NpJqFanG3JnoH6oAqdLuYP3X54tq2t/JlD7cbBydEKpp46EMhDkLGLhlikBDriAOQ7GjZQ6gqmRiXLrGMaEeMNtthxB5pPAD/DWzedfcWHWvQB/pTgBbRWNdbROf2Befr9nHIuu72gNlcugI+DsEuC5HTsMFG5FEiDWWAd6h9gb9ajGGNu+WqjVimSar8w0oVq9RuxdT6rtkUKx8oXhSmorWGMOjWUIAbC48kIU8kmgcOtBAlHI16Hr59lWIUCk219SdvZtZYoH66YngGAcnoz05EsJAV4/jNlArb9nCgI0P/4O4ydfP9yPBfjYAkirI/VIbBqaXgjrt4EyAYTz8eoRLwM3CMS3A2Ptz+LtDM/oAIfVCteUEhBso9nnth9t/75vYEKAR/FIgC1CX8McIaZeimcCL6Dm8YEpsI2M+eOnn9bJy2kSArChRw+3fc9GM/+qSzi1ULimkgAxBbaPHXug7b/SDasiADTf2sh81YbT7+tiQJiWU67DxBKYvmdC8xVinG7MHAIodezB9qNYKPg91w0UXUFaWPkME0MZ/H351b9pf31uG+YRgAmOfr3jG1E4c78puoK58srdd2JILI/99cZHalW+JgGYMCyfuicqTz9uSjhpWbhcSoDYReXJfyOWCzVgURu/+64zvaXWjm+aoO2WqDy1UBlFfAYlYFoI/vQT5ZnJ2998qG90oSouaAGYgRlZQMUSLMqXhe5RxF9UCWBxXzR/5lsXAp/VWpQATCDsaW+7PQyn7+dosng6oFSy6Tw+Npr9c9X21h2Lab5vQV0qvefuyd/UunQvbjRoyzjOk5XtxL4169bHDh95zi+fxvvGfv/VBzpqDvhqieeCFiCd6djhjodteeIGG848ytNEOuAAsS4OpYsrwiuWAIAnBsACWv/PUTR5Yz3g8/bLRm//l6Y+F1lOLNib3BxzGZXg9vKqeYYVN7EoYK4EALr8tg0nd2awiGv+G3P3f3rsgZb/nJtyKd+XTQAp/NAhs+fkPTcbE/y6VdFBDCl2mqDFUQBLClb2noMQ/oDfUmpUpIklAGi4IRI6Kvs1sY2L37Bii7/2LcQ+id9U/btjh0tPI82ytW5lBEBVvJNHxpaNV6CK1ysdHVBW78W1IVQWP6auOrXB2W1uPPV3xE/CCjFADv7Dl/hDb9ntQeYMOwGU9YuBpc84HtT010QMIU06rurz+Mp1exzgta8pa47gwgvlcvtLbz6kF3y0q0cCHo568iwt7SFrLj+leiZmpjfh13P7wxLeQ6SiHhxI68ZbYXfhdNcOtHAAFcCbAlU3fiAaPxel26y26NB0L1u/tBvlIRWmYoEcGoZTWNriTN4MZDCOFuL9KOqMnNA26i0cfj0J5eEu7TM8sBPplpGOQI28PAgSHNLQmNV3/w8VVVAKEBftwwAAAABJRU5ErkJggg==" alt="" width="32" height="32">`;
 
 const ICONS = {
-  logo: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
-  home: '<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20h14V9.5"/><path d="M10 20v-6h4v6"/>',
-  scan: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M8 9.5h6M8 12.5h4"/>',
-  sparkles: '<path d="M11 3l1.8 4.7 4.7 1.8-4.7 1.8L11 16l-1.8-4.7L4.5 9.5l4.7-1.8z"/><path d="M18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/>',
-  browser: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M6.5 6.5h.01M9.5 6.5h.01"/><path d="M12 12.5v5M9.5 15h5"/>',
-  book: '<path d="M2 5h6a4 4 0 0 1 4 4v11a3 3 0 0 0-3-3H2z"/><path d="M22 5h-6a4 4 0 0 0-4 4v11a3 3 0 0 1 3-3h7z"/>',
-  file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="m9 17 .5-2 4.5-4.5 1.5 1.5-4.5 4.5z"/>',
-  slides: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/><path d="m7 12 3-3 2.5 2 4-4"/>',
-  align: '<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',
-  clipboard: '<path d="M9 3h6v3H9z"/><path d="M15 4.5h2a2 2 0 0 1 2 2V19a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6.5a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>',
+  logo: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+  home: '<path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/><path d="m16 16-1.9-1.9"/>',
+  sparkles: '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/>',
+  browser: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/>',
+  book: '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+  file: '<path d="m18 5-2.414-2.414A2 2 0 0 0 14.172 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2"/><path d="M21.378 12.626a1 1 0 0 0-3.004-3.004l-4.01 4.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/><path d="M8 18h1"/>',
+  slides: '<path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/>',
+  align: '<path d="M15 12H3"/><path d="M17 18H3"/><path d="M21 6H3"/>',
+  clipboard: '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/>',
   sidebar: '<rect x="4.6" y="4.6" width="14.8" height="14.8" rx="3.4" stroke-width="1.2"/><path d="M7.6 7.6v8.8" stroke-width="1.2"/>',   /* Close.svg: collapse / expand the menu */
-  panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/><path d="m15 10-2 2 2 2"/>',
-  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
-  close: '<path d="M6 6l12 12M18 6 6 18"/>',
-  moon: '<path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/>',
-  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
-  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
-  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
-  upload: '<path d="M12 15V4M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
-  chrome: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 8.5h8.2M8.97 13.75 4.9 6.7M15.03 13.75 10.9 20.9"/>',
-  video: '<rect x="3" y="6" width="13" height="12" rx="2.5"/><path d="m16 10.5 5-3v9l-5-3z"/>',
-  info: '<path d="M12 10.5V18"/><path d="M12 6.5h.01"/>',
-  flash: '<path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/>',
-  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
-  database: '<ellipse cx="12" cy="5.5" rx="7.5" ry="3"/><path d="M4.5 5.5v6.5c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3V5.5"/><path d="M4.5 12v6.5c0 1.66 3.36 3 7.5 3s7.5-1.34 7.5-3V12"/>',
-  updown: '<path d="m8 9 4-4 4 4M8 15l4 4 4-4"/>',
-  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
-  coins: '<ellipse cx="12" cy="6" rx="7" ry="3"/><path d="M5 6v6c0 1.7 3.1 3 7 3s7-1.3 7-3V6"/><path d="M5 12v6c0 1.7 3.1 3 7 3s7-1.3 7-3v-6"/>',
-  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
-  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
-  plus: '<path d="M12 5v14M5 12h14"/>',
-  xmark: '<path d="M7 7l10 10M17 7 7 17"/>',
-  laptop: '<rect x="4" y="5" width="16" height="11" rx="2"/><path d="M2 19h20"/>',
-  card: '<rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M3 10h18M7 15h3"/>',
-  receipt: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
-  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M4.2 7.5l2.1 1.2M17.7 15.3l2.1 1.2M4.2 16.5l2.1-1.2M17.7 8.7l2.1-1.2"/><circle cx="12" cy="12" r="7"/>',
-  logout: '<path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/><path d="M10 16l-4-4 4-4M6 12h10"/>',
-  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/>',
-  gift: '<rect x="3.5" y="8" width="17" height="4" rx="1"/><path d="M5 12v8h14v-8M12 8v12"/><path d="M12 8c-1.5-3-5-3.5-5-1.2C7 8 9 8 12 8Zm0 0c1.5-3 5-3.5 5-1.2C17 8 15 8 12 8Z"/>',
-  wallet: '<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H17v3"/><rect x="4" y="8" width="16" height="11" rx="2.5"/><path d="M16 13.5h.01"/>',
+  panel: '<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/>',
+  menu: '<line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>',
+  close: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
+  chrome: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="21.17" x2="12" y1="8" y2="8"/><line x1="3.95" x2="8.54" y1="6.06" y2="14"/><line x1="10.88" x2="15.46" y1="21.94" y2="14"/>',
+  video: '<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  flash: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  database: '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>',
+  updown: '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  arrow: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+  plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  xmark: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  laptop: '<path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"/>',
+  card: '<rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/>',
+  receipt: '<path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8h-6a2 2 0 1 0 0 4h4a2 2 0 1 1 0 4H8"/><path d="M12 17.5v-11"/>',
+  gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>',
+  eye: '<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',
+  fileCheck: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="m9 15 2 2 4-4"/>',
+  gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5"/>',
+  wallet: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
   chevronDown: '<path d="m6 9 6 6 6-6"/>',
-  mail: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m4 7 8 6 8-6"/>',
+  mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
   telegram: '<path d="M21 4.5 3 11.5l6 2 2 6 3.2-4.2L19 19z"/><path d="m9 13.5 8-6"/>',
   whatsapp: '<path d="M4 20l1.2-4A8 8 0 1 1 8 18.8z"/><path d="M9 9.5c0 3 2.5 5.5 5.5 5.5l1-1.5-2-1-1 .8a3.5 3.5 0 0 1-1.8-1.8l.8-1-1-2z"/>',
-  instagram: '<rect x="4" y="4" width="16" height="16" rx="4.5"/><circle cx="12" cy="12" r="3.5"/><path d="M16.8 7.2h.01"/>',
-  youtube: '<rect x="3" y="6" width="18" height="12" rx="3.5"/><path d="m10.5 9.5 4 2.5-4 2.5z"/>',
+  instagram: '<rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/>',
+  youtube: '<path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/>',
   xlogo: '<path d="M5 5l14 14M19 5 5 19"/>',
   tiktok: '<path d="M14 4v10.5a3.5 3.5 0 1 1-3.5-3.5"/><path d="M14 4c.4 2.3 2 3.8 4.5 4"/>',
-  phone: '<path d="M6.5 4h3l1.5 4-2 1.3a10 10 0 0 0 5.7 5.7L16 13l4 1.5v3a2 2 0 0 1-2.2 2A15 15 0 0 1 4.5 6.2 2 2 0 0 1 6.5 4z"/>',
-  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
-  more: '<path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="3"/>',
-  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
-  redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0 0 10h3"/>',
-  alignLeft: '<path d="M4 6h16M4 10h10M4 14h16M4 18h10"/>',
-  alignCenter: '<path d="M4 6h16M7 10h10M4 14h16M7 18h10"/>',
-  alignRight: '<path d="M4 6h16M10 10h10M4 14h16M10 18h10"/>',
-  alignJustify: '<path d="M4 6h16M4 10h16M4 14h16M4 18h16"/>',
-  listBullet: '<path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01" stroke-width="3"/>',
-  listNumber: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 5h1.5v4M4 9h3M4 15.5a1.5 1.5 0 1 1 2.6 1L4 19h3"/>',
-  outdent: '<path d="M11 6h9M11 12h9M11 18h9"/><path d="m7 9-3 3 3 3"/>',
-  indent: '<path d="M11 6h9M11 12h9M11 18h9"/><path d="m4 9 3 3-3 3"/>',
-  clearFormat: '<path d="M6 5h12M12 5 9 19"/><path d="m15 15 5 5M20 15l-5 5"/>',
-  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
-  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/>',
-  chevL: '<path d="m15 6-6 6 6 6"/>',
-  chevR: '<path d="m9 6 6 6-6 6"/>',
+  phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
+  clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
+  redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>',
+  alignLeft: '<path d="M15 12H3"/><path d="M17 18H3"/><path d="M21 6H3"/>',
+  alignCenter: '<path d="M17 12H7"/><path d="M19 18H5"/><path d="M21 6H3"/>',
+  alignRight: '<path d="M21 12H9"/><path d="M21 18H7"/><path d="M21 6H3"/>',
+  alignJustify: '<path d="M3 12h18"/><path d="M3 18h18"/><path d="M3 6h18"/>',
+  listBullet: '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+  listNumber: '<path d="M10 12h11"/><path d="M10 18h11"/><path d="M10 6h11"/><path d="M4 10h2"/><path d="M4 6h1v4"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/>',
+  outdent: '<path d="M21 12H11"/><path d="M21 18H11"/><path d="M21 6H11"/><path d="m7 8-4 4 4 4"/>',
+  indent: '<path d="M21 12H11"/><path d="M21 18H11"/><path d="M21 6H11"/><path d="m3 8 4 4-4 4"/>',
+  clearFormat: '<path d="M4 7V4h16v3"/><path d="M5 20h6"/><path d="M13 4 8 20"/><path d="m15 15 5 5"/><path d="m20 15-5 5"/>',
+  history: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
+  share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>',
+  chevL: '<path d="m15 18-6-6 6-6"/>',
+  chevR: '<path d="m9 18 6-6-6-6"/>',
   minus: '<path d="M5 12h14"/>',
-  half: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/>',
-  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/>',
-  send: '<path d="M12 19V5M6 11l6-6 6 6"/>',
-  help: '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.5"/><path d="M12 16.8h.01"/>',
-  download: '<path d="M12 4v11M7 10l5 5 5-5"/><path d="M4 19h16"/>',
-  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
-  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M15.5 4.6a3.5 3.5 0 0 1 0 6.8M18 14.2a6.5 6.5 0 0 1 3.5 5.8"/>',
-  pulse: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>',
-  sliders: '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>',
-  arrowLeft: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
-  login: '<path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"/><path d="M14 16l4-4-4-4M18 12H8"/>',
-  alert: '<path d="M12 4 2.5 20h19z"/><path d="M12 10v4.5M12 17.5h.01"/>',
-  shield: '<path d="M12 3 5 6v5.5c0 4.3 3 7.9 7 9.5 4-1.6 7-5.2 7-9.5V6z"/><path d="m9 12 2 2 4-4"/>',
+  half: '<circle cx="12" cy="12" r="10"/><path d="M12 18a6 6 0 0 0 0-12v12z"/>',
+  image: '<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+  send: '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
+  grid: '<rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+  pulse: '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
+  sliders: '<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>',
+  arrowLeft: '<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>',
+  login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/>',
+  alert: '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+  shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
   dot: '<circle cx="12" cy="12" r="2.5"/>',
-  refresh: '<path d="M20 12a8 8 0 1 1-2.3-5.7L20 8.5"/><path d="M20 3.5v5h-5"/>',
-  userPlus: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M19 8v6M16 11h6"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+  userPlus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/>',
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${ICONS[name] || ''}</svg>`;
+// Brand marks for app-style social tiles in the site footer (Simple Icons, CC0), filled on a 24×24 grid
+const BRAND_ICONS = {
+  telegram: 'M11.944 0m4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z',
+  whatsapp: 'M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z',
+  instagram: 'M7.0301.084c-1.2768.0602-2.1487.264-2.911.5634-.7888.3075-1.4575.72-2.1228 1.3877-.6652.6677-1.075 1.3368-1.3802 2.127-.2954.7638-.4956 1.6365-.552 2.914-.0564 1.2775-.0689 1.6882-.0626 4.947.0062 3.2586.0206 3.6671.0825 4.9473.061 1.2765.264 2.1482.5635 2.9107.308.7889.72 1.4573 1.388 2.1228.6679.6655 1.3365 1.0743 2.1285 1.38.7632.295 1.6361.4961 2.9134.552 1.2773.056 1.6884.069 4.9462.0627 3.2578-.0062 3.668-.0207 4.9478-.0814 1.28-.0607 2.147-.2652 2.9098-.5633.7889-.3086 1.4578-.72 2.1228-1.3881.665-.6682 1.0745-1.3378 1.3795-2.1284.2957-.7632.4966-1.636.552-2.9124.056-1.2809.0692-1.6898.063-4.948-.0063-3.2583-.021-3.6668-.0817-4.9465-.0607-1.2797-.264-2.1487-.5633-2.9117-.3084-.7889-.72-1.4568-1.3876-2.1228C21.2982 1.33 20.628.9208 19.8378.6165 19.074.321 18.2017.1197 16.9244.0645 15.6471.0093 15.236-.005 11.977.0014 8.718.0076 8.31.0215 7.0301.0839m.1402 21.6932c-1.17-.0509-1.8053-.2453-2.2287-.408-.5606-.216-.96-.4771-1.3819-.895-.422-.4178-.6811-.8186-.9-1.378-.1644-.4234-.3624-1.058-.4171-2.228-.0595-1.2645-.072-1.6442-.079-4.848-.007-3.2037.0053-3.583.0607-4.848.05-1.169.2456-1.805.408-2.2282.216-.5613.4762-.96.895-1.3816.4188-.4217.8184-.6814 1.3783-.9003.423-.1651 1.0575-.3614 2.227-.4171 1.2655-.06 1.6447-.072 4.848-.079 3.2033-.007 3.5835.005 4.8495.0608 1.169.0508 1.8053.2445 2.228.408.5608.216.96.4754 1.3816.895.4217.4194.6816.8176.9005 1.3787.1653.4217.3617 1.056.4169 2.2263.0602 1.2655.0739 1.645.0796 4.848.0058 3.203-.0055 3.5834-.061 4.848-.051 1.17-.245 1.8055-.408 2.2294-.216.5604-.4763.96-.8954 1.3814-.419.4215-.8181.6811-1.3783.9-.4224.1649-1.0577.3617-2.2262.4174-1.2656.0595-1.6448.072-4.8493.079-3.2045.007-3.5825-.006-4.848-.0608M16.953 5.5864A1.44 1.44 0 1 0 18.39 4.144a1.44 1.44 0 0 0-1.437 1.4424M5.8385 12.012c.0067 3.4032 2.7706 6.1557 6.173 6.1493 3.4026-.0065 6.157-2.7701 6.1506-6.1733-.0065-3.4032-2.771-6.1565-6.174-6.1498-3.403.0067-6.156 2.771-6.1496 6.1738M8 12.0077a4 4 0 1 1 4.008 3.9921A3.9996 3.9996 0 0 1 8 12.0077',
+  youtube: 'M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z',
+  xlogo: 'M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z',
+  tiktok: 'M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z',
+};
+const appIcon = (name) => BRAND_ICONS[name]
+  ? `<svg class="app-glyph" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${BRAND_ICONS[name]}"/></svg>`
+  : icon(name);
+
+// Landing: screenshots for the hero and "How it works" (dark theme, JPEG) and the AI Detector demo video
+const LANDING_MEDIA = '/static/app2/media/';
+const LANDING_SHOTS = {
+  dashboard: LANDING_MEDIA + 'shot-dashboard.jpg',
+  check: LANDING_MEDIA + 'shot-check.jpg',
+  humanize: LANDING_MEDIA + 'shot-humanize.jpg',
+  format: LANDING_MEDIA + 'shot-format.jpg',
+};
 
 /* =========================================================
    Server data (templates/app_v2.html → window.DMX_BOOT)
@@ -1614,6 +1682,8 @@ const state = {
   editor: null,           // Editor document (title, html, zoom…)
   slides: null,           // Slides: settings, generated deck, design
   scans: [],              // AI Detector checks (filled at init)
+  detMode: store.get('det-mode', 'quick'),   // AI Detector page: 'quick' (our detector) or 'turnitin'
+  qd: { text: '', status: 'idle', result: null, error: '', note: '', autoRun: false, animate: false, left: null },
   scanCurrent: null,      // check shown in the result card
   scanMenu: null,         // id of the row whose ⋯ menu is open
   veil: { ...(BOOT.veil || {}) },   // { active, expiresAt } of the Veil pass
@@ -1724,6 +1794,13 @@ const itemHref = (item) => item.url || '#/' + item.route;
 const itemLinkAttrs = (item) => item.url ? 'target="_blank" rel="noopener"' : '';
 const newTabNote = (item) => item.url ? '<span class="visually-hidden"> (opens in a new tab)</span>' : '';
 
+function sidebarLogoHtml(href, where) {
+  const c = isCollapsed();
+  return `<a class="logo" href="${href}" ${c ? 'data-act="collapse" aria-expanded="false" aria-controls="sidebar"' : ''}
+      aria-label="${c ? 'Expand menu' : `${esc(CONFIG.brand)} ${where}`}" ${c ? 'data-tip-title="Expand menu" data-tip-desc=""' : ''}>
+      <span class="logo-mark">${LOGO_SVG}</span><span class="logo-text">${esc(CONFIG.brand)}</span>
+    </a>`;
+}
 function navItemHtml(item) {
   const descId = 'desc-' + item.id;
   if (item.dialog) {
@@ -1734,7 +1811,7 @@ function navItemHtml(item) {
   }
   const tipMeta = [item.tag, item.badge].filter(Boolean).join(' · ');
   return `<li>
-    <a class="nav-item" href="${esc(itemHref(item))}" ${itemLinkAttrs(item)} data-route="${item.url ? '' : item.route}"
+    <a class="nav-item${item.id === 'admin' ? ' nav-admin' : ''}" href="${esc(itemHref(item))}" ${itemLinkAttrs(item)} data-route="${item.url ? '' : item.route}"
        ${item.badge ? `data-badge="${esc(item.badge)}"` : ''}
        data-tip-title="${esc(item.label)}" data-tip-desc="${esc(item.description)}" data-tip-meta="${esc(tipMeta)}"
        aria-describedby="${descId}">
@@ -1847,9 +1924,7 @@ function renderSidebar() {
   }
   $('#sidebar').innerHTML = `
     <div class="sidebar-head">
-      <a class="logo" href="#/home" aria-label="${esc(CONFIG.brand)} home">
-        <span class="logo-mark">${LOGO_SVG}</span><span class="logo-text">${esc(CONFIG.brand)}</span>
-      </a>
+      ${sidebarLogoHtml('#/home', 'home')}
       <button class="icon-btn collapse-btn" data-act="collapse"
         aria-label="${isCollapsed() ? 'Expand menu' : 'Collapse menu'}" aria-expanded="${!isCollapsed()}" aria-controls="sidebar"
         data-tip-title="${isCollapsed() ? 'Expand menu' : 'Collapse menu'}" data-tip-desc="">${icon('sidebar')}</button>
@@ -2661,6 +2736,7 @@ function render() {
     main.innerHTML = renderLanding();
     document.title = CONFIG.brand;
     window.scrollTo(0, 0);
+    bindLanding();
     return;
   }
   const item = ALL_ITEMS.find(i => i.route === route);
@@ -2814,7 +2890,6 @@ function homeCreditsHtml() {
     <div class="box-head">
       <div><p class="box-title">${b} credits left</p>
         ${checks != null ? `<p class="box-sub">Enough for ~${checks} AI checks or ~${runs} humanizer runs.</p>` : ''}</div>
-      <button class="btn btn-sm ${low ? 'btn-primary' : ''}" data-act="topup">Top up credits</button>
     </div>
     ${low ? '<div class="hc-low" role="status"><b>Running low.</b> Top up to keep checking and humanizing.</div>' : ''}
     ${state.credits.length ? `<ul class="box-list" id="hc-list">${list.map(c => `<li class="box-row">
@@ -2864,13 +2939,23 @@ function historyHtml() {
 }
 
 /* What else do you need: the other tools as small tiles */
+// Solar icons (Bold Duotone, CC BY 4.0, 480 Design) for the home tool tiles, keyed by tool id
+const SOLAR = {
+  assignment: '<path fill-rule="evenodd" d="M20.0821 3.01774C21.1538 2.98054 22.0001 3.86139 22.0001 4.93375V16.1437C22.0001 17.2546 21.0941 18.1533 19.9854 18.2228C19.016 18.2834 17.8768 18.4026 17.0001 18.6339C15.9186 18.9193 15.0102 19.7011 13.627 20.0695C13.001 20.2362 12.3029 20.326 12.0001 20.3927V5.17399C12.3208 5.09543 13.3825 4.97156 13.6739 4.80289C13.8581 4.69626 14.0513 4.5874 14.2501 4.47965V7.53727C14.2499 7.64849 14.2493 7.8074 14.2706 7.94352C14.2966 8.10994 14.3826 8.43087 14.7149 8.62614C15.0353 8.81425 15.3492 8.7447 15.4981 8.6984C15.6279 8.65804 15.7699 8.58977 15.876 8.53922L17.0001 8.00602L18.1241 8.53922C18.2302 8.58977 18.3723 8.65804 18.502 8.6984C18.651 8.7447 18.9649 8.81425 19.2852 8.62614C19.6175 8.43088 19.7035 8.10994 19.7296 7.94352C19.7508 7.80741 19.7502 7.64849 19.7501 7.53727V3.03141C19.8629 3.02611 19.9739 3.02151 20.0821 3.01774ZM19.7276 12.8185C19.6272 12.4167 19.2202 12.1723 18.8184 12.2726L14.8184 13.2726C14.4167 13.3731 14.1722 13.78 14.2725 14.1818C14.373 14.5836 14.7799 14.828 15.1817 14.7277L19.1817 13.7277C19.5835 13.6273 19.8279 13.2203 19.7276 12.8185Z" clip-rule="evenodd"/><path d="M4.27253 12.8185C4.37296 12.4168 4.78001 12.1724 5.18171 12.2726L9.18171 13.2726C9.58344 13.3731 9.82784 13.7801 9.72761 14.1818C9.62715 14.5836 9.22027 14.8281 8.81843 14.7277L4.81843 13.7277C4.41662 13.6272 4.17214 13.2203 4.27253 12.8185Z"/><path d="M4.27253 8.81852C4.37296 8.41682 4.78001 8.17245 5.18171 8.27262L9.18171 9.27262C9.58344 9.37305 9.82784 9.78007 9.72761 10.1818C9.62715 10.5836 9.22027 10.8281 8.81843 10.7277L4.81843 9.7277C4.41662 9.62725 4.17214 9.22033 4.27253 8.81852Z"/><path d="M18.2501 6.93864L17.501 6.58317L17.4923 6.57828C17.4531 6.55827 17.3129 6.48706 17.1378 6.45914C17.0938 6.45214 17.0475 6.44743 17.0001 6.44743C16.7637 6.44743 16.5569 6.55323 16.5079 6.57828L16.4991 6.58317L15.7501 6.93864V3.757C16.0063 3.65201 16.2585 3.55977 16.5001 3.48746C17.0206 3.33165 17.6301 3.22482 18.2501 3.15153V6.93864Z"/><path d="M12 5.21395C11.6658 5.15047 10.9426 5.05264 10.2823 4.87544C8.9381 4.51475 8.04921 3.76429 7 3.48742C6.11349 3.25349 4.95877 3.13488 3.9824 3.07487C2.8863 3.0075 2 3.89961 2 4.99778V16.1436C2 17.2545 2.90605 18.1534 4.01486 18.2228C4.98428 18.2834 6.12329 18.402 7 18.6333C7.48596 18.7616 8.21615 19.0645 8.87295 19.3592C9.87752 19.81 10.9247 20.1556 12 20.3926V5.21395Z" opacity=".5"/>',
+  workspace: '<path d="M1 12C1 6.81455 1 4.22183 2.61091 2.61091C4.22183 1 6.81455 1 12 1C17.1854 1 19.7782 1 21.3891 2.61091C23 4.22183 23 6.81455 23 12C23 17.1854 23 19.7782 21.3891 21.3891C19.7782 23 17.1854 23 12 23C6.81455 23 4.22183 23 2.61091 21.3891C1 19.7782 1 17.1854 1 12Z" opacity=".5"/><path d="M13.9261 14.3018C14.1711 14.1107 14.3933 13.8885 14.8377 13.4441L20.378 7.90374C20.512 7.7698 20.4507 7.53909 20.2717 7.477C19.6178 7.25011 18.767 6.82414 17.9713 6.02835C17.1755 5.23257 16.7495 4.38186 16.5226 3.72788C16.4605 3.54892 16.2298 3.48761 16.0959 3.62156L10.5555 9.16192C10.1111 9.60634 9.88888 9.82854 9.69778 10.0736C9.47235 10.3626 9.27908 10.6753 9.12139 11.0062C8.98771 11.2867 8.88834 11.5848 8.68959 12.181L8.43278 12.9515L8.02443 14.1765L7.64153 15.3252C7.54373 15.6186 7.6201 15.9421 7.8388 16.1608C8.0575 16.3795 8.38099 16.4559 8.67441 16.3581L9.82308 15.9752L11.0481 15.5668L11.8186 15.31L11.8186 15.31C12.4148 15.1113 12.7129 15.0119 12.9934 14.8782C13.3243 14.7205 13.637 14.5273 13.9261 14.3018Z"/><path d="M22.1127 6.16905C23.2952 4.98656 23.2952 3.06936 22.1127 1.88687C20.9302 0.704377 19.013 0.704377 17.8306 1.88687L17.6524 2.06499C17.4806 2.23687 17.4027 2.47695 17.4456 2.7162C17.4726 2.8667 17.5227 3.08674 17.6138 3.3493C17.796 3.87439 18.14 4.56368 18.788 5.21165C19.4359 5.85961 20.1252 6.20364 20.6503 6.38581C20.9129 6.4769 21.1329 6.52697 21.2834 6.55399C21.5227 6.59693 21.7627 6.51905 21.9346 6.34717L22.1127 6.16905Z"/>',
+  presentation: '<path d="M4 10.5V2.75H20V10.5C20 13.5641 20 15.0962 18.9958 16.0481C17.9916 17 16.3753 17 13.1429 17H12.75H11.25H10.8571C7.62465 17 6.00841 17 5.00421 16.0481C4 15.0962 4 13.5641 4 10.5Z" opacity=".5"/><path d="M12.75 17V20.5361L14.3359 21.3291C14.7061 21.5144 14.8558 21.9646 14.6709 22.335C14.4857 22.7054 14.0355 22.8559 13.665 22.6709L12 21.8389L10.3359 22.6709C9.96545 22.8561 9.51434 22.7054 9.3291 22.335C9.14421 21.9646 9.29471 21.5143 9.66504 21.3291L11.25 20.5361V17H12.75Z"/><path d="M14.4697 7.96973C14.7626 7.67683 15.2374 7.67683 15.5303 7.96973C15.8232 8.26262 15.8232 8.73738 15.5303 9.03027L14.2129 10.3477C14.0679 10.4927 13.9109 10.6491 13.7607 10.7637C13.5848 10.8979 13.3335 11.043 13 11.043C12.6668 11.043 12.4152 10.8988 12.2393 10.7646C12.0891 10.6501 11.9321 10.4927 11.7871 10.3477L11.1768 9.7373C11.1068 9.66733 11.0499 9.61078 11 9.5625C10.9501 9.61078 10.8932 9.66733 10.8232 9.7373L9.53027 11.0303C9.23738 11.3232 8.76262 11.3232 8.46973 11.0303C8.17683 10.7374 8.17683 10.2626 8.46973 9.96973L9.78711 8.65234C9.93205 8.50729 10.0891 8.35088 10.2393 8.23633C10.4152 8.1021 10.6665 7.95703 11 7.95703C11.3335 7.95703 11.5848 8.1021 11.7607 8.23633C11.9109 8.35088 12.0679 8.50729 12.2129 8.65234L12.8232 9.2627C12.8932 9.33267 12.9501 9.38922 13 9.4375C13.0499 9.38922 13.1068 9.33267 13.1768 9.2627L14.4697 7.96973Z"/><path d="M22 1.25C22.4142 1.25 22.75 1.58579 22.75 2C22.75 2.41421 22.4142 2.75 22 2.75H2C1.58579 2.75 1.25 2.41421 1.25 2C1.25 1.58579 1.58579 1.25 2 1.25H22Z"/>',
+  format: '<path d="M3 10C3 6.22876 3 4.34315 4.17157 3.17157C5.34315 2 7.22876 2 11 2H13C16.7712 2 18.6569 2 19.8284 3.17157C21 4.34315 21 6.22876 21 10V14C21 17.7712 21 19.6569 19.8284 20.8284C18.6569 22 16.7712 22 13 22H11C7.22876 22 5.34315 22 4.17157 20.8284C3 19.6569 3 17.7712 3 14V10Z" opacity=".5"/><path d="M13 15.25C13.4142 15.25 13.75 15.5858 13.75 16C13.75 16.4142 13.4142 16.75 13 16.75H8C7.58579 16.75 7.25 16.4142 7.25 16C7.25 15.5858 7.58579 15.25 8 15.25H13Z"/><path d="M16 11.25C16.4142 11.25 16.75 11.5858 16.75 12C16.75 12.4142 16.4142 12.75 16 12.75H8C7.58579 12.75 7.25 12.4142 7.25 12C7.25 11.5858 7.58579 11.25 8 11.25H16Z"/><path d="M16 7.25C16.4142 7.25 16.75 7.58579 16.75 8C16.75 8.41421 16.4142 8.75 16 8.75H8C7.58579 8.75 7.25 8.41421 7.25 8C7.25 7.58579 7.58579 7.25 8 7.25H16Z"/>',
+  check: '<path d="M21 15.9983V9.99826C21 7.16983 21 5.75562 20.1213 4.87694C19.3529 4.10856 18.175 4.01211 16 4H8C5.82497 4.01211 4.64706 4.10856 3.87868 4.87694C3 5.75562 3 7.16983 3 9.99826V15.9983C3 18.8267 3 20.2409 3.87868 21.1196C4.75736 21.9983 6.17157 21.9983 9 21.9983H15C17.8284 21.9983 19.2426 21.9983 20.1213 21.1196C21 20.2409 21 18.8267 21 15.9983Z" opacity=".5"/><path d="M14.4883 10.4521C14.791 10.1696 15.2652 10.1857 15.5479 10.4883C15.8304 10.791 15.8143 11.2652 15.5117 11.5479L11.2256 15.5479C10.9374 15.8168 10.4903 15.8168 10.2021 15.5479L8.48828 13.9482C8.18548 13.6656 8.16953 13.1915 8.45215 12.8887C8.73475 12.5859 9.2089 12.569 9.51172 12.8516L10.7139 13.9736L14.4883 10.4521Z"/><path d="M14.5 2C15.3284 2 16 2.67157 16 3.5V4.5C16 5.32843 15.3284 6 14.5 6H9.5C8.67157 6 8 5.32843 8 4.5V3.5C8 2.67157 8.67157 2 9.5 2H14.5Z"/>',
+  veil: '<path d="M2.02639 9.5V8.75C2.10074 6.11064 2.38461 4.5451 3.46486 3.46484C4.92933 2.00041 7.28601 2 12 2C16.714 2 19.0707 2.00038 20.5352 3.46484C21.6154 4.5451 21.8993 6.11066 21.9737 8.75L22 9.5H9.00002V22L8.25002 21.9561C5.90966 21.8589 4.47508 21.5454 3.46486 20.5352C2.00041 19.0707 2.00002 16.714 2.00002 12C2.00002 11.3766 1.99956 10.7944 2.00295 10.25L2.02639 9.5Z" opacity=".5"/><path d="M2 12C2 16.714 2 19.0711 3.46447 20.5355C4.47468 21.5458 5.90962 21.8591 8.25 21.9563L9 22V10.25V9.5H2.02645L2.00339 10.25C2 10.7944 2 11.3766 2 12Z" opacity=".5"/><path d="M21.9971 10.25C22.0005 10.7944 22 11.3766 22 12C22 16.714 21.9996 19.0707 20.5352 20.5352C19.0707 21.9996 16.714 22 12 22C11.1815 22 9.68405 21.9999 9 21.9922V9.5H22L21.9971 10.25Z"/><path d="M6 5C6.55228 5 7 5.44772 7 6C7 6.55228 6.55228 7 6 7C5.44772 7 5 6.55228 5 6C5 5.44772 5.44772 5 6 5Z"/><path d="M9 5C9.55228 5 10 5.44772 10 6C10 6.55228 9.55228 7 9 7C8.44772 7 8 6.55228 8 6C8 5.44772 8.44772 5 9 5Z"/><path d="M12 5C12.5523 5 13 5.44772 13 6C13 6.55228 12.5523 7 12 7C11.4477 7 11 6.55228 11 6C11 5.44772 11.4477 5 12 5Z"/>',
+};
+
 function tasksHtml() {
   return `<section class="home-tasks" aria-labelledby="tasks-home-h">
     <h2 id="tasks-home-h" class="home-h">${esc(H().titles.tasks)}</h2>
     <div class="task-tiles">${H().tasks.map(t => {
       const it = ITEMS[t.tool];
       return `<a class="task-tile" href="${esc(itemHref(it))}" ${itemLinkAttrs(it)}>
-        <span class="task-top">${icon(it.icon)}${it.free ? '<span class="badge">Free</span>' : ''}</span>
+        <span class="task-top"><span class="task-ic">${SOLAR[t.tool] ? `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${SOLAR[t.tool]}</svg>` : icon(it.icon)}</span>${it.free ? '<span class="badge">Free</span>' : ''}</span>
         <b class="task-name">${esc(it.label)}</b>
         <span class="task-hint">${esc(t.hint)}</span>${newTabNote(it)}
       </a>`;
@@ -2916,10 +3001,17 @@ function rerenderHomeKeepScroll(focusSel) {
 }
 
 // Text from Home goes straight into the tool and runs there
-function homeSendTo(tool, { text, file, note } = {}) {
+function homeSendTo(tool, { text, file, note, turnitin = false } = {}) {
   const body = (text ?? workDoc.text).trim();
   const f = file === undefined ? workDoc.file : file;
+  if (tool === 'turnitin' && !f && body && !turnitin) {
+    Object.assign(state.qd, { text: body, status: 'idle', result: null, error: '', note: note || 'Added from Home.', autoRun: true });
+    state.detMode = 'quick';
+    go('turnitin');
+    return;
+  }
   if (tool === 'turnitin') {
+    state.detMode = 'turnitin';
     if (!state.signedIn) return openSignup({ intent: 'turnitin' });
     const blob = f?.blob || new File([body], 'Your text.txt', { type: 'text/plain' });
     Object.assign(toolState('turnitin'), {
@@ -2934,7 +3026,7 @@ function homeSendTo(tool, { text, file, note } = {}) {
   if (!body && f?.blob) {
     t.note = 'Reading your file…';
     API.extractText(f.blob).then((extracted) => {
-      Object.assign(t, { text: extracted.trim(), note: `Text from “${f.name}”.`, autoRun: !!extracted.trim() });
+      Object.assign(t, { text: extracted.trim(), fileName: f.name, note: `Text from “${f.name}”.`, autoRun: !!extracted.trim() });
     }).catch((err) => { t.note = err.message || 'Could not read the uploaded file.'; })
       .finally(() => { if (currentRoute() === 'humanizer') render(); });
   }
@@ -2965,7 +3057,7 @@ function homeAction(act, el) {
       } else if ((n.go === 'humanize' || n.go === 'recheck') && !d.text) {
         if (d.scanId) { state.scanCurrent = d.scanId; go('turnitin'); } else go(n.go === 'humanize' ? 'humanizer' : 'turnitin');
       } else if (n.go === 'humanize') homeSendTo('humanizer', { text: d.text, file: null, note: `From “${d.title}”.` });
-      else if (n.go === 'recheck') homeSendTo('turnitin', { text: d.text, file: null, note: `From “${d.title}”.` });
+      else if (n.go === 'recheck') homeSendTo('turnitin', { text: d.text, file: null, note: `From “${d.title}”.`, turnitin: !!d.scanId });
       else go(n.go === 'check' ? 'check' : n.go);
       break;
     }
@@ -3025,12 +3117,23 @@ function resultHtml(id) {
     <p class="muted" style="margin:0">${esc(t.error.message)}</p>
   </div>`;
   if (t.status !== 'done') return '';
-  // Result actions: main = send the text to the AI Detector, secondary = copy
+  // Result actions: main = send the text to the AI Detector, secondary = Copy for pasted text,
+  // or a download menu (copy / pdf / docx / txt) when the text came from an uploaded file
+  const fmts = [['pdf', 'PDF document', '#e5252a'], ['docx', 'Word document', '#2b579a'], ['txt', 'Plain text', '#71717a']];
+  // File-type icon: a page with a folded corner and a coloured format badge
+  const fileIc = (ext, c) => `<svg class="dl-file" viewBox="0 0 24 28" aria-hidden="true"><path d="M4 1h11l6 6v18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2z" fill="var(--surface)" stroke="color-mix(in oklab, var(--text) 25%, transparent)"/><path d="M15 1v6h6" fill="none" stroke="color-mix(in oklab, var(--text) 25%, transparent)"/><rect x="0" y="14" width="${ext.length > 3 ? 24 : 20}" height="9" rx="2" fill="${c}"/><text x="${ext.length > 3 ? 12 : 10}" y="20.8" text-anchor="middle" font-size="6.4" font-weight="700" fill="#fff" font-family="system-ui, sans-serif">${ext.toUpperCase()}</text></svg>`;
   return `<div class="card hum-result">
     <div class="result-head">
       <h2>${esc(flow.resultTitle)}</h2>
       <span class="spacer"></span>
-      <button class="btn btn-sm" data-act="copy">Copy</button>
+      ${!t.result.file ? '<button class="btn btn-sm" data-act="copy">Copy</button>' : `<div class="dl-wrap">
+        <button class="btn btn-sm" data-act="dl-toggle" aria-haspopup="menu" aria-expanded="false">${icon('download')} Download ${icon('chevronDown')}</button>
+        <div class="dl-menu" role="menu">
+          <button role="menuitem" data-act="copy"><b>${icon('copy')}</b><span>Copy text</span></button>
+          <hr>
+          ${fmts.map(([ext, label, c]) => `<button role="menuitem" data-act="dl-as" data-value="${ext}"><b>${fileIc(ext, c)}</b><span>${label}</span></button>`).join('')}
+        </div>
+      </div>`}
       <button class="btn btn-sm btn-primary" data-act="next">${esc(flow.next.label)}</button>
     </div>
     <pre class="result-text" id="result-text">${esc(t.result.text)}</pre>
@@ -3776,8 +3879,12 @@ function renderScan() {
   const runBtn = state.signedIn
     ? `<button class="btn btn-primary" data-act="scan-run" id="scan-run" ${t.file && !t.submitting ? '' : 'disabled'} ${t.file ? '' : 'title="Upload a document first"'}>${t.submitting ? 'Uploading…' : 'Check document'}</button>`
     : `<button class="btn btn-primary" data-act="signup">Sign up to check</button>`;
+  const quick = state.detMode === 'quick';
+  store.set('det-mode', state.detMode);   // the page reopens on the detector used last
   return `<div class="page">
-    ${pageHead(item, '', `<button class="btn btn-sm" data-act="start-tour" data-tour-name="scan">${icon('help')} Take the tour</button>`)}
+    ${pageHead(item, '', quick ? '' : `<button class="btn btn-sm" data-act="start-tour" data-tour-name="scan">${icon('help')} Take the tour</button>`)}
+    ${detSwitchHtml()}
+    ${quick ? quickDetHtml() : `
     ${t.note ? `<p class="note">${esc(t.note)}</p>` : ''}
     <section class="card scan-upload" aria-label="New check">
       ${drop}
@@ -3788,8 +3895,159 @@ function renderScan() {
       </div>
     </section>
     <section class="card scan-result" id="scan-latest" aria-live="polite" aria-labelledby="scan-result-h">${scanResultHtml(currentScan())}</section>
-    ${state.signedIn ? scanHistoryHtml() : ''}
+    ${state.signedIn ? scanHistoryHtml() : ''}`}
   </div>`;
+}
+
+/* ---------- AI Detector: our own detector (default) and the Turnitin report, one switch on top ---------- */
+function detSwitchHtml() {
+  const D = CONFIG.detector, opt = (mode, ic) => {
+    const o = D.switch[mode], on = state.detMode === mode;
+    return `<button role="tab" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-act="det-mode" data-v="${mode}">
+      <span class="det-sw-ic" aria-hidden="true">${icon(ic)}</span>
+      <span class="det-sw-text"><b>${esc(o.title)}</b><small>${esc(o.sub)}</small></span></button>`;
+  };
+  return `<div class="det-switch" role="tablist" aria-label="Detector">${opt('quick', 'flash')}${opt('turnitin', 'shield')}</div>`;
+}
+
+function quickDetHtml() {
+  // Text only: files are checked by the Turnitin report
+  const q = state.qd, D = CONFIG.detector;
+  return `${q.note ? `<p class="note">${esc(q.note)}</p>` : ''}
+    <section class="card qd" aria-label="${esc(D.switch.quick.title)}">
+      <div class="qd-input">
+        <div class="qd-label-row"><label class="qd-label" for="qd-text">Your text</label>
+          ${qdMarked() ? '<span class="qd-legend" id="qd-legend"><span><i class="lv-ai"></i>Looks AI</span><span><i></i>Looks human</span></span>' : ''}</div>
+        <div class="qd-field">
+          <div class="qd-backdrop" id="qd-backdrop" aria-hidden="true">${qdBackdropHtml()}</div>
+          <textarea class="input qd-text" id="qd-text" placeholder="Paste your essay, report or any text (at least ${D.minWords} words)…">${esc(q.text)}</textarea>
+        </div>
+        <div class="tool-bar">
+          <span class="tool-meta"><span class="counter" id="qd-count" aria-live="polite">${qdCountText()}</span><span class="cost">Cost: <span class="free">Free</span></span></span>
+          <span class="spacer"></span>
+          <button class="btn" data-act="qd-clear">Clear</button>
+          <button class="btn btn-primary" data-act="qd-run" id="qd-run" ${qdReady() ? '' : 'disabled'}>${icon('scan')} Detect AI</button>
+        </div>
+      </div>
+      <div class="qd-result" id="qd-result" aria-live="polite">${qdResultHtml()}</div>
+    </section>`;
+}
+
+const qdWords = () => countWords(state.qd.text);
+const qdMaxWords = () => state.signedIn ? CONFIG.detector.maxWords : CONFIG.detector.guestMaxWords;
+const qdReady = () => { const w = qdWords(); return w >= CONFIG.detector.minWords && w <= qdMaxWords() && state.qd.status !== 'loading'; };
+
+function qdCountText() {
+  const D = CONFIG.detector, w = qdWords(), max = qdMaxWords();
+  if (w && w < D.minWords) return `${fmtNum(w)} words · add ${D.minWords - w} more`;
+  if (w > max && !state.signedIn) return `${fmtNum(w)} / ${fmtNum(max)} words · sign up to check up to ${fmtNum(D.maxWords)}`;
+  return `${fmtNum(w)} / ${fmtNum(max)} words`;
+}
+
+function qdResultHtml() {
+  const q = state.qd, S = CONFIG.scan;
+  if (q.status === 'loading') return `<div class="qd-gauge is-loading" aria-hidden="true"></div>
+    <h2 class="qd-verdict" id="qd-result-h" tabindex="-1">Analyzing your text…</h2><p class="muted">This takes a few seconds.</p>`;
+  if (q.status === 'error') return `<div class="qd-gauge is-empty" aria-hidden="true"><b>—%</b></div>
+    <h2 class="qd-verdict" id="qd-result-h" tabindex="-1">Couldn’t check the text</h2>
+    <p class="muted qd-sub" role="alert">${esc(q.error)}</p>`;
+  if (q.status !== 'done') return `<div class="qd-gauge is-empty" aria-hidden="true"><b>—%</b></div>
+    <h2 class="qd-verdict" id="qd-result-h" tabindex="-1">Your AI score appears here</h2>
+    <ul class="qd-scale"><li><i class="lv-low"></i>Under ${S.levels.ai.low}% · looks human</li><li><i class="lv-medium"></i>${S.levels.ai.low}–${S.levels.ai.high - 1}% · some AI</li><li><i class="lv-high"></i>${S.levels.ai.high}%+ · likely AI</li></ul>`;
+  const r = q.result, lv = scanLevel('ai', r.ai).toLowerCase();
+  const scored = r.sents.filter(x => x.ai_prob != null), flagged = scored.filter(x => x.flagged).length;
+  return `<div class="qd-gauge lv-${lv}" data-v="${r.ai}" style="--v:${q.animate ? 0 : r.ai};--vi:${q.animate ? 0 : r.ai}"><span class="visually-hidden">${r.ai}% AI</span><b aria-hidden="true"></b><small aria-hidden="true">AI</small></div>
+    <h2 class="qd-verdict" id="qd-result-h" tabindex="-1">${esc(S.verdicts[scanLevel('ai', r.ai)].title)}</h2>
+    <p class="muted qd-sub">${r.ai}% of your text looks AI-generated${flagged ? ` · ${flagged} of ${scored.length} sentences flagged` : ''}.${q.left != null ? ` ${q.left} free check${q.left === 1 ? '' : 's'} left today.` : ''}</p>
+    <div class="qd-split" aria-hidden="true"><span class="lv-${lv}" style="width:${r.ai}%"></span></div>
+    <div class="qd-split-legend"><span>AI ${r.ai}%</span><span>Human ${100 - r.ai}%</span></div>
+    <div class="qd-actions">
+      ${r.ai >= S.levels.ai.low ? `<button class="btn btn-primary" data-act="qd-humanize">${icon('sparkles')} Humanize this text</button>` : ''}
+      <button class="btn" data-act="qd-turnitin">${icon('shield')} Get Turnitin report</button>
+    </div>`;
+}
+
+// AI sentences are highlighted right in the text box: a layer behind the transparent textarea carries the same text with marks.
+// The marks show only while the text is exactly the one that was checked.
+const qdMarked = () => state.qd.status === 'done' && state.qd.result?.text === state.qd.text;
+
+function qdBackdropHtml() {
+  if (!qdMarked()) return '';
+  // Server offsets count Unicode code points, so slice the text the same way
+  const r = state.qd.result, chars = Array.from(r.text), part = (a, b) => esc(chars.slice(a, b).join(''));
+  let pos = 0, html = '';
+  for (const s of r.sents) {
+    if (s.start < pos) continue;
+    html += part(pos, s.start) + (s.flagged ? `<mark>${part(s.start, s.end)}</mark>` : part(s.start, s.end));
+    pos = s.end;
+  }
+  return html + part(pos) + '\n';
+}
+
+function bindQuickDet() {
+  const q = state.qd, ta = $('#qd-text');
+  const sync = () => { $('#qd-count').textContent = qdCountText(); $('#qd-run').disabled = !qdReady(); };
+  const back = $('#qd-backdrop');
+  ta.addEventListener('input', () => {
+    q.text = ta.value; sync();
+    if (back.firstChild && !qdMarked()) { back.textContent = ''; $('#qd-legend')?.remove(); }   // edited: the marks no longer match
+  });
+  ta.addEventListener('scroll', () => { back.scrollTop = ta.scrollTop; });
+  // Count the score up from 0 once, right after a check finishes
+  const g = $('.qd-gauge[data-v]');
+  if (g && q.animate) { q.animate = false; requestAnimationFrame(() => requestAnimationFrame(() => { g.style.setProperty('--v', g.dataset.v); g.style.setProperty('--vi', g.dataset.v); })); }
+  if (q.autoRun) { q.autoRun = false; if (qdReady()) runQuickDet(); }
+}
+
+async function runQuickDet() {
+  const q = state.qd;
+  if (!qdReady()) return;
+  const text = q.text;
+  Object.assign(q, { status: 'loading', result: null, error: '', note: '' });
+  rerenderScan('#qd-result-h');
+  const show = () => { if (currentRoute() === 'turnitin' && state.detMode === 'quick') rerenderScan('#qd-result-h'); };
+  let data;
+  try {
+    data = await API.detectFree(text);
+  } catch (err) {
+    const info = apiErrorInfo(err, { intent: 'turnitin' });
+    Object.assign(q, { status: 'error', error: info.message || 'Something went wrong. Try again.' });
+    show();
+    return;
+  }
+  Object.assign(q, {
+    status: 'done', result: { ai: data.ai_percent, sents: data.sentences || [], text },
+    left: typeof data.checks_left === 'number' ? data.checks_left : null,
+    animate: !matchMedia('(prefers-reduced-motion: reduce)').matches,
+  });
+  addDoc(text, 'turnitin', { ai: data.ai_percent, text });
+  show();
+}
+
+function detAction(act, el) {
+  const q = state.qd;
+  switch (act) {
+    case 'det-mode':
+      if (tour.name) endTour();
+      state.detMode = el.dataset.v;
+      rerenderScan(`[data-act="det-mode"][data-v="${state.detMode}"]`);
+      break;
+    case 'qd-clear': Object.assign(q, { text: '', status: 'idle', result: null, error: '', note: '' }); rerenderScan('#qd-text'); break;
+    case 'qd-run': runQuickDet(); break;
+    case 'qd-humanize':
+      Object.assign(toolState('humanizer'), { mode: 'paste', text: q.text, fileName: '', status: 'idle', result: null, note: `Text from ${CONFIG.detector.switch.quick.title}.` });
+      go('humanizer');
+      break;
+    case 'qd-turnitin': {
+      const blob = new File([q.text], 'Your text.txt', { type: 'text/plain' });
+      Object.assign(toolState('turnitin'), { file: { name: blob.name, size: blob.size, blob, text: q.text },
+        note: 'Your text is attached. Press Check document for the official Turnitin report.' });
+      state.detMode = 'turnitin';
+      rerenderScan('#scan-run');
+      window.scrollTo(0, 0);
+      break;
+    }
+  }
 }
 
 function scanResultHtml(scan) {
@@ -3893,6 +4151,7 @@ const SCAN_FILE_RE = /\.(docx?|pdf|txt)$/i;
 const SCAN_MAX_BYTES = 16 * 1024 * 1024;
 
 function bindScan() {
+  if (state.detMode === 'quick') return bindQuickDet();
   const t = toolState('turnitin'), input = $('#scan-file'), zone = $('.scan-upload');
   const take = (file) => {
     if (!file) return;
@@ -6677,7 +6936,7 @@ function planRowHtml(r) {
   </li>`;
 }
 
-function planHtml(p) {
+function planHtml(p, { compact = false } = {}) {
   const badges = (p.badges || []).map(b => `<span class="pl-badge pl-badge-${b.kind}">${esc(b.text)}</span>`).join('');
   return `<article class="plan ${p.highlight ? 'plan-hl' : ''}" aria-labelledby="plan-${p.id}">
     <div class="plan-top">
@@ -6695,10 +6954,10 @@ function planHtml(p) {
         <h3 id="plan-${p.id}-free">Free generations</h3>
         <ul>${p.free.map(planRowHtml).join('')}</ul>
       </section>
-      <section class="pl-sec pl-sec-unl ${p.unlimitedStyle === 'outline' ? 'pl-sec-outline' : ''}" aria-labelledby="plan-${p.id}-unl">
+      ${compact ? '' : `<section class="pl-sec pl-sec-unl ${p.unlimitedStyle === 'outline' ? 'pl-sec-outline' : ''}" aria-labelledby="plan-${p.id}-unl">
         <h3 id="plan-${p.id}-unl">Unlimited & stealth</h3>
         <ul>${p.unlimited.map(planRowHtml).join('')}</ul>
-      </section>
+      </section>`}
     </div>
   </article>`;
 }
@@ -6721,7 +6980,7 @@ function renderPricing() {
       <h1>${esc(P.title)}</h1>
       <p class="lead">${esc(P.subtitle)}</p>
     </header>
-    <div class="plans">${P.plans.map(planHtml).join('')}</div>
+    <div class="plans">${P.plans.map(p => planHtml(p)).join('')}</div>
     <section class="payg" id="payg" aria-labelledby="payg-h">
       <div class="payg-head">
         <div><h2 id="payg-h">${esc(G.title)}</h2><p class="muted">${esc(G.lead)}</p></div>
@@ -6876,7 +7135,7 @@ function renderEarn() {
         <span class="earn-chip">Free Turnitin reports <b>${E.freeTurnitin}</b></span>
       </div>
       <div class="earn-share"><span class="small muted">Share</span>
-        ${E.share.map(t => `<a class="if-social" href="${esc(shareUrl(t))}" ${t.url.startsWith('mailto') ? '' : 'target="_blank" rel="noopener"'} aria-label="Share on ${esc(t.label)}" data-tip-title="${esc(t.label)}" data-tip-desc="" data-tip-pos="bottom">${icon(t.icon)}</a>`).join('')}
+        ${E.share.map(t => `<a class="if-social app-tile app-${t.icon}" href="${esc(shareUrl(t))}" ${t.url.startsWith('mailto') ? '' : 'target="_blank" rel="noopener"'} aria-label="Share on ${esc(t.label)}" data-tip-title="${esc(t.label)}" data-tip-desc="" data-tip-pos="bottom">${appIcon(t.icon)}</a>`).join('')}
       </div>`
     : `<div class="earn-guest"><p class="muted">Create a free account to get your personal link and code.</p>
         <button class="btn btn-primary" data-act="signup">Sign up</button></div>`;
@@ -7345,8 +7604,7 @@ tutDlg.addEventListener('close', () => { tutDlg.innerHTML = ''; });   // stops a
 
 /* ---------- Help ---------- */
 function renderHelp() {
-  const C = CONFIG.help, F = C.footer, ext = (path) => C.site + path;
-  const tel = 'https://wa.me/' + C.phone.replace(/\D/g, '');
+  const C = CONFIG.help;
   return `<div class="page help-page">
     ${pageHead(ITEMS.help, '', `<button class="btn btn-sm" data-act="open-tutorials" aria-haspopup="dialog">${icon('video')} Watch tutorials</button>`)}
     <section class="card help-contact" aria-labelledby="help-h">
@@ -7369,19 +7627,8 @@ function renderHelp() {
       </form>
     </section>
 
-    <footer class="info-footer" aria-label="About DocMaxxing">
-      <nav class="if-main" aria-label="Products">${F.product.map(l => `<a href="#/${l.route}">${esc(l.label)}</a>`).join('')}</nav>
-      <nav class="if-links" aria-label="Company and policies">${F.links.map(l => {
-        const id = l.path === '/account-info' ? 'account' : l.path.slice(1), inside = id === 'account' || CONFIG.legal.some(d => d.id === id);
-        if (inside) return `<a href="#/${id}">${esc(l.label)}</a>`;
-        if (id === 'contact') return `<a href="#/help" data-act="support">${esc(l.label)}</a>`;
-        return `<a href="${esc(ext(l.path))}" target="_blank" rel="noopener">${esc(l.label)}</a>`;
-      }).join('')}</nav>
-      <p class="if-support">Support: <a href="mailto:${esc(C.email)}">${esc(C.email)}</a><span aria-hidden="true">|</span><a href="${esc(tel)}" target="_blank" rel="noopener">${esc(C.phone)}</a><span aria-hidden="true">|</span>${esc(C.hours)}</p>
-      <div class="if-socials">${F.socials.map(x => `<a class="if-social" href="${esc(x.url)}" ${x.url.startsWith('mailto') ? '' : 'target="_blank" rel="noopener"'} aria-label="${esc(x.label)}" data-tip-title="${esc(x.label)}" data-tip-desc="" data-tip-pos="bottom">${icon(x.icon)}</a>`).join('')}</div>
-      <p class="if-copy">${esc(F.copyright)}</p>
-    </footer>
-  </div>`;
+  </div>
+  ${landFooterHtml({ inApp: true })}`;
 }
 
 function bindHelp() {
@@ -7463,7 +7710,8 @@ function bindTextTool(id) {
   }
   refresh();
 
-  ta.addEventListener('input', () => { t.text = ta.value; refresh(); });
+  // Emptying the field drops the uploaded file, so newly pasted text gets plain Copy, not the file download menu
+  ta.addEventListener('input', () => { t.text = ta.value; if (!t.text.trim()) t.fileName = ''; refresh(); });
 
   // Tabs: click + arrow keys
   const tabs = $$('[role="tab"]');
@@ -7510,7 +7758,7 @@ async function runTool(id) {
     const data = await API.humanize(source);
     const out = String(data.humanized_text || data.text || '').trim();
     if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
-    t.status = 'done'; t.result = { text: out };
+    t.status = 'done'; t.result = { text: out, file: t.fileName || '' };
     if (!state.signedIn) state.guestRunsUsed = data.free_runs_left === 0 ? 1 : 0;
     if (state.signedIn) { addDoc(source, id, { text: out }); loadCredits(); }
   } catch (err) {
@@ -7560,14 +7808,33 @@ function clearTool(id) {
   $('#tool-text')?.focus();
 }
 
+// Download the result under the uploaded file's name: "My essay-humanized.pdf"
+async function downloadResult(id, ext) {
+  $('.dl-wrap')?.classList.remove('is-open');
+  const r = toolState(id).result;
+  if (!r) return;
+  const base = (r.file || 'text').replace(/\.[^.]+$/, '') + '-humanized', name = `${base}.${ext}`;
+  let blob;
+  try {
+    blob = ext === 'txt' ? new Blob([r.text], { type: 'text/plain;charset=utf-8' }) : await API.exportText(r.text, base, ext);
+  } catch (err) {
+    toast(err.message || 'Could not download. Try again.');
+    return;
+  }
+  const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  toast(`Downloaded “${name}”`);
+}
+
 function handOff(fromId) {
   const t = toolState(fromId), flow = CONFIG.flows[fromId];
   const text = fromId === 'humanizer' ? t.result.text : t.text;
   const target = toolState(flow.next.to);
   if (flow.next.to === 'turnitin') {
-    const blob = new File([text], 'Humanized text.txt', { type: 'text/plain' });
-    target.file = { name: blob.name, size: blob.size, blob, text };
-    target.note = `Your text from ${ITEMS[fromId].label} is attached. Press Check document.`;
+    Object.assign(state.qd, { text, status: 'idle', result: null, error: '', autoRun: true,
+      note: `Your text from ${ITEMS[fromId].label}, checked with ${CONFIG.detector.switch.quick.title}.` });
+    state.detMode = 'quick';
     go(ITEMS.turnitin.route);
     return;
   }
@@ -7650,67 +7917,217 @@ function priceLabel(item) {
 }
 
 /* ---------- Landing ---------- */
+let landScrollBound = false;
+function bindLanding() {
+  const update = () => {
+    $('.land .pub-nav')?.classList.toggle('is-floating', scrollY > 24);
+    const hero = $('.land-hero');
+    if (!hero) return;
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const p = reduce ? 1 : Math.min(1, Math.max(0, scrollY / (innerHeight * .55)));
+    hero.style.setProperty('--p', p.toFixed(3));
+  };
+  update();
+  revealLanding();
+  bindHeroVideo();
+  if (landScrollBound) return;
+  landScrollBound = true;
+  let queued = false;
+  addEventListener('scroll', () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; update(); });
+  }, { passive: true });
+  addEventListener('resize', update);
+}
+
+// Hero demo video: starts when at least a third of it is on screen, pauses when it leaves; the still stays for reduced motion
+function bindHeroVideo() {
+  const v = $('.land-product-video');
+  if (!v || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  v.addEventListener('playing', () => v.classList.add('is-on'), { once: true });
+  new IntersectionObserver(([e]) => {
+    if (!v.isConnected) return;
+    if (e.isIntersecting) v.play().catch(() => {});
+    else v.pause();
+  }, { threshold: .35 }).observe(v);
+}
+
+// Scroll reveal, as on Framer sites: blocks fade up out of a soft blur when they enter the view; siblings stagger
+// One review: a Telegram-style chat (all cards the same height, newest at the bottom) and the student's words in English
+function reviewHtml(r) {
+  const bubble = (m) => `<div class="tg-msg ${m.me ? 'me' : ''}">${m.file
+    ? `<span class="tg-file"><i>${icon('file')}</i><span><b>${esc(m.file)}</b><small>${esc(m.size)}</small></span></span>`
+    : esc(m.text)}<span class="tg-time">${esc(m.time)}${m.me ? ' ✓✓' : ''}</span>${m.react ? `<span class="tg-react">${m.react}</span>` : ''}</div>`;
+  return `<figure class="land-review">
+    <div class="tg-chat" aria-hidden="true"><div class="tg-msgs">${r.msgs.map(bubble).join('')}</div></div>
+    <figcaption><q>${esc(r.quote)}</q><span>${esc(r.tag)}</span></figcaption>
+  </figure>`;
+}
+const REVEAL = ['.land-stats li', '.pub-sec > h2', '.pub-sec > h2 + .muted', '.land-steps > li', '.bento-tile', '.land-video', '.land-veil-text > *', '.land-veil > .veil-demo',
+  '.land-plans .plan', '.land-review', '.pub-sec-center > .btn', '.land-faq details', '.land-final-text > *', '.land-final-shot', '.lf-top > *', '.lf-word'];
+function revealLanding() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return;
+  const io = new IntersectionObserver((entries) => entries.forEach(e => {
+    if (!e.isIntersecting) return;
+    const el = e.target;
+    io.unobserve(el);
+    el.classList.add('rv-in');
+    // Drop the helper classes once played, so hover transitions on cards work as before
+    setTimeout(() => el.classList.remove('rv', 'rv-in'), 1100 + (+el.style.getPropertyValue('--rv-i') || 0) * 90);
+  }), { threshold: .12, rootMargin: '0px 0px -6% 0px' });
+  $$(REVEAL.join(',')).forEach(el => {
+    const sibs = [...el.parentElement.children].filter(c => c.matches(REVEAL.join(',')));
+    el.style.setProperty('--rv-i', Math.min(sibs.indexOf(el), 6));
+    el.classList.add('rv');
+    io.observe(el);
+  });
+}
+function landNavHtml() {
+  return publicNav(`<nav class="pub-links" aria-label="Landing sections">
+      ${CONFIG.landing.nav.map(([id, label]) => `<a href="#/landing" data-act="scroll-to" data-target="${id}">${esc(label)}</a>`).join('')}
+    </nav>
+    <button class="btn btn-ghost" data-act="open-login">Log in</button>
+    <button class="btn btn-primary" data-act="signup">Start free</button>`);
+}
+
+// Policies, About, FAQ… for visitors without an account: the landing header and footer around the document
+
+// Links into the app from the landing: every tool opens directly, guests included
+const appLinkAttrs = (item) => `href="${esc(itemHref(item))}" ${itemLinkAttrs(item)}`;
+
 function renderLanding() {
-  const L = CONFIG.landing;
-  const taskCard = (item) => `<button class="task-card ${item.primary ? 'primary' : ''}" data-act="landing-pick" data-intent="${item.id}">
-      <span class="tool-card-top"><span class="page-icon">${icon(item.icon)}</span><b>${esc(item.label)}</b>
-        <span style="margin-left:auto">${item.free ? '<span class="badge">Free</span>' : (item.badge ? `<span class="badge">${esc(item.badge)}</span>` : '')}</span></span>
-      <span class="task-desc">${esc(item.description)}</span>
-    </button>`;
-  const groups = CONFIG.groups.filter(g => !g.info).map(g => {
-    const items = g.items.map(i => ITEMS[i.id]);
-    return `<div class="task-group"><h3>${esc(g.label)}</h3>${items.map(taskCard).join('')}</div>`;
+  const L = CONFIG.landing, P = CONFIG.pricing;
+  const sec = (id, title, sub, body, cls = '') => `<section class="pub-sec ${cls}" id="${id}" aria-labelledby="${id}-h">
+      <h2 id="${id}-h">${esc(title)}</h2>${sub ? `<p class="muted">${esc(sub)}</p>` : ''}${body}</section>`;
+  // Bento grid: each tile gets a tone (blue / navy / black / white / sky) and a small illustration
+  const BENTO = [
+    ['turnitin', 'ai', 'blue', `<span class="bt-ai-art"><span class="bt-doc"><span class="bt-doc-head">${icon('file')}<span>Climate policy essay.docx</span></span>
+      <span class="bt-doc-text"><mark class="ai">It is important to note that climate policy plays a crucial role in shaping our shared future.</mark> Last summer our town ran out of water for two weeks, and that changed how I think about it. <mark class="ai">Furthermore, governments must leverage innovative and sustainable solutions.</mark> <mark class="mix">Carbon taxes are one option,</mark> but they hit poorer families hardest.</span>
+      <span class="bt-doc-legend"><span><i class="ai"></i>Likely AI</span><span><i class="mix"></i>Mixed</span><span><i></i>Human</span></span></span>
+      <span class="bt-card"><span class="bt-row"><span>AI score</span><b>76%</b></span><span class="bt-bar"><i style="width: 76%"></i></span>
+      <span class="bt-row"><span>Plagiarism</span><b>9%</b></span><span class="bt-bar"><i style="width: 9%"></i></span></span></span>`],
+    ['humanizer', 'hum', 'black', `<span class="bt-swap"><s>It is imperative to note that…</s><span>Here’s the thing…</span></span>`],
+    ['veil', 'veil', 'navy', `<span class="bt-veil-art"><span class="bt-page"><span class="bt-page-bar"><i></i><i></i><i></i><span>Biology 101 · Week 4</span></span>
+      <span class="bt-page-text">The Krebs cycle runs in the mitochondrial matrix. <mark>It produces NADH and FADH₂</mark>, which feed the electron transport chain.</span>
+      <span class="bt-page-lines"><i></i><i></i><i></i></span></span>
+      <span class="bt-pop"><span class="bt-pop-head">${icon('sparkles')}Veil</span>They carry electrons to the transport chain, where most of the cell’s ATP is made.</span></span>
+      <span class="bt-keys">${kbd('Q')}<span>Ask about anything you select</span></span>`],
+    ['format', 'fmt', 'white', `<span class="bt-chips">${['APA', 'MLA', 'Harvard', 'Chicago'].map(c => `<span>${c}</span>`).join('')}</span>`],
+    ['assignment', 'asg', 'sky', `<span class="bt-bubble">Write 1,500 words on climate policy</span>`],
+    ['workspace', 'edt', 'white', `<span class="bt-lines"><i></i><i class="hl"></i><i></i></span>`],
+    ['presentation', 'sld', 'black', `<span class="bt-slides"><i></i><i></i><i></i></span>`],
+    ['check', 'rev', 'blue2', `<span class="bt-checks">${['Matches the brief', 'Sources cited'].map(c => `<span>${icon('check')}${c}</span>`).join('')}</span>`],
+  ];
+  const tools = BENTO.map(([id, area, tone, art]) => {
+    const it = ITEMS[id];
+    return `<a class="bento-tile bt-${area} tone-${tone}" ${appLinkAttrs(it)}>
+      <span class="bt-head"><span class="bt-icon">${icon(it.icon)}</span>${it.free ? '<span class="bt-free">Free</span>' : ''}</span>
+      <b class="bt-title">${esc(it.label)}</b>
+      <span class="bt-text">${esc(it.description)}</span>
+      <span class="bt-art" aria-hidden="true">${art}</span>
+    </a>`;
   }).join('');
-  const rows = TASK_ITEMS().map(i => `<tr><td>${esc(i.label)}</td><td>${
-    i.free ? '<span class="free">Free</span>' : esc(i.price || CONFIG.pricePlaceholder) + (i.guestPrice ? ` · <span class="free">${esc(i.guestPrice)}</span>` : '')}</td></tr>`).join('');
-  return `<div class="pub">
-    ${publicNav(`<nav class="pub-links" aria-label="Landing sections">
-        <a href="#tasks" data-act="scroll-to" data-target="tasks">Tools</a>
-        <a href="#credits" data-act="scroll-to" data-target="credits">How credits work</a>
-      </nav>
-      <button class="btn btn-ghost" data-act="open-login">Log in</button>
-      <button class="btn btn-primary" data-act="signup">Start free</button>`)}
-    <section class="hero">
-      <div>
-        <div class="eyebrow">${esc(L.eyebrow)}</div>
-        <h1 class="hero-title">${esc(L.title)}</h1>
+  return `<div class="pub land">
+    ${landNavHtml()}
+
+    <section class="land-hero" aria-labelledby="hero-h">
+      <div class="land-hero-text">
+        <h1 class="hero-title" id="hero-h">${esc(L.title)}</h1>
         <p class="hero-sub">${esc(L.subtitle)}</p>
         <div class="hero-cta">
           <button class="btn btn-primary btn-lg" data-act="signup">${esc(L.cta)}</button>
-          <a class="btn btn-lg" href="#/home" data-act="try-guest">${esc(L.secondaryCta)}</a>
-        </div>
-        <p class="small muted">${freeNoteHtml()}. No card needed.</p>
-      </div>
-      <div class="hero-visual" aria-hidden="true">
-        <div class="sheet">
-          <div class="sheet-title">The influence of social media on how students read the news</div>
-          <p>Social media has changed how young people form opinions. <mark>In today’s rapidly evolving digital landscape, it is important to note</mark> that platforms now serve as a main news source for many students.</p>
-          <p>This raises questions about the quality of information that reaches first-time voters…</p>
-        </div>
-        <div class="sheet-tags">
-          <span><em>AI</em><b>12%</b></span><span><em>Similarity</em><b>8%</b></span><span><em>Style</em><b>APA 7 ✓</b></span>
+          ${state.signedIn ? '' : `<a class="btn btn-lg" href="#/home">${esc(L.secondaryCta)}</a>`}
         </div>
       </div>
-    </section>
-    <section class="pub-sec" id="tasks" aria-labelledby="tasks-h">
-      <h2 id="tasks-h">${esc(L.tasksTitle)}</h2>
-      <p class="muted">${esc(L.tasksSub)}</p>
-      <div class="task-groups">${groups}</div>
-    </section>
-    <section class="pub-sec" id="credits" aria-labelledby="credits-land-h">
-      <h2 id="credits-land-h">${esc(L.creditsTitle)}</h2>
-      <p class="muted">${esc(L.creditsSub)}</p>
-      <div class="land-credits">
-        <div class="facts">${L.facts.map(f => `<div class="fact"><span class="fact-big">${esc(f.big)}</span><p>${esc(f.text)}</p></div>`).join('')}</div>
-        <table class="rate-table"><thead><tr><th>Tool</th><th>Cost</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="land-product">
+        <div class="land-product-frame"><img src="${LANDING_SHOTS.dashboard}" alt="The DocMaxxing dashboard: paste a text, check it for AI or humanize it, and see your credit and document history" width="1800" height="1125">
+          <video class="land-product-video" src="${LANDING_MEDIA}ai-detector.mp4" muted loop playsinline preload="metadata" aria-hidden="true" tabindex="-1"></video></div>
       </div>
     </section>
-    <footer class="pub-foot"><span>© 2026 ${esc(CONFIG.brand)}</span>
-      <nav class="pub-foot-links" aria-label="Site">${CONFIG.publicFooter.map(l => `<a href="${esc(l.path)}">${esc(l.label)}</a>`).join('')}</nav></footer>
+
+    <ul class="land-stats" aria-label="DocMaxxing in numbers">${L.stats.map(([n, t, ic]) => `<li><i class="land-stat-ic" aria-hidden="true"><svg viewBox="-5 -5 34 34"><g class="stk-bg">${ICONS[ic]}</g><g class="stk-fg">${ICONS[ic]}</g></svg></i><b>${esc(n)}</b><span>${esc(t)}</span></li>`).join('')}</ul>
+
+    ${sec('how', L.howTitle, '', `<ol class="land-steps">${L.steps.map((s, i) => `<li class="card">
+        <div class="land-step-text"><span class="land-step-n">Step ${i + 1}</span>
+        <h3>${esc(s.title)}</h3><p class="muted">${esc(s.text)}</p></div>
+        <div class="land-shot-frame"><img src="${LANDING_SHOTS[s.shot]}" alt="" loading="lazy"></div></li>`).join('')}</ol>`)}
+
+    ${sec('tools', L.toolsTitle, L.toolsSub, `<div class="bento">${tools}</div>`)}
+
+    ${sec('video', L.videoTitle, L.videoText, `<button class="land-video" type="button" data-act="intro-play" aria-label="Play the overview video">
+        <span class="tut-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span><span class="intro-len">2:00</span></button>`, 'pub-sec-center')}
+
+    <section class="land-veil" id="veil-land" aria-labelledby="veil-land-h">
+      <div class="land-veil-text">
+        <span class="land-eyebrow">${icon('chrome')} Browser extension</span>
+        <h2 id="veil-land-h">${esc(L.veilTitle)}</h2>
+        <p class="muted">${esc(L.veilText)}</p>
+        <ul class="land-veil-sites" aria-label="Works in">${['Google Docs', 'Canvas', 'Moodle', 'Word Online'].map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+        <div class="veil-cta"><button class="btn btn-lg land-veil-btn" data-act="signup">${icon('chrome')} Get Veil</button></div>
+      </div>
+      ${veilDemoHtml()}
+    </section>
+
+    ${sec('pricing-land', L.pricingTitle, L.pricingSub, `<div class="plans land-plans">${P.plans.map(p => planHtml(p, { compact: true })).join('')}</div>`)}
+
+    ${sec('reviews', L.reviewsTitle, L.reviewsSub, `<div class="land-reviews">${L.reviews.map(reviewHtml).join('')}</div>
+      <a class="btn" href="${esc(L.reviewsUrl)}" target="_blank" rel="noopener">${icon('telegram')} See all in Telegram</a>`, 'pub-sec-center')}
+
+    ${sec('faq', L.faqTitle, '', `<div class="land-faq">${L.faq.map(([q, a]) => `<details class="card"><summary><span>${esc(q)}</span><span class="faq-sign" aria-hidden="true"></span></summary><p class="muted">${esc(a)}</p></details>`).join('')}</div>`, 'pub-sec-center')}
+
+    <section class="land-final" aria-labelledby="final-h">
+      <div class="land-final-text">
+        <h2 id="final-h">${esc(L.finalTitle)}</h2>
+        <p class="muted">${esc(L.finalText)}</p>
+        <button class="btn btn-primary btn-lg" data-act="signup">${esc(L.cta)}</button>
+      </div>
+      <div class="land-final-shot"><img src="${LANDING_SHOTS.check}" alt="An AI Detector result: the AI score and the parts that look AI-written" loading="lazy"></div>
+    </section>
+
+    ${landFooterHtml()}
   </div>`;
 }
 
+// Site footer (landing, public documents, Help): brand + socials, link columns, big wordmark
+
+// Site footer (landing, Help): brand + socials, link columns, big wordmark
+function landFooterHtml({ inApp = false } = {}) {
+  const C = CONFIG.help, F = C.footer;
+  // On the landing every link is a real page (crawlable); inside the app policies open as app pages
+  const link = (l) => {
+    const id = l.path === '/account-info' ? 'account' : l.path.slice(1);
+    if (id === 'account') return state.signedIn ? `<a href="#/account">${esc(l.label)}</a>` : `<a href="#/landing" data-act="open-login">${esc(l.label)}</a>`;
+    if (!inApp) return `<a href="${esc(l.path)}">${esc(l.label)}</a>`;
+    if (CONFIG.legal.some(d => d.id === id)) return `<a href="#/${id}">${esc(l.label)}</a>`;
+    if (id === 'contact') return `<a href="#/help">${esc(l.label)}</a>`;
+    return `<a href="${esc(C.site + l.path)}" target="_blank" rel="noopener">${esc(l.label)}</a>`;
+  };
+  const toolLink = (i) => inApp || i.url ? `<a ${appLinkAttrs(i)}>${esc(i.label)}</a>` : `<a href="/${i.route === 'format' ? 'formatter' : i.route}">${esc(i.label)}</a>`;
+  const extra = inApp
+    ? `<a href="${esc(C.site)}/blog" target="_blank" rel="noopener">Blog</a><a href="#/pricing">Pricing</a>`
+    : '<a href="/blog">Blog</a><a href="/pricing">Pricing</a>';
+  const legal = ['/privacy', '/terms', '/disclaimer', '/payment-policy', '/delivery-policy', '/refund-policy'];
+  const col = (title, html) => `<nav class="lf-col" aria-label="${esc(title)}"><h3>${esc(title)}</h3>${html}</nav>`;
+  return `<footer class="land-foot${inApp ? ' in-app' : ''}">
+    <div class="lf-top">
+      <div class="lf-brand">
+        <a class="logo" href="#/landing"><span class="logo-mark">${LOGO_SVG}</span><span>${esc(CONFIG.brand)}</span></a>
+        <p class="muted">Academic formatting, humanizing and integrity tools for students.</p>
+        <div class="if-socials">${F.socials.map(x => `<a class="if-social app-tile app-${x.icon}" href="${esc(x.url)}" ${x.url.startsWith('mailto') ? '' : 'target="_blank" rel="noopener"'} aria-label="${esc(x.label)}">${appIcon(x.icon)}</a>`).join('')}</div>
+      </div>
+      ${col('Tools', [...TASK_ITEMS(), ITEMS.veil].map(toolLink).join(''))}
+      ${col('Company', F.links.filter(l => !legal.includes(l.path)).map(link).join('') + extra)}
+      ${col('Legal', F.links.filter(l => legal.includes(l.path)).map(link).join(''))}
+      ${col('Support', `<a href="mailto:${esc(C.email)}">${esc(C.email)}</a><a href="https://wa.me/${C.phone.replace(/\D/g, '')}" target="_blank" rel="noopener">${esc(C.phone)}</a><span class="muted">${esc(C.hours)}</span>`)}
+    </div>
+    <p class="lf-word" aria-hidden="true">${esc(CONFIG.brand)}</p>
+  </footer>`;
+}
+
 /* ---------- Sign up / Log in dialog ---------- */
+
+
 const signupDlg = $('#signup-dialog');
 let signupOpener = null;
 
@@ -7831,6 +8248,7 @@ async function signOut() {
 document.addEventListener('click', (e) => {
   if (state.scanMenu && !e.target.closest('#scan-menu, [data-act="scan-menu"]')) closeScanMenu(false);
   if ($('#ed-menu') && !e.target.closest('#ed-menu, [data-act="ed-export"], [data-act="ed-versions"], [data-act="ed-open"], [data-act="sl-download"]')) edCloseMenu();
+  if (!e.target.closest('.dl-wrap')) $('.dl-wrap.is-open')?.classList.remove('is-open');
   if ($('#profile-menu') && !$('#profile-menu').hidden && !e.target.closest('.profile')) toggleProfileMenu(false);
   const el = e.target.closest('[data-act]');
   if (!el) return;
@@ -7838,8 +8256,9 @@ document.addEventListener('click', (e) => {
   if (act.startsWith('adm-')) { e.preventDefault(); adminAction(act, el); return; }
   switch (act) {
     case 'collapse':
+      e.preventDefault();
       state.collapsed = !state.collapsed; store.set('collapsed', state.collapsed);
-      hideTip(); renderSidebar(); applyLayout(); $('.collapse-btn').focus(); break;
+      hideTip(); renderSidebar(); applyLayout(); (isCollapsed() ? $('.sidebar-head .logo') : $('.collapse-btn')).focus(); break;
     case 'close-drawer': setDrawer(false); break;
     case 'profile-menu': toggleProfileMenu(); break;
     case 'profile-item': {
@@ -7895,9 +8314,13 @@ document.addEventListener('click', (e) => {
     case 'signup': e.preventDefault(); openSignup({ intent: el.dataset.intent }); break;
     case 'open-login': e.preventDefault(); openSignup({ mode: 'login' }); break;
     case 'close-signup': signupDlg.close(); break;
-    case 'landing-pick': openSignup({ intent: el.dataset.intent }); break;
-    case 'try-guest': break;
-    case 'scroll-to': e.preventDefault(); $('#' + el.dataset.target)?.scrollIntoView({ behavior: 'smooth' }); break;
+    case 'scroll-to': {
+      e.preventDefault();
+      const t = $('#' + el.dataset.target);
+      if (t) t.scrollIntoView({ behavior: 'smooth' });
+      else { go('landing'); setTimeout(() => $('#' + el.dataset.target)?.scrollIntoView(), 60); }
+      break;
+    }
     case 'theme':
       applyTheme(state.theme === 'light' ? 'dark' : 'light');
       renderSidebar(); applyLayout();
@@ -7911,7 +8334,9 @@ document.addEventListener('click', (e) => {
     case 'clear-filter':state.docFilter = 'all'; rerenderDocs(); break;
     case 'run': runTool(page); break;
     case 'clear-tool': clearTool(page); break;
-    case 'copy': copyResult(); break;
+    case 'copy': $('.dl-wrap')?.classList.remove('is-open'); copyResult(); break;
+    case 'dl-toggle': { const w = el.closest('.dl-wrap'); el.setAttribute('aria-expanded', w.classList.toggle('is-open')); break; }
+    case 'dl-as': downloadResult(page, el.dataset.value); break;
     case 'next': handOff(page); break;
     case 'assign-upload': $('#assign-file').click(); break;
     case 'assign-example': {
@@ -7936,9 +8361,13 @@ document.addEventListener('click', (e) => {
       {
         const byIntent = Object.keys(CONFIG.tours).find(k => CONFIG.tours[k].route === state.profile?.intent);
         const name = el.dataset.tourName || byIntent || 'scan', route = CONFIG.tours[name].route;
+        if (name === 'scan' && state.detMode !== 'turnitin') { state.detMode = 'turnitin'; if (currentRoute() === route) rerenderScan(); }
         if (currentRoute() === route) startTour(name); else { state.pendingTour = name; go(route); }
       }
       break;
+    case 'det-mode': case 'qd-clear': case 'qd-run':
+    case 'qd-humanize': case 'qd-turnitin':
+      detAction(act, el); break;
     case 'scan-upload': case 'scan-remove-file': case 'scan-run': case 'scan-show': case 'scan-menu':
     case 'scan-delete': case 'scan-retry': case 'scan-download': case 'scan-highlights': case 'scan-humanize':
       scanAction(act, el); break;
@@ -8006,6 +8435,17 @@ $('#topbar-logo').innerHTML = `<span class="logo-mark">${LOGO_SVG}</span><span>$
 renderSidebar();
 applyLayout();
 window.addEventListener('hashchange', render);
+// App header auto-hide: hide after scrolling down past the top, show again on any scroll up
+(function bindHeaderAutoHide() {
+  let lastY = scrollY;
+  addEventListener('scroll', () => {
+    const y = scrollY, root = document.documentElement;
+    if (y < 120) { root.classList.remove('hdr-hidden'); lastY = y; return; }
+    if (Math.abs(y - lastY) < 6) return;
+    root.classList.toggle('hdr-hidden', y > lastY);
+    lastY = y;
+  }, { passive: true });
+})();
 if (!location.hash) history.replaceState(null, '', '#/' + (state.signedIn ? CONFIG.defaultRoute : 'landing'));
 render();
 loadCredits();

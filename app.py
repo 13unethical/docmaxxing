@@ -6172,6 +6172,29 @@ def api_workspace_export():
     )
 
 
+@app.post("/api/text/export")
+def api_text_export():
+    """Humanized text -> .docx or .pdf. Free, guests included (the text comes from the client)."""
+    from services.text_export import TextExportError, text_to_docx, text_to_pdf
+
+    payload = request.get_json(silent=True) or {}
+    fmt = str(payload.get("format") or "").lower()
+    if fmt not in {"docx", "pdf"}:
+        return jsonify({"success": False, "error": "FORMAT_INVALID", "message": "Choose PDF or Word."}), 400
+    title = str(payload.get("title") or "").strip()[:200]
+    try:
+        data = (text_to_pdf if fmt == "pdf" else text_to_docx)(title, str(payload.get("text") or ""))
+    except TextExportError as exc:
+        return jsonify({"success": False, "error": "EXPORT_FAILED", "message": str(exc)}), 400
+    name = re.sub(r"[^\w\s.-]", "", title, flags=re.UNICODE).strip() or "humanized"
+    mimetype = (
+        "application/pdf"
+        if fmt == "pdf"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    return send_file(io.BytesIO(data), mimetype=mimetype, as_attachment=True, download_name=f"{name}.{fmt}")
+
+
 @app.post("/api/humanizer/session")
 def api_humanizer_session_create():
     payload = request.get_json(silent=True) or {}
