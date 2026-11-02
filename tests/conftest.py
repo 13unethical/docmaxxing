@@ -17,6 +17,11 @@ def _legacy_pages_render(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _guest_landing_pages(monkeypatch):
+    monkeypatch.setenv("GUEST_LANDING_PAGES", "1")
+
+
+@pytest.fixture(autouse=True)
 def _fresh_guest_rate_limit():
     from services.free_humanize import guest_rate_limiter
 

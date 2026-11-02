@@ -494,9 +494,13 @@ def _redirect_old_pages_to_new_app():
         return None
     if (os.environ.get("LEGACY_UI") or "").strip().lower() in {"1", "true", "yes"}:
         return None
-    from services.seo import GUEST_LANDING_PATHS
+    from services.seo import GUEST_LANDING_PATHS, guest_landings_enabled
 
-    if request.path in GUEST_LANDING_PATHS and economy_auth.current_user() is None:
+    if (
+        guest_landings_enabled()
+        and request.path in GUEST_LANDING_PATHS
+        and economy_auth.current_user() is None
+    ):
         return None
     query = request.query_string.decode("utf-8", "ignore")
     return redirect(f"/app{'?' + query if query else ''}#/{screen}", code=302)
@@ -2351,7 +2355,13 @@ def api_economy_topup():
 
 def _serve_public_landing() -> bool:
     """Guests (and crawlers) get the server-rendered landing; ?classic=1 keeps the old tool page."""
-    return economy_auth.current_user() is None and request.args.get("classic") != "1"
+    from services.seo import guest_landings_enabled
+
+    return (
+        guest_landings_enabled()
+        and economy_auth.current_user() is None
+        and request.args.get("classic") != "1"
+    )
 
 
 def _render_landing(template: str, *, signup_next: str):

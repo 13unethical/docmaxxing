@@ -47,7 +47,7 @@ ROBOTS_NOINDEX = "noindex, follow"
 
 # Pages that must never show up in search results. They stay crawlable (not blocked in
 # robots.txt) so crawlers can actually see the noindex tag.
-NOINDEX_PATHS = frozenset({"/app", "/login", "/register", "/account", "/admin", "/ru/humanizer"})
+NOINDEX_PATHS = frozenset({"/login", "/register", "/account", "/admin", "/ru/humanizer"})
 NOINDEX_PREFIXES = ("/verify-email/", "/admin/")
 
 _OG_LOCALES = {"en": "en_US", "ru": "ru_RU"}
@@ -274,9 +274,15 @@ def page_lang(path: str) -> str:
     return "ru" if path == "/ru" or path.startswith("/ru/") else "en"
 
 
+def guest_landings_enabled() -> bool:
+    """Server-rendered landing pages for guests. Off: guests go straight to the app."""
+    return (os.environ.get("GUEST_LANDING_PAGES") or "").strip().lower() in {"1", "true", "yes"}
+
+
 def is_noindex_path(path: str) -> bool:
     raw = (path or "/").split("?", 1)[0] or "/"
-    if normalize_path(raw) in NOINDEX_PATHS:
+    norm = normalize_path(raw)
+    if norm in NOINDEX_PATHS or (norm == "/app" and guest_landings_enabled()):
         return True
     return any(raw.startswith(prefix) for prefix in NOINDEX_PREFIXES)
 
@@ -340,7 +346,8 @@ def page_seo_for_path(
     title = page.title if page else DEFAULT_TITLE
     description = page.description if page else DEFAULT_DESCRIPTION
     keywords = list(page.keywords) if page and page.keywords else list(DEFAULT_KEYWORDS)
-    canonical = canonical_url(norm) if indexable else None
+    # Without landing pages the app is what guests see at "/".
+    canonical = canonical_url("/" if norm == "/app" else norm) if indexable else None
     og_image = absolute_url(page.og_image if page else OG_IMAGE_DEFAULT)
     alternates = [
         (hreflang, canonical_url(alt_path)) for hreflang, alt_path in (page.alternates if page else {}).items()
@@ -520,10 +527,11 @@ class SitemapEntry:
 def sitemap_entries() -> list[SitemapEntry]:
     from services import blog
 
+    landings = guest_landings_enabled()
     entries = [
         SitemapEntry(page.path, page_lastmod(page), dict(page.alternates))
         for page in _PAGES
-        if page.in_sitemap
+        if page.in_sitemap and (landings or page.path == "/" or page.path not in GUEST_LANDING_PATHS)
     ]
     for post_page, lastmod in blog.sitemap_pages():
         entries.append(SitemapEntry(post_page.path, lastmod, dict(post_page.alternates)))

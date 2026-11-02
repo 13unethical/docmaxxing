@@ -99,3 +99,33 @@ def test_app_is_noindex_without_root_canonical(client):
 def test_post_is_not_redirected(client):
     resp = client.post("/account")
     assert "#/" not in resp.headers.get("Location", "")
+
+
+@pytest.mark.parametrize(
+    ("path", "target"),
+    [
+        ("/", "/app#/home"),
+        ("/humanizer", "/app#/humanizer"),
+        ("/pricing", "/app#/pricing"),
+        ("/formatter", "/app#/format"),
+    ],
+)
+def test_without_landing_pages_guests_go_to_the_app(client, monkeypatch, path, target):
+    monkeypatch.setenv("GUEST_LANDING_PAGES", "0")
+    resp = client.get(path)
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == target
+
+
+def test_without_landing_pages_the_app_is_indexed_under_the_root(client, monkeypatch):
+    from services.seo import SITE_URL, sitemap_xml
+
+    monkeypatch.setenv("GUEST_LANDING_PAGES", "0")
+    html = client.get("/app").get_data(as_text=True)
+    assert '<meta name="robots" content="index, follow"' in html
+    assert f'<link rel="canonical" href="{SITE_URL}" />' in html
+    xml = sitemap_xml()
+    assert f"<loc>{SITE_URL}</loc>" in xml
+    for path in ("/humanizer", "/pricing", "/formatter"):
+        assert f"<loc>{SITE_URL}{path}</loc>" not in xml
+    assert f"<loc>{SITE_URL}/faq</loc>" in xml

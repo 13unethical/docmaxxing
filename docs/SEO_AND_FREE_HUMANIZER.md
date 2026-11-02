@@ -49,7 +49,10 @@ API error codes the widget and the app handle: `TOO_MANY_WORDS` (400), `FREE_WOR
 
 ## Public pages
 
-- Guests get server-rendered pages on `/`, `/humanizer`, `/pricing` and `/formatter`
+- `GUEST_LANDING_PAGES=1` turns the landing pages on. Off (the default), guests go straight
+  to the app as before, `/app` is indexed with the root as canonical, and the sitemap drops
+  `/humanizer`, `/pricing` and `/formatter`.
+- With it on, guests get server-rendered pages on `/`, `/humanizer`, `/pricing` and `/formatter`
   (`/ru/humanizer` also renders but is on hold: noindex, not in the sitemap, not linked); signed-in users are still redirected to `/app#/...`. `?classic=1` shows the
   old pages (marked `noindex`).
 - Page titles, descriptions, hreflang and breadcrumbs: `_PAGES` in `services/seo.py`.
