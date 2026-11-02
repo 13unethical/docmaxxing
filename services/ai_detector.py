@@ -131,6 +131,11 @@ def _score_remote(texts: list[str]) -> tuple[list[float], str]:
     return [float(p) for p in probs], str(body.get("model") or "")
 
 
+def score_texts(texts: list[str]) -> list[float]:
+    """AI probability of each text as one unit (no sentence windows); raises DetectorUnavailable."""
+    return _score_remote(texts)[0] if texts else []
+
+
 def detect(text: str, *, score=None) -> dict:
     score = score or _score_remote
     sentences = split_sentences(text)

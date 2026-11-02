@@ -47,7 +47,10 @@ WARMUP_EVERY_SECONDS = 60.0
 WARMUP_TIMEOUT_SECONDS = 300.0
 # A memory-snapshot restore takes ~10 s, so poll often while waiting for it.
 BOOT_POLL_SECONDS = 2.0
-MAX_CANDIDATES = 8
+MAX_CANDIDATES = 16
+# pick="detector": a chunk whose best variant the AI detector still scores above this gets
+# ``refine_sampling`` more variants before the final choice.
+REFINE_ABOVE = 0.3
 
 _WORD = re.compile(r"[a-z0-9']+")
 _CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
@@ -60,6 +63,8 @@ TITLE_MAX_WORDS = 12
 # each paragraph shorter than the rest.
 WRAP_MAX_CHARS = 130
 WRAP_FULL_LINE = 0.8
+# A short piece the model always returns verbatim (a caption, a stray line) is kept rather than failing the text.
+KEEP_UNCHANGED_MAX_WORDS = 30
 
 
 class StudentHumanizerError(RuntimeError):
@@ -81,10 +86,30 @@ class StudentConfig:
     # Variants sampled per chunk; the best one by ``pick`` is kept.
     candidates: int = 1
     pick: str = "changed"
+    # (temperature, variants) per request; overrides temperature/candidates when set.
+    sampling: tuple[tuple[float, int], ...] = ()
+    refine_above: float = REFINE_ABOVE
+    refine_sampling: tuple[tuple[float, int], ...] = ()
 
     @property
     def configured(self) -> bool:
         return bool(self.url and self.api_key)
+
+    @property
+    def sampling_plan(self) -> tuple[tuple[float, int], ...]:
+        return self.sampling or ((self.temperature, self.candidates),)
+
+
+def parse_sampling(raw: str) -> tuple[tuple[float, int], ...]:
+    """"1.0:4,1.2:4" -> ((1.0, 4), (1.2, 4)); malformed parts are skipped."""
+    plan = []
+    for part in (raw or "").split(","):
+        temperature, _, n = part.strip().partition(":")
+        try:
+            plan.append((max(0.1, min(2.0, float(temperature))), max(1, min(MAX_CANDIDATES, int(n or 1)))))
+        except ValueError:
+            continue
+    return tuple(plan)
 
 
 def student_config() -> StudentConfig:
@@ -107,6 +132,9 @@ def student_config() -> StudentConfig:
         temperature=max(0.1, min(2.0, _float("HUMANIZER_STUDENT_TEMPERATURE", TEMPERATURE))),
         candidates=max(1, min(MAX_CANDIDATES, int(_float("HUMANIZER_STUDENT_CANDIDATES", 1)))),
         pick=(os.environ.get("HUMANIZER_STUDENT_PICK") or "changed").strip().lower(),
+        sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_SAMPLING") or ""),
+        refine_above=_float("HUMANIZER_STUDENT_REFINE_ABOVE", REFINE_ABOVE),
+        refine_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_REFINE_SAMPLING") or ""),
     )
 
 
@@ -184,8 +212,25 @@ def _split_block(block: str) -> tuple[list[str], bool]:
 def normalize_wrapped(text: str) -> str:
     """Blank-line separated text with hard-wrapped paragraphs joined back into single lines."""
     if not re.search(r"\n\s*\n", text):
-        return text
+        return _unwrap_single_spaced(text)
     return "\n\n".join(_blocks(text, "\n\n"))
+
+
+def _unwrap_single_spaced(text: str) -> str:
+    """A hard-wrapped text without blank lines (pasted from a PDF) as paragraphs; anything else unchanged.
+
+    The reference list stays line by line, as one block after its "References" title.
+    """
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    cut = next(
+        (i for i, ln in enumerate(lines) if i > 0 and _wc(ln) <= 3 and is_references_section_title(ln.rstrip(":"))),
+        len(lines),
+    )
+    paragraphs, _ = _split_block("\n".join(lines[:cut]))
+    if not 1 < len(paragraphs) < cut:
+        return text
+    tail = [lines[cut], "\n".join(lines[cut + 1 :])] if cut < len(lines) else []
+    return "\n\n".join(paragraphs + [t for t in tail if t])
 
 
 def _blocks(body: str, separator: str) -> list[str]:
@@ -295,6 +340,17 @@ def pick_candidate(source: str, candidates: list[Candidate], pick: str = "change
     return min(candidates, key=lambda c: (_lost_numbers(source, c.text), _jaccard(source, c.text)))
 
 
+def pick_least_ai(source: str, scored: list[tuple[Candidate, float]]) -> tuple[Candidate, float]:
+    """Variant the AI detector scores lowest, among those that keep every source number if any do."""
+    return min(scored, key=lambda cp: (_lost_numbers(source, cp[0].text) > 0, cp[1]))
+
+
+def _detector_score(texts: list[str]) -> list[float]:
+    from services import ai_detector
+
+    return ai_detector.score_texts(texts)
+
+
 class StudentTextHumanizer:
     """Same ``humanize(text)`` contract as ``StealthWriterTextHumanizer``."""
 
@@ -305,10 +361,12 @@ class StudentTextHumanizer:
         config: StudentConfig | None = None,
         *,
         complete_fn: Callable[[str], str] | None = None,
+        score_fn: Callable[[list[str]], list[float]] | None = None,
         max_workers: int = 32,
     ) -> None:
         self.config = config or student_config()
         self._complete_fn = complete_fn
+        self._score_fn = score_fn or _detector_score
         self.max_workers = max_workers
         self._fallback_scorer = MockTextHumanizer()
 
@@ -340,7 +398,6 @@ class StudentTextHumanizer:
         problem = "NOT_RUN"
         # A paragraph the model only lightly edits should not sink the whole text.
         lightest: tuple[float, str] | None = None
-        single_paragraph = len(_paragraphs(chunk)) == 1
         for attempt in range(1, ATTEMPTS + 1):
             try:
                 variants = self._candidates(chunk)
@@ -348,32 +405,85 @@ class StudentTextHumanizer:
                 problem = f"REQUEST_FAILED: {exc}"
                 log.info("student humanizer attempt %s failed: %s", attempt, problem)
                 continue
-            usable: list[Candidate] = []
-            for variant in variants:
-                output = variant.text.strip()
-                if single_paragraph:
-                    # The model sometimes splits a long paragraph in two; keep the source layout.
-                    output = " ".join(_paragraphs(output))
-                problem = chunk_problem(chunk, output) or ""
-                if not problem:
-                    usable.append(Candidate(output, variant.mean_logprob))
-                elif problem == "UNCHANGED" and output.strip() != chunk.strip():
-                    similarity = _jaccard(chunk, output)
-                    if lightest is None or similarity < lightest[0]:
-                        lightest = (similarity, output)
+            usable, problem, light = self._usable(chunk, variants)
+            if light is not None and (lightest is None or light[0] < lightest[0]):
+                lightest = light
             if usable:
+                if self.config.pick == "detector":
+                    return self._pick_by_detector(chunk, usable)
                 return pick_candidate(chunk, usable, self.config.pick).text
             log.info("student humanizer attempt %s failed: %s", attempt, problem)
         if lightest is not None:
             return lightest[1]
+        if problem == "UNCHANGED" and _wc(chunk) <= KEEP_UNCHANGED_MAX_WORDS:
+            return chunk
         raise StudentHumanizerError(f"Chunk rejected after {ATTEMPTS} attempts: {problem}")
 
-    def _candidates(self, chunk: str) -> list[Candidate]:
+    def _usable(
+        self, chunk: str, variants: list[Candidate]
+    ) -> tuple[list[Candidate], str, tuple[float, str] | None]:
+        """Variants passing the checks, the last problem seen, and the least similar UNCHANGED one."""
+        single_paragraph = len(_paragraphs(chunk)) == 1
+        usable: list[Candidate] = []
+        problem = "NO_VARIANTS"
+        lightest: tuple[float, str] | None = None
+        for variant in variants:
+            output = variant.text.strip()
+            if single_paragraph:
+                # The model sometimes splits a long paragraph in two; keep the source layout.
+                output = " ".join(_paragraphs(output))
+            problem = chunk_problem(chunk, output) or ""
+            if not problem:
+                usable.append(Candidate(output, variant.mean_logprob))
+            elif problem == "UNCHANGED" and output.strip() != chunk.strip():
+                similarity = _jaccard(chunk, output)
+                if lightest is None or similarity < lightest[0]:
+                    lightest = (similarity, output)
+        return usable, problem, lightest
+
+    def _pick_by_detector(self, chunk: str, usable: list[Candidate]) -> str:
+        """Lowest AI-detector score; still-flagged chunks get extra variants. Without the detector, "changed"."""
         cfg = self.config
+        try:
+            scored = list(zip(usable, self._score_fn([c.text for c in usable])))
+        except Exception as exc:  # noqa: BLE001
+            log.info("AI detector unavailable for student pick: %s", exc)
+            return pick_candidate(chunk, usable, "changed").text
+        best = pick_least_ai(chunk, scored)
+        if best[1] > cfg.refine_above and cfg.refine_sampling:
+            try:
+                extra, _, _ = self._usable(chunk, self._candidates(chunk, cfg.refine_sampling))
+                if extra:
+                    scored += list(zip(extra, self._score_fn([c.text for c in extra])))
+                    best = pick_least_ai(chunk, scored)
+            except Exception as exc:  # noqa: BLE001
+                log.info("student humanizer refine failed: %s", exc)
+        return best[0].text
+
+    def _candidates(self, chunk: str, sampling: tuple[tuple[float, int], ...] = ()) -> list[Candidate]:
+        cfg = self.config
+        plan = sampling or cfg.sampling_plan
         if self._complete_fn is not None:
-            return [Candidate(self._complete_fn(chunk)) for _ in range(cfg.candidates)]
+            return [Candidate(self._complete_fn(chunk)) for _, n in plan for _ in range(n)]
         if not cfg.configured:
             raise StudentHumanizerError("Student humanizer is not configured")
+        if len(plan) == 1:
+            return self._request(chunk, *plan[0])
+        with ThreadPoolExecutor(max_workers=len(plan)) as pool:
+            futures = [pool.submit(self._request, chunk, t, n) for t, n in plan]
+        out: list[Candidate] = []
+        errors: list[Exception] = []
+        for future in futures:
+            try:
+                out += future.result()
+            except (requests.RequestException, StudentHumanizerError, KeyError, ValueError, IndexError) as exc:
+                errors.append(exc)
+        if not out and errors:
+            raise errors[0]
+        return out
+
+    def _request(self, chunk: str, temperature: float, n: int) -> list[Candidate]:
+        cfg = self.config
         response = requests.post(
             f"{cfg.url}/v1/chat/completions",
             headers={"Authorization": f"Bearer {cfg.api_key}"},
@@ -383,9 +493,9 @@ class StudentTextHumanizer:
                     {"role": "system", "content": system_prompt(cfg.level)},
                     {"role": "user", "content": chunk},
                 ],
-                "temperature": cfg.temperature,
+                "temperature": temperature,
                 "top_p": TOP_P,
-                "n": cfg.candidates,
+                "n": n,
                 "logprobs": cfg.pick == "surprise",
                 # A memory-snapshot restore brings back the server's RNG state too, so without
                 # a per-request seed every first request after a cold start samples identically.

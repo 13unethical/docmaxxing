@@ -29,9 +29,11 @@ import os
 import modal
 
 BASE_MODEL = "Qwen/Qwen3-8B"
-ADAPTER_PATH = "/adapters/qwen3_8b_lora_v1"
-MERGED_PATH = "/adapters/merged/qwen3_8b_humanizer_v1"
-SERVED_NAME = "humanizer-v1"
+# Baked into the images below so containers resolve the same paths as the deploying shell.
+MODEL_VERSION = os.environ.get("HUMANIZER_MODEL_VERSION", "v1")
+ADAPTER_PATH = f"/adapters/qwen3_8b_lora_{MODEL_VERSION}"
+MERGED_PATH = f"/adapters/merged/qwen3_8b_humanizer_{MODEL_VERSION}"
+SERVED_NAME = f"humanizer-{MODEL_VERSION}"
 # vLLM listens only inside the container; the public endpoint is a proxy that forwards
 # /v1/* alone, because sleep mode adds unauthenticated /sleep and /wake_up routes.
 VLLM_PORT = 8001
@@ -53,13 +55,14 @@ serve_image = (
             # Sleep mode (needed for GPU memory snapshots) lives behind dev mode.
             "VLLM_SERVER_DEV_MODE": "1",
             "TORCHINDUCTOR_COMPILE_THREADS": "1",
+            "HUMANIZER_MODEL_VERSION": MODEL_VERSION,
         }
     )
 )
 merge_image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("torch", "transformers", "peft", "accelerate", "huggingface_hub[hf_transfer]")
-    .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
+    .env({"HF_HUB_ENABLE_HF_TRANSFER": "1", "HUMANIZER_MODEL_VERSION": MODEL_VERSION})
 )
 
 app = modal.App(APP_NAME)

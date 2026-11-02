@@ -192,6 +192,39 @@ def test_bad_chunk_is_retried_then_raises():
     assert len(calls) == sh.ATTEMPTS
 
 
+def test_short_piece_returned_verbatim_is_kept_but_a_long_one_still_fails():
+    short = "Revenue grew by 13 percent in 2021."
+    long_para = " ".join([PARA] * 3)
+
+    def echo_short(chunk: str) -> str:
+        return chunk if chunk == short else _rewrite(chunk)
+
+    out = StudentTextHumanizer(_config(), complete_fn=echo_short).humanize(f"{PARA}\n\n{short}")
+    assert out == f"{_rewrite(PARA)}\n\n{short}"
+    with pytest.raises(StudentHumanizerError, match="UNCHANGED"):
+        StudentTextHumanizer(_config(), complete_fn=lambda c: c).humanize(long_para)
+
+
+def test_single_spaced_pdf_text_is_unwrapped_and_its_references_kept_line_by_line():
+    text = (
+        "Introduction\n"
+        "Streaming platforms and digital entertainment ecosystems occupy a central position in shaping\n"
+        "contemporary global culture, acting as primary arbiters of which stories reach audiences\n"
+        "and which remain invisible.\n"
+        "This audit compares two platforms over a two-week window in October and records how each\n"
+        "one presents diverse social groups across new series, films and promotional banners.\n"
+        "References\n"
+        "1. Smith J. (2020) Remote work and the modern office. Journal of Work, 1(2),\n"
+        "3-4."
+    )
+    lines = text.split("\n")
+    assert sh.normalize_wrapped(text) == "\n\n".join([
+        "Introduction", " ".join(lines[1:4]), " ".join(lines[4:6]), "References", "\n".join(lines[7:]),
+    ])
+    one_paragraph_per_line = f"{PARA}\n{PARA}"
+    assert sh.normalize_wrapped(one_paragraph_per_line) == one_paragraph_per_line
+
+
 def test_lightly_edited_paragraph_keeps_the_most_changed_attempt():
     light = PARA.replace("study", "paper")
     lighter = PARA.replace("study", "paper").replace("sharply", "steeply")
@@ -226,6 +259,134 @@ def test_surprise_pick_prefers_the_least_predictable_variant():
     a, b = sh.Candidate("text a 42", -0.4), sh.Candidate("text b 42", -1.3)
     lost = sh.Candidate("text c", -2.0)
     assert sh.pick_candidate("source 42", [a, b, lost], "surprise") == b
+
+
+def test_parse_sampling():
+    assert sh.parse_sampling("1.0:4, 1.2:4") == ((1.0, 4), (1.2, 4))
+    assert sh.parse_sampling("x:2,0.9:99,") == ((0.9, sh.MAX_CANDIDATES),)
+    assert sh.parse_sampling("") == ()
+
+
+def _variants(n):
+    return [_rewrite(PARA).replace("paper", f"paper{i}") for i in range(n)]
+
+
+def test_detector_pick_keeps_the_variant_scored_least_ai():
+    outputs = iter(_variants(4))
+    probs = {v: p for v, p in zip(_variants(4), [0.9, 0.2, 0.05, 0.6])}
+    engine = StudentTextHumanizer(
+        _config(candidates=4, pick="detector", refine_above=0.5),
+        complete_fn=lambda _c: next(outputs),
+        score_fn=lambda texts: [probs[t] for t in texts],
+    )
+    assert engine.humanize(PARA) == _variants(4)[2]
+
+
+def test_detector_pick_prefers_variants_that_keep_the_numbers():
+    lost = _rewrite(PARA).replace("42", "many")
+    kept = _rewrite(PARA)
+    outputs = iter([lost, kept])
+    engine = StudentTextHumanizer(
+        _config(candidates=2, pick="detector"),
+        complete_fn=lambda _c: next(outputs),
+        score_fn=lambda texts: [0.0 if t == lost else 0.4 for t in texts],
+    )
+    assert engine.humanize(PARA) == kept
+
+
+def test_detector_pick_refines_still_flagged_chunks():
+    outputs = iter(_variants(6))
+    probs = dict(zip(_variants(6), [0.9, 0.8, 0.7, 0.6, 0.1, 0.95]))
+    calls = []
+
+    def score(texts):
+        calls.append(len(texts))
+        return [probs[t] for t in texts]
+
+    engine = StudentTextHumanizer(
+        _config(sampling=((1.0, 2),), pick="detector", refine_above=0.3, refine_sampling=((1.0, 2), (1.2, 2))),
+        complete_fn=lambda _c: next(outputs),
+        score_fn=score,
+    )
+    assert engine.humanize(PARA) == _variants(6)[4]
+    assert calls == [2, 4]
+
+
+def test_detector_pick_skips_refine_when_already_clean():
+    outputs = iter(_variants(2))
+    calls = []
+
+    def score(texts):
+        calls.append(len(texts))
+        return [0.1, 0.2]
+
+    engine = StudentTextHumanizer(
+        _config(candidates=2, pick="detector", refine_sampling=((1.0, 4),)),
+        complete_fn=lambda _c: next(outputs),
+        score_fn=score,
+    )
+    assert engine.humanize(PARA) == _variants(2)[0]
+    assert calls == [2]
+
+
+def test_detector_pick_falls_back_to_most_rewritten_when_detector_is_down():
+    light = PARA.replace("study", "paper")
+    heavy = _rewrite(PARA)
+    outputs = iter([light, heavy])
+
+    def down(texts):
+        raise RuntimeError("detector down")
+
+    engine = StudentTextHumanizer(_config(candidates=2, pick="detector"), complete_fn=lambda _c: next(outputs), score_fn=down)
+    assert engine.humanize(PARA) == heavy
+
+
+def test_sampling_plan_sends_one_request_per_temperature(monkeypatch):
+    sent = []
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, n):
+            self.n = n
+
+        def json(self):
+            return {"choices": [{"message": {"content": f"v{i}"}} for i in range(self.n)]}
+
+    def fake_post(url, headers, json, timeout):
+        sent.append((json["temperature"], json["n"]))
+        return _Resp(json["n"])
+
+    monkeypatch.setattr(sh.requests, "post", fake_post)
+    engine = StudentTextHumanizer(_config(sampling=((1.0, 3), (1.2, 2))))
+    assert len(engine._candidates(PARA)) == 5
+    assert sorted(sent) == [(1.0, 3), (1.2, 2)]
+
+
+def test_sampling_plan_survives_one_failed_temperature(monkeypatch):
+    class _Resp:
+        def __init__(self, ok):
+            self.status_code = 200 if ok else 500
+            self.text = "boom"
+
+        def json(self):
+            return {"choices": [{"message": {"content": "v"}}]}
+
+    monkeypatch.setattr(sh.requests, "post", lambda url, headers, json, timeout: _Resp(json["temperature"] == 1.0))
+    engine = StudentTextHumanizer(_config(sampling=((1.0, 1), (1.2, 1))))
+    assert [c.text for c in engine._candidates(PARA)] == ["v"]
+
+
+def test_student_config_reads_detector_settings(monkeypatch):
+    monkeypatch.setenv("HUMANIZER_STUDENT_PICK", "detector")
+    monkeypatch.setenv("HUMANIZER_STUDENT_SAMPLING", "1.0:4,1.2:4")
+    monkeypatch.setenv("HUMANIZER_STUDENT_REFINE_SAMPLING", "1.0:12,1.2:12")
+    monkeypatch.setenv("HUMANIZER_STUDENT_REFINE_ABOVE", "0.25")
+    cfg = sh.student_config()
+    assert cfg.pick == "detector"
+    assert cfg.sampling_plan == ((1.0, 4), (1.2, 4))
+    assert cfg.refine_sampling == ((1.0, 12), (1.2, 12))
+    assert cfg.refine_above == 0.25
 
 
 def test_candidates_are_read_from_every_choice_with_logprobs(monkeypatch):
