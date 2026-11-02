@@ -65,6 +65,79 @@ def test_titles_and_headings_of_any_level_stay_verbatim():
     ]
 
 
+def test_paragraphs_hard_wrapped_by_a_pdf_are_joined_and_rewritten():
+    page_one = (
+        "Streaming platforms and digital entertainment ecosystems occupy a central position in shaping\n"
+        "contemporary global culture, acting as primary arbiters of which stories reach audiences\n"
+        "and which remain invisible.\n"
+        "Methodology\n"
+        "This audit compares two platforms over a two-week window in October and records how each\n"
+        "one presents diverse social groups across new series, films and promotional banners on its"
+    )
+    page_two = (
+        "home page, along with the metadata that describes them in the catalogue and in the\n"
+        "recommendation rows shown to new subscribers."
+    )
+    address = "Jane Doe\nDepartment of History\nOctober 2026"
+    bullets = "- first point of the list here\n- second point of the list here"
+    table = "Term | Definition\nPitch | How high or low a sound is, as heard by the listener."
+    lines = page_one.split("\n")
+    body = "\n\n".join([page_one, page_two, address, bullets, table])
+    assert plan_chunks(body, "\n\n", chunk_words=1) == [
+        (" ".join(lines[:3]), True),
+        ("Methodology", False),
+        (" ".join(lines[4:] + page_two.split("\n")), True),
+        (address, False),
+        (bullets, False),
+        (table, False),
+    ]
+
+
+def test_a_short_first_line_that_runs_on_is_not_taken_for_a_heading():
+    block = (
+        "Trade among the five Central Asian countries has nearly\n"
+        "doubled in five years. For farmers, drivers, shopkeepers and graduates, it\n"
+        "brings real chances and real risks."
+    )
+    assert plan_chunks(block + "\n\n" + PARA, "\n\n", chunk_words=1) == [
+        (" ".join(block.split("\n")), True),
+        (PARA, True),
+    ]
+
+
+def test_references_inside_a_wrapped_page_are_kept_verbatim():
+    head, tail = PARA.split(" Researchers")
+    tail = "Researchers" + tail
+    page = (
+        f"{head}\n{tail}\n"
+        "References\n"
+        "Crenshaw, K. (1989). Demarginalizing the intersection of race and sex. University of Chicago Legal Forum."
+    )
+    def rewrite_every_word(text: str) -> str:
+        return "\n\n".join(" ".join(f"x{w}" for w in p.split()) for p in text.split("\n\n"))
+
+    out = StudentTextHumanizer(_config(), complete_fn=rewrite_every_word).humanize(page + "\n\n" + PARA)
+    assert out.startswith("xThe xstudy")
+    assert out.endswith("References\n\nCrenshaw, K. (1989). Demarginalizing the intersection of race and sex. "
+                        "University of Chicago Legal Forum.\n\n" + PARA)
+
+
+def test_a_plain_references_list_stays_in_place_up_to_the_next_section():
+    entry = "Smith, J. (2020). Remote work and the modern office. Journal of Work, 1(2), 3-4."
+    url_entry = "WHO (2021). Remote work guidance. https://who.int/remote"
+    body = "\n\n".join([PARA, "References:", entry, url_entry, "Appendix A", PARA])
+    assert sh.split_plain_references(body, "\n\n") == (
+        PARA, f"References:\n\n{entry}\n\n{url_entry}", f"Appendix A\n\n{PARA}"
+    )
+    out = StudentTextHumanizer(_config(chunk_words=1), complete_fn=_rewrite).humanize(body)
+    assert out.split("\n\n")[1:5] == ["References:", entry, url_entry, "Appendix A"]
+    assert out.count("The paper explores") == 2
+
+
+def test_a_heading_on_the_line_above_its_paragraph_is_split_off():
+    assert plan_chunks(f"Introduction\n{PARA}", "\n\n", chunk_words=1) == [("Introduction", False), (PARA, True)]
+
+
 def test_plan_chunks_splits_long_prose_at_paragraph_breaks():
     body = "\n\n".join([PARA] * 30)
     chunks = [text for text, rewrite in plan_chunks(body, "\n\n") if rewrite]
@@ -138,6 +211,45 @@ def test_multi_paragraph_chunk_must_keep_its_paragraph_count():
     engine = StudentTextHumanizer(_config(chunk_words=sh.CHUNK_WORDS), complete_fn=lambda c: _rewrite(c).replace("\n\n", " "))
     with pytest.raises(StudentHumanizerError, match="PARAGRAPHS_CHANGED"):
         engine.humanize(text)
+
+
+def test_best_of_n_keeps_the_most_rewritten_variant_that_keeps_the_numbers():
+    light = PARA.replace("study", "paper")
+    heavy_but_lost_number = _rewrite(PARA).replace("42", "many")
+    heavy = _rewrite(PARA)
+    outputs = iter([light, heavy_but_lost_number, heavy, "", light])
+    engine = StudentTextHumanizer(_config(candidates=5), complete_fn=lambda _c: next(outputs))
+    assert engine.humanize(PARA) == heavy
+
+
+def test_surprise_pick_prefers_the_least_predictable_variant():
+    a, b = sh.Candidate("text a 42", -0.4), sh.Candidate("text b 42", -1.3)
+    lost = sh.Candidate("text c", -2.0)
+    assert sh.pick_candidate("source 42", [a, b, lost], "surprise") == b
+
+
+def test_candidates_are_read_from_every_choice_with_logprobs(monkeypatch):
+    sent = {}
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {
+                "choices": [
+                    {"message": {"content": "one"}, "logprobs": {"content": [{"logprob": -1.0}, {"logprob": -3.0}]}},
+                    {"message": {"content": "two"}, "logprobs": None},
+                ]
+            }
+
+    def fake_post(url, headers, json, timeout):
+        sent.update(json)
+        return _Resp()
+
+    monkeypatch.setattr(sh.requests, "post", fake_post)
+    engine = StudentTextHumanizer(_config(candidates=2, pick="surprise", temperature=1.2))
+    assert engine._candidates(PARA) == [sh.Candidate("one", -2.0), sh.Candidate("two", 0.0)]
+    assert (sent["n"], sent["logprobs"], sent["temperature"]) == (2, True, 1.2)
 
 
 def test_flaky_chunk_recovers_on_retry():
@@ -387,6 +499,7 @@ def _stealthwriter_logged_out(monkeypatch):
 def test_site_humanize_falls_back_to_student_when_stealthwriter_is_logged_out(economy, monkeypatch):
     import app as app_mod
 
+    monkeypatch.setenv("FREE_HUMANIZE_ENGINE", "default")
     _stealthwriter_logged_out(monkeypatch)
     calls = []
 

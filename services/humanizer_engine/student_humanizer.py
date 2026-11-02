@@ -25,7 +25,11 @@ from typing import Any, Callable
 import requests
 
 from services.humanizer_engine.constants import MIN_HUMANIZE_CHARS
-from services.humanizer_engine.heading_utils import join_body_and_references, split_off_references
+from services.humanizer_engine.heading_utils import (
+    is_references_section_title,
+    join_body_and_references,
+    split_off_references,
+)
 from services.humanizer_engine.mock_humanizer import MockTextHumanizer
 
 log = logging.getLogger(__name__)
@@ -43,6 +47,7 @@ WARMUP_EVERY_SECONDS = 60.0
 WARMUP_TIMEOUT_SECONDS = 300.0
 # A memory-snapshot restore takes ~10 s, so poll often while waiting for it.
 BOOT_POLL_SECONDS = 2.0
+MAX_CANDIDATES = 8
 
 _WORD = re.compile(r"[a-z0-9']+")
 _CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
@@ -51,6 +56,10 @@ _VERBATIM_LINE = re.compile(r"^\s*(#{1,6}\s|\||```|[-*•+]\s|\d+[.)]\s)")
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*\s*$")
 # Given a bare title, the model writes a whole paragraph after it.
 TITLE_MAX_WORDS = 12
+# Text pasted from a PDF keeps its line breaks: lines of at most this many characters, the last line of
+# each paragraph shorter than the rest.
+WRAP_MAX_CHARS = 130
+WRAP_FULL_LINE = 0.8
 
 
 class StudentHumanizerError(RuntimeError):
@@ -68,6 +77,10 @@ class StudentConfig:
     chunk_words: int = CHUNK_WORDS
     probe_timeout: float = 3.0
     events_log: str = ""
+    temperature: float = TEMPERATURE
+    # Variants sampled per chunk; the best one by ``pick`` is kept.
+    candidates: int = 1
+    pick: str = "changed"
 
     @property
     def configured(self) -> bool:
@@ -91,6 +104,9 @@ def student_config() -> StudentConfig:
         chunk_words=max(1, int(_float("HUMANIZER_STUDENT_CHUNK_WORDS", CHUNK_WORDS))),
         probe_timeout=max(0.5, _float("HUMANIZER_STUDENT_PROBE_TIMEOUT", 3.0)),
         events_log=(os.environ.get("HUMANIZER_STUDENT_EVENTS_LOG") or "").strip(),
+        temperature=max(0.1, min(2.0, _float("HUMANIZER_STUDENT_TEMPERATURE", TEMPERATURE))),
+        candidates=max(1, min(MAX_CANDIDATES, int(_float("HUMANIZER_STUDENT_CANDIDATES", 1)))),
+        pick=(os.environ.get("HUMANIZER_STUDENT_PICK") or "changed").strip().lower(),
     )
 
 
@@ -132,6 +148,91 @@ def _is_verbatim(block: str) -> bool:
     )
 
 
+def _split_block(block: str) -> tuple[list[str], bool]:
+    """Paragraphs of a multi-line block, and whether its last paragraph runs on into the next block.
+
+    Hard-wrapped lines are joined back into paragraphs; lines that are whole paragraphs already
+    (a heading above its text, an address) become blocks of their own. Lists and tables stay intact.
+    """
+    lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
+    if len(lines) < 2 or any(_VERBATIM_LINE.match(ln) or " | " in ln for ln in lines):
+        return [block], False
+    width = max(len(ln) for ln in lines)
+    full = WRAP_FULL_LINE * width
+    # A line followed by one starting in lowercase breaks mid-sentence.
+    continued = [nxt[:1].islower() for nxt in lines[1:]] + [False]
+    if width > WRAP_MAX_CHARS or (sum(len(ln) >= full for ln in lines) < 2 and not any(continued)):
+        return (lines if not all(_is_verbatim(ln) for ln in lines) else [block]), False
+    ends = [bool(_SENTENCE_END.search(ln)) for ln in lines]
+    heading = [len(ln) < full and not end and not cont for ln, end, cont in zip(lines, ends, continued)]
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for i, ln in enumerate(lines):
+        current.append(ln)
+        if continued[i]:
+            continue
+        # A short line ends its paragraph and a short line on its own is a heading; a sentence
+        # that ends right before a heading ends its paragraph too.
+        if (len(ln) < full and (ends[i] or len(current) == 1)) or (ends[i] and i + 1 < len(lines) and heading[i + 1]):
+            paragraphs.append(" ".join(current))
+            current = []
+    if current:
+        paragraphs.append(" ".join(current))
+    return paragraphs, bool(current) and not _SENTENCE_END.search(lines[-1])
+
+
+def normalize_wrapped(text: str) -> str:
+    """Blank-line separated text with hard-wrapped paragraphs joined back into single lines."""
+    if not re.search(r"\n\s*\n", text):
+        return text
+    return "\n\n".join(_blocks(text, "\n\n"))
+
+
+def _blocks(body: str, separator: str) -> list[str]:
+    if separator != "\n\n":
+        return [b.strip() for b in body.split(separator) if b.strip()]
+    blocks: list[str] = []
+    runs_on = False
+    for raw in (b.strip() for b in re.split(r"\n\s*\n", body)):
+        if not raw:
+            continue
+        parts, next_runs_on = _split_block(raw)
+        if runs_on and blocks and parts[0][:1].islower():
+            blocks[-1] = f"{blocks[-1]} {parts.pop(0)}"
+        blocks.extend(parts)
+        runs_on = next_runs_on
+    return blocks
+
+
+_APPENDIX_LINE = re.compile(r"(?im)^\s*(appendix|appendices|annex)\b")
+_YEAR_OR_URL = re.compile(r"\b(1[89]|20)\d\d\b|https?://|doi\.org")
+
+
+def _ends_reference_list(block: str) -> bool:
+    """A new section after the reference list: an appendix, or a heading that is no reference entry."""
+    text = block.strip()
+    return bool(_APPENDIX_LINE.search(text)) or (
+        "\n" not in text
+        and _wc(text) <= TITLE_MAX_WORDS
+        and not _SENTENCE_END.search(text)
+        and not _YEAR_OR_URL.search(text)
+    )
+
+
+def split_plain_references(body: str, separator: str) -> tuple[str, str, str]:
+    """(before, references, after) around a plain-text reference list: a "References" line up to the next section.
+
+    Markdown "## References" sections are handled upstream by split_off_references.
+    """
+    blocks = body.split(separator)
+    for i, block in enumerate(blocks):
+        title = block.strip().rstrip(":")
+        if i > 0 and "\n" not in title and _wc(title) <= 3 and is_references_section_title(title):
+            end = next((j for j in range(i + 1, len(blocks)) if _ends_reference_list(blocks[j])), len(blocks))
+            return separator.join(blocks[:i]), separator.join(blocks[i:end]), separator.join(blocks[end:])
+    return body, "", ""
+
+
 def plan_chunks(body: str, separator: str, chunk_words: int = CHUNK_WORDS) -> list[tuple[str, bool]]:
     """Body as ordered (text, rewrite?) pieces: prose grouped up to ``chunk_words``, the rest verbatim.
 
@@ -145,9 +246,7 @@ def plan_chunks(body: str, separator: str, chunk_words: int = CHUNK_WORDS) -> li
             pieces.append(("\n\n".join(prose), True))
             prose.clear()
 
-    for block in (b.strip() for b in body.split(separator)):
-        if not block:
-            continue
+    for block in _blocks(body, separator):
         if _is_verbatim(block):
             _flush()
             pieces.append((block, False))
@@ -175,6 +274,27 @@ def chunk_problem(source: str, output: str) -> str | None:
     return None
 
 
+_NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _lost_numbers(source: str, output: str) -> int:
+    return len(set(_NUMBER.findall(source)) - set(_NUMBER.findall(output)))
+
+
+@dataclass(frozen=True, slots=True)
+class Candidate:
+    text: str
+    # Mean log-probability of the sampled tokens; lower means less predictable text.
+    mean_logprob: float = 0.0
+
+
+def pick_candidate(source: str, candidates: list[Candidate], pick: str = "changed") -> Candidate:
+    """Best usable variant: keeps the source numbers first, then the most rewritten or least predictable."""
+    if pick == "surprise":
+        return min(candidates, key=lambda c: (_lost_numbers(source, c.text), c.mean_logprob))
+    return min(candidates, key=lambda c: (_lost_numbers(source, c.text), _jaccard(source, c.text)))
+
+
 class StudentTextHumanizer:
     """Same ``humanize(text)`` contract as ``StealthWriterTextHumanizer``."""
 
@@ -199,9 +319,12 @@ class StudentTextHumanizer:
         if len(text.strip()) < MIN_HUMANIZE_CHARS:
             return text.strip()
 
-        body, refs = split_off_references(text)
+        body, refs = split_off_references(normalize_wrapped(text))
         separator = "\n\n" if "\n\n" in body or "\n" not in body.strip() else "\n"
-        pieces = plan_chunks(body, separator, self.config.chunk_words)
+        before, plain_refs, after = split_plain_references(body, separator)
+        pieces = plan_chunks(before, separator, self.config.chunk_words)
+        if plain_refs:
+            pieces += [(plain_refs, False), *plan_chunks(after, separator, self.config.chunk_words)]
         todo = [piece for piece, rewrite in pieces if rewrite]
         if not todo:
             raise StudentHumanizerError("No prose to rewrite")
@@ -220,29 +343,35 @@ class StudentTextHumanizer:
         single_paragraph = len(_paragraphs(chunk)) == 1
         for attempt in range(1, ATTEMPTS + 1):
             try:
-                output = self._complete(chunk).strip()
+                variants = self._candidates(chunk)
+            except (requests.RequestException, StudentHumanizerError, KeyError, ValueError, IndexError) as exc:
+                problem = f"REQUEST_FAILED: {exc}"
+                log.info("student humanizer attempt %s failed: %s", attempt, problem)
+                continue
+            usable: list[Candidate] = []
+            for variant in variants:
+                output = variant.text.strip()
                 if single_paragraph:
                     # The model sometimes splits a long paragraph in two; keep the source layout.
                     output = " ".join(_paragraphs(output))
-            except (requests.RequestException, StudentHumanizerError, KeyError, ValueError) as exc:
-                problem = f"REQUEST_FAILED: {exc}"
-            else:
                 problem = chunk_problem(chunk, output) or ""
                 if not problem:
-                    return output
-                if problem == "UNCHANGED" and output.strip() != chunk.strip():
+                    usable.append(Candidate(output, variant.mean_logprob))
+                elif problem == "UNCHANGED" and output.strip() != chunk.strip():
                     similarity = _jaccard(chunk, output)
                     if lightest is None or similarity < lightest[0]:
                         lightest = (similarity, output)
+            if usable:
+                return pick_candidate(chunk, usable, self.config.pick).text
             log.info("student humanizer attempt %s failed: %s", attempt, problem)
         if lightest is not None:
             return lightest[1]
         raise StudentHumanizerError(f"Chunk rejected after {ATTEMPTS} attempts: {problem}")
 
-    def _complete(self, chunk: str) -> str:
-        if self._complete_fn is not None:
-            return self._complete_fn(chunk)
+    def _candidates(self, chunk: str) -> list[Candidate]:
         cfg = self.config
+        if self._complete_fn is not None:
+            return [Candidate(self._complete_fn(chunk)) for _ in range(cfg.candidates)]
         if not cfg.configured:
             raise StudentHumanizerError("Student humanizer is not configured")
         response = requests.post(
@@ -254,8 +383,10 @@ class StudentTextHumanizer:
                     {"role": "system", "content": system_prompt(cfg.level)},
                     {"role": "user", "content": chunk},
                 ],
-                "temperature": TEMPERATURE,
+                "temperature": cfg.temperature,
                 "top_p": TOP_P,
+                "n": cfg.candidates,
+                "logprobs": cfg.pick == "surprise",
                 # A memory-snapshot restore brings back the server's RNG state too, so without
                 # a per-request seed every first request after a cold start samples identically.
                 "seed": random.randrange(2**31),
@@ -266,7 +397,7 @@ class StudentTextHumanizer:
         )
         if response.status_code != 200:
             raise StudentHumanizerError(f"HTTP {response.status_code}: {response.text[:200]}")
-        return response.json()["choices"][0]["message"]["content"] or ""
+        return [_candidate(choice) for choice in response.json()["choices"]]
 
     def is_warm(self) -> bool:
         """True when the model answers right away.
@@ -289,6 +420,12 @@ class StudentTextHumanizer:
 
     def estimate_ai_score(self, text: str) -> int:
         return self._fallback_scorer.estimate_ai_score(text)
+
+
+def _candidate(choice: dict[str, Any]) -> Candidate:
+    tokens = ((choice.get("logprobs") or {}).get("content")) or []
+    mean = sum(t["logprob"] for t in tokens) / len(tokens) if tokens else 0.0
+    return Candidate(choice["message"]["content"] or "", mean)
 
 
 def pick_student(config: StudentConfig | None = None, *, rng: Callable[[], float] = random.random) -> bool:
