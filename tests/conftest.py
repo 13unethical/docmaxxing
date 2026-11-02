@@ -23,11 +23,14 @@ def _guest_landing_pages(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _fresh_guest_rate_limit():
+    from services import ai_detector
     from services.free_humanize import guest_rate_limiter
 
     guest_rate_limiter.reset()
+    ai_detector.guest_rate_limiter.reset()
     yield
     guest_rate_limiter.reset()
+    ai_detector.guest_rate_limiter.reset()
 
 
 def run_format_pipeline(

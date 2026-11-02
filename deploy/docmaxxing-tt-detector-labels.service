@@ -1,0 +1,14 @@
+[Unit]
+Description=DocMaxxing AI detector: label new Turnitin reports and upload them for retraining
+After=network-online.target docmaxxing.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/docmaxxing
+EnvironmentFile=-/root/docmaxxing/.env
+# Only new or changed reports are rendered; the rest come from the per-report cache.
+ExecStart=/root/tt_label_venv/bin/python /root/docmaxxing/scripts/tt_detector_labels.py --upload
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

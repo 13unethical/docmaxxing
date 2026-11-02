@@ -2975,6 +2975,78 @@ def _free_runs_left(subject: str | None, user: dict | None) -> int | None:
     return left
 
 
+def _detect_error(code: str, message: str, status: int, **extra):
+    return jsonify({"success": False, "error": code, "message": message, **extra}), status
+
+
+@app.post("/api/detector/free")
+def api_free_ai_detector():
+    """Free AI check on our own detector. Turnitin itself is the paid check (/api/turnitin/...)."""
+    from services import ai_detector, free_humanize
+
+    payload = request.get_json(silent=True) or {}
+    text = payload.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return _detect_error("TEXT_REQUIRED", "Paste some text to check.", 400)
+    if len(text) > 200_000:
+        return _detect_error("TOO_MANY_WORDS", "This text is too long.", 400)
+
+    lim = ai_detector.limits()
+    user = economy_auth.current_user()
+    words = free_humanize.count_words(text)
+    max_words = lim.user_words if user else lim.guest_words
+    if words > max_words:
+        message = (
+            f"Free checks take up to {max_words:,} words."
+            if user
+            else f"Without an account, checks take up to {max_words:,} words. "
+            f"Create a free account for up to {lim.user_words:,} words."
+        )
+        return _detect_error("FREE_WORD_LIMIT", message, 403, max_words=max_words, words=words)
+    if not _is_english_text(text):
+        return _detect_error("ENGLISH_ONLY", "The AI detector works with English text for now.", 422)
+
+    if user is None:
+        ip = free_humanize.client_ip(request)
+        if not ai_detector.guest_rate_limiter.allow(ip or "-", 20):
+            resp, status = _detect_error("RATE_LIMITED", "Too many requests. Wait a minute and try again.", 429)
+            resp.headers["Retry-After"] = "60"
+            return resp, status
+        subject = "detect:" + free_humanize.guest_subject(
+            ip, free_humanize.guest_session_id(session), str(app.secret_key)
+        )
+        daily = lim.guest_daily
+    else:
+        subject = f"detect:user:{int(user['id'])}"
+        daily = lim.user_daily
+    if not free_humanize.reserve(subject, daily):
+        if user is None:
+            return _detect_error(
+                "REGISTER_REQUIRED",
+                f"You have used today’s free checks. Create a free account to get {lim.user_daily} checks a day.",
+                403,
+                reason="FREE_LIMIT_REACHED",
+            )
+        return _detect_error("FREE_LIMIT_REACHED", "You have used today’s free checks. Come back tomorrow.", 429)
+
+    try:
+        result = ai_detector.detect(text)
+    except ai_detector.DetectorUnavailable:
+        free_humanize.release(subject)
+        app.logger.exception("free AI detector failed")
+        return _detect_error(
+            "DETECTOR_UNAVAILABLE", "The AI detector is busy right now. Try again in a minute — this check wasn’t counted.", 503
+        )
+    if result.get("too_short"):
+        free_humanize.release(subject)
+        return _detect_error(
+            "TOO_SHORT", f"Paste at least {ai_detector.MIN_SCORED_WORDS} words of prose to get a reliable result.", 400
+        )
+    return jsonify(
+        {"success": True, **result, "checks_left": free_humanize.remaining_today(subject, daily)}
+    )
+
+
 def _free_engine_unavailable():
     return (
         jsonify(

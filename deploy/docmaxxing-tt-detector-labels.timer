@@ -1,0 +1,12 @@
+[Unit]
+Description=DocMaxxing AI detector nightly Turnitin label upload
+
+[Timer]
+# Before the weekly Modal retrain (Monday 03:00 Asia/Tashkent).
+OnCalendar=*-*-* 02:20:00 Asia/Tashkent
+Persistent=true
+AccuracySec=1min
+Unit=docmaxxing-tt-detector-labels.service
+
+[Install]
+WantedBy=timers.target
