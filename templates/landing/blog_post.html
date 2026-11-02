@@ -1,0 +1,36 @@
+{% extends "landing/base.html" %}
+{% block content %}
+<article class="lp-section lp-wrap">
+  <div class="lp-prose">
+    <nav class="lp-breadcrumbs" aria-label="{{ 'Навигация' if ru else 'Breadcrumbs' }}">
+      <a href="/">{{ 'Главная' if ru else 'Home' }}</a> / <a href="/blog">{{ 'Блог' if ru else 'Blog' }}</a>
+    </nav>
+    {% if post.draft %}<p class="lp-tool-msg is-cta">{{ 'Черновик — виден только администраторам и не индексируется.' if ru else 'Draft — visible to admins only and not indexed.' }}</p>{% endif %}
+    <h1>{{ post.title }}</h1>
+    <p class="lp-post-meta">
+      <time datetime="{{ post.date }}">{{ display_date(post.date, post.lang) }}</time>
+      {% if post.updated and post.updated != post.date %} · {{ 'обновлено' if ru else 'updated' }} <time datetime="{{ post.updated }}">{{ display_date(post.updated, post.lang) }}</time>{% endif %}
+    </p>
+    {{ post.html|safe }}
+
+    <aside class="lp-cta">
+      {% if ru %}
+      <h2>Попробуйте хуманайзер DocMaxxing</h2>
+      <p>Английский текст до {{ free.guest_words_ru }} слов можно обработать бесплатно, без регистрации.</p>
+      <p><a class="lp-btn lp-btn-primary" href="/humanizer">Открыть хуманайзер</a></p>
+      {% else %}
+      <h2>Try the DocMaxxing AI Humanizer</h2>
+      <p>Humanize up to {{ free.guest_words_s }} words free, no sign-up needed.</p>
+      <p><a class="lp-btn lp-btn-primary" href="/humanizer">Open the humanizer</a></p>
+      {% endif %}
+    </aside>
+
+    {% if more %}
+    <h2>{{ 'Читайте также' if ru else 'Keep reading' }}</h2>
+    <ul>
+      {% for other in more %}<li><a href="{{ other.path }}">{{ other.title }}</a></li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</article>
+{% endblock %}

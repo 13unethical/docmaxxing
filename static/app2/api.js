@@ -89,9 +89,11 @@
       return String(data.text || '');
     },
 
-    humanize(text, source = 'standalone') {
-      const url = isCyrillic(text) ? '/api/browser/providers/ru/humanize' : '/api/browser/providers/stealthwriter/humanize';
-      return request('POST', url, { json: { text, source } });
+    async humanize(text, source = 'standalone') {
+      if (isCyrillic(text)) {
+        throw new ApiError("Russian text isn't supported yet. Paste English text to humanize it.", { code: 'RU_NOT_SUPPORTED' });
+      }
+      return request('POST', '/api/browser/providers/stealthwriter/humanize', { json: { text, source } });
     },
     editor: {
       detect: (text) => request('POST', '/api/workspace/detect', { json: { text }, timeoutMs: 180000 }),

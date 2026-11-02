@@ -35,9 +35,6 @@
   var fileInput = $("[data-hz-file]", root);
   var pasteBtn = $("[data-hz-paste-focus]", root);
   var fontSelect = $("[data-hz-font]", root);
-  var lang = "eng";
-  var langSegment = $("[data-hz-lang-segment]", root);
-  var langBtns = $all("[data-hz-lang]", root);
   var loadingSub = $("[data-hz-loading-sub]", root);
   var LOADING_SUB_ENG = "This usually takes under 10 seconds";
   var segment = $("[data-hz-segment]", root);
@@ -214,13 +211,10 @@
     setStage("loading");
 
     if (loadingSub) {
-      loadingSub.textContent = lang === "ru" ? "Replacing lookalike letters..." : LOADING_SUB_ENG;
+      loadingSub.textContent = LOADING_SUB_ENG;
     }
 
-    var endpoint = lang === "ru"
-      ? "/api/browser/providers/ru/humanize"
-      : "/api/browser/providers/stealthwriter/humanize";
-    fetch(endpoint, {
+    fetch("/api/browser/providers/stealthwriter/humanize", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       credentials: "same-origin",
@@ -298,23 +292,6 @@
         showError(body, { detail: detail });
       });
   }
-
-  /* ------------------------------------------------------------- language */
-  function setLang(next) {
-    lang = next === "ru" ? "ru" : "eng";
-    if (langSegment) langSegment.classList.toggle("is-ru", lang === "ru");
-    langBtns.forEach(function (btn) {
-      var active = btn.getAttribute("data-hz-lang") === lang;
-      btn.classList.toggle("is-active", active);
-      btn.setAttribute("aria-selected", active ? "true" : "false");
-    });
-  }
-
-  langBtns.forEach(function (btn) {
-    btn.addEventListener("click", function () {
-      setLang(btn.getAttribute("data-hz-lang"));
-    });
-  });
 
   /* --------------------------------------------------- segmented control */
   function setSource(src) {

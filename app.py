@@ -415,6 +415,23 @@ def _path_requires_email_verification(path: str) -> bool:
 
 
 @app.before_request
+def _strip_trailing_slash_on_public_pages():
+    """/humanizer/ -> 301 /humanizer so every public page has one URL."""
+    if request.method not in ("GET", "HEAD"):
+        return None
+    path = request.path or ""
+    if len(path) < 2 or not path.endswith("/"):
+        return None
+    from services.seo import is_public_path, normalize_path
+
+    target = normalize_path(path)
+    if not is_public_path(target):
+        return None
+    query = request.query_string.decode("utf-8", "ignore")
+    return redirect(f"{target}{'?' + query if query else ''}", code=301)
+
+
+@app.before_request
 def _email_verification_wall():
     """Strict wall: Workspace, Humanizer, Turnitin, Assignment + their APIs."""
     path = request.path or ""
@@ -444,6 +461,7 @@ def _assignment_project_ownership_guard():
 
 # Old server-rendered pages -> screens of the single-page app at /app.
 # Auth, email verification, legal pages, Veil download and all APIs stay as they are.
+# Public landing pages (services.seo.GUEST_LANDING_PATHS) are only redirected for signed-in users.
 _NEW_APP_SCREENS = {
     "/": "home",
     "/formatter": "format",
@@ -452,6 +470,7 @@ _NEW_APP_SCREENS = {
     "/references": "format",
     "/check": "check",
     "/humanizer": "humanizer",
+    "/ru/humanizer": "humanizer",
     "/turnitin": "turnitin",
     "/assignment": "assignment",
     "/assignments": "assignment",
@@ -474,6 +493,10 @@ def _redirect_old_pages_to_new_app():
     if screen is None or request.args.get("classic") == "1":
         return None
     if (os.environ.get("LEGACY_UI") or "").strip().lower() in {"1", "true", "yes"}:
+        return None
+    from services.seo import GUEST_LANDING_PATHS
+
+    if request.path in GUEST_LANDING_PATHS and economy_auth.current_user() is None:
         return None
     query = request.query_string.decode("utf-8", "ignore")
     return redirect(f"/app{'?' + query if query else ''}#/{screen}", code=302)
@@ -835,7 +858,7 @@ def inject_account():
         "is_humanizer_discount_active": bool(discount.get("active"))
         and int(discount.get("percent") or 0) > 0,
         "humanizer_discount_percent": int(discount.get("percent") or 0),
-        "seo": page_seo_for_path(request.path),
+        "seo": page_seo_for_path(request.path, args=request.args),
     }
 
 
@@ -1113,8 +1136,8 @@ def account():
     )
 
 
-def _render_info(template: str, *, info_active: str | None = None):
-    return render_template(template, nav_active=None, info_active=info_active)
+def _render_info(template: str, *, info_active: str | None = None, **context: Any):
+    return render_template(template, nav_active=None, info_active=info_active, **context)
 
 
 @app.get("/account-info")
@@ -1169,7 +1192,9 @@ def contact():
 
 @app.get("/faq")
 def faq():
-    return _render_info("info/faq.html", info_active="faq")
+    from services.site_content import site_faq_sections
+
+    return _render_info("info/faq.html", info_active="faq", faq_sections=site_faq_sections())
 
 
 @app.get("/changelog")
@@ -2324,9 +2349,27 @@ def api_economy_topup():
     )
 
 
+def _serve_public_landing() -> bool:
+    """Guests (and crawlers) get the server-rendered landing; ?classic=1 keeps the old tool page."""
+    return economy_auth.current_user() is None and request.args.get("classic") != "1"
+
+
+def _render_landing(template: str, *, signup_next: str):
+    from services.site_content import faq_items_for_path, free_limits_context
+
+    return render_template(
+        template,
+        free=free_limits_context(),
+        faq_items=faq_items_for_path(request.path) or [],
+        signup_next=signup_next,
+    )
+
+
 @app.route("/")
 def index():
-    """Format tab. V2 UI when ``FORMATTER_V2_ENABLED``; otherwise the legacy page."""
+    """Public landing for guests; Format tab (V2 when ``FORMATTER_V2_ENABLED``) otherwise."""
+    if _serve_public_landing():
+        return _render_landing("landing/home.html", signup_next="/")
     if formatter_v2_enabled():
         return render_template("format_v2.html", nav_active="home")
     return render_template("index.html", nav_active="home")
@@ -2344,6 +2387,40 @@ def robots_txt():
     from services.seo import robots_txt as build_robots
 
     return Response(build_robots(), mimetype="text/plain; charset=utf-8")
+
+
+@app.get("/favicon.ico")
+def favicon():
+    return send_from_directory(app.static_folder, "favicon.ico", mimetype="image/vnd.microsoft.icon", max_age=86400)
+
+
+@app.get("/site.webmanifest")
+def site_webmanifest():
+    from services.seo import webmanifest
+
+    return Response(json.dumps(webmanifest()), mimetype="application/manifest+json")
+
+
+@app.errorhandler(404)
+def not_found(_error):
+    if request.path.startswith("/api/"):
+        return jsonify({"success": False, "error": "NOT_FOUND", "message": "Not found."}), 404
+    from services.seo import ROBOTS_NOINDEX, PublicPage, page_lang, page_seo_for_path
+
+    ru = page_lang(request.path) == "ru"
+    page = PublicPage(
+        path=request.path,
+        title="Страница не найдена | DocMaxxing" if ru else "Page not found | DocMaxxing",
+        description=(
+            "Такой страницы нет. Откройте хуманайзер, оформление работ или цены DocMaxxing."
+            if ru
+            else "This page does not exist. Try the DocMaxxing AI humanizer, essay formatter or pricing."
+        ),
+        lang="ru" if ru else "en",
+        in_sitemap=False,
+    )
+    seo = page_seo_for_path(request.path, page=page, robots=ROBOTS_NOINDEX, faq=[])
+    return render_template("landing/404.html", seo=seo), 404
 
 
 @app.route("/formatter")
@@ -2742,6 +2819,192 @@ def _is_student_result(result: dict[str, Any]) -> bool:
     return result.get("provider") == PROVIDER
 
 
+def _humanize_word_cap_error(text: str):
+    """Server-side word cap shared by every humanizer endpoint (None when within it)."""
+    from services import free_humanize
+
+    cap = free_humanize.limits().max_words
+    words = free_humanize.count_words(text)
+    if not cap or words <= cap:
+        return None
+    return (
+        jsonify(
+            {
+                "ok": False,
+                "success": False,
+                "error": "TOO_MANY_WORDS",
+                "message": f"Up to {cap:,} words per run. Split the text and run it in parts.",
+                "max_words": cap,
+                "words": words,
+            }
+        ),
+        400,
+    )
+
+
+def _free_humanize_gate(user: dict | None, text: str, *, english_only: bool):
+    """Decide whether this humanize request is a free run.
+
+    Returns ``(subject, None)`` for a reserved free run, ``(None, None)`` when the user pays
+    as usual, or ``(None, response)`` when a guest is blocked.
+    """
+    from services import free_humanize
+
+    lim = free_humanize.limits()
+    words = free_humanize.count_words(text)
+    eligible = not (english_only and lim.engine == "student") or _is_english_text(text)
+
+    if user is None:
+        ip = free_humanize.client_ip(request)
+        if not free_humanize.guest_rate_limiter.allow(ip or "-", lim.guest_rate_per_minute):
+            resp = jsonify(
+                {
+                    "success": False,
+                    "error": "RATE_LIMITED",
+                    "message": "Too many requests. Wait a minute and try again.",
+                }
+            )
+            resp.status_code = 429
+            resp.headers["Retry-After"] = "60"
+            return None, resp
+        if not eligible:
+            return None, (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "FREE_ENGLISH_ONLY",
+                        "message": "Free runs work with English text for now.",
+                    }
+                ),
+                422,
+            )
+        if words > lim.guest_words:
+            return None, (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "FREE_WORD_LIMIT",
+                        "message": (
+                            f"Without an account, free runs take up to {lim.guest_words:,} words. "
+                            f"Create a free account for up to {lim.user_words:,} words."
+                        ),
+                        "max_words": lim.guest_words,
+                        "words": words,
+                    }
+                ),
+                403,
+            )
+        subject = free_humanize.guest_subject(
+            ip, free_humanize.guest_session_id(session), str(app.secret_key)
+        )
+        ip_subject = free_humanize.guest_ip_subject(ip, str(app.secret_key))
+        reserved = free_humanize.reserve(subject, lim.guest_daily)
+        if reserved and ip_subject and not free_humanize.reserve(ip_subject, lim.guest_ip_daily):
+            free_humanize.release(subject)
+            reserved = False
+        if not reserved:
+            session["guest_humanize_used"] = True
+            return None, (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "REGISTER_REQUIRED",
+                        "reason": "FREE_LIMIT_REACHED",
+                        "message": (
+                            "You have used today’s free runs. Create a free account to get "
+                            f"{lim.user_daily} free runs a day."
+                        ),
+                    }
+                ),
+                403,
+            )
+        g.free_humanize_ip_subject = ip_subject
+        return subject, None
+
+    if not eligible or words > lim.user_words or _has_active_plan(user):
+        return None, None
+    subject = free_humanize.user_subject(int(user["id"]))
+    if free_humanize.reserve(subject, lim.user_daily):
+        return subject, None
+    return None, None
+
+
+def _has_active_plan(user: dict) -> bool:
+    from services.economy.plans import active_plan
+
+    try:
+        return active_plan(int(user["id"])) is not None
+    except Exception:
+        return False
+
+
+def _release_free_run(subject: str) -> None:
+    from services import free_humanize
+
+    free_humanize.release(subject)
+    ip_subject = g.pop("free_humanize_ip_subject", None)
+    if ip_subject:
+        free_humanize.release(ip_subject)
+
+
+def _is_english_text(text: str) -> bool:
+    from services.humanizer_engine.student_humanizer import is_english
+
+    return is_english(text)
+
+
+def _free_runs_left(subject: str | None, user: dict | None) -> int | None:
+    from services import free_humanize
+
+    if subject is None:
+        return None
+    lim = free_humanize.limits()
+    left = free_humanize.remaining_today(subject, lim.user_daily if user else lim.guest_daily)
+    if user is None and left == 0:
+        session["guest_humanize_used"] = True
+    return left
+
+
+def _free_engine_unavailable():
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": "FREE_ENGINE_UNAVAILABLE",
+                "message": "The free humanizer is busy right now. Try again in a minute — this run wasn’t counted.",
+            }
+        ),
+        503,
+    )
+
+
+def _free_humanize_boot(user: dict | None) -> dict[str, Any]:
+    """Free allowance for the app's first render."""
+    from services import free_humanize
+
+    lim = free_humanize.limits()
+    if user is not None:
+        left = free_humanize.remaining_today(free_humanize.user_subject(int(user["id"])), lim.user_daily)
+    else:
+        ip = free_humanize.client_ip(request)
+        sid = session.get(free_humanize.GUEST_SESSION_KEY)
+        left = lim.guest_daily
+        if isinstance(sid, str) and sid:
+            subject = free_humanize.guest_subject(ip, sid, str(app.secret_key))
+            left = free_humanize.remaining_today(subject, lim.guest_daily)
+        ip_subject = free_humanize.guest_ip_subject(ip, str(app.secret_key))
+        if ip_subject:
+            left = min(left, free_humanize.remaining_today(ip_subject, lim.guest_ip_daily))
+    return {
+        "guestWords": lim.guest_words,
+        "guestDaily": lim.guest_daily,
+        "userWords": lim.user_words,
+        "userDaily": lim.user_daily,
+        "maxWords": lim.max_words,
+        "runsLeft": left,
+    }
+
+
 def _run_stealthwriter_humanize_job(text: str):
     """Run the production Humanizer job. Returns (job, error_response).
 
@@ -2869,6 +3132,9 @@ def api_extension_humanize():
                 "message": "Selection is too long (80000 characters max).",
             }
         ), 400
+    too_long = _humanize_word_cap_error(text)
+    if too_long is not None:
+        return too_long
 
     pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
     cost = int(pricing["charged"])
@@ -3321,6 +3587,8 @@ def editor():
 @app.route("/humanizer")
 @economy_auth.email_verified_required(allow_guest_preview=True)
 def humanizer():
+    if _serve_public_landing():
+        return _render_landing("landing/humanizer_en.html", signup_next="/humanizer")
     from services.economy.pricing import FEATURE_COSTS
     from services.economy.site_settings import humanize_credit_cost
 
@@ -3329,15 +3597,82 @@ def humanizer():
     discount_percent = int(pricing["discount_percent"] or 0)
     is_discount_active = bool(pricing["discount_active"]) and discount_percent > 0
     discounted_cost = int(pricing["charged"])
+    from services.site_content import free_limits_context
+
     return render_template(
         "humanizer.html",
         nav_active="humanizer",
+        free=free_limits_context(),
         humanize_cost=discounted_cost if is_discount_active else base_cost,
         base_cost=base_cost,
         is_discount_active=is_discount_active,
         discount_percent=discount_percent,
         discounted_cost=discounted_cost,
     )
+
+
+@app.route("/ru/humanizer")
+def ru_humanizer():
+    return _render_landing("landing/humanizer_ru.html", signup_next="/ru/humanizer")
+
+
+@app.route("/blog")
+def blog_index():
+    from services import blog
+    from services.seo import ROBOTS_NOINDEX, page_seo_for_path
+
+    posts = blog.published_posts()
+    seo = page_seo_for_path(
+        blog.BLOG_INDEX_PATH,
+        page=blog.index_page(),
+        robots=None if posts else ROBOTS_NOINDEX,
+        faq=[],
+    )
+    return render_template(
+        "landing/blog_index.html", seo=seo, posts=posts, display_date=blog.display_date
+    )
+
+
+def _render_blog_post(lang: str, slug: str):
+    from flask import abort
+
+    from services import blog
+    from services.seo import ROBOTS_NOINDEX, page_seo_for_path
+
+    user = economy_auth.current_user()
+    preview = user is not None and economy_auth.is_admin(user)
+    post = blog.find_post(lang, slug, include_drafts=preview)
+    if post is None:
+        abort(404)
+    seo = page_seo_for_path(
+        post.path,
+        page=blog.post_page(post),
+        robots=ROBOTS_NOINDEX if post.draft else None,
+        faq=[],
+        extra_nodes=[post.article_node()],
+        og_type="article",
+    )
+    from services.site_content import free_limits_context
+
+    more = [p for p in blog.published_posts(post.lang) if p.slug != post.slug][:3]
+    return render_template(
+        "landing/blog_post.html",
+        seo=seo,
+        post=post,
+        more=more,
+        free=free_limits_context(),
+        display_date=blog.display_date,
+    )
+
+
+@app.route("/blog/<slug>")
+def blog_post(slug: str):
+    return _render_blog_post("en", slug)
+
+
+@app.route("/ru/blog/<slug>")
+def blog_post_ru(slug: str):
+    return _render_blog_post("ru", slug)
 
 
 def _veil_client_status(user_id: int) -> dict[str, Any]:
@@ -3378,8 +3713,9 @@ def _app_v2_boot() -> dict[str, Any]:
             "defaultTheme": DEFAULT_THEME,
             "researchMaxChars": RESEARCH_MAX_REQUEST_CHARS,
         },
-        "guestHumanizeUsed": bool(session.get("guest_humanize_used")),
     }
+    boot["freeHumanize"] = _free_humanize_boot(user)
+    boot["guestHumanizeUsed"] = user is None and boot["freeHumanize"]["runsLeft"] <= 0
     if user:
         avatar = user.get("avatar_file")
         boot["user"] = {
@@ -4306,82 +4642,15 @@ def api_browser_stealthwriter_check_login():
 
 @app.post("/api/browser/providers/ru/humanize")
 def api_humanizer_ru():
-    """Replace lookalike Cyrillic letters. Credits match the English humanizer."""
-    from services.humanizer_engine.ru_humanizer import humanize_ru
-
-    payload = request.get_json(silent=True) or {}
-    text = payload.get("text")
-    if not isinstance(text, str) or not text.strip():
-        return jsonify({"success": False, "error": "text is required"}), 400
-    if len(text) > 80_000:
-        return jsonify({"success": False, "error": "text is too long"}), 400
-
-    user = economy_auth.current_user()
-    guest_trial = False
-
-    if user is None:
-        if session.get("guest_humanize_used"):
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "REGISTER_REQUIRED",
-                        "message": "Create a free account to humanize more text.",
-                    }
-                ),
-                403,
-            )
-        guest_trial = True
-        session["guest_humanize_used"] = True
-    elif not economy_auth.user_email_verified(user):
-        blocked = economy_auth.email_verification_gate()
-        if blocked is not None:
-            return blocked
-
-    from services.economy.pricing import FEATURE_COSTS
-    from services.economy.site_settings import humanize_credit_cost
-
-    pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
-    cost = 0 if guest_trial else int(pricing["charged"])
-    user_id = 0 if guest_trial else None
-    if not guest_trial:
-        charged = _charge_current_user(
-            "humanize",
-            cost,
-            meta={
-                "original_price": pricing["original_price"],
-                "discount_active": pricing["discount_active"],
-                "discount_percent": pricing["discount_percent"],
-                "discount_source": pricing["discount_source"],
-                "humanizer": "ru",
-            },
-        )
-        if not isinstance(charged, tuple):
-            return charged
-        user_id, _tx = charged
-        cost = _charged_amount(_tx, cost)
-
-    started = time.monotonic()
-    humanized = humanize_ru(text)
-    if not guest_trial and user_id:
-        _record_usage_safe(
-            int(user_id),
-            feature=FEATURE_HUMANIZER,
-            credits_used=cost,
-            provider="ru",
-            latency=int((time.monotonic() - started) * 1000),
-        )
-    return jsonify(
-        {
-            "success": True,
-            "humanized_text": humanized,
-            "coins_charged": cost,
-            "guest_trial": guest_trial,
-            "original_price": pricing["original_price"],
-            "discount_active": pricing["discount_active"],
-            "discount_percent": pricing["discount_percent"],
-            "balance": wallet.get_balance(int(user_id)) if user_id else 0,
-        }
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": "RU_NOT_SUPPORTED",
+                "message": "Russian text isn't supported yet. Paste English text to humanize it.",
+            }
+        ),
+        400,
     )
 
 
@@ -4389,40 +4658,37 @@ def api_humanizer_ru():
 def api_browser_stealthwriter_humanize():
     """Humanize via the production job engine (retries, timeout, recovery, logs).
 
-    Guests get one free humanize per browser session; signed-in users are charged.
+    Short texts get a daily free allowance (services/free_humanize.py); beyond it,
+    signed-in users are charged and guests are asked to sign up.
     """
+    from services import free_humanize
     from services.browser.jobs.retry import MAX_RETRIES
 
     payload = request.get_json(silent=True) or {}
     text = payload.get("text")
     if not isinstance(text, str) or not text.strip():
         return jsonify({"success": False, "error": "text is required"}), 400
+    too_long = _humanize_word_cap_error(text)
+    if too_long is not None:
+        return too_long
 
     user = economy_auth.current_user()
-    guest_trial = False
+    guest_trial = user is None
 
-    def _release_guest_trial() -> None:
-        if guest_trial:
-            session.pop("guest_humanize_used", None)
-
-    if user is None:
-        if session.get("guest_humanize_used"):
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "REGISTER_REQUIRED",
-                        "message": "Create a free account to humanize more text.",
-                    }
-                ),
-                403,
-            )
-        guest_trial = True
-        session["guest_humanize_used"] = True
-    elif not economy_auth.user_email_verified(user):
+    if user is not None and not economy_auth.user_email_verified(user):
         blocked = economy_auth.email_verification_gate()
         if blocked is not None:
             return blocked
+    free_subject, refused = _free_humanize_gate(user, text, english_only=True)
+    if refused is not None:
+        return refused
+    free_run = free_subject is not None
+
+    def _release_guest_trial() -> None:
+        if free_run:
+            _release_free_run(free_subject)
+            if guest_trial:
+                session.pop("guest_humanize_used", None)
 
     raw_source = str(payload.get("source") or "standalone").strip().lower()
     dataset_source = (
@@ -4435,9 +4701,9 @@ def api_browser_stealthwriter_humanize():
     from services.economy.site_settings import humanize_credit_cost
 
     pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
-    cost = 0 if guest_trial else int(pricing["charged"])
-    user_id = 0 if guest_trial else None
-    if not guest_trial:
+    cost = 0 if free_run else int(pricing["charged"])
+    user_id = int(user["id"]) if user is not None else 0
+    if not free_run:
         charged = _charge_current_user(
             "humanize",
             cost,
@@ -4449,13 +4715,12 @@ def api_browser_stealthwriter_humanize():
             },
         )
         if not isinstance(charged, tuple):
-            _release_guest_trial()
             return charged
         user_id, _tx = charged
         cost = _charged_amount(_tx, cost)
 
     def _refund_humanize(**kwargs: Any) -> None:
-        if guest_trial or not user_id:
+        if free_run or not user_id:
             return
         _refund_safe(int(user_id), cost, "humanize", **kwargs)
 
@@ -4499,12 +4764,21 @@ def api_browser_stealthwriter_humanize():
                 "job_id": request_id,
                 "coins_charged": cost,
                 "guest_trial": guest_trial,
+                "free_run": free_run,
+                "free_runs_left": _free_runs_left(free_subject, user),
                 "original_price": pricing["original_price"],
                 "discount_active": pricing["discount_active"],
                 "discount_percent": pricing["discount_percent"],
                 "balance": wallet.get_balance(int(user_id)) if user_id else 0,
             }
         )
+
+    if free_run and free_humanize.limits().engine == "student":
+        student = _student_humanize(text, rescue=True)
+        if student is None:
+            _release_guest_trial()
+            return _free_engine_unavailable()
+        return _humanize_success(student, student["request_id"])
 
     try:
         student = _student_humanize(text, rescue=_stealthwriter_down())

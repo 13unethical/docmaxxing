@@ -68,11 +68,11 @@ def test_action_triggers_modal_for_guest():
 
 
 def test_humanizer_guest_can_interact_without_tool_lock():
-    res = _client().get("/humanizer")
+    res = _client().get("/humanizer?classic=1")
     assert res.status_code == 200
     html = res.get_data(as_text=True)
     assert "data-guest-tool" not in html
-    assert "1 free run" in html
+    assert "Free: up to 500 words, once a day" in html
     assert "data-hz-run" in html
 
 
@@ -97,14 +97,14 @@ def test_account_page_redirects_guest():
 def test_only_whitelisted_pages_show_guest_preview():
     client = _client()
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
-        humanizer_html = client.get("/humanizer").get_data(as_text=True)
+        humanizer_html = client.get("/humanizer?classic=1").get_data(as_text=True)
         assert "data-guest-tool" not in humanizer_html
-        assert "1 free run" in humanizer_html
+        assert "Free: up to 500 words, once a day" in humanizer_html
 
         assignment_html = client.get("/assignment").get_data(as_text=True)
         assert "data-guest-tool" in assignment_html
 
-        format_html = client.get("/").get_data(as_text=True)
+        format_html = client.get("/?classic=1").get_data(as_text=True)
         assert 'data-guest-persist="v2_pasted_text"' in format_html
         assert "data-require-auth" in format_html
 
@@ -126,6 +126,7 @@ def test_signed_in_humanizer_and_workspace_cost_is_25(economy):
 
     hz = client.get("/humanizer").get_data(as_text=True)
     assert "1 free run" not in hz
+    assert "Free: up to 1,500 words, 10 times a day" in hz
     assert "25 Credits" in hz
     assert "hz-cost-strike" not in hz
 
@@ -151,10 +152,9 @@ def test_guest_history_shows_empty_state_not_error():
     assert "Sign in to see history" in html
 
 
-def test_guest_humanize_second_request_blocked():
+def test_guest_humanize_blocked_when_free_runs_are_spent(economy, monkeypatch):
+    monkeypatch.setenv("FREE_HUMANIZE_GUEST_DAILY", "0")
     client = _client()
-    with client.session_transaction() as sess:
-        sess["guest_humanize_used"] = True
     res = client.post(
         "/api/browser/providers/stealthwriter/humanize",
         json={"text": "Sample paragraph for humanize."},
@@ -165,16 +165,15 @@ def test_guest_humanize_second_request_blocked():
     assert data["error"] == "REGISTER_REQUIRED"
 
 
-def test_internal_error_codes_never_reach_ui():
+def test_internal_error_codes_never_reach_ui(economy, monkeypatch):
     js = Path(__file__).resolve().parents[1] / "static" / "api-errors.js"
     text = js.read_text(encoding="utf-8")
     assert "REGISTER_REQUIRED" in text
     assert "userMessage" in text
     assert "isInternalCode" in text
 
+    monkeypatch.setenv("FREE_HUMANIZE_GUEST_DAILY", "0")
     client = _client()
-    with client.session_transaction() as sess:
-        sess["guest_humanize_used"] = True
     res = client.post(
         "/api/browser/providers/stealthwriter/humanize",
         json={"text": "Sample paragraph for humanize."},
@@ -226,6 +225,6 @@ def test_form_state_survives_signup():
     assert "data-guest-persist" in text
 
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
-        html = _client().get("/").get_data(as_text=True)
+        html = _client().get("/?classic=1").get_data(as_text=True)
     assert 'data-guest-persist="v2_pasted_text"' in html
     assert "api-errors.js" in html

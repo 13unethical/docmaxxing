@@ -11,7 +11,7 @@ def _client():
 
 
 def test_veil_sidebar_link():
-    html = _client().get("/").get_data(as_text=True)
+    html = _client().get("/?classic=1").get_data(as_text=True)
     assert 'title="Veil"' in html
     assert "Veil (Stealth)" not in html
     assert 'href="/veil"' in html

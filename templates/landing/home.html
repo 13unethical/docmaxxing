@@ -1,0 +1,135 @@
+{% extends "landing/base.html" %}
+{% block content %}
+<section class="lp-hero lp-wrap" aria-labelledby="lp-h1">
+  <p class="lp-eyebrow">DocMaxxing</p>
+  <h1 id="lp-h1">{{ seo.h1 }}</h1>
+  <p class="lp-lede">
+    Turn a stiff AI draft into natural writing, format it in APA, MLA or Harvard for free, and check it against
+    your brief before you submit. Try the humanizer below — no account needed.
+  </p>
+  {% include "landing/_tool.html" %}
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="tools-h">
+  <h2 id="tools-h">Tools for every step of an assignment</h2>
+  <p class="lp-lede">Start with one tool or use them together — your text moves from one to the next without copy-pasting.</p>
+  <ul class="lp-cards">
+    <li class="lp-card">
+      <h3><a href="/humanizer">AI Humanizer</a></h3>
+      <p>Rewrite AI-sounding text into natural, readable prose. Free for short texts every day.</p>
+      <a class="lp-card-link" href="/humanizer">Humanize text →</a>
+    </li>
+    <li class="lp-card">
+      <h3><a href="/formatter">Essay Formatter</a></h3>
+      <p>APA 7, MLA 9, Harvard, Chicago and IEEE: margins, headings, cover page and references. Always free.</p>
+      <a class="lp-card-link" href="/formatter">Format an essay →</a>
+    </li>
+    <li class="lp-card">
+      <h3><a href="/app#/turnitin">AI &amp; Plagiarism Check</a></h3>
+      <p>Turnitin-style similarity and AI reports with highlighted passages, so you know what to revise.</p>
+      <a class="lp-card-link" href="/app#/turnitin">Check a document →</a>
+    </li>
+    <li class="lp-card">
+      <h3><a href="/app#/workspace">Workspace Editor</a></h3>
+      <p>Write and edit your paper, humanize just a selected passage, and review suggested changes.</p>
+      <a class="lp-card-link" href="/app#/workspace">Open the editor →</a>
+    </li>
+    <li class="lp-card">
+      <h3><a href="/app#/presentation">Slides</a></h3>
+      <p>Turn a topic or your paper into a presentation, pick a template and download a PowerPoint file.</p>
+      <a class="lp-card-link" href="/app#/presentation">Make slides →</a>
+    </li>
+    <li class="lp-card">
+      <h3><a href="/app#/assignment">Assignment Helper</a></h3>
+      <p>Send your brief, confirm the requirements and get a researched, cited draft step by step.</p>
+      <a class="lp-card-link" href="/app#/assignment">Start an assignment →</a>
+    </li>
+    <li class="lp-card">
+      <h3><a href="/app#/check">Work Review</a></h3>
+      <p>See how well your draft meets the brief and rubric, with a list of what to fix before submitting.</p>
+      <a class="lp-card-link" href="/app#/check">Review my work →</a>
+    </li>
+  </ul>
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="how-h">
+  <h2 id="how-h">How the humanizer works</h2>
+  <ol class="lp-steps">
+    <li>
+      <h3>Paste your draft</h3>
+      <p>Up to {{ free.guest_words_s }} words without an account, {{ free.user_words_s }} with a free one. Headings and references stay put.</p>
+    </li>
+    <li>
+      <h3>Press Humanize</h3>
+      <p>Our model rewrites paragraph by paragraph, varying sentence rhythm and replacing stock phrases with plain wording.</p>
+    </li>
+    <li>
+      <h3>Edit and finish</h3>
+      <p>Check the result against your original, then send it to the formatter or the editor to finish the document.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="example-h">
+  <h2 id="example-h">What “natural writing” looks like</h2>
+  <div class="lp-compare">
+    <figure>
+      <figcaption>AI draft</figcaption>
+      <blockquote>
+        <p>Moreover, it is crucial to acknowledge that effective time management plays a pivotal role in academic
+          success, as it enables students to navigate the multifaceted demands of university life.</p>
+      </blockquote>
+    </figure>
+    <figure>
+      <figcaption>Humanized</figcaption>
+      <blockquote>
+        <p>Managing your time well matters a lot at university. Lectures, deadlines and part-time work all compete
+          for the same week, and the students who plan for that tend to do better.</p>
+      </blockquote>
+    </figure>
+  </div>
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="who-h">
+  <div class="lp-prose">
+    <h2 id="who-h">Made for students, honest about limits</h2>
+    <p>
+      DocMaxxing is built for undergraduates, postgraduates and anyone writing in English for a course: people
+      who draft with AI help where it’s allowed, non-native speakers whose writing comes out stiff, and anyone who
+      would rather spend the evening on the argument than on margins and reference lists.
+    </p>
+    <p>
+      We don’t promise detector scores. AI detectors are statistical, they disagree with each other, and they
+      sometimes flag work written entirely by people. What we can do is help your text read naturally, keep your
+      formatting right, and show you where a draft falls short of the brief. Always review the result, cite your
+      sources, and follow your institution’s AI policy.
+    </p>
+    <p>
+      Formatting is free. The humanizer is free for short texts — up to {{ free.guest_words_s }} words,
+      {{ free.guest_daily_s }} a day without an account. Bigger jobs use credits; see <a href="/pricing">Pricing</a>
+      and <a href="/credits">how credits work</a>.
+    </p>
+  </div>
+</section>
+
+<section class="lp-section lp-wrap lp-faq" aria-labelledby="faq-h">
+  <h2 id="faq-h">Frequently asked questions</h2>
+  {% for question, answer in faq_items %}
+  <details>
+    <summary>{{ question }}</summary>
+    <div><p>{{ answer|safe }}</p></div>
+  </details>
+  {% endfor %}
+</section>
+
+<section class="lp-section lp-wrap">
+  <div class="lp-cta">
+    <h2>Get more free runs with an account</h2>
+    <p>Up to {{ free.user_words_s }} words, {{ free.user_daily }} times a day, plus history, the editor and slides. New accounts also get {{ welcome_bonus }} welcome credits.</p>
+    <a class="lp-btn lp-btn-primary lp-btn-lg" href="/register" data-umami-event="landing_signup_click" data-umami-event-place="cta_bottom">Create a free account</a>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='landing/tool.js') }}?v=20261102-1" defer></script>
+{% endblock %}

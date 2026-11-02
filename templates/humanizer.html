@@ -27,11 +27,6 @@
     <section class="hz-card hz-card--input" data-tour="hz-input">
       <div class="hz-card-head">
         <div>
-          <div class="dm-segment hz-lang-segment" role="tablist" aria-label="Humanizer language" data-hz-lang-segment>
-            <span class="dm-segment-thumb" aria-hidden="true"></span>
-            <button type="button" class="dm-segment-btn is-active" role="tab" aria-selected="true" data-hz-lang="eng">eng</button>
-            <button type="button" class="dm-segment-btn" role="tab" aria-selected="false" data-hz-lang="ru">ru</button>
-          </div>
           <h2 class="hz-card-title">Your text</h2>
         </div>
       </div>
@@ -90,7 +85,7 @@
           {% if not current_user %}
           <div class="hz-cost" aria-label="Humanize cost">
             <span class="hz-cost-label">Cost</span>
-            <span class="hz-cost-sale">1 free run</span>
+            <span class="hz-cost-sale">Free: up to {{ free.guest_words_s }} words, {{ free.guest_daily_s }} a day</span>
           </div>
           {% elif is_discount_active %}
           <div class="hz-cost hz-cost--discount" aria-label="Humanize cost">
@@ -102,6 +97,11 @@
           <div class="hz-cost" aria-label="Humanize cost">
             <span class="hz-cost-label">Cost</span>
             <span class="hz-cost-sale">{{ base_cost }} Credits</span>
+          </div>
+          {% endif %}
+          {% if current_user %}
+          <div class="hz-cost" aria-label="Free allowance">
+            <span class="hz-cost-label">Free: up to {{ free.user_words_s }} words, {{ free.user_daily_s }} a day</span>
           </div>
           {% endif %}
         </div>

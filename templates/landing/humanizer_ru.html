@@ -1,0 +1,168 @@
+{% extends "landing/base.html" %}
+{% block content %}
+<section class="lp-hero lp-wrap" aria-labelledby="lp-h1">
+  <h1 id="lp-h1">{{ seo.h1 }}</h1>
+  <p class="lp-lede">
+    Хуманайзер переписывает черновик после ChatGPT, Gemini или Claude так, чтобы он читался как живой текст:
+    предложения разной длины, простые слова, никаких дежурных оборотов. Смысл остаётся вашим.
+  </p>
+  <p class="lp-tool-msg is-cta">
+    <strong>Сейчас хуманайзер работает с английскими текстами.</strong> Русскоязычный движок в разработке, и мы
+    не будем выдавать за него простую замену слов или символов. Если вы пишете по-английски — пробуйте прямо здесь;
+    для русского текста страница обновится, когда движок будет готов.
+  </p>
+  {% include "landing/_tool.html" %}
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="how-h">
+  <h2 id="how-h">Как это работает</h2>
+  <ol class="lp-steps">
+    <li>
+      <h3>Вставьте текст</h3>
+      <p>Без регистрации — до {{ free.guest_words_ru }} слов, с бесплатным аккаунтом — до {{ free.user_words_ru }}.
+        Заголовки и список литературы остаются как были.</p>
+    </li>
+    <li>
+      <h3>Нажмите «Очеловечить текст»</h3>
+      <p>Модель проходит текст по абзацам: разбивает однообразные конструкции и заменяет шаблонные фразы
+        обычными словами.</p>
+    </li>
+    <li>
+      <h3>Проверьте и скопируйте</h3>
+      <p>Сравните результат с исходником, поправьте места, где сместился смысл, и скопируйте текст в документ
+        одной кнопкой.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="features-h">
+  <h2 id="features-h">Что меняет хуманайзер</h2>
+  <p class="lp-lede">Текст нейросети обычно грамотный, но плоский. Хуманайзер убирает именно то, из-за чего он так звучит.</p>
+  <ul class="lp-cards">
+    <li class="lp-card">
+      <h3>Ритм</h3>
+      <p>Нейросеть пишет предложениями одной длины и формы. После обработки короткие фразы чередуются с
+        длинными — как у человека, который думает над текстом.</p>
+    </li>
+    <li class="lp-card">
+      <h3>Шаблонные обороты</h3>
+      <p>«В современном быстро меняющемся мире», «важно отметить», «играет ключевую роль» и их английские
+        аналоги заменяются прямыми формулировками или исчезают.</p>
+    </li>
+    <li class="lp-card">
+      <h3>Лишние оговорки</h3>
+      <p>Нейросеть смягчает каждое утверждение. Хуманайзер оставляет осторожность там, где она нужна, и
+        убирает остальное — аргумент звучит увереннее.</p>
+    </li>
+    <li class="lp-card">
+      <h3>Структура на месте</h3>
+      <p>Заголовки, списки и литература не меняются, а утверждения, цифры и ссылки в тексте хуманайзер
+        старается сохранить.</p>
+    </li>
+  </ul>
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="example-h">
+  <h2 id="example-h">Пример до и после</h2>
+  <p class="lp-lede">Типичный абзац из чат-бота и та же мысль после обработки (пример на английском — на этом языке хуманайзер работает сейчас).</p>
+  <div class="lp-compare">
+    <figure>
+      <figcaption>До</figcaption>
+      <blockquote lang="en">
+        <p>In today’s rapidly evolving digital landscape, it is important to note that social media platforms have
+          become a pivotal source of news for students. Furthermore, this phenomenon raises significant concerns
+          regarding the quality and reliability of the information that young people consume on a daily basis.</p>
+      </blockquote>
+    </figure>
+    <figure>
+      <figcaption>После</figcaption>
+      <blockquote lang="en">
+        <p>Social media is now one of the main places students get their news. That raises a fair question: how
+          good is the information they read every day, and how much of it can they actually trust?</p>
+      </blockquote>
+    </figure>
+  </div>
+  <p>Мысль та же, объём сопоставимый, но второй вариант звучит так, будто у автора есть своё мнение.</p>
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="why-h">
+  <div class="lp-prose">
+    <h2 id="why-h">Почему текст нейросети звучит неестественно</h2>
+    <p>
+      Языковая модель пишет, раз за разом выбирая самое вероятное следующее слово. Поэтому её текст гладкий, но
+      предсказуемый: одни и те же связки («кроме того», «более того»), перечисления из трёх пунктов, абзацы,
+      которые начинаются с вывода и им же заканчиваются. Читатель замечает этот рисунок, даже если не может его
+      назвать.
+    </p>
+    <p>
+      Люди пишут неровно. Короткой фразой ставим точку в мысли, длинной — объясняем её. Выбираем простое слово
+      вместо красивого, пропускаем связку, если логика и так понятна, и не добавляем оговорок, о которых никто не
+      просил. Очеловечить текст — значит вернуть эту неровность и не потерять то, что в черновике получилось хорошо.
+    </p>
+    <h3>Как довести текст до финальной версии</h3>
+    <ul>
+      <li>Прочитайте результат вслух: всё, что вы никогда бы так не сказали, стоит переписать.</li>
+      <li>Добавьте к каждому тезису пример из прочитанного, лекций или своего опыта.</li>
+      <li>Сверьте факты, цифры и цитаты с источниками.</li>
+      <li>В конце оформите работу: бесплатное <a href="/formatter">оформление по APA, MLA и Harvard</a> сделает это за минуту.</li>
+    </ul>
+    <h3>Что будет с русским языком</h3>
+    <p>
+      Движок для русского текста в разработке. Простая замена слов синонимами или букв на похожие
+      символы портит текст: его сложнее читать, искать по нему и проверять орфографию, а системы проверки
+      замечают такие подмены. Поэтому русский режим появится только тогда, когда он будет действительно
+      переписывать текст.
+    </p>
+  </div>
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="who-h">
+  <h2 id="who-h">Кому подойдёт</h2>
+  <ul class="lp-cards">
+    <li class="lp-card">
+      <h3>Студентам англоязычных программ</h3>
+      <p>Эссе, отчёты и курсовые на английском, особенно если вы учитесь в международном вузе или готовите
+        документы для поступления.</p>
+    </li>
+    <li class="lp-card">
+      <h3>Тем, для кого английский не родной</h3>
+      <p>Если ваш английский выходит слишком скованным или канцелярским, хуманайзер переведёт его в обычный
+        академический тон.</p>
+    </li>
+    <li class="lp-card">
+      <h3>Исследователям и специалистам</h3>
+      <p>Отчёты, аннотации, сопроводительные письма и деловые письма, которые должны звучать по-человечески.</p>
+    </li>
+  </ul>
+  <p class="lp-muted">
+    Пользуйтесь честно: хуманайзер улучшает то, как читается текст, но не делает чужие идеи вашими. Указывайте
+    источники и сообщайте о помощи ИИ, если этого требует ваш вуз.
+  </p>
+</section>
+
+<section class="lp-section lp-wrap lp-faq" aria-labelledby="faq-h">
+  <h2 id="faq-h">Частые вопросы</h2>
+  {% for question, answer in faq_items %}
+  <details>
+    <summary>{{ question }}</summary>
+    <div><p>{{ answer|safe }}</p></div>
+  </details>
+  {% endfor %}
+</section>
+
+<section class="lp-section lp-wrap">
+  <div class="lp-cta">
+    <h2>Больше слов и запусков — тоже бесплатно</h2>
+    <p>С бесплатным аккаунтом лимит вырастает до {{ free.user_words_ru }} слов {{ free.user_daily_ru }} в день, а ещё
+      появляются история, редактор документов и проверка на ИИ.</p>
+    <a class="lp-btn lp-btn-primary lp-btn-lg" href="/register?next=/ru/humanizer" data-umami-event="landing_signup_click" data-umami-event-place="cta_bottom">Создать аккаунт бесплатно</a>
+    <p class="lp-muted" style="margin-top:16px">
+      Смотрите также: <a href="/formatter">оформление работ</a> · <a href="/pricing">цены</a> · <a href="/faq">FAQ</a> ·
+      <a href="/humanizer" hreflang="en" lang="en">AI Humanizer in English</a>
+    </p>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='landing/tool.js') }}?v=20261102-1" defer></script>
+{% endblock %}

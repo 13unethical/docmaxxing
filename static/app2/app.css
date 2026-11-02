@@ -1023,6 +1023,9 @@ table.hist { width: 100%; border-collapse: collapse; min-width: 780px; font-size
 .rate-table th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); background: var(--surface-2); }
 .rate-table tr:last-child td { border-bottom: 0; }
 .pub-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-5) 0; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 13px; }
+.pub-foot-links { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.pub-foot-links a { color: var(--text-muted); text-decoration: none; }
+.pub-foot-links a:hover { color: var(--text); text-decoration: underline; }
 @media (max-width: 900px) {
   .hero, .land-credits, .task-groups { grid-template-columns: 1fr; }
   .pub-links { display: none; }

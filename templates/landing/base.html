@@ -1,0 +1,50 @@
+{# Public server-rendered pages (landings, 404, blog): light, no app shell, full content without JS. #}
+{% set ru = seo.lang == 'ru' %}
+<!doctype html>
+<html lang="{{ seo.lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ seo.title }}</title>
+{% include "_seo_head.html" %}
+<meta name="theme-color" content="#0b0b0f">
+<link rel="preload" href="{{ url_for('static', filename='landing/findsans-bold.woff2') }}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{ url_for('static', filename='landing/landing.css') }}?v=20261102-1">
+<script defer src="https://cloud.umami.is/script.js" data-website-id="177e569c-f873-485d-9ba7-cb75a43be7b6"></script>
+</head>
+<body class="lp">
+<a class="lp-skip" href="#main">{{ 'Перейти к содержанию' if ru else 'Skip to content' }}</a>
+<header class="lp-header">
+  <div class="lp-wrap lp-header-inner">
+    <a class="lp-logo" href="/" aria-label="DocMaxxing — {{ 'главная' if ru else 'home' }}">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" width="24" height="24"><path d="M7 3.75h7l4.25 4.25V20.25a1.5 1.5 0 0 1-1.5 1.5h-9.5a1.5 1.5 0 0 1-1.5-1.5V5.25A1.5 1.5 0 0 1 7 3.75Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M14 3.75V8h4.25" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="M8.75 11h6.5M8.75 14.5h6.5M8.75 18h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span>DocMaxxing</span>
+    </a>
+    <nav class="lp-nav" aria-label="{{ 'Основное меню' if ru else 'Main' }}">
+      {% if ru %}
+      <a href="/ru/humanizer">Хуманайзер</a>
+      <a href="/formatter">Оформление</a>
+      <a href="/pricing">Цены</a>
+      <a href="/blog">Блог</a>
+      {% else %}
+      <a href="/humanizer">AI Humanizer</a>
+      <a href="/formatter">Formatter</a>
+      <a href="/pricing">Pricing</a>
+      <a href="/blog">Blog</a>
+      {% endif %}
+    </nav>
+    <div class="lp-header-cta">
+      <a class="lp-btn lp-btn-ghost" href="/login">{{ 'Войти' if ru else 'Log in' }}</a>
+      <a class="lp-btn lp-btn-primary" href="/register" data-umami-event="landing_signup_click" data-umami-event-place="header">{{ 'Регистрация' if ru else 'Sign up free' }}</a>
+    </div>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+{% block content %}{% endblock %}
+</main>
+
+{% include "landing/_footer.html" %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

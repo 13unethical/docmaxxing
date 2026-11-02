@@ -547,8 +547,8 @@ def _wants_json() -> bool:
 
 
 def _guest_page_preview_allowed() -> bool:
-    """True for unsigned GET navigations to HTML pages (not APIs)."""
-    if request.method != "GET":
+    """True for unsigned GET/HEAD navigations to HTML pages (not APIs)."""
+    if request.method not in ("GET", "HEAD"):
         return False
     if request.path.startswith("/api/"):
         return False

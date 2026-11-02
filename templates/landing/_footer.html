@@ -1,0 +1,31 @@
+{% set ru = seo.lang == 'ru' %}
+<footer class="lp-footer">
+  <div class="lp-wrap lp-footer-grid">
+    <div>
+      <p class="lp-footer-brand">DocMaxxing</p>
+      <p class="lp-muted">{{ 'Инструменты для студентов: хуманайзер, оформление работ, проверка и помощь с заданиями.' if ru else 'Writing tools for students: AI humanizer, essay formatting, checks and assignment help.' }}</p>
+      <p class="lp-muted"><a href="mailto:support@docmaxxing.com">support@docmaxxing.com</a></p>
+    </div>
+    <nav aria-label="{{ 'Инструменты' if ru else 'Tools' }}">
+      <p class="lp-footer-h">{{ 'Инструменты' if ru else 'Tools' }}</p>
+      <a href="/humanizer">AI Humanizer</a>
+      <a href="/formatter">{{ 'Оформление APA, MLA, Harvard' if ru else 'Essay Formatter' }}</a>
+      <a href="/pricing">{{ 'Цены' if ru else 'Pricing' }}</a>
+    </nav>
+    <nav aria-label="{{ 'Ресурсы' if ru else 'Resources' }}">
+      <p class="lp-footer-h">{{ 'Ресурсы' if ru else 'Resources' }}</p>
+      <a href="/blog">{{ 'Блог' if ru else 'Blog' }}</a>
+      <a href="/faq">FAQ</a>
+      <a href="/about">{{ 'О нас' if ru else 'About' }}</a>
+      <a href="/contact">{{ 'Контакты' if ru else 'Contact' }}</a>
+    </nav>
+    <nav aria-label="{{ 'Документы' if ru else 'Legal' }}">
+      <p class="lp-footer-h">{{ 'Документы' if ru else 'Legal' }}</p>
+      <a href="/terms">{{ 'Условия использования' if ru else 'Terms and Conditions' }}</a>
+      <a href="/privacy">{{ 'Политика конфиденциальности' if ru else 'Privacy Policy' }}</a>
+      <a href="/refund-policy">{{ 'Возвраты' if ru else 'Refund Policy' }}</a>
+      <a href="/disclaimer">{{ 'Ограничения ответственности' if ru else 'Disclaimer' }}</a>
+    </nav>
+  </div>
+  <div class="lp-wrap lp-footer-copy lp-muted">© 2026 DocMaxxing</div>
+</footer>

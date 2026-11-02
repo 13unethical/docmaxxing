@@ -1,8 +1,15 @@
-"""Old server-rendered pages send visitors to the matching screen of the new app."""
+"""Old server-rendered pages send visitors to the matching screen of the new app.
+
+Public landing pages stay server-rendered for guests (and crawlers); signed-in users
+still go to the app.
+"""
 
 from __future__ import annotations
 
 import pytest
+
+from services.economy import auth as economy_auth
+from services.economy import db as economy_db
 
 
 @pytest.fixture()
@@ -14,18 +21,56 @@ def client(monkeypatch):
     return app.test_client()
 
 
+@pytest.fixture()
+def signed_in_client(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(economy_db, "DB_PATH", tmp_path / "economy.db")
+    economy_db.init_db()
+    user = economy_auth.create_user("redirects@example.com", "secret123")
+    economy_auth.mark_email_verified(user["id"], user["email"])
+    with client.session_transaction() as sess:
+        sess[economy_auth.SESSION_KEY] = user["id"]
+    return client
+
+
+PUBLIC_PAGES = ["/", "/humanizer", "/ru/humanizer", "/pricing", "/formatter"]
+
+
+@pytest.mark.parametrize("path", PUBLIC_PAGES)
+def test_public_pages_render_for_guests(client, path):
+    resp = client.get(path)
+    assert resp.status_code == 200, path
+    assert "Location" not in resp.headers
+    html = resp.get_data(as_text=True)
+    robots = "noindex, follow" if path == "/ru/humanizer" else "index, follow"
+    assert f'<meta name="robots" content="{robots}"' in html
+
+
 @pytest.mark.parametrize(
     ("path", "target"),
     [
         ("/", "/app#/home"),
         ("/humanizer", "/app#/humanizer"),
+        ("/ru/humanizer", "/app#/humanizer"),
         ("/pricing", "/app#/pricing"),
-        ("/veil", "/app#/veil"),
-        ("/admin", "/app#/admin"),
+        ("/formatter", "/app#/format"),
         ("/pricing?paid=1&utm_source=x", "/app?paid=1&utm_source=x#/pricing"),
     ],
 )
-def test_old_pages_redirect(client, path, target):
+def test_public_pages_redirect_signed_in_users(signed_in_client, path, target):
+    resp = signed_in_client.get(path)
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == target
+
+
+@pytest.mark.parametrize(
+    ("path", "target"),
+    [
+        ("/veil", "/app#/veil"),
+        ("/admin", "/app#/admin"),
+        ("/turnitin", "/app#/turnitin"),
+    ],
+)
+def test_app_only_pages_still_redirect_guests(client, path, target):
     resp = client.get(path)
     assert resp.status_code == 302
     assert resp.headers["Location"] == target
@@ -37,16 +82,17 @@ def test_kept_pages_do_not_redirect_to_app(client, path):
     assert "#/" not in resp.headers.get("Location", "")
 
 
-def test_classic_param_and_legacy_env_skip_redirect(client, monkeypatch):
-    assert client.get("/pricing?classic=1").status_code == 200
+def test_classic_param_and_legacy_env_skip_redirect(signed_in_client, monkeypatch):
+    assert signed_in_client.get("/pricing?classic=1").status_code == 200
     monkeypatch.setenv("LEGACY_UI", "1")
-    assert client.get("/pricing").status_code == 200
+    assert signed_in_client.get("/pricing").status_code == 200
 
 
-def test_app_has_seo_and_analytics(client):
+def test_app_is_noindex_without_root_canonical(client):
     html = client.get("/app").get_data(as_text=True)
     assert '<meta name="description"' in html
-    assert '<link rel="canonical" href="https://docmaxxing.com"' in html
+    assert '<meta name="robots" content="noindex, follow"' in html
+    assert 'rel="canonical"' not in html
     assert "cloud.umami.is/script.js" in html
 
 

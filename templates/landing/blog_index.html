@@ -1,0 +1,35 @@
+{% extends "landing/base.html" %}
+{% block content %}
+<section class="lp-section lp-wrap">
+  <nav class="lp-breadcrumbs" aria-label="Breadcrumbs"><a href="/">Home</a> / Blog</nav>
+  <h1>Blog</h1>
+  <p class="lp-lede">Plain-English guides on AI writing, AI detectors, Turnitin reports and citing AI tools — written for students.</p>
+  {% if posts %}
+  <ul class="lp-post-list">
+    {% for post in posts %}
+    <li>
+      <h2><a href="{{ post.path }}"{% if post.lang != 'en' %} hreflang="{{ post.lang }}" lang="{{ post.lang }}"{% endif %}>{{ post.title }}</a></h2>
+      <p class="lp-post-meta"><time datetime="{{ post.date }}">{{ display_date(post.date, post.lang) }}</time>{% if post.lang == 'ru' %} · на русском{% endif %}</p>
+      <p{% if post.lang != 'en' %} lang="{{ post.lang }}"{% endif %}>{{ post.description }}</p>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>The first articles are on their way. Meanwhile, try the tools:</p>
+  <ul class="lp-cards">
+    <li class="lp-card">
+      <h2><a href="/humanizer">AI Humanizer</a></h2>
+      <p>Turn a stiff AI draft into natural, readable writing. Free for short texts.</p>
+    </li>
+    <li class="lp-card">
+      <h2><a href="/formatter">Essay Formatter</a></h2>
+      <p>APA, MLA, Harvard, Chicago and IEEE formatting — free.</p>
+    </li>
+    <li class="lp-card">
+      <h2><a href="/faq">FAQ</a></h2>
+      <p>Free limits, credits, plans and how each tool works.</p>
+    </li>
+  </ul>
+  {% endif %}
+</section>
+{% endblock %}

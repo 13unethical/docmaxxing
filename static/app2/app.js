@@ -10,6 +10,12 @@ const CONFIG = {
   wordLimit: 5000,
   pricePlaceholder: '[N] credits',          // replace with real prices per tool below
   freeNote: 'Formatting and Work Review are free',
+  // Landing footer: real page links (crawlable server-rendered pages).
+  publicFooter: [
+    { label: 'AI Humanizer', path: '/humanizer' },
+    { label: 'Pricing', path: '/pricing' }, { label: 'Blog', path: '/blog' }, { label: 'FAQ', path: '/faq' },
+    { label: 'Terms', path: '/terms' }, { label: 'Privacy', path: '/privacy' }, { label: 'Contact', path: '/contact' },
+  ],
   // Veil page (menu → Information → Veil). Copy from the Veil design canvas.
   veil: {
     price: 2200, days: 30,                    // credits for 30 days of access, no auto-renewal (from the server)
@@ -46,7 +52,7 @@ const CONFIG = {
           price: '[N] credits',
           description: 'Check your text for AI-generated content and plagiarism' },
         { id: 'humanizer', label: 'Humanizer', route: 'humanizer', icon: 'sparkles', primary: true,
-          badge: '-50%', price: '[N] credits', guestPrice: '1 free run',
+          badge: '-50%', price: '[N] credits', guestPrice: 'Free for short texts',
           description: 'Rewrite text so it sounds natural and human' },
       ],
     },
@@ -1504,6 +1510,14 @@ const API = window.DMX.api;
   CONFIG.pricePlaceholder = 'Price shown before you pay';
   Object.assign(item('turnitin'), { price: cr(c.turnitin) });
   Object.assign(item('humanizer'), { price: cr(c.humanizer), badge: c.humanizerDiscount ? `-${c.humanizerDiscount}%` : '' });
+  const fh = BOOT.freeHumanize;
+  if (fh) {
+    CONFIG.freeHumanize = fh;
+    CONFIG.wordLimit = fh.maxWords || CONFIG.wordLimit;
+    item('humanizer').guestPrice = freeHumanizeNote(false);
+    const step = CONFIG.tours.humanizer.steps.find(s => s.target === '#hum-meta');
+    if (step) step.textGuest = `${freeHumanizeNote(false)} without an account. A free account raises it to ${freeHumanizeNote(true).replace(/^Free: up to /, '')}.`;
+  }
   Object.assign(item('workspace'), { price: `${cr(c.humanizer)} per humanize` });
   CONFIG.slides.price = cr(c.presentation);
   CONFIG.slides.perSlidePrice = c.presentationPerSlide ?? CONFIG.slides.perSlidePrice;
@@ -1628,9 +1642,16 @@ function costHtml(item) {
   if (!state.signedIn && item.guestPrice) {
     return state.guestRunsUsed < 1
       ? `<span class="free">${esc(item.guestPrice)}</span>`
-      : 'Free run used — <a href="#" data-act="signup">sign up</a> for ' + CONFIG.signupCredits + ' credits';
+      : 'Today’s free runs are used — <a href="#" data-act="signup">sign up</a> for more free runs and ' + CONFIG.signupCredits + ' credits';
   }
   return esc(item.price || CONFIG.pricePlaceholder);
+}
+function freeHumanizeNote(signedIn) {
+  const fh = CONFIG.freeHumanize;
+  if (!fh) return '';
+  const words = Number(signedIn ? fh.userWords : fh.guestWords).toLocaleString('en-US').replace(/,/g, ' ');
+  const daily = signedIn ? fh.userDaily : fh.guestDaily;
+  return `Free: up to ${words} words, ${daily} ${daily === 1 ? 'time' : 'times'} a day`;
 }
 function freeNoteHtml() {
   return esc(CONFIG.freeNote).replace(/\bfree\b/, '<span class="free">free</span>');
@@ -2740,14 +2761,14 @@ function homeColHtml(id, title, body, action = '', boxId = '') {
 function promoHtml() {
   return homeColHtml('promo-h', esc(H().titles.guestCredits), `<div class="box-head">
       <div><p class="box-title">Sign up and get ${CONFIG.signupCredits} credits</p>
-        <p class="box-sub">${freeNoteHtml()}. Humanizer: <span class="free">1 free run</span> without an account.</p></div>
+        <p class="box-sub">${freeNoteHtml()}. Humanizer: <span class="free">${esc(ITEMS.humanizer.guestPrice)}</span> without an account.</p></div>
       <button class="btn btn-sm btn-primary" data-act="signup">Sign up</button></div>`);
 }
 
 /* Start here: one field, then Humanize or Check for AI (main) */
 function quickStartHtml() {
   const has = !!(workDoc.file || workDoc.text.trim());
-  const humanizeCost = !state.signedIn && state.guestRunsUsed < 1 ? '1 free run' : estLabel('humanizer');
+  const humanizeCost = !state.signedIn && state.guestRunsUsed < 1 ? ITEMS.humanizer.guestPrice : estLabel('humanizer');
   return `<section class="qs" id="qs" aria-labelledby="qs-h">
     <h1 id="qs-h" class="qs-title" tabindex="-1">${esc(H().startTitle)}</h1>
     <div class="qs-field">
@@ -2981,6 +3002,7 @@ function renderTextTool(id) {
         <span class="tool-meta" id="hum-meta">
           <span class="counter" id="counter" aria-live="polite"></span>
           <span class="cost" id="cost">Cost: ${state.signedIn && !item.free && estCredits(id) != null ? estLabel(id) : costHtml(item)}</span>
+          ${state.signedIn && id === 'humanizer' && CONFIG.freeHumanize ? `<span class="free">${esc(freeHumanizeNote(true))}</span>` : ''}
         </span>
         <span class="spacer"></span>
         <button class="btn" data-act="clear-tool">Clear</button>
@@ -7489,7 +7511,7 @@ async function runTool(id) {
     const out = String(data.humanized_text || data.text || '').trim();
     if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
     t.status = 'done'; t.result = { text: out };
-    if (!state.signedIn) state.guestRunsUsed = 1;
+    if (!state.signedIn) state.guestRunsUsed = data.free_runs_left === 0 ? 1 : 0;
     if (state.signedIn) { addDoc(source, id, { text: out }); loadCredits(); }
   } catch (err) {
     const e = apiErrorInfo(err, { intent: id });
@@ -7640,7 +7662,7 @@ function renderLanding() {
     return `<div class="task-group"><h3>${esc(g.label)}</h3>${items.map(taskCard).join('')}</div>`;
   }).join('');
   const rows = TASK_ITEMS().map(i => `<tr><td>${esc(i.label)}</td><td>${
-    i.free ? '<span class="free">Free</span>' : esc(i.price || CONFIG.pricePlaceholder) + (i.guestPrice ? ` · <span class="free">first run free</span>` : '')}</td></tr>`).join('');
+    i.free ? '<span class="free">Free</span>' : esc(i.price || CONFIG.pricePlaceholder) + (i.guestPrice ? ` · <span class="free">${esc(i.guestPrice)}</span>` : '')}</td></tr>`).join('');
   return `<div class="pub">
     ${publicNav(`<nav class="pub-links" aria-label="Landing sections">
         <a href="#tasks" data-act="scroll-to" data-target="tasks">Tools</a>
@@ -7683,7 +7705,8 @@ function renderLanding() {
         <table class="rate-table"><thead><tr><th>Tool</th><th>Cost</th></tr></thead><tbody>${rows}</tbody></table>
       </div>
     </section>
-    <footer class="pub-foot"><span>© 2026 ${esc(CONFIG.brand)}</span><span>Terms · Privacy · Contact</span></footer>
+    <footer class="pub-foot"><span>© 2026 ${esc(CONFIG.brand)}</span>
+      <nav class="pub-foot-links" aria-label="Site">${CONFIG.publicFooter.map(l => `<a href="${esc(l.path)}">${esc(l.label)}</a>`).join('')}</nav></footer>
   </div>`;
 }
 

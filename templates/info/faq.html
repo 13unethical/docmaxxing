@@ -1,47 +1,13 @@
 {% extends "info/base.html" %}
 {% set info_active = "faq" %}
 {% set page_title = "FAQ" %}
-{% set page_lede = "Common questions about DocMaxxing tools, credits, referrals, and Assignment delivery." %}
+{% set page_lede = "Common questions about DocMaxxing tools, credits, plans and referrals." %}
+{# Questions live in services/site_content.py so the FAQPage JSON-LD always matches this page. #}
 {% block info_body %}
-<h2>Getting started</h2>
-<p><strong>Do I need an account?</strong> You can try Format as a guest for many flows. Buying credits, saving Assignment progress, running paid Humanizer / Turnitin actions, and Earn &amp; Share require sign-up.</p>
-<p><strong>Where do I buy credits?</strong> Read the <a href="{{ url_for('credits') }}">Credits</a> guide, then open <a href="{{ url_for('pricing') }}">Buy credits</a>. Checkout uses Lemon Squeezy. Guests are asked to register before checkout.</p>
-{# Previously: Cryptomus (crypto) and/or Paddle (cards). #}
-<p><strong>What are welcome credits?</strong> New accounts receive <strong>50</strong> welcome credits. Signing up with a referral link also grants <strong>+100</strong> referral bonus credits.</p>
-
-<h2>Format</h2>
-<p><strong>What files can I upload?</strong> Briefs and text as paste or DOC/PDF/TXT/images (as shown on the Format page).</p>
-<p><strong>Which styles are supported?</strong> Harvard, APA, MLA presets plus custom font, size, spacing, margins, cover page, references, and citations.</p>
-<p><strong>Does Format cost credits?</strong> No — Format is free.</p>
-
-<h2>Humanizer</h2>
-<p><strong>How does humanizing run?</strong> The standalone Humanizer and Assignment humanizing use StealthWriter Legacy 5.1. Assignment batches can run up to ~5,000 words.</p>
-<p><strong>Why is AI score still high?</strong> Later revision / repair steps can rewrite prose. The pipeline re-humanizes after those steps; always re-check the final DOCX on your detector of choice.</p>
-<p><strong>Cost?</strong> Typically <strong>25 credits</strong> per humanize action (Pro users get 10% off paid charges).</p>
-
-<h2>Assignment</h2>
-<p><strong>What is the pipeline?</strong> Upload brief → price → pay → research → blueprint → write sections → citations → humanize → format → review/revision → validation → AI detection → delivery ZIP.</p>
-<p><strong>Word count rules?</strong> Targets use a ±10% band (example: 1200 → 1080–1320). Overages are trimmed (including Gemini smart-trim when needed).</p>
-<p><strong>Download says ready but nothing downloads?</strong> Use Download again — packaging rebuilds the ZIP. Hard-refresh if the UI was stale.</p>
-
-<h2>Turnitin &amp; detection</h2>
-<p><strong>Is this official Turnitin?</strong> We provide Turnitin-style report workflows through configured providers. Institutional Turnitin portals can still differ.</p>
-<p><strong>Cost?</strong> Typically <strong>300 credits</strong> per check. Earn &amp; Share milestones can award free detailed Turnitin reports.</p>
-
-<h2>Academic Check</h2>
-<p><strong>What does it do?</strong> Paste your assignment brief and draft (or upload DOCX/PDF) to get a readiness score, missing requirements, and an action plan — free for everyone.</p>
-<p><strong>Do I need credits?</strong> No — Academic Check does not spend credits.</p>
-
-<h2>Earn &amp; Share</h2>
-<p><strong>How does cashback work?</strong> When someone you referred deposits, you earn <strong>40%</strong> of that USD amount into your referral balance.</p>
-<p><strong>What counts as a qualifying friend?</strong> Their first deposit of <strong>$10+</strong>. Milestones unlock free Turnitin reports, bonus credits, and Pro (10% off) at 10 qualifying friends.</p>
-<p><strong>Convert or withdraw?</strong> Convert referral USD to credits at <strong>1.2×</strong>, or request a withdrawal from <strong>$50</strong> minimum (manual review).</p>
-
-<h2>Coming soon</h2>
-<p><strong>What about Workspace and Presentation?</strong> They are listed in the menu but currently show a Soon page until they launch.</p>
-
-<h2>Billing</h2>
-<p><strong>Who processes payment?</strong> Lemon Squeezy for card / wallet payments (merchant of record).</p>
-{# Previously: Cryptomus for crypto checkout and Paddle for card / wallet payments. #}
-<p><strong>Refunds?</strong> All purchases are final and we do not offer refunds. You can cancel a plan at any time; it stays active until the end of the paid period. Credits for failed actions return to your balance automatically. See <a href="{{ url_for('refund_policy') }}">Refund Policy</a>.</p>
+{% for heading, items in faq_sections %}
+<h2>{{ heading|safe }}</h2>
+{% for question, answer in items %}
+<p><strong>{{ question }}</strong> {{ answer|safe }}</p>
+{% endfor %}
+{% endfor %}
 {% endblock %}

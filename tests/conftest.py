@@ -16,6 +16,15 @@ def _legacy_pages_render(monkeypatch):
     monkeypatch.setenv("LEGACY_UI", "1")
 
 
+@pytest.fixture(autouse=True)
+def _fresh_guest_rate_limit():
+    from services.free_humanize import guest_rate_limiter
+
+    guest_rate_limiter.reset()
+    yield
+    guest_rate_limiter.reset()
+
+
 def run_format_pipeline(
     doc: Document,
     job: FormatJob,

@@ -58,18 +58,21 @@ def test_check_page_shows_guest_preview():
 
 
 def test_check_not_listed_as_coming_soon():
-    about = Path(__file__).resolve().parents[1] / "templates" / "info" / "about.html"
-    faq = Path(__file__).resolve().parents[1] / "templates" / "info" / "faq.html"
-    about_text = about.read_text(encoding="utf-8")
-    faq_text = faq.read_text(encoding="utf-8")
+    from app import app
 
-    coming_about = about_text.split("<h2>Coming soon</h2>", 1)[-1]
-    assert "Academic Check" not in coming_about.split("</ul>", 1)[0]
+    about = Path(__file__).resolve().parents[1] / "templates" / "info" / "about.html"
+    about_text = about.read_text(encoding="utf-8")
+    faq_text = app.test_client().get("/faq").get_data(as_text=True)
+
+    if "<h2>Coming soon</h2>" in about_text:
+        coming_about = about_text.split("<h2>Coming soon</h2>", 1)[-1]
+        assert "Academic Check" not in coming_about.split("</ul>", 1)[0]
 
     assert "Academic Check" in about_text.split("<h2>What you can do today</h2>", 1)[-1]
 
-    coming_faq = faq_text.split("<h2>Coming soon</h2>", 1)[-1]
-    assert "Academic Check" not in coming_faq.split("<h2>", 1)[0]
+    if "<h2>Coming soon</h2>" in faq_text:
+        coming_faq = faq_text.split("<h2>Coming soon</h2>", 1)[-1]
+        assert "Academic Check" not in coming_faq.split("<h2>", 1)[0]
     assert "Academic Check" in faq_text
 
 

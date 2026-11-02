@@ -1,44 +1,41 @@
 {% extends "info/base.html" %}
 {% set info_active = "about" %}
 {% set page_title = "About Us" %}
-{% set page_lede = "DocMaxxing is an academic document studio for formatting, humanizing, integrity checks, and assignment delivery." %}
+{% set page_lede = "DocMaxxing is an academic writing studio for students: humanizing, formatting, checks, editing, slides and assignment help." %}
 {% block info_body %}
 <p>
   DocMaxxing helps students and researchers ship clean academic documents without fighting Word styles
-  for hours. The product combines free formatting, AI humanization, Turnitin-style reports, citations,
-  a full Assignment pipeline, and a referral cashback program in one place.
+  for hours. The product combines free formatting, an AI humanizer, Turnitin-style reports, a document
+  editor, a presentation maker, citations, a full Assignment pipeline, and a referral cashback program in one place.
 </p>
 
 <h2>What you can do today</h2>
 <ul>
-  <li><strong>Format</strong> — paste or upload text, apply Harvard / APA / MLA presets, fonts, margins, cover page, references, and citations, then download a DOCX. Free.</li>
-  <li><strong>Humanizer</strong> — rewrite AI-sounding prose through StealthWriter (Legacy 5.1), including large batches up to ~5,000 words in Assignment.</li>
-  <li><strong>Turnitin</strong> — run similarity / AI-oriented report workflows billed in credits.</li>
-  <li><strong>Assignment</strong> — upload a brief, review the price, pay once, then auto-run research → blueprint → writing → citations → humanize → format → review → AI detection → delivery ZIP.</li>
-  <li><strong>Academic Check</strong> — compare a draft to your assignment brief and rubric (free).</li>
+  <li><strong>Humanizer</strong> — rewrite stiff, AI-sounding prose into natural writing with our own fine-tuned model and a partner rewriting engine. Short texts are free every day; see the <a href="/humanizer">AI Humanizer</a> page.</li>
+  <li><strong>Format</strong> — paste or upload text, apply Harvard / APA / MLA / Chicago / IEEE presets, fonts, margins, cover page, references, and citations, then download a DOCX. Free.</li>
+  <li><strong>Workspace</strong> — a document editor: write or paste your paper, humanize a selection, review suggested changes, and export a DOCX.</li>
+  <li><strong>Slides</strong> — turn a topic or your paper into a presentation, pick a template, and download a PowerPoint file.</li>
+  <li><strong>AI check</strong> — run Turnitin-style similarity and AI report workflows billed in credits.</li>
+  <li><strong>Assignment</strong> — upload a brief, review the price, pay once, then auto-run research → blueprint → writing → citations → formatting → review → delivery ZIP.</li>
+  <li><strong>Work Review (Academic Check)</strong> — compare a draft to your assignment brief and rubric (free).</li>
+  <li><strong>Veil</strong> — a Chrome extension that explains and humanizes text on the page you are reading.</li>
   <li><strong>Earn &amp; Share</strong> — invite friends, earn cashback on their deposits, unlock milestone rewards, convert to credits, or withdraw.</li>
 </ul>
-
-<h2>Coming soon</h2>
-<ul>
-  <li><strong>Workspace</strong> — in-editor paid tools</li>
-  <li><strong>Presentation</strong> — presentation helpers</li>
-</ul>
-<p>These items appear in the sidebar and open a “Soon” page until they launch.</p>
 
 <h2>How Assignment works</h2>
 <p>
   The Assignment pipeline treats your brief as the source of truth. We extract required sections,
   word budgets (±10%), formatting rules, rubric / learning outcomes, and mandatory evidence
-  (for example lecture/seminar references in Learning Journals). Writing can happen section-by-section;
-  humanizing runs on large batches; a grade gate repairs word count and rubric gaps before export.
+  (for example lecture/seminar references in Learning Journals). Writing happens section by section,
+  and a grade gate repairs word count and rubric gaps before export.
 </p>
 
 <h2>Credits economy</h2>
 <p>
-  Format stays free. Paid actions (humanize, Turnitin, Assignment, and related metered tools) spend credits.
-  New accounts get 50 welcome credits. Packages are sold on the
-  <a href="{{ url_for('pricing') }}">buy credits</a> screen via Lemon Squeezy
+  Format stays free, and short humanizer runs are free every day. Paid actions (longer humanizer runs,
+  AI checks, Assignment, Slides and related metered tools) spend credits.
+  New accounts get {{ welcome_bonus|default(50) }} welcome credits. Plans and credit packs are sold on the
+  <a href="{{ url_for('pricing') }}">Pricing</a> page via Lemon Squeezy
   {# Previously: Cryptomus or Paddle #}
   (see the <a href="{{ url_for('credits') }}">Credits</a> guide).
 </p>

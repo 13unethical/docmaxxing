@@ -1,0 +1,23 @@
+{% extends "landing/base.html" %}
+{% block content %}
+<section class="lp-section lp-wrap lp-404">
+  <p class="lp-eyebrow">404</p>
+  <h1>{{ 'Страница не найдена' if ru else 'Page not found' }}</h1>
+  <p class="lp-lede">{{ 'Такой страницы нет или она переехала. Вот куда можно пойти дальше:' if ru else 'This page does not exist or has moved. Here is where you can go next:' }}</p>
+  <ul class="lp-cards">
+    <li class="lp-card">
+      <h2><a href="/humanizer">AI Humanizer</a></h2>
+      <p>{{ 'Перепишите текст после ChatGPT так, чтобы он звучал естественно.' if ru else 'Turn a stiff AI draft into natural, readable writing.' }}</p>
+    </li>
+    <li class="lp-card">
+      <h2><a href="/formatter">{{ 'Оформление работ' if ru else 'Essay Formatter' }}</a></h2>
+      <p>{{ 'APA, MLA, Harvard, Chicago и IEEE — бесплатно.' if ru else 'APA, MLA, Harvard, Chicago and IEEE — free.' }}</p>
+    </li>
+    <li class="lp-card">
+      <h2><a href="/pricing">{{ 'Цены' if ru else 'Pricing' }}</a></h2>
+      <p>{{ 'Бесплатные инструменты, планы и пакеты кредитов.' if ru else 'Free tools, plans and credit packs.' }}</p>
+    </li>
+  </ul>
+  <p><a class="lp-btn lp-btn-primary" href="/">{{ 'На главную' if ru else 'Go to the home page' }}</a></p>
+</section>
+{% endblock %}

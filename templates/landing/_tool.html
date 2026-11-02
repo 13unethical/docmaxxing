@@ -1,0 +1,33 @@
+{# Humanizer widget for landing pages. Needs: ru (bool), free (free_limits_context()), signup_next (path). Behaviour: static/landing/tool.js #}
+<form class="lp-tool" action="/app#/humanizer" method="get" data-lp-tool
+      data-lang="{{ 'ru' if ru else 'en' }}"
+      data-endpoint="/api/browser/providers/stealthwriter/humanize"
+      data-max-words="{{ free.guest_words }}"
+      data-hard-max-words="{{ free.max_words }}"
+      data-signup-url="/register?next={{ signup_next }}"
+      data-en-page="/humanizer"
+      {% if ru %}data-block-cyrillic="1"{% endif %}>
+  <div class="lp-tool-grid">
+    <div>
+      <label for="lp-input">{{ 'Ваш текст' if ru else 'Your text' }}</label>
+      <textarea id="lp-input" aria-describedby="lp-count lp-free-note"
+        placeholder="{{ 'Вставьте английский текст из ChatGPT, Gemini или Claude…' if ru else 'Paste text from ChatGPT, Gemini, Claude or your own draft…' }}"></textarea>
+    </div>
+    <div>
+      <span class="lp-label" id="lp-output-label"><b>{{ 'Результат' if ru else 'Humanized text' }}</b></span>
+      <div class="lp-output" id="lp-output" role="region" aria-labelledby="lp-output-label" aria-live="polite" tabindex="0"
+        data-placeholder="{{ 'Здесь появится переписанный текст.' if ru else 'The rewritten text will appear here.' }}"></div>
+    </div>
+  </div>
+  <div class="lp-tool-bar">
+    <span class="lp-count" id="lp-count">0 / {{ free.guest_words_ru if ru else free.guest_words_s }} {{ 'слов' if ru else 'words' }}</span>
+    <p class="lp-free-note" id="lp-free-note">
+      {% if ru %}Бесплатно: до {{ free.guest_words_ru }} слов, {{ free.guest_daily_ru }} в день{% else %}Free: up to {{ free.guest_words_s }} words, {{ free.guest_daily_s }} a day{% endif %}
+    </p>
+    <span class="lp-spacer"></span>
+    <button type="button" class="lp-btn lp-btn-ghost" id="lp-copy" disabled>{{ 'Копировать' if ru else 'Copy' }}</button>
+    <button type="submit" class="lp-btn lp-btn-primary lp-btn-lg" id="lp-run">{{ 'Очеловечить текст' if ru else 'Humanize' }}</button>
+  </div>
+  <div class="lp-tool-msg" id="lp-msg" role="alert" hidden></div>
+  <noscript><p class="lp-noscript">{{ 'Для запуска хуманайзера нужен JavaScript. Остальная страница работает и без него.' if ru else 'The humanizer needs JavaScript to run. The rest of this page works without it.' }}</p></noscript>
+</form>

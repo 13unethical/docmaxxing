@@ -68,7 +68,7 @@ def test_format_v2_page_renders_when_flag_enabled() -> None:
 
 def test_home_format_tab_uses_v2_when_flag_enabled() -> None:
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "1"}, clear=False):
-        res = _client().get("/")
+        res = _client().get("/?classic=1")
         assert res.status_code == 200
         html = res.get_data(as_text=True)
         assert "format_v2.js" in html
@@ -78,7 +78,7 @@ def test_home_format_tab_uses_v2_when_flag_enabled() -> None:
 
 def test_home_format_tab_uses_v1_when_flag_disabled() -> None:
     with patch.dict("os.environ", {"FORMATTER_V2_ENABLED": "0"}, clear=False):
-        res = _client().get("/")
+        res = _client().get("/?classic=1")
         assert res.status_code == 200
         html = res.get_data(as_text=True)
         assert "format_v2.js" not in html

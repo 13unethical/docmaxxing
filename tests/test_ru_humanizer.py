@@ -1,20 +1,16 @@
-"""Russian humanizer swaps lookalike Cyrillic letters and leaves the English path alone."""
+"""Russian text is not supported yet: the old letter-swap endpoint refuses and charges nothing."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 from services.economy import auth as economy_auth
 from services.economy import db as economy_db
 from services.economy.wallet import WalletService
-from services.humanizer_engine.ru_humanizer import humanize_ru
 
-
-def test_ru_humanizer_swaps_only_the_lookalike_letters():
-    assert humanize_ru("Собака ела орех") == "Coбaкa eлa oрex"
-    assert humanize_ru("АаОоХхСсЕе") == "AaOoXxCcEe"
-    assert humanize_ru("Hello, мир!") == "Hello, мир!"
-    assert humanize_ru("ВНМКТУ") == "ВНМКТУ"
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture()
@@ -32,40 +28,28 @@ def _client():
     return app.test_client()
 
 
-def test_ru_endpoint_charges_and_does_not_call_the_english_humanizer(economy, monkeypatch):
-    from app import job_manager
-
-    def _must_not_run(*_args, **_kwargs):
-        raise AssertionError("English humanizer should not run")
-
-    if job_manager is not None:
-        monkeypatch.setattr(job_manager, "create", _must_not_run)
-
+def test_ru_endpoint_refuses_without_charging(economy):
     user = economy_auth.create_user("ru-hz@example.com", "secret123")
     economy_auth.mark_email_verified(user["id"], user["email"])
     WalletService().set_balance(user["id"], 500)
-    before = WalletService().get_balance(user["id"])
 
     client = _client()
     with client.session_transaction() as sess:
         sess[economy_auth.SESSION_KEY] = user["id"]
     res = client.post("/api/browser/providers/ru/humanize", json={"text": "Собака ела орех"})
     body = res.get_json()
-    assert res.status_code == 200, body
-    assert body["humanized_text"] == "Coбaкa eлa oрex"
-    assert body["coins_charged"] > 0
-    assert WalletService().get_balance(user["id"]) == before - body["coins_charged"]
+    assert res.status_code == 400
+    assert body["error"] == "RU_NOT_SUPPORTED"
+    assert WalletService().get_balance(user["id"]) == 500
 
 
-def test_ru_page_defaults_to_english():
-    from app import app
+def test_classic_page_has_no_language_switch():
+    html = _client().get("/humanizer?classic=1").get_data(as_text=True)
+    assert "data-hz-lang" not in html
 
-    app.config["TESTING"] = True
-    html = app.test_client().get("/humanizer").get_data(as_text=True)
-    assert 'data-hz-lang="eng"' in html
-    assert 'data-hz-lang="ru"' in html
-    assert 'data-hz-lang="eng" class="dm-segment-btn is-active"' in html or (
-        'class="dm-segment-btn is-active"' in html and 'data-hz-lang="eng"' in html
-    )
-    eng = html.split('data-hz-lang="eng"')[0]
-    assert "is-active" in eng[-80:]
+
+def test_app_does_not_send_cyrillic_text_anywhere():
+    js = (ROOT / "static/app2/api.js").read_text(encoding="utf-8")
+    assert "/api/browser/providers/ru/humanize" not in js
+    assert "RU_NOT_SUPPORTED" in js
+    assert "/api/browser/providers/ru/humanize" not in (ROOT / "static/humanizer-page.js").read_text(encoding="utf-8")
