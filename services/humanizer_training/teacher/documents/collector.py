@@ -144,7 +144,11 @@ class TeacherDocumentCollector:
 
     def run(self) -> DocumentCollectionResult:
         run_started = time.monotonic()
-        pool = SourcePool(self.config.source_pool_dir) if self.config.source_pool_dir else None
+        pool = (
+            SourcePool(self.config.source_pool_dir, providers=self.config.source_providers)
+            if self.config.source_pool_dir
+            else None
+        )
         if pool is not None:
             docs = pool.peek(int(self.config.count))
             plan = sampling_plan_for(docs)

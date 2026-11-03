@@ -5,6 +5,7 @@ Data on the ``tt-detector`` volume:
                       scripts/tt_detector_labels.py --upload); never leaves the server/GPU.
   /tt_labels_ours.jsonl, /batch_*.jsonl   Turnitin labels of our own rewrites.
   /extra_*.jsonl, /ext.jsonl              open human/AI corpora (guards against false positives).
+  /chatgpt_*.jsonl, /rawai_*.jsonl        raw ChatGPT / Claude / Gemini documents (AI examples).
 
 Every Monday ``retrain`` trains two models in parallel: one with 20% of the reports held out (to
 measure) and one on everything (to serve). The serving model is replaced only when the held-out
@@ -46,6 +47,15 @@ MIN_AUC = 0.85
 MAX_HUMAN_FP = 0.04
 MIN_TT_CORR = 0.8
 MAX_CORR_DROP = 0.03
+# Raw ChatGPT documents (/data/chatgpt_*.jsonl, scripts/gen_chatgpt_corpus.py): windows used for
+# training, and the share of held-out documents shown as AI may not drop by more than this.
+CHATGPT_MAX = int(os.environ.get("AI_DETECTOR_CHATGPT_MAX", "4000"))
+CHATGPT_GROUP = "openai_chatgpt"
+MAX_CHATGPT_RECALL_DROP = 0.02
+# Raw Claude/Gemini documents (/data/rawai_*.jsonl): same use, own cap so they don't crowd out ChatGPT.
+RAWAI_MAX = int(os.environ.get("AI_DETECTOR_RAWAI_MAX", "3000"))
+# Held-out models per retrain (training seeds 0..N-1, same held-out reports); the gate uses their mean.
+HOLDOUT_SEEDS = 3
 PROD_DIR = "/data/models/prod"
 
 app = modal.App(APP_NAME)
@@ -138,7 +148,10 @@ def _doc_rates(rows, scores, t: float = FLAG_THRESHOLD) -> dict:
 
 @app.function(image=gpu_image, gpu="L40S", timeout=4 * 3600,
               volumes={"/data": data, "/root/.cache/huggingface": hf_cache})
-def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: int = EXT_MAX) -> dict:
+def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: int = EXT_MAX,
+        batches: str = "", train_seed: int = -1) -> dict:
+    """``batches``: comma list of batch_<name>.jsonl to use ("none" = no batches, "" = all).
+    ``train_seed``: shuffling/initialisation seed (default ``seed``); the held-out split always follows ``seed``."""
     import random
 
     import torch
@@ -168,10 +181,14 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
     held = set() if final else set(reports[: int(len(reports) * HOLDOUT)])
     train_rows = [r for r in vps if r["report"] not in held]
     vps_test = [r for r in vps if r["report"] in held]
+    if train_seed >= 0:
+        rng = random.Random(train_seed)
     train_rows += _read("/data/tt_labels_ours.jsonl")
+    allowed = None if not batches else {b.strip() for b in batches.split(",") if b.strip() and b.strip() != "none"}
     for fname in sorted(os.listdir("/data")):
         if fname.startswith("batch_") and fname.endswith(".jsonl"):
-            train_rows += _read(f"/data/{fname}")
+            if allowed is None or fname[len("batch_"):-len(".jsonl")] in allowed:
+                train_rows += _read(f"/data/{fname}")
     train_rows += [r for r in _read("/data/extra_train.jsonl") if not r["ai"]]
     ext = _read("/data/ext.jsonl")
     ext_train = [r for r in ext if r["split"] == "train" and not r["ai"]]
@@ -179,6 +196,20 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
     ext_train += rng.sample(ext_ai, min(EXT_AI_MAX, len(ext_ai)))
     train_rows += rng.sample(ext_train, min(ext_max, len(ext_train)))
     corpus_test = _read("/data/extra_test.jsonl") + [r for r in ext if r["split"] == "test"]
+    chat = []
+    for fname in sorted(os.listdir("/data")):
+        if fname.startswith("chatgpt_") and fname.endswith(".jsonl"):
+            chat += _read(f"/data/{fname}")
+    chat_train = [r for r in chat if r.get("split") != "test"]
+    train_rows += rng.sample(chat_train, min(CHATGPT_MAX, len(chat_train)))
+    corpus_test += [r for r in chat if r.get("split") == "test"]
+    rawai = []
+    for fname in sorted(os.listdir("/data")):
+        if fname.startswith("rawai_") and fname.endswith(".jsonl"):
+            rawai += _read(f"/data/{fname}")
+    rawai_train = [r for r in rawai if r.get("split") != "test"]
+    train_rows += rng.sample(rawai_train, min(RAWAI_MAX, len(rawai_train)))
+    corpus_test += [r for r in rawai if r.get("split") == "test"]
     print(f"{name}: train {len(train_rows)} windows, held-out {len(vps_test)} windows from {len(held)} reports")
 
     tok = AutoTokenizer.from_pretrained(BASE)
@@ -194,7 +225,7 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
                 out.extend(torch.sigmoid(model(enc["input_ids"], enc["attention_mask"]).float()).tolist())
         return out
 
-    torch.manual_seed(seed)
+    torch.manual_seed(train_seed if train_seed >= 0 else seed)
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.01)
     bs = 16
     steps = epochs * ((len(train_rows) + bs - 1) // bs)
@@ -232,6 +263,7 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
         metrics["corpus"] = rates
         human = [rates[g] for g in GATED_HUMAN if g in rates]
         metrics["human_fp"] = round(sum(human) / len(human), 4) if human else None
+        metrics["chatgpt_recall"] = rates.get(CHATGPT_GROUP)
     print(json.dumps(metrics))
     if not final:
         return metrics
@@ -257,8 +289,30 @@ def _turnitin_doc_corr(rows, scores, t: float = FLAG_THRESHOLD):
     return float(np.corrcoef(*zip(*pairs))[0, 1]) if len(pairs) > 2 else None
 
 
+def average_metrics(runs: list[dict], name: str) -> dict:
+    """Mean of numeric held-out metrics over runs that differ only in training seed."""
+    out: dict = {"name": name, "seeds": len(runs), "runs": runs}
+    keys = {k for r in runs for k, v in r.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
+    for k in sorted(keys):
+        vals = [r[k] for r in runs if isinstance(r.get(k), (int, float))]
+        out[k] = sum(vals) / len(vals) if vals else None
+    corpora = {g for r in runs for g in (r.get("corpus") or {})}
+    out["corpus"] = {
+        g: round(sum(r["corpus"][g] for r in runs if g in (r.get("corpus") or {}))
+                 / sum(1 for r in runs if g in (r.get("corpus") or {})), 4)
+        for g in sorted(corpora)
+    }
+    return out
+
+
 def gate(new: dict, prod: dict | None) -> tuple[bool, str]:
-    """Whether held-out metrics of a candidate are good enough to replace production."""
+    """Whether held-out metrics of a candidate are good enough to replace production.
+
+    Relative limits apply only against production metrics averaged over as many training seeds:
+    one run swings by several points on ~24 held-out reports.
+    """
+    if prod and int(prod.get("seeds") or 1) < int(new.get("seeds") or 1):
+        prod = None
     auc, fp, corr = new.get("vps_auc"), new.get("human_fp"), new.get("tt_doc_corr")
     if auc is None or fp is None or corr is None:
         return False, "missing held-out metrics"
@@ -274,6 +328,9 @@ def gate(new: dict, prod: dict | None) -> tuple[bool, str]:
         return False, f"vps_auc {auc:.3f} vs prod {prod['vps_auc']:.3f}"
     if prod and prod.get("human_fp") is not None and fp > prod["human_fp"] + MAX_FP_RISE:
         return False, f"human_fp {fp:.3f} vs prod {prod['human_fp']:.3f}"
+    recall, prod_recall = new.get("chatgpt_recall"), (prod or {}).get("chatgpt_recall")
+    if recall is not None and prod_recall is not None and recall < prod_recall - MAX_CHATGPT_RECALL_DROP:
+        return False, f"chatgpt_recall {recall:.3f} vs prod {prod_recall:.3f}"
     return True, "ok"
 
 
@@ -302,14 +359,18 @@ def promote(name: str, holdout_metrics: dict) -> str:
 
 
 @app.function(image=gpu_image, volumes={"/data": data}, timeout=6 * 3600, schedule=modal.Cron("0 22 * * 0"))
-def retrain(force: bool = False) -> dict:
-    """Weekly (Monday 03:00 Tashkent): train held-out + full models, promote the full one if the gate passes."""
+def retrain(force: bool = False, promote_model: bool = True) -> dict:
+    """Weekly (Monday 03:00 Tashkent): train held-out + full models, promote the full one if the gate passes.
+
+    ``promote_model=False``: train and judge only; promote later with ``promote`` if wanted."""
     from datetime import datetime, timezone
 
     stamp = f"{datetime.now(timezone.utc):%Y%m%d}"
-    holdout_call = fit.spawn(final=False, name=f"auto_holdout_{stamp}")
+    holdout_calls = [
+        fit.spawn(final=False, name=f"auto_holdout_{stamp}_s{s}", train_seed=s) for s in range(HOLDOUT_SEEDS)
+    ]
     final_call = fit.spawn(final=True, name=f"auto_{stamp}")
-    holdout = holdout_call.get()
+    holdout = average_metrics([c.get() for c in holdout_calls], name=f"auto_holdout_{stamp}")
     final = final_call.get()
     data.reload()
     prod = None
@@ -319,7 +380,7 @@ def retrain(force: bool = False) -> dict:
     ok, reason = gate(holdout, prod)
     report = {"at": stamp, "holdout": holdout, "final": final.get("name"), "prod_before": prod,
               "promoted": False, "reason": reason}
-    if ok or force:
+    if promote_model and (ok or force):
         report["promoted"] = promote.local(final["name"], holdout)
     import shutil
 

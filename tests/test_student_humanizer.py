@@ -341,6 +341,50 @@ def test_detector_pick_falls_back_to_most_rewritten_when_detector_is_down():
     assert engine.humanize(PARA) == heavy
 
 
+def _ai_if_moreover(texts):
+    return [0.95 if "Moreover" in t else 0.05 for t in texts]
+
+
+def test_document_pick_rewrites_only_the_chunks_the_whole_text_check_flags(monkeypatch):
+    from services import ai_detector
+
+    monkeypatch.setattr(ai_detector, "WINDOW_WORDS", 1)
+    paras = [PARA, PARA.replace("42", "57"), PARA.replace("42", "99")]
+    seen = []
+
+    def complete(chunk):
+        seen.append(chunk)
+        return ("Moreover, " if "57" in chunk and seen.count(chunk) == 1 else "") + _rewrite(chunk)
+
+    engine = StudentTextHumanizer(_config(chunk_words=1, pick="document"), complete_fn=complete, score_fn=_ai_if_moreover)
+    out = engine.humanize("\n\n".join(paras))
+    assert out.split("\n\n") == [_rewrite(p) for p in paras]
+    assert sorted(seen) == sorted([paras[0], paras[1], paras[1], paras[2]])
+
+
+def test_document_pick_keeps_the_current_text_when_rewrites_are_no_better(monkeypatch):
+    from services import ai_detector
+
+    monkeypatch.setattr(ai_detector, "WINDOW_WORDS", 1)
+    first = "Moreover, " + _rewrite(PARA)
+    worse = "Moreover, furthermore, " + _rewrite(PARA)
+    outputs = iter([first, worse, worse, worse])
+
+    def score(texts):
+        return [0.99 if "furthermore" in t else 0.9 if "Moreover" in t else 0.05 for t in texts]
+
+    engine = StudentTextHumanizer(_config(pick="document", doc_rounds=3), complete_fn=lambda _c: next(outputs), score_fn=score)
+    assert engine.humanize(PARA) == first
+
+
+def test_document_pick_returns_the_first_pass_when_the_detector_is_down():
+    def down(texts):
+        raise RuntimeError("detector down")
+
+    engine = StudentTextHumanizer(_config(pick="document"), complete_fn=_rewrite, score_fn=down)
+    assert engine.humanize(PARA) == _rewrite(PARA)
+
+
 def test_sampling_plan_sends_one_request_per_temperature(monkeypatch):
     sent = []
 
@@ -382,11 +426,14 @@ def test_student_config_reads_detector_settings(monkeypatch):
     monkeypatch.setenv("HUMANIZER_STUDENT_SAMPLING", "1.0:4,1.2:4")
     monkeypatch.setenv("HUMANIZER_STUDENT_REFINE_SAMPLING", "1.0:12,1.2:12")
     monkeypatch.setenv("HUMANIZER_STUDENT_REFINE_ABOVE", "0.25")
+    monkeypatch.setenv("HUMANIZER_STUDENT_DOC_ROUNDS", "2")
+    monkeypatch.setenv("HUMANIZER_STUDENT_DOC_BUDGET", "30")
     cfg = sh.student_config()
     assert cfg.pick == "detector"
     assert cfg.sampling_plan == ((1.0, 4), (1.2, 4))
     assert cfg.refine_sampling == ((1.0, 12), (1.2, 12))
     assert cfg.refine_above == 0.25
+    assert (cfg.doc_rounds, cfg.doc_budget) == (2, 30.0)
 
 
 def test_candidates_are_read_from_every_choice_with_logprobs(monkeypatch):

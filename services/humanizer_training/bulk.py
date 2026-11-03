@@ -71,6 +71,8 @@ class BulkConfig:
     timeout_s: float = 300.0
     root: Path = DEFAULT_BULK_ROOT
     pool_root: Path = DEFAULT_POOL_ROOT
+    # Writer providers whose pool documents are collected (e.g. ["openai"]); None = all.
+    source_providers: list[str] | None = None
 
     @classmethod
     def from_env(cls) -> "BulkConfig":
@@ -84,6 +86,12 @@ class BulkConfig:
             reset_utc_hour=_env_int("HUMANIZER_TRAINING_BULK_RESET_UTC_HOUR", 0) % 24,
             reserve_release_minutes=max(0, _env_int("HUMANIZER_TRAINING_BULK_RESERVE_RELEASE_MIN", 60)),
             reuse_production_session=(os.environ.get("HUMANIZER_TRAINING_BULK_REUSE_SESSION", "1").strip() != "0"),
+            source_providers=[
+                p.strip()
+                for p in (os.environ.get("HUMANIZER_TRAINING_BULK_SOURCE_PROVIDERS") or "").split(",")
+                if p.strip()
+            ]
+            or None,
         )
 
     @property
@@ -112,6 +120,7 @@ class BulkConfig:
             "batch_size": self.batch_size,
             "level_weights": {str(k): v for k, v in self.level_weights.items()},
             "reset_utc_hour": self.reset_utc_hour,
+            "source_providers": self.source_providers,
         }
 
 
@@ -221,7 +230,7 @@ class CycleResult:
 def status(cfg: BulkConfig, now: datetime) -> dict[str, Any]:
     day = sw_day(now, cfg.reset_utc_hour)
     ledger = QuotaLedger(cfg.root, day)
-    pool = SourcePool(cfg.pool_root)
+    pool = SourcePool(cfg.pool_root, providers=cfg.source_providers)
     used = ledger.used()
     return {
         **cfg.safe_dict(),
@@ -271,7 +280,7 @@ def run_cycle(
             wait = min(wait, (cfg.release_starts(now) - now).total_seconds() + 5)
         return CycleResult("quota_done", wait, {"used": ledger.used()})
 
-    pool = SourcePool(cfg.pool_root)
+    pool = SourcePool(cfg.pool_root, providers=cfg.source_providers)
     pending = pool.pending_count()
     if pending == 0:
         return CycleResult("pool_empty", IDLE_WAIT.total_seconds())
@@ -291,6 +300,7 @@ def run_cycle(
             seed=int(day.replace("-", "")),
             output_dir=str(cfg.root / day / f"batch-{stamp}"),
             source_pool_dir=str(cfg.pool_root),
+            source_providers=cfg.source_providers,
             provider_name="stealthwriter",
             model="Legacy 5.1",
             level=8,

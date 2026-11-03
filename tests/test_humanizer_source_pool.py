@@ -218,6 +218,66 @@ def test_login_required_stops_run_and_keeps_documents_pending(tmp_path: Path):
     assert pool.pending_count() == 4
 
 
+def test_openai_writer_uses_format_only_prompt_and_records_cost(tmp_path: Path, monkeypatch):
+    from services.humanizer_training.teacher.documents import source_pool as sp
+
+    calls: list[dict] = []
+
+    def reply(**kwargs):
+        calls.append(kwargs)
+        return _essay(), {"model": kwargs["model"], "latency_ms": 1, "cost_usd": 0.05}
+
+    monkeypatch.setattr(sp, "_reply_fn_for", lambda provider: reply)
+    mix = sp.parse_source_mix("openai:gpt-4o:1")
+    result = fill_source_pool(target_pending=2, root=tmp_path, workers=1, mix=mix, seed=5)
+    assert result.generated == 2
+    assert result.cost_usd == 0.1
+    assert all(c["system_prompt"] == sp.OPENAI_SYSTEM_PROMPT for c in calls)
+    meta = json.loads(next((tmp_path / "pending").glob("*.json")).read_text())["source_generator"]
+    assert meta["provider"] == "openai" and meta["cost_usd"] == 0.05
+
+
+def test_pool_filters_pending_by_writer_provider(tmp_path: Path):
+    pool = SourcePool(tmp_path)
+    pool.add(_pool_doc("src-old"))
+    pool.add(_pool_doc("src-gem"), meta={"provider": "gemini", "model": "gemini-3.5-flash"})
+    pool.add(_pool_doc("src-gpt"), meta={"provider": "openai", "model": "gpt-4o"})
+    assert pool.pending_count() == 3
+    only_gpt = SourcePool(tmp_path, providers=["openai"])
+    assert only_gpt.pending_count() == 1
+    assert [d.document_id for d in only_gpt.peek(5)] == ["src-gpt"]
+    assert SourcePool(tmp_path, providers=["claude"]).pending_count() == 1
+
+
+def test_openai_mix_counts_only_openai_pending_toward_target(tmp_path: Path, monkeypatch):
+    from services.humanizer_training.teacher.documents import source_pool as sp
+
+    pool = SourcePool(tmp_path)
+    for i in range(3):
+        pool.add(_pool_doc(f"src-{i}"), meta={"provider": "claude"})
+    monkeypatch.setattr(sp, "_reply_fn_for", lambda provider: _fake_reply(_essay()))
+    result = fill_source_pool(target_pending=2, root=tmp_path, workers=1, mix=sp.parse_source_mix("openai:gpt-4o"), seed=9)
+    assert result.pending_before == 0
+    assert result.generated == 2
+
+
+def test_collector_takes_only_configured_writer_providers(tmp_path: Path):
+    pool = SourcePool(tmp_path / "pool")
+    pool.add(_pool_doc("src-claude"))
+    pool.add(_pool_doc("src-gpt"), meta={"provider": "openai"})
+    cfg = DocumentCollectorConfig(
+        count=2,
+        output_dir=str(tmp_path / "run"),
+        source_pool_dir=str(pool.root),
+        source_providers=["openai"],
+    )
+    result = TeacherDocumentCollector(cfg, provider=_Provider()).run()
+    assert result.summary["successful"] == 1
+    assert pool.pending_count() == 1
+    rows = [json.loads(l) for l in (tmp_path / "run" / "documents.jsonl").read_text().splitlines()]
+    assert [r["document_id"] for r in rows] == ["src-gpt"]
+
+
 def test_daily_plan_caps_attempts_by_pool(tmp_path: Path, monkeypatch):
     from services.economy import db as economy_db
     from services.economy.site_settings import ensure_schema, ensure_today_row, update_site_settings

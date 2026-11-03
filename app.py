@@ -3037,6 +3037,7 @@ def api_free_ai_detector():
         return _detect_error(
             "DETECTOR_UNAVAILABLE", "The AI detector is busy right now. Try again in a minute — this check wasn’t counted.", 503
         )
+    ai_detector.log_check(subject, text, result)
     if result.get("too_short"):
         free_humanize.release(subject)
         return _detect_error(

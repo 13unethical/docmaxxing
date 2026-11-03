@@ -378,3 +378,23 @@ def test_fill_pool_spreads_briefs_across_writer_models(tmp_path: Path, monkeypat
     assert result.by_writer["gemini-3.5-flash"] > result.by_writer["claude-sonnet-4-6"]
     meta = json.loads(next((tmp_path / "pending").glob("*.json")).read_text())["source_generator"]
     assert meta["provider"] in {"gemini", "claude"}
+
+
+def test_bulk_collects_only_from_configured_writer_providers(tmp_path: Path, monkeypatch):
+    _pool(tmp_path / "pool", 4)
+    cfg = _cfg(tmp_path, level_weights={10: 1}, source_providers=["openai"])
+    provider = _Provider()
+    idle = run_cycle(cfg, provider=provider, now=NOW, clock=lambda: NOW)
+    assert idle.action == "pool_empty"
+    assert provider.calls == []
+
+    SourcePool(cfg.pool_root).add(_doc("src-gpt"), meta={"provider": "openai", "model": "gpt-4o"})
+    done = run_cycle(cfg, provider=provider, now=NOW, clock=lambda: NOW)
+    assert done.action == "batch_done"
+    assert done.detail["requested"] == 1
+    assert SourcePool(cfg.pool_root).pending_count() == 4
+
+    monkeypatch.setenv("HUMANIZER_TRAINING_BULK_SOURCE_PROVIDERS", "openai, gemini")
+    assert BulkConfig.from_env().source_providers == ["openai", "gemini"]
+    monkeypatch.delenv("HUMANIZER_TRAINING_BULK_SOURCE_PROVIDERS")
+    assert BulkConfig.from_env().source_providers is None

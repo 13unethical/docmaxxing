@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from services.humanizer_training.teacher.config import LANGUAGE
 from services.humanizer_training.teacher.documents.generator import DocumentSamplingPlan
@@ -60,6 +60,15 @@ SYSTEM_PROMPT = (
     "Write continuous prose paragraphs only, separated by a blank line: no tables, "
     "no bullet or numbered lists, no code blocks, no diagrams or figures."
 )
+# Format rules only: students paste ChatGPT's own voice, so no style guidance here.
+OPENAI_SYSTEM_PROMPT = (
+    "Output only the document in Markdown: start directly with the first `##` section heading, "
+    "use `##` for every section heading, no title line, no preamble, no closing notes. "
+    "Write paragraphs only, separated by a blank line: no tables, no bullet or numbered lists, "
+    "no code blocks."
+)
+WRITER_PROVIDERS = ("claude", "gemini", "openai")
+_THINKING_MODEL_PREFIXES = ("gemini", "gpt-5", "o1", "o3", "o4")
 
 ReplyFn = Callable[..., tuple[str | None, dict[str, Any]]]
 
@@ -74,6 +83,7 @@ class PoolFillResult:
     pending_after: int = 0
     reject_reasons: dict[str, int] = field(default_factory=dict)
     by_writer: dict[str, int] = field(default_factory=dict)
+    cost_usd: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -239,6 +249,10 @@ def _reply_fn_for(provider: str) -> ReplyFn:
         from services.gemini_client import generate_text
 
         return generate_text
+    if provider == "openai":
+        from services.openai_client import generate_text as openai_generate_text
+
+        return openai_generate_text
     return _default_reply_fn()
 
 
@@ -249,7 +263,7 @@ def parse_source_mix(raw: str) -> list[tuple[str, str, float]]:
         if not part.strip():
             continue
         provider, model, *weight = [p.strip() for p in part.split(":")]
-        if provider not in ("claude", "gemini") or not model:
+        if provider not in WRITER_PROVIDERS or not model:
             raise ValueError(f"bad source mix entry: {part!r}")
         mix.append((provider, model, float(weight[0]) if weight else 1.0))
     if not mix:
@@ -269,19 +283,37 @@ def pick_writer(combo_key: str, mix: list[tuple[str, str, float]]) -> tuple[str,
 
 
 class SourcePool:
-    def __init__(self, root: Path | str = DEFAULT_POOL_ROOT) -> None:
+    def __init__(self, root: Path | str = DEFAULT_POOL_ROOT, *, providers: Iterable[str] | None = None) -> None:
+        """``providers`` limits pending documents to those written by these writer providers."""
         self.root = Path(root)
         self.pending_dir = self.root / "pending"
         self.used_dir = self.root / "used"
         self.failed_dir = self.root / "failed"
         self.rejected_path = self.root / "rejected.jsonl"
+        self.providers = frozenset(p.strip() for p in providers if p.strip()) if providers else None
 
     def _ensure(self) -> None:
         self.pending_dir.mkdir(parents=True, exist_ok=True)
         self.used_dir.mkdir(parents=True, exist_ok=True)
 
+    def _provider_of(self, path: Path) -> str:
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8")).get("source_generator") or {}
+        except (OSError, ValueError):
+            return ""
+        # Documents from before the writer mix were all Claude-written.
+        return str(meta.get("provider") or "claude")
+
+    def _pending_paths(self) -> list[Path]:
+        if not self.pending_dir.is_dir():
+            return []
+        paths = list(self.pending_dir.glob("*.json"))
+        if self.providers is not None:
+            paths = [p for p in paths if self._provider_of(p) in self.providers]
+        return paths
+
     def pending_count(self) -> int:
-        return len(list(self.pending_dir.glob("*.json"))) if self.pending_dir.is_dir() else 0
+        return len(self._pending_paths())
 
     def used_count(self) -> int:
         return len(list(self.used_dir.glob("*.json"))) if self.used_dir.is_dir() else 0
@@ -292,9 +324,9 @@ class SourcePool:
         return SyntheticDocument(**{k: v for k, v in data.items() if k in fields})
 
     def peek(self, count: int) -> list[SyntheticDocument]:
-        if count <= 0 or not self.pending_dir.is_dir():
+        if count <= 0:
             return []
-        paths = sorted(self.pending_dir.glob("*.json"), key=lambda p: (p.stat().st_mtime, p.name))
+        paths = sorted(self._pending_paths(), key=lambda p: (p.stat().st_mtime, p.name))
         return [self._read(p) for p in paths[:count]]
 
     def mark_used(self, document_id: str) -> bool:
@@ -401,6 +433,7 @@ def generate_source_document(
     seed: int,
     reply_fn: ReplyFn,
     model: str | None = None,
+    system_prompt: str = SYSTEM_PROMPT,
 ) -> tuple[SyntheticDocument | None, list[str], dict[str, Any]]:
     domain, topic, document_type, angle = combo
     prompt = build_generation_prompt(
@@ -412,12 +445,12 @@ def generate_source_document(
         target_words_high=TARGET_WORDS_HIGH,
     )
     raw, diag = reply_fn(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         content=prompt,
         temperature=0.9,
         model=model,
         timeout_s=TIMEOUT_S,
-        max_tokens=GEMINI_MAX_TOKENS if str(model or "").startswith("gemini") else MAX_TOKENS,
+        max_tokens=GEMINI_MAX_TOKENS if str(model or "").startswith(_THINKING_MODEL_PREFIXES) else MAX_TOKENS,
     )
     if not raw:
         return None, ["CLAUDE_FAILED"], diag
@@ -452,7 +485,7 @@ def fill_source_pool(
     model: str | None = None,
     mix: list[tuple[str, str, float]] | None = None,
 ) -> PoolFillResult:
-    pool = SourcePool(root)
+    pool = SourcePool(root, providers=[p for p, *_ in mix] if mix and reply_fn is None else None)
     pending = pool.pending_count()
     need = max(0, int(target_pending) - pending)
     if max_new is not None:
@@ -473,14 +506,23 @@ def fill_source_pool(
         else:
             provider, writer = pick_writer("|".join(combo), mix)
             fn = _reply_fn_for(provider)
-        return combo, provider, *generate_source_document(combo, seed=active_seed, reply_fn=fn, model=writer)
+        system = OPENAI_SYSTEM_PROMPT if provider == "openai" else SYSTEM_PROMPT
+        return combo, provider, *generate_source_document(
+            combo, seed=active_seed, reply_fn=fn, model=writer, system_prompt=system
+        )
 
     with ThreadPoolExecutor(max_workers=max(1, int(workers))) as executor:
         for combo, provider, doc, reasons, diag in executor.map(_one, combos):
+            result.cost_usd = round(result.cost_usd + float(diag.get("cost_usd") or 0.0), 4)
             if doc is not None:
                 pool.add(
                     doc,
-                    meta={"provider": provider, "model": diag.get("model"), "latency_ms": diag.get("latency_ms")},
+                    meta={
+                        "provider": provider,
+                        "model": diag.get("model"),
+                        "latency_ms": diag.get("latency_ms"),
+                        **({"cost_usd": diag["cost_usd"]} if diag.get("cost_usd") is not None else {}),
+                    },
                 )
                 result.generated += 1
                 result.by_writer[str(diag.get("model"))] = result.by_writer.get(str(diag.get("model")), 0) + 1

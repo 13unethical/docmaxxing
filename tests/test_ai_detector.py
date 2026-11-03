@@ -65,7 +65,8 @@ def test_short_text_is_refused():
 def economy(tmp_path, monkeypatch):
     monkeypatch.setattr(economy_db, "DB_PATH", tmp_path / "economy.db")
     monkeypatch.setenv("SECRET_KEY", "x" * 40)
-    for name in ("FREE_DETECT_GUEST_WORDS", "FREE_DETECT_GUEST_DAILY", "FREE_DETECT_USER_WORDS", "FREE_DETECT_USER_DAILY"):
+    for name in ("FREE_DETECT_GUEST_WORDS", "FREE_DETECT_GUEST_DAILY", "FREE_DETECT_USER_WORDS", "FREE_DETECT_USER_DAILY",
+                 "AI_DETECTOR_EVENTS_LOG"):
         monkeypatch.delenv(name, raising=False)
     economy_db.init_db()
     calls = []
@@ -140,3 +141,25 @@ def test_signed_in_user_gets_the_bigger_limit(economy, monkeypatch):
     assert body["success"] is True
     assert body["checks_left"] == 49
     assert free_humanize.used_today(f"detect:user:{user['id']}") == 1
+
+
+def test_checks_are_logged_without_the_text(economy, monkeypatch, tmp_path):
+    import json
+
+    log_path = tmp_path / "checks.jsonl"
+    monkeypatch.setenv("AI_DETECTOR_EVENTS_LOG", str(log_path))
+    user = economy_auth.create_user("log@example.com", "secret123")
+    client = _client()
+    with client.session_transaction() as sess:
+        sess[economy_auth.SESSION_KEY] = user["id"]
+    body = client.post(URL, json={"text": HUMAN + "\n" + AI}).get_json()
+    client.post(URL, json={"text": "  " + HUMAN + "\n\n" + AI + " "})
+    client.post(URL, json={"text": "Too short to judge here."})
+
+    rows = [json.loads(line) for line in log_path.read_text().splitlines()]
+    assert [r["too_short"] for r in rows] == [False, False, True]
+    first = rows[0]
+    assert first["subject"] == f"detect:user:{user['id']}"
+    assert first["ai_percent"] == body["ai_percent"] and first["model"] == "test-v1"
+    assert rows[0]["text_sha"] == rows[1]["text_sha"] != rows[2]["text_sha"]
+    assert "Moreover" not in log_path.read_text() and "library" not in log_path.read_text()

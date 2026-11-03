@@ -60,6 +60,16 @@ with image.imports():
             pooled = (hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
             return self.classifier(pooled).squeeze(-1)
 
+    def load_model(path: str):
+        """Weights read fully into memory: from_pretrained memory-maps them, and an open file
+        on the volume makes every later ``data.reload()`` fail, so promotions never show up."""
+        from safetensors.torch import load as load_safetensors
+
+        model = Desklib(AutoConfig.from_pretrained(path))
+        with open(f"{path}/model.safetensors", "rb") as fh:
+            model.load_state_dict(load_safetensors(fh.read()))
+        return AutoTokenizer.from_pretrained(path), model.eval()
+
 
 @app.function(image=image, volumes={"/data": data}, timeout=600)
 def promote(name: str = "final") -> str:
@@ -94,8 +104,7 @@ class Detector:
     def load(self) -> None:
         import threading
 
-        self.tok = AutoTokenizer.from_pretrained(MODEL_DIR)
-        self.model = Desklib.from_pretrained(MODEL_DIR).eval()
+        self.tok, self.model = load_model(MODEL_DIR)
         self.version = open(f"{MODEL_DIR}/VERSION").read().strip()
         self.lock = threading.Lock()
 
@@ -105,11 +114,11 @@ class Detector:
         try:
             data.reload()
             current = open(f"{MODEL_DIR}/VERSION").read().strip()
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            print(f"detector: volume reload failed, serving snapshot {self.version}: {exc!r}")
             current = self.version
         if current != self.version:
-            self.tok = AutoTokenizer.from_pretrained(MODEL_DIR)
-            self.model = Desklib.from_pretrained(MODEL_DIR).eval()
+            self.tok, self.model = load_model(MODEL_DIR)
             self.version = current
         self.model = self.model.cuda()
         self.probs(["Warm-up sentence for the detector."])

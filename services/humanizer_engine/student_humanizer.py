@@ -4,10 +4,14 @@ Prose paragraphs are grouped into ~600-word chunks (the size the model was train
 rewritten in parallel; headings, lists, tables, figure markers and references stay verbatim.
 Any chunk that fails the quality checks is retried, and if it still fails the whole call
 raises so the caller can fall back to StealthWriter.
+
+pick="document": each chunk is written once, then the AI detector scores the whole text in its
+~110-word windows and only the chunks holding flagged sentences are rewritten, judged in context.
 """
 
 from __future__ import annotations
 
+import bisect
 import json
 import logging
 import os
@@ -51,6 +55,9 @@ MAX_CANDIDATES = 16
 # pick="detector": a chunk whose best variant the AI detector still scores above this gets
 # ``refine_sampling`` more variants before the final choice.
 REFINE_ABOVE = 0.3
+# pick="document": rounds of "score the whole text, rewrite the flagged chunks", within this many seconds.
+DOC_ROUNDS = 3
+DOC_BUDGET_SECONDS = 45.0
 
 _WORD = re.compile(r"[a-z0-9']+")
 _CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
@@ -90,6 +97,8 @@ class StudentConfig:
     sampling: tuple[tuple[float, int], ...] = ()
     refine_above: float = REFINE_ABOVE
     refine_sampling: tuple[tuple[float, int], ...] = ()
+    doc_rounds: int = DOC_ROUNDS
+    doc_budget: float = DOC_BUDGET_SECONDS
 
     @property
     def configured(self) -> bool:
@@ -135,6 +144,8 @@ def student_config() -> StudentConfig:
         sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_SAMPLING") or ""),
         refine_above=_float("HUMANIZER_STUDENT_REFINE_ABOVE", REFINE_ABOVE),
         refine_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_REFINE_SAMPLING") or ""),
+        doc_rounds=max(0, int(_float("HUMANIZER_STUDENT_DOC_ROUNDS", DOC_ROUNDS))),
+        doc_budget=max(0.0, _float("HUMANIZER_STUDENT_DOC_BUDGET", DOC_BUDGET_SECONDS)),
     )
 
 
@@ -390,6 +401,8 @@ class StudentTextHumanizer:
         with ThreadPoolExecutor(max_workers=max(1, min(self.max_workers, len(todo)))) as pool:
             rewritten = iter(pool.map(self._rewrite_chunk, todo))
         out = [next(rewritten) if rewrite else piece for piece, rewrite in pieces]
+        if self.config.pick == "document":
+            out = self._fix_flagged(pieces, out, separator)
         if separator == "\n":
             out = [p.replace("\n\n", "\n") for p in out]
         return join_body_and_references(separator.join(out), refs)
@@ -459,6 +472,79 @@ class StudentTextHumanizer:
             except Exception as exc:  # noqa: BLE001
                 log.info("student humanizer refine failed: %s", exc)
         return best[0].text
+
+    def _detect(self, text: str) -> dict:
+        from services import ai_detector
+
+        return ai_detector.detect(text, score=lambda texts: (self._score_fn(texts), ""))
+
+    def _fix_flagged(self, pieces: list[tuple[str, bool]], out: list[str], separator: str) -> list[str]:
+        """Rewrite again only the chunks where the whole-text detector flags sentences."""
+        cfg = self.config
+        sources = [piece for piece, _ in pieces]
+        rewrite = [flag for _, flag in pieces]
+        deadline = time.monotonic() + cfg.doc_budget
+        out = list(out)
+        for _ in range(cfg.doc_rounds):
+            if time.monotonic() >= deadline:
+                break
+            try:
+                flagged = self._flagged_pieces(out, rewrite, separator)
+            except Exception as exc:  # noqa: BLE001
+                log.info("AI detector unavailable for the document check: %s", exc)
+                break
+            if not flagged:
+                break
+            with ThreadPoolExecutor(max_workers=max(1, min(self.max_workers, len(flagged)))) as pool:
+                fixes = list(pool.map(lambda i: self._refit(i, sources[i], out, separator), flagged))
+            for i, text in zip(flagged, fixes):
+                out[i] = text
+        return out
+
+    def _flagged_pieces(self, out: list[str], rewrite: list[bool], separator: str) -> list[int]:
+        result = self._detect(separator.join(out))
+        if result.get("too_short"):
+            return []
+        starts, pos = [], 0
+        for piece in out:
+            starts.append(pos)
+            pos += len(piece) + len(separator)
+        hit = {bisect.bisect_right(starts, s["start"]) - 1 for s in result["sentences"] if s["flagged"]}
+        return sorted(i for i in hit if rewrite[i])
+
+    def _refit(self, i: int, source: str, out: list[str], separator: str) -> str:
+        """Best of the current text and fresh variants of chunk ``i``, scored with its neighbours around it."""
+        current = out[i]
+        try:
+            fresh, _, _ = self._usable(source, self._candidates(source, self.config.refine_sampling))
+        except (requests.RequestException, StudentHumanizerError, KeyError, ValueError, IndexError) as exc:
+            log.info("student humanizer rewrite of a flagged chunk failed: %s", exc)
+            return current
+        options = [Candidate(current), *(c for c in fresh if c.text != current)]
+        try:
+            with ThreadPoolExecutor(max_workers=len(options)) as pool:
+                scores = list(pool.map(lambda c: self._context_score(i, c.text, out, separator), options))
+            scored = list(zip(options, scores))
+        except Exception as exc:  # noqa: BLE001
+            log.info("AI detector unavailable for a flagged chunk: %s", exc)
+            return current
+        return pick_least_ai(source, scored)[0].text
+
+    def _context_score(self, i: int, text: str, out: list[str], separator: str) -> float:
+        """Word-weighted AI probability of ``text``'s sentences, read between its neighbouring chunks."""
+        before = out[i - 1] if i > 0 else ""
+        after = out[i + 1] if i + 1 < len(out) else ""
+        start = len(before) + len(separator) if before else 0
+        local = separator.join(p for p in (before, text, after) if p)
+        result = self._detect(local)
+        own = [
+            (s["ai_prob"], len(s["text"].split()))
+            for s in result.get("sentences") or []
+            if s["ai_prob"] is not None and start <= s["start"] < start + len(text)
+        ]
+        if not own:
+            return self._score_fn([text])[0]
+        return sum(p * w for p, w in own) / sum(w for _, w in own)
 
     def _candidates(self, chunk: str, sampling: tuple[tuple[float, int], ...] = ()) -> list[Candidate]:
         cfg = self.config

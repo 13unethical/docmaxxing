@@ -11,19 +11,26 @@ Environment:
   FREE_DETECT_GUEST_DAILY=10              checks per UTC day without an account (per IP + session)
   FREE_DETECT_USER_WORDS=5000             words per check for a signed-in user
   FREE_DETECT_USER_DAILY=50               checks per UTC day for a signed-in user
+  AI_DETECTOR_EVENTS_LOG=<path>           JSONL of free checks (who, %, model, text hash; never the text)
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 
 from services.free_humanize import RateLimiter
 
 guest_rate_limiter = RateLimiter()
+log = logging.getLogger(__name__)
 
 WINDOW_WORDS = 110
 MIN_SCORED_WORDS = 40
@@ -173,3 +180,35 @@ def detect(text: str, *, score=None) -> dict:
         ],
         "model": model,
     }
+
+
+def text_hash(text: str) -> str:
+    """Same hash for texts that differ only in whitespace."""
+    return hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()[:16]
+
+
+def log_check(subject: str, text: str, result: dict) -> None:
+    """Append one free check to AI_DETECTOR_EVENTS_LOG, so "same text, different %" reports can be traced."""
+    path = (os.environ.get("AI_DETECTOR_EVENTS_LOG") or "").strip()
+    if not path:
+        return
+    scored = [s for s in result.get("sentences") or [] if s.get("ai_prob") is not None]
+    row = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "subject": subject,
+        "text_sha": text_hash(text),
+        "words": len(text.split()),
+        "too_short": bool(result.get("too_short")),
+        "ai_percent": result.get("ai_percent"),
+        "scored_words": result.get("scored_words"),
+        "flagged_sentences": sum(1 for s in scored if s.get("flagged")),
+        "scored_sentences": len(scored),
+        "model": result.get("model"),
+    }
+    try:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        log.exception("AI detector event log write failed")

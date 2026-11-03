@@ -100,6 +100,8 @@ class DocumentCollectorConfig:
     # When set, source documents come from the Claude-written pool instead of the
     # template generator; archived documents are moved out of the pool.
     source_pool_dir: str | None = None
+    # Only pool documents written by these writer providers (e.g. ["openai"]); None = all.
+    source_providers: list[str] | None = None
     # {level: weight}. When set, each document gets its own rewrite level and only
     # these levels pass the policy gate; otherwise every document uses ``level`` (8).
     level_weights: dict[int, float] | None = None
