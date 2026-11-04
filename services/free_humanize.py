@@ -1,8 +1,8 @@
 """Free humanizer allowance (checked on the server only).
 
 Environment (all optional):
-  FREE_HUMANIZE_GUEST_WORDS=500       words per free run without an account
-  FREE_HUMANIZE_GUEST_DAILY=1         free runs per day without an account (per IP + session)
+  FREE_HUMANIZE_GUEST_WORDS=1000      words per free run without an account
+  FREE_HUMANIZE_GUEST_DAILY=3         free runs per day without an account (per IP + session)
   FREE_HUMANIZE_GUEST_IP_DAILY=3      free guest runs per day from one IP, whatever the session
                                       (clearing cookies doesn't give more; leaves room for shared Wi-Fi)
   FREE_HUMANIZE_USER_WORDS=1500       words per free run for a signed-in user
@@ -59,8 +59,8 @@ class FreeHumanizeLimits:
 def limits() -> FreeHumanizeLimits:
     engine = (os.environ.get("FREE_HUMANIZE_ENGINE") or "student").strip().lower() or "student"
     return FreeHumanizeLimits(
-        guest_words=_env_int("FREE_HUMANIZE_GUEST_WORDS", 500),
-        guest_daily=_env_int("FREE_HUMANIZE_GUEST_DAILY", 1),
+        guest_words=_env_int("FREE_HUMANIZE_GUEST_WORDS", 1000),
+        guest_daily=_env_int("FREE_HUMANIZE_GUEST_DAILY", 3),
         guest_ip_daily=_env_int("FREE_HUMANIZE_GUEST_IP_DAILY", 3),
         user_words=_env_int("FREE_HUMANIZE_USER_WORDS", 1500),
         user_daily=_env_int("FREE_HUMANIZE_USER_DAILY", 10),

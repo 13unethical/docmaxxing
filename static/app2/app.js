@@ -1259,7 +1259,11 @@ const CONFIG = {
 
   // Landing page (draft structure). Sections top to bottom; numbers are real (Oct 2026).
   landing: {
-    nav: [['tools', 'Tools'], ['how', 'How it works'], ['pricing-land', 'Pricing'], ['veil-land', 'Veil'], ['faq', 'FAQ']],
+    // landing-try hero: a free detector / humanizer without an account (like ZeroGPT)
+    tryIt: { title: 'Check your text for AI', subtitle: 'Paste your essay to see how much of it looks AI-written, then humanize the flagged parts. Free, no sign-up.',
+      demoTitle: 'See everything DocMaxxing does', demoText: 'Check for AI, humanize, format and write. All in one place.',
+      freeRuns: 3, maxWords: 1000, placeholder: 'Paste your essay or any text here (at least 40 words)…' },
+    nav: [['how', 'How it works'], ['tools', 'Tools'], ['veil-land', 'Veil'], ['pricing-land', 'Pricing'], ['faq', 'FAQ']],
     title: 'Pass the AI check. Sound like you.',
     subtitle: 'AI and plagiarism check before you submit, humanizing for flagged parts and free reference formatting. All in one place.',
     cta: 'Start free with 50 credits',
@@ -1509,6 +1513,7 @@ const ICONS = {
   phone: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>',
   clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  lock: '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>',
   redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>',
   alignLeft: '<path d="M15 12H3"/><path d="M17 18H3"/><path d="M21 6H3"/>',
@@ -2733,10 +2738,11 @@ function render() {
   syncProto();
   if (isPublic) {
     document.body.classList.remove('on-editor', 'on-format', 'on-assign');
-    main.innerHTML = renderLanding();
+    main.innerHTML = renderLanding({ tryIt: route === 'landing-try' });
     document.title = CONFIG.brand;
     window.scrollTo(0, 0);
     bindLanding();
+    if (route === 'landing-try') bindLandTry();
     return;
   }
   const item = ALL_ITEMS.find(i => i.route === route);
@@ -2841,26 +2847,12 @@ function promoHtml() {
       <button class="btn btn-sm btn-primary" data-act="signup">Sign up</button></div>`);
 }
 
-/* Start here: one field, then Humanize or Check for AI (main) */
+/* Start here: the same detector / humanizer box as on the landing (no free-try limit, costs credits) */
 function quickStartHtml() {
-  const has = !!(workDoc.file || workDoc.text.trim());
-  const humanizeCost = !state.signedIn && state.guestRunsUsed < 1 ? ITEMS.humanizer.guestPrice : estLabel('humanizer');
+  if (!lt.text && workDoc.text) lt.text = workDoc.text;
   return `<section class="qs" id="qs" aria-labelledby="qs-h">
     <h1 id="qs-h" class="qs-title" tabindex="-1">${esc(H().startTitle)}</h1>
-    <div class="qs-field">
-      <button class="qs-add" type="button" data-act="qs-upload" aria-label="Upload a file"
-        data-tip-title="Upload a file" data-tip-desc=".docx, .pdf or .txt" data-tip-pos="bottom">${icon('plus')}</button>
-      ${workDoc.file
-        ? `<span class="file-chip">${icon('file')}<span class="file-name">${esc(workDoc.file.name)}</span><span class="muted small">${fmtSize(workDoc.file.size)}</span>
-             <button class="chip-x" data-act="qs-remove-file" aria-label="Remove ${esc(workDoc.file.name)}">${icon('close')}</button></span>`
-        : `<label class="visually-hidden" for="qs-text">Your text</label>
-           <textarea id="qs-text" class="qs-input" rows="1" placeholder="${esc(H().startPlaceholder)}">${esc(workDoc.text)}</textarea>`}
-      <input type="file" id="qs-file" accept=".docx,.pdf,.txt" hidden>
-    </div>
-    <div class="qs-actions">
-      <button class="btn" data-act="qs-humanize" ${has ? '' : 'disabled'} data-tip-title="Humanize" data-tip-desc="${esc(humanizeCost)}" data-tip-pos="bottom">${icon('sparkles')} Humanize</button>
-      <button class="btn btn-primary" data-act="qs-check" ${has ? '' : 'disabled'} data-tip-title="Check for AI" data-tip-desc="${esc(estLabel('turnitin'))}" data-tip-pos="bottom">${icon('scan')} Check for AI</button>
-    </div>
+    ${landTryHtml()}
   </section>`;
 }
 
@@ -2901,7 +2893,7 @@ function homeCreditsHtml() {
       : '<div class="empty">No credit activity yet</div>'}`);
 }
 
-/* History: latest documents with their next step; "Show more" adds filter and delete */
+/* History: latest documents with their next step and a delete button on every row */
 function homeHistoryHtml() {
   return homeColHtml('hist-h', esc(H().titles.history), historyHtml(), '', 'home-history');
 }
@@ -2929,8 +2921,8 @@ function historyHtml() {
         <span class="doc-icon">${icon(t.icon)}</span>
         <span class="box-row-main"><a class="box-row-title doc-title" href="#/${t.route}">${esc(d.title)}</a>
           <span class="box-row-sub">${esc(t.label)} · ${fmtDate(d.date)}</span></span>
-        ${all ? `<button class="icon-btn" data-act="delete-doc" data-id="${d.id}" aria-label="Delete “${esc(d.title)}”">${icon('trash')}</button>`
-          : n ? `<button class="btn btn-sm" data-act="continue" data-id="${d.id}" aria-label="${esc(n.label)}: ${esc(d.title)}">${esc(n.label)}</button>` : ''}
+        ${n ? `<button class="btn btn-sm row-action" data-act="continue" data-id="${d.id}" aria-label="${esc(n.label)}: ${esc(d.title)}">${esc(n.label)}</button>` : ''}
+        <button class="icon-btn row-del" data-act="delete-doc" data-id="${d.id}" aria-label="Delete “${esc(d.title)}”">${icon('trash')}</button>
       </li>`;
     }).join('')}</ul>`
       : `<div class="empty"><strong>No documents for this tool</strong><button class="btn btn-sm" data-act="clear-filter">Show all</button></div>`}
@@ -2964,31 +2956,11 @@ function tasksHtml() {
 }
 
 function bindHome() {
-  const ta = $('#qs-text');
-  const refresh = () => {
-    const has = !!(workDoc.file || workDoc.text.trim());
-    $$('[data-act="qs-check"], [data-act="qs-humanize"]').forEach(b => { b.disabled = !has; });
-  };
-  // The pill grows with the text, up to ~8 lines
-  const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 218) + 'px'; ta.closest('.qs-field').classList.toggle('tall', ta.scrollHeight > 42); };
-  if (ta) { grow(); ta.addEventListener('input', () => { workDoc.text = ta.value; workDoc.formatted = null; grow(); refresh(); }); }
-  const take = (file) => {
-    if (!file) return;
-    if (!/\.(docx|pdf|txt)$/i.test(file.name)) { toast('Please choose a .docx, .pdf or .txt file'); return; }
-    if (/\.txt$/i.test(file.name)) {
-      const r = new FileReader();
-      r.onload = () => { workDoc.text = String(r.result); workDoc.file = null; rerenderHomeKeepScroll('#qs-text'); };
-      r.readAsText(file);
-      return;
-    }
-    workDoc.file = { name: file.name, size: file.size, blob: file }; workDoc.formatted = null;
-    rerenderHomeKeepScroll('[data-act="qs-check"]');
-  };
-  $('#qs-file')?.addEventListener('change', (e) => take(e.target.files[0]));
+  bindLandTry();
   const card = $('#qs');
   card?.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drag'); });
   card?.addEventListener('dragleave', (e) => { if (!card.contains(e.relatedTarget)) card.classList.remove('drag'); });
-  card?.addEventListener('drop', (e) => { e.preventDefault(); card.classList.remove('drag'); take(e.dataTransfer.files[0]); });
+  card?.addEventListener('drop', (e) => { e.preventDefault(); card.classList.remove('drag'); ltTakeFile(e.dataTransfer.files[0]); });
   $('#doc-filter')?.addEventListener('change', (e) => { state.docFilter = e.target.value; rerenderDocs(); });
 }
 
@@ -3035,10 +3007,6 @@ function homeSendTo(tool, { text, file, note, turnitin = false } = {}) {
 
 function homeAction(act, el) {
   switch (act) {
-    case 'qs-upload': $('#qs-file').click(); break;
-    case 'qs-remove-file': workDoc.file = null; rerenderHomeKeepScroll('#qs-text'); break;
-    case 'qs-check': homeSendTo('turnitin'); break;
-    case 'qs-humanize': homeSendTo('humanizer'); break;
     case 'history-all': state.historyAll = true; rerenderHomeKeepScroll('[data-act="history-less"]'); break;
     case 'history-less': state.historyAll = false; rerenderHomeKeepScroll('[data-act="history-all"]'); break;
     case 'topup':
@@ -3105,6 +3073,17 @@ function renderTextTool(id) {
   </div>`;
 }
 
+// Export formats shown as app tiles (white rounded square with the app's logo): [title, description, svg]
+const appMark = (id, bands, badge, letter) => `<svg viewBox="0 0 24 24"><clipPath id="${id}"><rect x="6" y="3" width="16" height="18" rx="2.5"/></clipPath><g clip-path="url(#${id})">${bands.map((c, i) => `<rect x="6" y="${3 + i * 6}" width="16" height="6" fill="${c}"/>`).join('')}</g><rect x="2" y="10" width="11" height="11" rx="2" fill="${badge}"/>${letter}</svg>`;
+const FORMATS = {
+  docx: ['Word', 'Editable .docx document', appMark('fm-w', ['#41a5ee', '#2b7cd3', '#185abd'], '#103f91', '<path d="M4.4 12.6l1.1 5.8h1.1l1-3.9 1 3.9h1.1l1.1-5.8h-1.1l-.6 3.7-1-3.7h-1l-1 3.7-.6-3.7z" fill="#fff"/>')],
+  pptx: ['PowerPoint', 'Editable .pptx presentation', appMark('fm-p', ['#ff8f6b', '#ed6c47', '#d35230'], '#c43e1c', '<path d="M5.6 12.6h2.6a1.9 1.9 0 0 1 0 3.8H6.8v2H5.6zm1.2 1v1.8h1.3a.9.9 0 0 0 0-1.8z" fill="#fff"/>')],
+  pdf: ['PDF', 'Document for printing and sharing', '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="4" fill="#d93831"/><text x="12" y="15.2" text-anchor="middle" font-size="7.4" font-weight="800" fill="#fff" font-family="system-ui, sans-serif">PDF</text></svg>'],
+  txt: ['Plain text', 'Simple .txt file', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M8.5 8h7M8.5 12h7M8.5 16h4"/></svg>'],
+};
+// One menu row: app tile, title + description, trailing download arrow
+const formatItemHtml = (ext, act) => `<button role="menuitem" data-act="${act}" data-value="${ext}"><b class="dl-tile" aria-hidden="true">${FORMATS[ext][2]}</b><span class="dl-txt">${FORMATS[ext][0]}<small>${FORMATS[ext][1]}</small></span>${icon('download')}</button>`;
+
 function resultHtml(id) {
   const t = toolState(id), flow = CONFIG.flows[id];
   if (t.status === 'loading') return `<div class="card hum-result loading"><span class="spinner" aria-hidden="true"></span>${esc(flow.loadingLabel)}</div>`;
@@ -3119,9 +3098,6 @@ function resultHtml(id) {
   if (t.status !== 'done') return '';
   // Result actions: main = send the text to the AI Detector, secondary = Copy for pasted text,
   // or a download menu (copy / pdf / docx / txt) when the text came from an uploaded file
-  const fmts = [['pdf', 'PDF document', '#e5252a'], ['docx', 'Word document', '#2b579a'], ['txt', 'Plain text', '#71717a']];
-  // File-type icon: a page with a folded corner and a coloured format badge
-  const fileIc = (ext, c) => `<svg class="dl-file" viewBox="0 0 24 28" aria-hidden="true"><path d="M4 1h11l6 6v18a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2z" fill="var(--surface)" stroke="color-mix(in oklab, var(--text) 25%, transparent)"/><path d="M15 1v6h6" fill="none" stroke="color-mix(in oklab, var(--text) 25%, transparent)"/><rect x="0" y="14" width="${ext.length > 3 ? 24 : 20}" height="9" rx="2" fill="${c}"/><text x="${ext.length > 3 ? 12 : 10}" y="20.8" text-anchor="middle" font-size="6.4" font-weight="700" fill="#fff" font-family="system-ui, sans-serif">${ext.toUpperCase()}</text></svg>`;
   return `<div class="card hum-result">
     <div class="result-head">
       <h2>${esc(flow.resultTitle)}</h2>
@@ -3129,9 +3105,9 @@ function resultHtml(id) {
       ${!t.result.file ? '<button class="btn btn-sm" data-act="copy">Copy</button>' : `<div class="dl-wrap">
         <button class="btn btn-sm" data-act="dl-toggle" aria-haspopup="menu" aria-expanded="false">${icon('download')} Download ${icon('chevronDown')}</button>
         <div class="dl-menu" role="menu">
-          <button role="menuitem" data-act="copy"><b>${icon('copy')}</b><span>Copy text</span></button>
+          <button role="menuitem" data-act="copy"><b class="dl-tile">${icon('copy')}</b><span class="dl-txt">Copy text<small>Paste it anywhere</small></span></button>
           <hr>
-          ${fmts.map(([ext, label, c]) => `<button role="menuitem" data-act="dl-as" data-value="${ext}"><b>${fileIc(ext, c)}</b><span>${label}</span></button>`).join('')}
+          ${['docx', 'pdf', 'txt'].map(ext => formatItemHtml(ext, 'dl-as')).join('')}
         </div>
       </div>`}
       <button class="btn btn-sm btn-primary" data-act="next">${esc(flow.next.label)}</button>
@@ -3972,9 +3948,13 @@ function qdResultHtml() {
 const qdMarked = () => state.qd.status === 'done' && state.qd.result?.text === state.qd.text;
 
 function qdBackdropHtml() {
-  if (!qdMarked()) return '';
+  return qdMarked() ? sentMarksHtml(state.qd.result) : '';
+}
+
+// The checked text with flagged sentences wrapped in <mark>; r = { text, sents } from /api/detector/free
+function sentMarksHtml(r) {
   // Server offsets count Unicode code points, so slice the text the same way
-  const r = state.qd.result, chars = Array.from(r.text), part = (a, b) => esc(chars.slice(a, b).join(''));
+  const chars = Array.from(r.text), part = (a, b) => esc(chars.slice(a, b).join(''));
   let pos = 0, html = '';
   for (const s of r.sents) {
     if (s.start < pos) continue;
@@ -5039,7 +5019,8 @@ function edOpenMenu(btn, items) {
   edCloseMenu();
   const menu = document.createElement('div');
   menu.className = 'menu'; menu.id = 'ed-menu'; menu.setAttribute('role', 'menu');
-  menu.innerHTML = items.map(i => i.disabled
+  if (items.some(i => i.format)) menu.classList.add('menu-formats');
+  menu.innerHTML = items.map(i => i.format ? formatItemHtml(i.format, i.act) : i.disabled
     ? `<button role="menuitem" disabled aria-disabled="true" class="muted">${esc(i.label)}</button>`
     : `<button role="menuitem" data-act="${i.act}" data-value="${esc(i.value || '')}">${esc(i.label)}</button>`).join('');
   document.body.append(menu);
@@ -5088,7 +5069,7 @@ function edAction(act, el) {
     case 'ed-open-file': edCloseMenu(); $('#ed-file').click(); break;
     case 'ed-new': edCloseMenu(); edReplaceDoc('Untitled document', '<p><br></p>', 'Before new document'); $('#doc')?.focus(); break;
     case 'ed-export':
-      edOpenMenu(el, [{ label: 'Download as .docx', act: 'ed-export-as', value: 'docx' }, { label: 'Print or save as PDF', act: 'ed-export-as', value: 'pdf' }]);
+      edOpenMenu(el, [{ format: 'docx', act: 'ed-export-as' }, { format: 'pdf', act: 'ed-export-as' }]);
       break;
     case 'ed-export-as': edCloseMenu(true); if (el.dataset.value === 'pdf') edPrint(); else edExportDocx(); break;
     case 'ed-versions':
@@ -5410,8 +5391,7 @@ function slDoneHtml() {
         <span class="small muted">${s.deck.length} slides · ${esc(d.name)}</span></div>
       <div class="sl-head-actions">
         <button class="btn btn-ghost" data-act="sl-new">${icon('plus')} New presentation</button>
-        <button class="btn btn-primary" id="sl-download" data-act="sl-download" ${s.downloading ? 'disabled' : ''}
-          data-tip-title="Download .pptx" data-tip-desc="Opens in PowerPoint, Google Slides and Keynote" data-tip-pos="bottom">${icon('download')} ${s.downloading ? 'Preparing…' : 'Download .pptx'}</button>
+        <button class="btn btn-primary" id="sl-download" data-act="sl-download" aria-haspopup="menu" ${s.downloading ? 'disabled' : ''}>${icon('download')} ${s.downloading ? 'Preparing…' : 'Download'}</button>
       </div>
     </section>
     <section class="sl-viewer" id="sl-viewer" aria-label="Slides">
@@ -5500,7 +5480,34 @@ async function slAttach(file) {
   if (currentRoute() === 'presentation' && s.stage === 'setup') rerenderSlides(s.file ? '#sl-topic' : '[data-act="sl-upload"]');
 }
 
-async function slDownload(btn) {
+// PDF: one slide per landscape page through the browser's print dialog (Save as PDF), drawn with the app's own slide styles
+function slPrint() {
+  const s = slState(), d = slDesign();
+  if (!s.deck.length) return;
+  const css = $('link[rel="stylesheet"][href*="app2/app.css"]')?.href || '/static/app2/app.css';
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+  document.body.append(frame);
+  const doc = frame.contentDocument;
+  doc.open();
+  doc.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(s.deck[0].title || 'Presentation')}</title>
+    <link rel="stylesheet" href="${esc(css)}"><style>
+    @page { size: 297mm 167mm; margin: 0; } html, body { margin: 0; background: #fff; }
+    .sl-print-page { width: 297mm; height: 167mm; break-after: page; } .sl-print-page:last-child { break-after: auto; }
+    .sl-print-page .slide { width: 100%; height: 100%; border: 0; border-radius: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  </style></head><body>${s.deck.map(sl => `<div class="sl-print-page">${slideHtml(sl, d, { photos: s.photos })}</div>`).join('')}</body></html>`);
+  doc.close();
+  const print = () => { frame.contentWindow.focus(); frame.contentWindow.print(); };
+  frame.contentWindow.addEventListener('afterprint', () => frame.remove());
+  setTimeout(() => frame.remove(), 120000);
+  // Wait for the stylesheet and photos, otherwise the first pages print unstyled
+  const imgs = [...doc.images].map(img => img.complete ? null : new Promise(r => { img.onload = img.onerror = r; })).filter(Boolean);
+  const sheet = doc.querySelector('link[rel="stylesheet"]');
+  Promise.all([...imgs, new Promise(r => { if (sheet.sheet) r(); else { sheet.onload = sheet.onerror = r; } })]).then(() => setTimeout(print, 50));
+}
+
+async function slDownload() {
   const s = slState();
   if (s.downloading || !s.deck.length) return;
   s.downloading = true;
@@ -5598,7 +5605,8 @@ function slAction(act, el) {
       rerenderSlides(`[data-act="sl-design"][data-id="${s.designId}"]`);
       toast(s.stage === 'done' ? `Design changed to ${slDesign().name}. No credits used.` : `Design: ${slDesign().name}`);
       break;
-    case 'sl-download': slDownload(el); break;
+    case 'sl-download': edOpenMenu(el, [{ format: 'pptx', act: 'sl-download-as' }, { format: 'pdf', act: 'sl-download-as' }]); break;
+    case 'sl-download-as': edCloseMenu(true); if (el.dataset.value === 'pdf') slPrint(); else slDownload(); break;
     case 'sl-new':
       askConfirm({
         title: 'Start a new presentation?', okLabel: 'Start new', opener: el,
@@ -7879,7 +7887,7 @@ function askDelete(docId, opener) {
       if (!state.docs.some(d => d.tool === state.docFilter)) state.docFilter = 'all';
       rerenderDocs();
       toast(`Deleted “${doc.title}”`);
-      return $('.doc-list [data-act="delete-doc"]') || $('#docs-h');
+      return $('.doc-list [data-act="delete-doc"], #hist-list [data-act="delete-doc"]') || $('#docs-h');
     },
   });
 }
@@ -7896,7 +7904,7 @@ dlg.addEventListener('close', () => { if (confirmOpener && document.contains(con
 /* =========================================================
    Public flow: Landing → Sign up (dialog) → Home (dashboard)
    ========================================================= */
-const PUBLIC_ROUTES = ['landing'];
+const PUBLIC_ROUTES = ['landing', 'landing-try'];   // landing-try: the same landing with a free detector / humanizer in the hero
 const TASK_ITEMS = () => ALL_ITEMS.filter(i => i.id !== 'home' && !i.info && !i.hidden);
 
 function navigate(route) {
@@ -7926,6 +7934,12 @@ function bindLanding() {
     const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
     const p = reduce ? 1 : Math.min(1, Math.max(0, scrollY / (innerHeight * .55)));
     hero.style.setProperty('--p', p.toFixed(3));
+    // landing-try: the demo sits under the tool, so its tilt follows its own position in the viewport
+    const demo = $('.land-demo');
+    if (demo) {
+      const dp = reduce ? 1 : Math.min(1, Math.max(0, (innerHeight - demo.getBoundingClientRect().top) / (innerHeight * .8)));
+      demo.style.setProperty('--p', dp.toFixed(3));
+    }
   };
   update();
   revealLanding();
@@ -7996,8 +8010,214 @@ function landNavHtml() {
 // Links into the app from the landing: every tool opens directly, guests included
 const appLinkAttrs = (item) => `href="${esc(itemHref(item))}" ${itemLinkAttrs(item)}`;
 
-function renderLanding() {
+/* ---------- Detector / humanizer box: landing-try hero (3 free tries per tool) and the dashboard's Start here (credits) ---------- */
+const lt = { tab: 'detect', text: '', status: 'idle', result: null, error: null, animate: false };
+const ltApp = () => state.signedIn && !PUBLIC_ROUTES.includes(currentRoute());
+const ltMax = () => !ltApp() ? CONFIG.landing.tryIt.maxWords : lt.tab === 'detect' ? CONFIG.detector.maxWords : CONFIG.wordLimit;
+// Free tries are counted per tool on this device: 3 for the detector and 3 for the humanizer (the server keeps its own daily limits)
+const ltUsed = (tab = lt.tab) => +store.get(`lt-runs-${tab}`, 0);
+const ltLeft = (tab = lt.tab) => Math.max(0, CONFIG.landing.tryIt.freeRuns - ltUsed(tab));
+const ltWords = () => countWords(lt.text);
+const ltReady = () => { const w = ltWords(); return w >= CONFIG.detector.minWords && w <= ltMax() && lt.status !== 'loading'; };
+function ltCountText() {
+  const w = ltWords(), min = CONFIG.detector.minWords, max = ltMax();
+  if (w && w < min) return `${fmtNum(w)} words · add ${min - w} more`;
+  if (w > max) return `${fmtNum(w)} / ${fmtNum(max)} words${ltApp() ? ' · too long' : ' · sign up for longer texts'}`;
+  return `${fmtNum(w)} / ${fmtNum(max)} words`;
+}
+const ltMarked = () => lt.tab === 'detect' && lt.status === 'done' && lt.result?.kind === 'detect' && lt.result.text === lt.text;
+
+function landTryHtml({ intro = false } = {}) {
+  const T = CONFIG.landing.tryIt, det = lt.tab === 'detect', app = ltApp();
+  if (lt.status === 'limit' && (app || ltLeft())) lt.status = 'idle';
+  const tab = (v, label, ic) => `<button role="tab" id="lt-tab-${v}" aria-selected="${lt.tab === v}" aria-controls="lt-panel" tabindex="${lt.tab === v ? 0 : -1}" data-act="lt-tab" data-v="${v}">${icon(ic)} ${label}</button>`;
+  return `<div class="land-try${intro ? ' lt-intro' : ''}" id="land-try">
+    <div class="lt-top">
+      <div class="seg lt-seg" role="tablist" aria-label="Free tool">${tab('detect', 'AI Detector', 'scan')}${tab('humanize', 'Humanizer', 'sparkles')}</div>
+      ${app ? '' : `<span class="lt-free">${icon('gift')} ${ltLeft() ? `${ltLeft()} free ${ltLeft() === 1 ? 'try' : 'tries'} left` : 'Free tries used'}</span>`}
+    </div>
+    <section class="card qd lt-card" id="lt-panel" role="tabpanel" aria-labelledby="lt-tab-${lt.tab}">
+      <div class="qd-input">
+        <div class="qd-label-row"><label class="qd-label" for="lt-text">${det ? 'Text to check' : 'Text to humanize'}</label>
+          ${ltMarked() ? '<span class="qd-legend" id="lt-legend"><span><i class="lv-ai"></i>Looks AI</span><span><i></i>Looks human</span></span>' : ''}</div>
+        <div class="qd-field">
+          <div class="qd-backdrop" id="lt-backdrop" aria-hidden="true">${ltMarked() ? sentMarksHtml(lt.result) : ''}</div>
+          <textarea class="input qd-text" id="lt-text" placeholder="${esc(T.placeholder)}" spellcheck="false">${esc(lt.text)}</textarea>
+        </div>
+        <div class="tool-bar">
+          <span class="lt-meta"><span class="muted small" id="lt-count">${ltCountText()}</span>
+          ${app ? `<span class="muted small">Cost: ${det ? 'Free' : esc(estLabel('humanizer'))}</span>` : ''}</span>
+          <span class="spacer"></span>
+          <input type="file" id="lt-file" accept=".txt,.docx,.pdf" hidden>
+          <button class="btn btn-ghost" data-act="lt-upload">${icon('upload')} Upload file</button>
+          <button class="btn" data-act="lt-clear" ${lt.text ? '' : 'hidden'} id="lt-clear">Clear</button>
+          <button class="btn btn-primary" data-act="lt-run" id="lt-run" ${ltReady() ? '' : 'disabled'}>${det ? `${icon('scan')} Detect AI` : `${icon('sparkles')} Humanize`}</button>
+        </div>
+      </div>
+      <div class="qd-result" id="lt-result" aria-live="polite">${ltResultHtml()}</div>
+    </section>
+  </div>`;
+}
+
+function ltResultHtml() {
+  const S = CONFIG.scan, det = lt.tab === 'detect';
+  if (lt.status === 'loading') return `<div class="qd-gauge is-loading" aria-hidden="true"></div>
+    <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">${det ? 'Analyzing your text…' : 'Humanizing your text…'}</h2><p class="muted">${det ? 'This takes a few seconds.' : 'This can take up to a minute.'}</p>`;
+  if (lt.status === 'limit') return `<span class="lt-lock" aria-hidden="true">${icon('lock')}</span>
+    <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">You’ve used your free tries</h2>
+    <p class="muted qd-sub">Create a free account to keep going. You get ${CONFIG.signupCredits} credits to start.</p>
+    <div class="qd-actions"><button class="btn btn-primary" data-act="signup">Sign up free</button></div>`;
+  if (lt.status === 'error') return `<div class="qd-gauge is-empty" aria-hidden="true"><b>—%</b></div>
+    <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">${det ? 'Couldn’t check the text' : 'Couldn’t humanize the text'}</h2>
+    <p class="muted qd-sub" role="alert">${esc(lt.error.message)}</p>
+    ${lt.error.action === 'topup' ? '<div class="qd-actions"><button class="btn btn-primary" data-act="topup">Top up credits</button></div>' : ''}`;
+  if (lt.status !== 'done') return det
+    ? `<div class="qd-gauge is-empty" aria-hidden="true"><b>—%</b></div>
+      <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">Your AI score appears here</h2>
+      <ul class="qd-scale"><li><i class="lv-low"></i>Under ${S.levels.ai.low}% · looks human</li><li><i class="lv-medium"></i>${S.levels.ai.low}–${S.levels.ai.high - 1}% · some AI</li><li><i class="lv-high"></i>${S.levels.ai.high}%+ · likely AI</li></ul>`
+    : `<span class="lt-lock lt-hum-ic" aria-hidden="true">${icon('sparkles')}</span>
+      <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">Your humanized text appears here</h2>
+      <p class="muted qd-sub">We rewrite stiff, AI-sounding phrases so the text reads like you wrote it.</p>`;
+  const r = lt.result;
+  if (r.kind === 'humanize') return `<div class="lt-out">
+      <div class="lt-out-head"><b id="lt-result-h" tabindex="-1">Humanized text</b><button class="btn btn-sm" data-act="lt-copy">${icon('copy')} Copy</button></div>
+      <pre class="lt-out-text" id="lt-out-text">${esc(r.out)}</pre>
+      <div class="qd-actions"><button class="btn btn-primary" data-act="lt-check-out">${icon('scan')} Check it for AI</button></div>
+    </div>`;
+  const lv = scanLevel('ai', r.ai).toLowerCase();
+  const scored = r.sents.filter(x => x.ai_prob != null), flagged = scored.filter(x => x.flagged).length;
+  return `<div class="qd-gauge lv-${lv}" data-v="${r.ai}" style="--v:${lt.animate ? 0 : r.ai};--vi:${lt.animate ? 0 : r.ai}"><span class="visually-hidden">${r.ai}% AI</span><b aria-hidden="true"></b><small aria-hidden="true">AI</small></div>
+    <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">${esc(S.verdicts[scanLevel('ai', r.ai)].title)}</h2>
+    <p class="muted qd-sub">${r.ai}% of your text looks AI-generated${flagged ? ` · ${flagged} of ${scored.length} sentences flagged` : ''}.</p>
+    <div class="qd-split" aria-hidden="true"><span class="lv-${lv}" style="width:${r.ai}%"></span></div>
+    <div class="qd-split-legend"><span>AI ${r.ai}%</span><span>Human ${100 - r.ai}%</span></div>
+    <div class="qd-actions">
+      ${r.ai >= S.levels.ai.low ? `<button class="btn btn-primary" data-act="lt-humanize">${icon('sparkles')} Humanize this text</button>` : ''}
+      <button class="btn" data-act="${ltApp() ? 'lt-turnitin' : 'signup'}" data-intent="turnitin">${icon('shield')} Get Turnitin report</button>
+    </div>`;
+}
+
+function rerenderLandTry(focusSel) {
+  const box = $('#land-try');
+  if (!box) return;
+  box.outerHTML = landTryHtml();
+  bindLandTry();
+  if (focusSel) $(focusSel)?.focus({ preventScroll: true });
+}
+
+function bindLandTry() {
+  const ta = $('#lt-text');
+  if (!ta) return;
+  const back = $('#lt-backdrop');
+  ta.addEventListener('input', () => {
+    lt.text = ta.value; ltSyncWorkDoc();
+    $('#lt-count').textContent = ltCountText();
+    $('#lt-run').disabled = !ltReady();
+    $('#lt-clear').hidden = !lt.text;
+    if (back.firstChild && !ltMarked()) { back.textContent = ''; $('#lt-legend')?.remove(); }   // edited: the marks no longer match
+  });
+  ta.addEventListener('scroll', () => { back.scrollTop = ta.scrollTop; });
+  $('#lt-file').addEventListener('change', (e) => { ltTakeFile(e.target.files[0]); e.target.value = ''; });
+  const g = $('#lt-result .qd-gauge[data-v]');
+  if (g && lt.animate) { lt.animate = false; requestAnimationFrame(() => requestAnimationFrame(() => { g.style.setProperty('--v', g.dataset.v); g.style.setProperty('--vi', g.dataset.v); })); }
+}
+
+// Upload: the file's text goes into the box (.txt is read here, .docx/.pdf on the server)
+function ltTakeFile(file) {
+  if (!file) return;
+  if (!/\.(docx|pdf|txt)$/i.test(file.name)) { toast('Please choose a .docx, .pdf or .txt file'); return; }
+  toast(`Reading “${file.name}”…`);
+  API.extractText(file).then((text) => {
+    text = String(text || '').trim();
+    if (!text) throw new Error('No readable text found in that file.');
+    Object.assign(lt, { text, status: 'idle', result: null, error: null });
+    ltSyncWorkDoc();
+    rerenderLandTry('#lt-text');
+    toast(`File “${file.name}” added`);
+  }).catch((err) => toast(err.message || 'Could not read the uploaded file.'));
+}
+// In the app the box is the shared work document, so Format and Work Review open with the same text
+function ltSyncWorkDoc() { if (ltApp()) { workDoc.text = lt.text; workDoc.file = null; workDoc.formatted = null; } }
+
+function ltLimit() {
+  lt.status = 'limit'; rerenderLandTry();
+  openSignup({ intent: lt.tab === 'detect' ? 'turnitin' : 'humanizer', title: 'You’ve used your free tries',
+    lead: `Create a free account to keep checking and humanizing. You get ${CONFIG.signupCredits} credits to start.` });
+}
+
+async function runLandTry() {
+  if (!ltReady()) return;
+  const app = ltApp(), tab = lt.tab, det = tab === 'detect', text = lt.text;
+  // Out of free tries: the sign-up dialog opens right away; the card behind it keeps a Sign up button for later
+  if (!app && !ltLeft(tab)) return ltLimit();
+  Object.assign(lt, { status: 'loading', result: null, error: null });
+  rerenderLandTry('#lt-result-h');
+  try {
+    if (det) {
+      const data = await API.detectFree(text);
+      lt.result = { kind: 'detect', ai: Math.round(data.ai_percent), sents: data.sentences || [], text };
+      if (app) addDoc(text, 'turnitin', { title: 'Pasted text', ai: lt.result.ai, text });
+    } else {
+      const data = await API.humanize(text);
+      const out = String(data.humanized_text || data.text || '').trim();
+      if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
+      lt.result = { kind: 'humanize', out, text };
+      if (app) { addDoc(text, 'humanizer', { title: 'Pasted text', text: out }); loadCredits(); }
+      else if (data.free_runs_left === 0) state.guestRunsUsed = 1;
+    }
+  } catch (err) {
+    if (lt.tab !== tab) return;
+    if (!app && err.code === 'REGISTER_REQUIRED') {
+      store.set(`lt-runs-${tab}`, CONFIG.landing.tryIt.freeRuns);
+      if (!det) state.guestRunsUsed = 1;
+      return ltLimit();
+    }
+    const e = apiErrorInfo(err, { intent: det ? 'turnitin' : 'humanizer' });
+    Object.assign(lt, { status: e.handled ? 'idle' : 'error', error: e });
+    rerenderLandTry('#lt-result-h');
+    return;
+  }
+  if (lt.tab !== tab) return;
+  if (!app) store.set(`lt-runs-${tab}`, ltUsed(tab) + 1);
+  lt.status = 'done'; lt.animate = det && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  rerenderLandTry('#lt-result-h');
+  if (app) rerenderDocs();
+}
+
+function landTryAction(act, el) {
+  switch (act) {
+    case 'lt-tab':
+      if (lt.tab === el.dataset.v || lt.status === 'loading') return;
+      Object.assign(lt, { tab: el.dataset.v, status: 'idle', result: null, error: null });
+      rerenderLandTry(`#lt-tab-${lt.tab}`); break;
+    case 'lt-clear': Object.assign(lt, { text: '', status: 'idle', result: null, error: null }); ltSyncWorkDoc(); rerenderLandTry('#lt-text'); break;
+    // Dashboard: the text goes to the AI Detector page as a file for the official Turnitin report
+    case 'lt-turnitin': {
+      const blob = new File([lt.text], 'Your text.txt', { type: 'text/plain' });
+      Object.assign(toolState('turnitin'), { file: { name: blob.name, size: blob.size, blob, text: lt.text },
+        note: 'Your text is attached. Press Check document for the official Turnitin report.' });
+      state.detMode = 'turnitin'; go('turnitin'); break;
+    }
+    case 'lt-upload': $('#lt-file').click(); break;
+    case 'lt-run': runLandTry(); break;
+    // Detector → Humanizer with the same text; Humanizer → Detector with the rewritten text
+    case 'lt-humanize': Object.assign(lt, { tab: 'humanize', status: 'idle', result: null, error: null }); rerenderLandTry('#lt-tab-humanize'); runLandTry(); break;
+    case 'lt-check-out': Object.assign(lt, { tab: 'detect', text: lt.result.out, status: 'idle', result: null, error: null }); ltSyncWorkDoc(); rerenderLandTry('#lt-tab-detect'); runLandTry(); break;
+    case 'lt-copy': {
+      const text = lt.result?.out || '';
+      navigator.clipboard?.writeText(text).then(() => toast('Copied to clipboard'), () => toast('Copy failed'));
+      break;
+    }
+  }
+}
+
+function renderLanding({ tryIt = false } = {}) {
   const L = CONFIG.landing, P = CONFIG.pricing;
+  // Product demo: the dashboard still with the AI Detector video over it (hero on the main landing, right under the tool on landing-try)
+  const product = `<div class="land-product">
+        <div class="land-product-frame"><img src="${LANDING_SHOTS.dashboard}" alt="The DocMaxxing dashboard: paste a text, check it for AI or humanize it, and see your credit and document history" width="1800" height="1125">
+          <video class="land-product-video" src="${LANDING_MEDIA}ai-detector.mp4" muted loop playsinline preload="metadata" aria-hidden="true" tabindex="-1"></video></div>
+      </div>`;
   const sec = (id, title, sub, body, cls = '') => `<section class="pub-sec ${cls}" id="${id}" aria-labelledby="${id}-h">
       <h2 id="${id}-h">${esc(title)}</h2>${sub ? `<p class="muted">${esc(sub)}</p>` : ''}${body}</section>`;
   // Bento grid: each tile gets a tone (blue / navy / black / white / sky) and a small illustration
@@ -8031,7 +8251,13 @@ function renderLanding() {
   return `<div class="pub land">
     ${landNavHtml()}
 
-    <section class="land-hero" aria-labelledby="hero-h">
+    ${tryIt ? `<section class="land-hero land-hero-try" aria-labelledby="hero-h">
+      <div class="land-hero-text">
+        <h1 class="hero-title" id="hero-h">${esc(L.tryIt.title)}</h1>
+        <p class="hero-sub">${esc(L.tryIt.subtitle)}</p>
+      </div>
+      ${landTryHtml({ intro: true })}
+    </section>` : `<section class="land-hero" aria-labelledby="hero-h">
       <div class="land-hero-text">
         <h1 class="hero-title" id="hero-h">${esc(L.title)}</h1>
         <p class="hero-sub">${esc(L.subtitle)}</p>
@@ -8040,13 +8266,15 @@ function renderLanding() {
           ${state.signedIn ? '' : `<a class="btn btn-lg" href="#/home">${esc(L.secondaryCta)}</a>`}
         </div>
       </div>
-      <div class="land-product">
-        <div class="land-product-frame"><img src="${LANDING_SHOTS.dashboard}" alt="The DocMaxxing dashboard: paste a text, check it for AI or humanize it, and see your credit and document history" width="1800" height="1125">
-          <video class="land-product-video" src="${LANDING_MEDIA}ai-detector.mp4" muted loop playsinline preload="metadata" aria-hidden="true" tabindex="-1"></video></div>
-      </div>
-    </section>
+      ${product}
+    </section>`}
 
     <ul class="land-stats" aria-label="DocMaxxing in numbers">${L.stats.map(([n, t, ic]) => `<li><i class="land-stat-ic" aria-hidden="true"><svg viewBox="-5 -5 34 34"><g class="stk-bg">${ICONS[ic]}</g><g class="stk-fg">${ICONS[ic]}</g></svg></i><b>${esc(n)}</b><span>${esc(t)}</span></li>`).join('')}</ul>
+
+    ${tryIt ? `<section class="pub-sec pub-sec-center land-demo" id="demo" aria-labelledby="demo-h">
+      <h2 id="demo-h">${esc(L.tryIt.demoTitle)}</h2><p class="muted">${esc(L.tryIt.demoText)}</p>
+      ${product}
+    </section>` : ''}
 
     ${sec('how', L.howTitle, '', `<ol class="land-steps">${L.steps.map((s, i) => `<li class="card">
         <div class="land-step-text"><span class="land-step-n">Step ${i + 1}</span>
@@ -8328,7 +8556,8 @@ document.addEventListener('click', (e) => {
       $(`${PUBLIC_ROUTES.includes(currentRoute()) ? '.pub-nav' : '#app-header'} [data-act="theme"]`)?.focus();
       break;
     case 'delete-doc': askDelete(el.dataset.id, el); break;
-    case 'qs-upload': case 'qs-remove-file': case 'qs-check': case 'qs-humanize':
+    case 'lt-tab': case 'lt-clear': case 'lt-upload': case 'lt-run': case 'lt-turnitin': case 'lt-humanize': case 'lt-check-out': case 'lt-copy':
+      landTryAction(act, el); break;
     case 'history-all': case 'history-less': case 'topup': case 'credits-more': case 'continue':
       homeAction(act, el); break;
     case 'clear-filter':state.docFilter = 'all'; rerenderDocs(); break;
@@ -8385,7 +8614,7 @@ document.addEventListener('click', (e) => {
     case 'fmt-preview-close': case 'fmt-preset-form': case 'fmt-preset-cancel': case 'fmt-preset-save':
       fmtAction(act, el); break;
     case 'sl-upload': case 'sl-remove-file': case 'sl-jump-designs': case 'sl-generate': case 'sl-go': case 'sl-pick':
-    case 'sl-filter': case 'sl-design': case 'sl-download': case 'sl-new':
+    case 'sl-filter': case 'sl-design': case 'sl-download': case 'sl-download-as': case 'sl-new':
       slAction(act, el); break;
     case 'veil-unlock': case 'veil-confirm': case 'veil-dlg-close': case 'veil-download': case 'veil-steps': case 'veil-scroll': case 'veil-copy': case 'veil-email':
       e.preventDefault(); veilAction(act, el); break;

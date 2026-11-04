@@ -228,7 +228,8 @@ svg.icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentCol
 button.nav-item { width: 100%; border: 0; background: transparent; font-family: inherit; text-align: left; cursor: pointer; }
 /* HeroUI ListBox selected item: filled default background */
 .nav-item[aria-current="page"] { background: var(--default); }
-.nav-item.nav-admin { background: color-mix(in oklab, var(--accent) 11%, transparent); }
+/* Admin: tinted strip across the whole sidebar width (edge to the content panel), rounded only on the right */
+.nav-item.nav-admin { margin: 0 calc(-1 * var(--space-4)); padding-left: calc(var(--space-2) + var(--space-4)); border-radius: 0 12px 12px 0; background: color-mix(in oklab, var(--accent) 15%, transparent); }
 .nav-item.nav-admin:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
 .nav-item.nav-admin[aria-current="page"] { background: color-mix(in oklab, var(--accent) 20%, transparent); }
 .nav-label { overflow: hidden; text-overflow: ellipsis; }
@@ -274,6 +275,7 @@ button.nav-item { width: 100%; border: 0; background: transparent; font-family: 
 .app.is-collapsed .nav { align-items: center; gap: var(--space-4); padding: var(--space-4) 14px; }
 .app.is-collapsed .nav ul { display: flex; flex-direction: column; gap: var(--space-2); }
 .app.is-collapsed .nav-item { width: 36px; justify-content: center; padding: 0; }
+.app.is-collapsed .nav-item.nav-admin { margin: 0; border-radius: 10px; }
 .app.is-collapsed .sidebar-foot { align-items: center; padding: var(--space-4) var(--space-3); }
 .app.is-collapsed .profile-btn { justify-content: center; width: auto; }
 .app.is-collapsed .profile-menu { right: auto; width: 200px; }
@@ -831,13 +833,16 @@ button.earn-chip:hover { background: var(--default-hover); }
 .dl-menu::before { content: ""; position: absolute; inset: -8px 0 auto; height: 8px; }   /* hover bridge over the gap */
 .dl-wrap:is(:hover, :focus-within, .is-open) .dl-menu { opacity: 1; visibility: visible; transform: none; transition: opacity 150ms var(--ease-smooth), transform 150ms var(--ease-smooth), visibility 0s; }
 .dl-wrap:is(:hover, :focus-within, .is-open) > .btn svg.icon:last-child { transform: rotate(180deg); }
-.dl-menu button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 16px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: transform 250ms cubic-bezier(.25, 1, .5, 1); }
-@media (hover: hover) { .dl-menu button:hover { background: var(--default); } }
-.dl-menu button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus); }
-.dl-menu button:active { transform: scale(.98); }
-.dl-menu b { display: grid; place-items: center; width: 16px; flex: none; }
-.dl-menu b svg.icon { width: 16px; height: 16px; color: var(--text-muted); }
-.dl-menu .dl-file { width: 16px; height: 19px; }
+:is(.dl-menu, .menu.menu-formats) button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 36px; padding: 6px 10px; border: 0; border-radius: 16px; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: transform 250ms cubic-bezier(.25, 1, .5, 1); }
+@media (hover: hover) { :is(.dl-menu, .menu.menu-formats) button:hover { background: var(--default); } }
+:is(.dl-menu, .menu.menu-formats) button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--focus); }
+:is(.dl-menu, .menu.menu-formats) button:active { transform: scale(.98); }
+:is(.dl-menu, .menu.menu-formats) .dl-tile { display: grid; place-items: center; width: 36px; height: 36px; flex: none; border-radius: 10px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); color: var(--text-muted); }
+:is(.dl-menu, .menu.menu-formats) .dl-tile svg { width: 22px; height: 22px; }
+:is(.dl-menu, .menu.menu-formats) .dl-tile svg.icon { width: 18px; height: 18px; }
+:is(.dl-menu, .menu.menu-formats) .dl-txt { display: flex; flex-direction: column; flex: 1; line-height: 1.3; }
+:is(.dl-menu, .menu.menu-formats) .dl-txt small { font-size: 12px; color: var(--text-muted); }
+:is(.dl-menu, .menu.menu-formats) button > svg.icon { width: 16px; height: 16px; flex: none; margin-left: 8px; color: var(--text-muted); }
 .dl-menu hr { width: 94%; margin: 0 0 0 3%; border: 0; border-top: 1px solid var(--border); }
 @media (prefers-reduced-motion: reduce) { .dl-menu, .dl-menu button { transition: none; } }
 .result-text { white-space: pre-wrap; background: var(--surface-2); border-radius: var(--radius); padding: var(--space-4); margin: 0; line-height: 1.7; font-family: var(--font); font-size: 15px; }
@@ -937,6 +942,10 @@ body.on-assign .proto { bottom: 156px; }
 .field-input { background: var(--default); border: 1px solid transparent; border-radius: var(--radius); min-height: 0; height: 40px; padding: 0 var(--space-3); font-size: 15px; font-weight: 400; color: var(--text); }
 textarea.field-input { min-height: 72px; height: auto; padding: var(--space-2) var(--space-3); resize: vertical; }
 .field .select { height: 40px; color: var(--text); font-weight: 400; }
+/* Form selects: same text size and inset as .field-input, with our own chevron instead of the native one */
+.field select.select { appearance: none; -webkit-appearance: none; padding: 0 40px 0 var(--space-3); font-size: 15px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2371717a' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 8 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center; background-size: 18px; }
 .field-input:disabled, .field .select:disabled { opacity: .7; }
 .price-box { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--border); }
 .price { font-size: 24px; font-weight: 700; }
@@ -1027,6 +1036,8 @@ table.hist { width: 100%; border-collapse: collapse; min-width: 780px; font-size
 .menu { position: fixed; z-index: 90; min-width: 180px; background: var(--overlay); border: 0; border-radius: 16px; box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; }
 .menu button { border: 0; background: none; text-align: left; height: 36px; padding: 0 10px; border-radius: var(--radius); cursor: pointer; color: var(--text); font-size: 14px; }
 .menu button:hover, .menu button:focus-visible { background: var(--default); outline: none; }
+.menu.menu-formats { min-width: 260px; padding: 6px; gap: 2px; border-radius: 22px; }
+.menu.menu-formats button { height: auto; }
 
 
 /* ---------- Guided tour ---------- */
@@ -1082,7 +1093,34 @@ table.hist { width: 100%; border-collapse: collapse; min-width: 780px; font-size
 .land-hero .hero-title { font-size: clamp(36px, 5.6vw, 64px); margin: 0 0 var(--space-4); text-wrap: balance; }
 .land-hero .hero-sub { margin: 0 auto; max-width: 52ch; text-wrap: pretty; }
 .land-hero .hero-cta { justify-content: center; }
+/* Landing · try it: the free detector / humanizer sits right under the headline */
+.land-hero-try { padding-top: 64px; }   /* Figma: shorter one-line title and less top space, so the tool fits on the first screen */
+.land-try { max-width: 1080px; margin: var(--space-6) auto 0; text-align: left; }
+.qs .land-try { width: 100%; margin-top: 0; }
+.lt-meta { display: inline-flex; flex-wrap: wrap; gap: 4px var(--space-3); }
+/* Dashboard column is narrower: word count + cost on their own line, buttons on the right below */
+.qs .lt-card .tool-bar { flex-wrap: wrap; row-gap: var(--space-2); }
+.qs .lt-meta { flex-basis: 100%; }
+.qs .lt-card { box-shadow: none; }   /* flat in the app, like the other dashboard cards */
+.qs.drag .lt-card { box-shadow: 0 0 0 2px var(--accent-text); }
+.land-try.lt-intro { animation: land-rise .9s var(--ease-out) .2s both; }   /* only on page load, not when the result re-renders */
+.lt-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+.lt-seg { margin: 0; }
+.lt-seg button { display: inline-flex; align-items: center; gap: 6px; }
+.lt-seg svg.icon { width: 16px; height: 16px; }
+:root .land-try .lt-seg button[aria-selected="true"] { box-shadow: 0 1px 2px rgb(0 0 0 / .05), 0 4px 12px rgb(0 0 0 / .06); }   /* softer than the app's segment shadow on the light hero */
+.lt-free { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--overlay); font-size: 13px; font-weight: 500; color: var(--text); }   /* white pill so it reads on the hero gradient */
+.lt-free svg.icon { width: 16px; height: 16px; color: var(--success); }
+.lt-card { --surface: var(--overlay); background: var(--surface); box-shadow: var(--shadow); }   /* the landing tints --surface; keep the tool card white like in the app */
+.lt-lock { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 20px; background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent-text); }
+.lt-lock svg.icon { width: 28px; height: 28px; }
+.lt-out { display: flex; flex-direction: column; gap: var(--space-3); width: 100%; height: 100%; text-align: left; }
+.lt-out-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.lt-out-text { flex: 1; min-height: 200px; max-height: 300px; overflow: auto; margin: 0; padding: var(--space-4); border-radius: var(--radius); background: var(--default); font: inherit; font-size: 15px; line-height: 1.6; white-space: pre-wrap; }
+.lt-out .qd-actions { justify-content: flex-start; margin-top: 0; }
 .land-product { margin: 64px auto 0; perspective: 1600px; }
+.land-demo { --p: 0; }
+.land-demo .land-product { margin-top: var(--space-6); animation: none; }   /* below the fold: the scroll tilt is the entrance */
 .land-product-frame { padding: 8px; border-radius: 28px; background: color-mix(in oklab, var(--surface) 70%, transparent); border: 1px solid var(--border);
   box-shadow: 0 40px 80px -24px rgb(0 0 0 / .45), 0 0 0 1px color-mix(in oklab, var(--hero-accent) 12%, transparent);
   transform-origin: 50% 0; transform: rotateX(calc((1 - var(--p)) * 24deg)) scale(calc(.86 + var(--p) * .14)); will-change: transform; }
@@ -1130,7 +1168,7 @@ table.hist { width: 100%; border-collapse: collapse; min-width: 780px; font-size
 @media (max-width: 420px) { .land .pub-nav .logo span:last-child { display: none; } }
 @media (prefers-reduced-motion: reduce) {
   .land-hero-text, .land-product-frame { opacity: 1; transform: none; }
-  .land-hero-text > *, .land-product { animation: none; }
+  .land-hero-text > *, .land-product, .land-try.lt-intro { animation: none; }
   .land .pub-nav { transition: none; }
 }
 .land-stats { list-style: none; margin: 72px 0 var(--space-6); padding: var(--space-5) 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); text-align: center; }
@@ -1851,6 +1889,15 @@ textarea.rv-text { min-height: 200px; }
 a.box-row-title { font-weight: 400; }
 .box-row-sub { font-size: 13px; line-height: 19.5px; color: var(--text-muted); }
 .box-row .row-amount { font-size: 14px; }
+/* History row: next step as a ghost button (white, dark text), delete as a red icon with a light-red hover */
+.box-row .row-action { background: var(--surface); color: var(--text); }
+.box-row .row-action:hover { background: var(--default-soft); }
+.box-row .row-del { width: 32px; height: 32px; margin-left: calc(-1 * var(--space-2)); color: var(--danger); }
+.box-row .row-del:hover { background: var(--danger-soft); color: var(--danger); }
+.box-row .row-del svg.icon { width: 18px; height: 18px; }
+#hist-list .box-row-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* one line even next to the action buttons */
+.menu button.is-danger { display: flex; align-items: center; gap: 8px; color: var(--red); }
+.menu button.is-danger svg.icon { width: 16px; height: 16px; }
 .box-foot { display: flex; justify-content: center; padding: var(--space-4); }
 .home-box .hc-low { margin: var(--space-3) var(--space-4) 0; }
 .home-box .empty { padding: var(--space-5) var(--space-4); }

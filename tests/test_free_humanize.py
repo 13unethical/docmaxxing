@@ -89,7 +89,7 @@ def test_defaults_and_env_overrides(monkeypatch):
     for name in ("FREE_HUMANIZE_GUEST_WORDS", "FREE_HUMANIZE_ENGINE", "HUMANIZE_MAX_WORDS"):
         monkeypatch.delenv(name, raising=False)
     lim = free_humanize.limits()
-    assert (lim.guest_words, lim.guest_daily, lim.user_words, lim.user_daily) == (500, 1, 1500, 10)
+    assert (lim.guest_words, lim.guest_daily, lim.user_words, lim.user_daily) == (1000, 3, 1500, 10)
     assert lim.guest_ip_daily == 3
     assert lim.engine == "student"
     assert lim.guest_rate_per_minute == 10
@@ -206,16 +206,17 @@ def test_server_word_cap_on_every_humanizer_endpoint(economy, engine, monkeypatc
 # --- guests ------------------------------------------------------------------
 
 
-def test_guest_gets_one_free_student_run_then_signup(economy, engine):
+def test_guest_gets_three_free_student_runs_then_signup(economy, engine):
     client = _client()
-    res = client.post(URL, json={"text": EN})
-    body = res.get_json()
-    assert res.status_code == 200, body
-    assert body["free_run"] is True
-    assert body["coins_charged"] == 0
-    assert body["humanized_text"] == "Rewritten by our model."
-    assert body["free_runs_left"] == 0
-    assert engine["calls"] == [True]
+    for left in (2, 1, 0):
+        res = client.post(URL, json={"text": EN})
+        body = res.get_json()
+        assert res.status_code == 200, body
+        assert body["free_run"] is True
+        assert body["coins_charged"] == 0
+        assert body["humanized_text"] == "Rewritten by our model."
+        assert body["free_runs_left"] == left
+    assert engine["calls"] == [True, True, True]
 
     res = client.post(URL, json={"text": EN})
     assert res.status_code == 403
@@ -223,7 +224,7 @@ def test_guest_gets_one_free_student_run_then_signup(economy, engine):
     assert body["error"] == "REGISTER_REQUIRED"
     assert body["reason"] == "FREE_LIMIT_REACHED"
     assert "10" in body["message"]
-    assert len(engine["calls"]) == 1
+    assert len(engine["calls"]) == 3
 
 
 def test_guest_daily_counter_resets_next_day(economy, engine, monkeypatch):
@@ -237,13 +238,13 @@ def test_guest_daily_counter_resets_next_day(economy, engine, monkeypatch):
 
 
 def test_guest_word_limit(economy, engine):
-    res = _client().post(URL, json={"text": _words(501)})
+    res = _client().post(URL, json={"text": _words(1001)})
     assert res.status_code == 403
     body = res.get_json()
     assert body["error"] == "FREE_WORD_LIMIT"
-    assert body["max_words"] == 500
+    assert body["max_words"] == 1000
     assert engine["calls"] == []
-    assert _client().post(URL, json={"text": _words(500)}).status_code == 200
+    assert _client().post(URL, json={"text": _words(1000)}).status_code == 200
 
 
 def test_guest_free_run_failure_is_not_counted(economy, engine, monkeypatch):
@@ -388,11 +389,11 @@ def test_app_boot_reports_free_allowance(economy, monkeypatch):
     with app_mod.app.test_request_context("/app"):
         boot = app_mod._app_v2_boot()
     assert boot["freeHumanize"] == {
-        "guestWords": 500,
-        "guestDaily": 1,
+        "guestWords": 1000,
+        "guestDaily": 3,
         "userWords": 1500,
         "userDaily": 10,
         "maxWords": 5000,
-        "runsLeft": 1,
+        "runsLeft": 3,
     }
     assert boot["guestHumanizeUsed"] is False
