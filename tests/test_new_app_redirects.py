@@ -104,7 +104,7 @@ def test_post_is_not_redirected(client):
 @pytest.mark.parametrize(
     ("path", "target"),
     [
-        ("/", "/app#/home"),
+        ("/", "/app#/landing"),
         ("/humanizer", "/app#/humanizer"),
         ("/pricing", "/app#/pricing"),
         ("/formatter", "/app#/format"),

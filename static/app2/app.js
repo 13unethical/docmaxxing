@@ -2738,11 +2738,11 @@ function render() {
   syncProto();
   if (isPublic) {
     document.body.classList.remove('on-editor', 'on-format', 'on-assign');
-    main.innerHTML = renderLanding({ tryIt: route === 'landing-try' });
+    main.innerHTML = renderLanding({ tryIt: true });
     document.title = CONFIG.brand;
     window.scrollTo(0, 0);
     bindLanding();
-    if (route === 'landing-try') bindLandTry();
+    bindLandTry();
     return;
   }
   const item = ALL_ITEMS.find(i => i.route === route);

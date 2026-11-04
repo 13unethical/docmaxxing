@@ -502,6 +502,8 @@ def _redirect_old_pages_to_new_app():
         and economy_auth.current_user() is None
     ):
         return None
+    if screen == "home" and economy_auth.current_user() is None:
+        screen = "landing"
     query = request.query_string.decode("utf-8", "ignore")
     return redirect(f"/app{'?' + query if query else ''}#/{screen}", code=302)
 
