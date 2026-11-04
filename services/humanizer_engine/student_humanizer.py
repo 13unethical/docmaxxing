@@ -97,6 +97,8 @@ class StudentConfig:
     sampling: tuple[tuple[float, int], ...] = ()
     refine_above: float = REFINE_ABOVE
     refine_sampling: tuple[tuple[float, int], ...] = ()
+    # Extra variants always sampled for conclusion paragraphs (Turnitin flags ~2/3 of them vs ~1/4 of the rest).
+    conclusion_sampling: tuple[tuple[float, int], ...] = ()
     doc_rounds: int = DOC_ROUNDS
     doc_budget: float = DOC_BUDGET_SECONDS
 
@@ -144,6 +146,7 @@ def student_config() -> StudentConfig:
         sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_SAMPLING") or ""),
         refine_above=_float("HUMANIZER_STUDENT_REFINE_ABOVE", REFINE_ABOVE),
         refine_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_REFINE_SAMPLING") or ""),
+        conclusion_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_CONCLUSION_SAMPLING") or ""),
         doc_rounds=max(0, int(_float("HUMANIZER_STUDENT_DOC_ROUNDS", DOC_ROUNDS))),
         doc_budget=max(0.0, _float("HUMANIZER_STUDENT_DOC_BUDGET", DOC_BUDGET_SECONDS)),
     )
@@ -314,6 +317,35 @@ def plan_chunks(body: str, separator: str, chunk_words: int = CHUNK_WORDS) -> li
     return pieces
 
 
+_CONCLUSION_OPENER = re.compile(
+    r"^\W*(in conclusion|to conclude|in summary|to summari[sz]e|to sum up|in sum|overall|ultimately|"
+    r"in closing|all in all|taken together|in the end)\b",
+    re.IGNORECASE,
+)
+_CONCLUSION_TITLE = re.compile(r"\b(conclusions?|concluding|summary|final thoughts|closing remarks)\b", re.IGNORECASE)
+
+
+def _is_title(text: str) -> bool:
+    return "\n" not in text.strip() and _wc(text) <= TITLE_MAX_WORDS and not _SENTENCE_END.search(text)
+
+
+def conclusion_pieces(pieces: list[tuple[str, bool]]) -> set[int]:
+    """Indices of rewritten pieces that are conclusions: under a "Conclusion" heading, opening with
+    "In conclusion"-style words, or else the last prose piece of the text."""
+    found: set[int] = set()
+    under_heading = False
+    for i, (text, rewrite) in enumerate(pieces):
+        if not rewrite or _is_title(text):
+            under_heading = bool(_CONCLUSION_TITLE.search(text)) and _is_title(text)
+            continue
+        if under_heading or _CONCLUSION_OPENER.match(text):
+            found.add(i)
+    if not found:
+        last = [i for i, (text, rewrite) in enumerate(pieces) if rewrite and not _is_title(text)]
+        found.update(last[-1:])
+    return found
+
+
 def chunk_problem(source: str, output: str) -> str | None:
     """Why a rewritten chunk is unusable, or None when it is fine."""
     if not output.strip():
@@ -397,9 +429,11 @@ class StudentTextHumanizer:
         todo = [piece for piece, rewrite in pieces if rewrite]
         if not todo:
             raise StudentHumanizerError("No prose to rewrite")
+        conclusions = conclusion_pieces(pieces) if self.config.conclusion_sampling else set()
+        flags = [i in conclusions for i, (_, rewrite) in enumerate(pieces) if rewrite]
 
         with ThreadPoolExecutor(max_workers=max(1, min(self.max_workers, len(todo)))) as pool:
-            rewritten = iter(pool.map(self._rewrite_chunk, todo))
+            rewritten = iter(pool.map(self._rewrite_chunk, todo, flags))
         out = [next(rewritten) if rewrite else piece for piece, rewrite in pieces]
         if self.config.pick == "document":
             out = self._fix_flagged(pieces, out, separator)
@@ -407,7 +441,7 @@ class StudentTextHumanizer:
             out = [p.replace("\n\n", "\n") for p in out]
         return join_body_and_references(separator.join(out), refs)
 
-    def _rewrite_chunk(self, chunk: str) -> str:
+    def _rewrite_chunk(self, chunk: str, conclusion: bool = False) -> str:
         problem = "NOT_RUN"
         # A paragraph the model only lightly edits should not sink the whole text.
         lightest: tuple[float, str] | None = None
@@ -423,7 +457,7 @@ class StudentTextHumanizer:
                 lightest = light
             if usable:
                 if self.config.pick == "detector":
-                    return self._pick_by_detector(chunk, usable)
+                    return self._pick_by_detector(chunk, usable, conclusion)
                 return pick_candidate(chunk, usable, self.config.pick).text
             log.info("student humanizer attempt %s failed: %s", attempt, problem)
         if lightest is not None:
@@ -454,8 +488,9 @@ class StudentTextHumanizer:
                     lightest = (similarity, output)
         return usable, problem, lightest
 
-    def _pick_by_detector(self, chunk: str, usable: list[Candidate]) -> str:
-        """Lowest AI-detector score; still-flagged chunks get extra variants. Without the detector, "changed"."""
+    def _pick_by_detector(self, chunk: str, usable: list[Candidate], conclusion: bool = False) -> str:
+        """Lowest AI-detector score; still-flagged chunks and conclusions get extra variants.
+        Without the detector, "changed"."""
         cfg = self.config
         try:
             scored = list(zip(usable, self._score_fn([c.text for c in usable])))
@@ -463,9 +498,12 @@ class StudentTextHumanizer:
             log.info("AI detector unavailable for student pick: %s", exc)
             return pick_candidate(chunk, usable, "changed").text
         best = pick_least_ai(chunk, scored)
-        if best[1] > cfg.refine_above and cfg.refine_sampling:
+        more = cfg.conclusion_sampling if conclusion else ()
+        if not more and best[1] > cfg.refine_above:
+            more = cfg.refine_sampling
+        if more:
             try:
-                extra, _, _ = self._usable(chunk, self._candidates(chunk, cfg.refine_sampling))
+                extra, _, _ = self._usable(chunk, self._candidates(chunk, more))
                 if extra:
                     scored += list(zip(extra, self._score_fn([c.text for c in extra])))
                     best = pick_least_ai(chunk, scored)

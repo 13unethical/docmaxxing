@@ -341,6 +341,36 @@ def test_detector_pick_falls_back_to_most_rewritten_when_detector_is_down():
     assert engine.humanize(PARA) == heavy
 
 
+def test_conclusion_pieces_follow_heading_opener_or_last_paragraph():
+    body = [("Intro text here. It goes on.", True), ("Conclusion", True), ("Wrap up. Done.", True),
+            ("Another wrap. End.", True), ("References", False)]
+    assert sh.conclusion_pieces(body) == {2, 3}
+    assert sh.conclusion_pieces([("First point. More.", True), ("In conclusion, it works.", True)]) == {1}
+    assert sh.conclusion_pieces([("First point. More.", True), ("Second point. More.", True)]) == {1}
+
+
+def test_conclusion_gets_extra_variants_even_when_already_clean():
+    first, last = PARA, PARA.replace("study", "survey")
+    calls = []
+
+    def complete(content):
+        return _rewrite(content)
+
+    def score(texts):
+        calls.append(len(texts))
+        return [0.1] * len(texts)
+
+    engine = StudentTextHumanizer(
+        _config(candidates=2, pick="detector", chunk_words=1, refine_sampling=((1.0, 4),),
+                conclusion_sampling=((1.2, 3),)),
+        complete_fn=complete,
+        score_fn=score,
+    )
+    engine.max_workers = 1
+    engine.humanize(f"{first}\n\n{last}")
+    assert calls == [2, 2, 3]
+
+
 def _ai_if_moreover(texts):
     return [0.95 if "Moreover" in t else 0.05 for t in texts]
 

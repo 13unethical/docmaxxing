@@ -54,6 +54,11 @@ CHATGPT_GROUP = "openai_chatgpt"
 MAX_CHATGPT_RECALL_DROP = 0.02
 # Raw Claude/Gemini documents (/data/rawai_*.jsonl): same use, own cap so they don't crowd out ChatGPT.
 RAWAI_MAX = int(os.environ.get("AI_DETECTOR_RAWAI_MAX", "3000"))
+# Turnitin labels of humanized text (/tt_labels_ours.jsonl, /batch_*.jsonl) are ~5% of the windows
+# but the only examples of what humanizers leave behind; each is repeated this many times.
+OURS_REPEAT = 1
+# Turnitin labels of the golden set (/data/eval_golden*.jsonl): humanized text, evaluation only.
+GOLDEN_GLOB = "eval_golden"
 # Held-out models per retrain (training seeds 0..N-1, same held-out reports); the gate uses their mean.
 HOLDOUT_SEEDS = 3
 PROD_DIR = "/data/models/prod"
@@ -149,7 +154,7 @@ def _doc_rates(rows, scores, t: float = FLAG_THRESHOLD) -> dict:
 @app.function(image=gpu_image, gpu="L40S", timeout=4 * 3600,
               volumes={"/data": data, "/root/.cache/huggingface": hf_cache})
 def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: int = EXT_MAX,
-        batches: str = "", train_seed: int = -1) -> dict:
+        batches: str = "", train_seed: int = -1, ours_repeat: int = OURS_REPEAT) -> dict:
     """``batches``: comma list of batch_<name>.jsonl to use ("none" = no batches, "" = all).
     ``train_seed``: shuffling/initialisation seed (default ``seed``); the held-out split always follows ``seed``."""
     import random
@@ -183,12 +188,13 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
     vps_test = [r for r in vps if r["report"] in held]
     if train_seed >= 0:
         rng = random.Random(train_seed)
-    train_rows += _read("/data/tt_labels_ours.jsonl")
+    ours = _read("/data/tt_labels_ours.jsonl")
     allowed = None if not batches else {b.strip() for b in batches.split(",") if b.strip() and b.strip() != "none"}
     for fname in sorted(os.listdir("/data")):
         if fname.startswith("batch_") and fname.endswith(".jsonl"):
             if allowed is None or fname[len("batch_"):-len(".jsonl")] in allowed:
-                train_rows += _read(f"/data/{fname}")
+                ours += _read(f"/data/{fname}")
+    train_rows += ours * max(1, ours_repeat)
     train_rows += [r for r in _read("/data/extra_train.jsonl") if not r["ai"]]
     ext = _read("/data/ext.jsonl")
     ext_train = [r for r in ext if r["split"] == "train" and not r["ai"]]
@@ -264,6 +270,15 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
         human = [rates[g] for g in GATED_HUMAN if g in rates]
         metrics["human_fp"] = round(sum(human) / len(human), 4) if human else None
         metrics["chatgpt_recall"] = rates.get(CHATGPT_GROUP)
+    golden = [r for f in sorted(os.listdir("/data")) if f.startswith(GOLDEN_GLOB) and f.endswith(".jsonl")
+              for r in _read(f"/data/{f}")]
+    if golden:
+        s = predict([r["text"] for r in golden])
+        flagged = [p for r, p in zip(golden, s) if r["ai"]]
+        clean = [p for r, p in zip(golden, s) if not r["ai"]]
+        metrics["golden_auc"] = _auc([r["ai"] for r in golden], s)
+        metrics["golden_recall"] = sum(p > FLAG_THRESHOLD for p in flagged) / max(1, len(flagged))
+        metrics["golden_fp"] = sum(p > FLAG_THRESHOLD for p in clean) / max(1, len(clean))
     print(json.dumps(metrics))
     if not final:
         return metrics
@@ -359,17 +374,18 @@ def promote(name: str, holdout_metrics: dict) -> str:
 
 
 @app.function(image=gpu_image, volumes={"/data": data}, timeout=6 * 3600, schedule=modal.Cron("0 22 * * 0"))
-def retrain(force: bool = False, promote_model: bool = True) -> dict:
+def retrain(force: bool = False, promote_model: bool = True, ours_repeat: int = OURS_REPEAT, tag: str = "") -> dict:
     """Weekly (Monday 03:00 Tashkent): train held-out + full models, promote the full one if the gate passes.
 
     ``promote_model=False``: train and judge only; promote later with ``promote`` if wanted."""
     from datetime import datetime, timezone
 
-    stamp = f"{datetime.now(timezone.utc):%Y%m%d}"
+    stamp = f"{datetime.now(timezone.utc):%Y%m%d}{tag}"
     holdout_calls = [
-        fit.spawn(final=False, name=f"auto_holdout_{stamp}_s{s}", train_seed=s) for s in range(HOLDOUT_SEEDS)
+        fit.spawn(final=False, name=f"auto_holdout_{stamp}_s{s}", train_seed=s, ours_repeat=ours_repeat)
+        for s in range(HOLDOUT_SEEDS)
     ]
-    final_call = fit.spawn(final=True, name=f"auto_{stamp}")
+    final_call = fit.spawn(final=True, name=f"auto_{stamp}", ours_repeat=ours_repeat)
     holdout = average_metrics([c.get() for c in holdout_calls], name=f"auto_holdout_{stamp}")
     final = final_call.get()
     data.reload()
