@@ -47,11 +47,12 @@ def load_pairs(cfg: TrainConfig, tokenizer: Any) -> tuple[list[dict[str, str]], 
     return splits[0], splits[1], stats
 
 
-def train(cfg: TrainConfig) -> dict[str, Any]:
+def train(cfg: TrainConfig, callbacks: list[Any] | None = None) -> dict[str, Any]:
     import torch
     from datasets import Dataset
     from peft import LoraConfig
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from transformers.trainer_utils import get_last_checkpoint
     from trl import SFTConfig, SFTTrainer
 
     out = Path(cfg.output_dir)
@@ -122,8 +123,12 @@ def train(cfg: TrainConfig) -> dict[str, Any]:
             task_type="CAUSAL_LM",
             target_modules=cfg.lora_targets,
         ),
+        callbacks=callbacks,
     )
-    result = trainer.train()
+    checkpoints = out / "checkpoints"
+    last = get_last_checkpoint(str(checkpoints)) if checkpoints.is_dir() else None
+    stats["resumed_from"] = Path(last).name if last else ""
+    result = trainer.train(resume_from_checkpoint=last)
     adapter_dir = out / "adapter"
     trainer.save_model(str(adapter_dir))
     tokenizer.save_pretrained(str(adapter_dir))

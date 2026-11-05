@@ -144,16 +144,26 @@ def prepare(src: str, dst: str, drop_share: float = 0.35) -> dict:
     image=train_image,
     gpu="H100",
     timeout=24 * 3600,
+    retries=modal.Retries(max_retries=3, initial_delay=30.0),
     volumes={"/sft": sft, "/adapters": adapters, "/root/.cache/huggingface": hf_cache},
 )
 def train(data: str, run: str, epochs: float = 2.0, learning_rate: float = 1e-4, limit: int = 0) -> dict:
     import shutil
 
+    from transformers import TrainerCallback
+
     from humanizer_student.train import TrainConfig
     from humanizer_student.train import train as run_training
 
+    class CommitCheckpoints(TrainerCallback):
+        """A preempted container loses uncommitted volume writes, so every checkpoint is committed."""
+
+        def on_save(self, args, state, control, **kwargs):
+            adapters.commit()
+
     sft.reload()
-    work = f"/tmp/run_{run}"
+    adapters.reload()
+    work = f"/adapters/runs/{run}"
     cfg = TrainConfig(
         data_dir=f"/sft/{data}",
         output_dir=work,
@@ -165,7 +175,7 @@ def train(data: str, run: str, epochs: float = 2.0, learning_rate: float = 1e-4,
         eval_steps=200,
         limit=limit or None,
     )
-    summary = run_training(cfg)
+    summary = run_training(cfg, callbacks=[CommitCheckpoints()])
     dest = f"/adapters/qwen3_8b_lora_{run}"
     shutil.rmtree(dest, ignore_errors=True)
     shutil.copytree(f"{work}/adapter", dest)
