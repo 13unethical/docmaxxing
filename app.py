@@ -3813,10 +3813,21 @@ def _app_v2_boot() -> dict[str, Any]:
         }
         boot["balance"] = wallet.get_balance(user["id"])
         boot["plan"] = plans_service.plan_summary(int(user["id"]))
+        boot["renewsAt"] = _credits_renew_at(int(user["id"]))
         boot["veil"] = _veil_client_status(int(user["id"]))
     boot["catalog"] = plans_service.catalog()
     boot["formatProfiles"] = _app_v2_format_profiles()
     return boot
+
+
+def _credits_renew_at(user_id: int) -> str | None:
+    """When a running subscription next renews the plan's credits; None for one-off passes and cancelled plans."""
+    from services.economy import lemon_plans
+
+    sub = lemon_plans.active_subscription(user_id)
+    if not sub or sub.get("status") not in ("active", "on_trial"):
+        return None
+    return sub.get("renews_at") or None
 
 
 def _app_v2_format_profiles() -> dict[str, Any] | None:

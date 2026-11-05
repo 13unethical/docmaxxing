@@ -225,13 +225,10 @@ svg.icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentCol
   transition: background-color 100ms var(--ease-out);
 }
 .nav-item:hover { background: var(--default-soft); }
+.nav-item.nav-admin:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
 button.nav-item { width: 100%; border: 0; background: transparent; font-family: inherit; text-align: left; cursor: pointer; }
 /* HeroUI ListBox selected item: filled default background */
 .nav-item[aria-current="page"] { background: var(--default); }
-/* Admin: tinted strip across the whole sidebar width (edge to the content panel), rounded only on the right */
-.nav-item.nav-admin { margin: 0 calc(-1 * var(--space-4)); padding-left: calc(var(--space-2) + var(--space-4)); border-radius: 0 12px 12px 0; background: color-mix(in oklab, var(--accent) 15%, transparent); }
-.nav-item.nav-admin:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
-.nav-item.nav-admin[aria-current="page"] { background: color-mix(in oklab, var(--accent) 20%, transparent); }
 .nav-label { overflow: hidden; text-overflow: ellipsis; }
 .nav-meta { margin-left: auto; display: flex; gap: var(--space-1); align-items: center; }
 .nav-meta .badge { height: 20px; padding: 0 8px; font-size: 11px; }   /* "Free" on Formatting and Work Review */
@@ -275,7 +272,6 @@ button.nav-item { width: 100%; border: 0; background: transparent; font-family: 
 .app.is-collapsed .nav { align-items: center; gap: var(--space-4); padding: var(--space-4) 14px; }
 .app.is-collapsed .nav ul { display: flex; flex-direction: column; gap: var(--space-2); }
 .app.is-collapsed .nav-item { width: 36px; justify-content: center; padding: 0; }
-.app.is-collapsed .nav-item.nav-admin { margin: 0; border-radius: 10px; }
 .app.is-collapsed .sidebar-foot { align-items: center; padding: var(--space-4) var(--space-3); }
 .app.is-collapsed .profile-btn { justify-content: center; width: auto; }
 .app.is-collapsed .profile-menu { right: auto; width: 200px; }
@@ -1094,13 +1090,22 @@ table.hist { width: 100%; border-collapse: collapse; min-width: 780px; font-size
 .land-hero .hero-sub { margin: 0 auto; max-width: 52ch; text-wrap: pretty; }
 .land-hero .hero-cta { justify-content: center; }
 /* Landing · try it: the free detector / humanizer sits right under the headline */
-.land-hero-try { padding-top: 64px; }   /* Figma: shorter one-line title and less top space, so the tool fits on the first screen */
-.land-try { max-width: 1080px; margin: var(--space-6) auto 0; text-align: left; }
+.land-hero-try { padding-top: 60px; }   /* Figma: shorter one-line title and less top space, so the tool fits on the first screen */
+.land-hero-try .hero-title { font-size: clamp(36px, 5.6vw, 60px); line-height: 1.133; letter-spacing: -.021em; margin-bottom: 0; }
+@media (min-width: 901px) { .land-try .qd-field { flex: 1 0 auto; height: clamp(244px, calc(100svh - 445px), 340px); } }   /* header, title and tool share one screen; 340px once there is room */
+@media (min-width: 901px) and (max-height: 784px) {
+  .land-try .qd-result { padding-block: var(--space-5); }
+  .land-try .qd-gauge { width: 152px; }
+  .land-try .qd-gauge b { font-size: 32px; }
+  .land-try .lt-out-text { max-height: 240px; }
+}
+@media (min-width: 901px) and (max-height: 720px) { .land-hero-try { padding-top: 32px; } }
+.land-try { max-width: 1072px; margin: var(--space-6) auto 0; text-align: left; }
 .qs .land-try { width: 100%; margin-top: 0; }
 .lt-meta { display: inline-flex; flex-wrap: wrap; gap: 4px var(--space-3); }
 /* Dashboard column is narrower: word count + cost on their own line, buttons on the right below */
 .qs .lt-card .tool-bar { flex-wrap: wrap; row-gap: var(--space-2); }
-.qs .lt-meta { flex-basis: 100%; }
+@media (max-width: 1359px) { .qs .lt-meta { flex-basis: 100%; } }   /* with the sidebar the buttons need their own row, or Detect wraps alone */
 .qs .lt-card { box-shadow: none; }   /* flat in the app, like the other dashboard cards */
 .qs.drag .lt-card { box-shadow: 0 0 0 2px var(--accent-text); }
 .land-try.lt-intro { animation: land-rise .9s var(--ease-out) .2s both; }   /* only on page load, not when the result re-renders */
@@ -1111,6 +1116,7 @@ table.hist { width: 100%; border-collapse: collapse; min-width: 780px; font-size
 :root .land-try .lt-seg button[aria-selected="true"] { box-shadow: 0 1px 2px rgb(0 0 0 / .05), 0 4px 12px rgb(0 0 0 / .06); }   /* softer than the app's segment shadow on the light hero */
 .lt-free { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--overlay); font-size: 13px; font-weight: 500; color: var(--text); }   /* white pill so it reads on the hero gradient */
 .lt-free svg.icon { width: 16px; height: 16px; color: var(--success); }
+.qs .lt-free svg.icon { color: var(--text-muted); }
 .lt-card { --surface: var(--overlay); background: var(--surface); box-shadow: var(--shadow); }   /* the landing tints --surface; keep the tool card white like in the app */
 .lt-lock { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 20px; background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent-text); }
 .lt-lock svg.icon { width: 28px; height: 28px; }

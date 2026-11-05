@@ -228,6 +228,18 @@ def test_billing_shows_cancelled_subscription_until_it_expires(uid):
     assert billing_subscription(uid) is None
 
 
+def test_app_shows_credit_renewal_only_for_a_running_subscription(uid):
+    from app import _credits_renew_at
+
+    assert _credits_renew_at(uid) is None
+    handle_webhook_event(_subscription(uid))
+    assert _credits_renew_at(uid) == "2026-11-27T00:00:00Z"
+    handle_webhook_event(_subscription(uid, status="past_due", event="subscription_updated"))
+    assert _credits_renew_at(uid) is None
+    handle_webhook_event(_subscription(uid, status="cancelled", event="subscription_cancelled"))
+    assert _credits_renew_at(uid) is None
+
+
 def test_credit_packs_still_use_their_own_variants(uid, monkeypatch):
     monkeypatch.setenv("LEMON_VARIANT_ID_CREDITS_1000", "1111111")
     before = _balance(uid)

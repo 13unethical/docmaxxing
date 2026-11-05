@@ -1260,7 +1260,7 @@ const CONFIG = {
   // Landing page (draft structure). Sections top to bottom; numbers are real (Oct 2026).
   landing: {
     // landing-try hero: a free detector / humanizer without an account (like ZeroGPT)
-    tryIt: { title: 'Check your text for AI', subtitle: 'Paste your essay to see how much of it looks AI-written, then humanize the flagged parts. Free, no sign-up.',
+    tryIt: { title: 'Check your text for AI',
       demoTitle: 'See everything DocMaxxing does', demoText: 'Check for AI, humanize, format and write. All in one place.',
       freeRuns: 3, maxWords: 1000, placeholder: 'Paste your essay or any text here (at least 40 words)…' },
     nav: [['how', 'How it works'], ['tools', 'Tools'], ['veil-land', 'Veil'], ['pricing-land', 'Pricing'], ['faq', 'FAQ']],
@@ -7386,6 +7386,8 @@ async function loadBilling(force = false) {
     state.billing = { plan: res.plan, payments: res.payments || [], subscription: res.subscription || null,
       provider: res.provider || 'cryptomus' };
     BOOT.plan = res.plan;
+    const sub = res.subscription;
+    BOOT.renewsAt = sub && ['active', 'on_trial'].includes(sub.status) ? sub.renews_at : null;
     const changed = CONFIG.billing.plan !== (res.plan ? res.plan.plan_id : null);
     CONFIG.billing.plan = res.plan ? res.plan.plan_id : null;
     if (changed) { renderSidebar(); applyLayout(); }
@@ -8014,9 +8016,51 @@ const appLinkAttrs = (item) => `href="${esc(itemHref(item))}" ${itemLinkAttrs(it
 const lt = { tab: 'detect', text: '', status: 'idle', result: null, error: null, animate: false };
 const ltApp = () => state.signedIn && !PUBLIC_ROUTES.includes(currentRoute());
 const ltMax = () => !ltApp() ? CONFIG.landing.tryIt.maxWords : lt.tab === 'detect' ? CONFIG.detector.maxWords : CONFIG.wordLimit;
-// Free tries are counted per tool on this device: 3 for the detector and 3 for the humanizer (the server keeps its own daily limits)
-const ltUsed = (tab = lt.tab) => +store.get(`lt-runs-${tab}`, 0);
+// Free tries are counted per tool on this device: 3 for the detector and 3 for the humanizer (the server keeps its own daily limits).
+// The 24 hours run from the first try spent in that tool; after that the tool starts again with all its tries.
+const LT_RESET_MS = 24 * 60 * 60 * 1000;
+function ltTries(tab = lt.tab) {
+  const t = store.get(`lt-tries-${tab}`, null);
+  return t && Date.now() - t.since < LT_RESET_MS ? t : { used: 0, since: null };
+}
+const ltUsed = (tab = lt.tab) => ltTries(tab).used;
 const ltLeft = (tab = lt.tab) => Math.max(0, CONFIG.landing.tryIt.freeRuns - ltUsed(tab));
+function ltSpendTry(tab, used = ltUsed(tab) + 1) {
+  store.set(`lt-tries-${tab}`, { used, since: ltTries(tab).since || Date.now() });
+}
+// Time until the reset: minutes only while someone is actually waiting
+function ltResetIn(tab = lt.tab, exact = false) {
+  const { since } = ltTries(tab);
+  const mins = since ? Math.max(1, Math.ceil((since + LT_RESET_MS - Date.now()) / 60000)) : 0;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  if (!h) return `${m}m`;
+  return exact ? `${h}h ${m}m` : `${h}h`;
+}
+function ltTriesLabel() {
+  const total = CONFIG.landing.tryIt.freeRuns, left = ltLeft();
+  if (left === total) return `${total} free tries · reset every 24h`;
+  if (left) return `${left} of ${total} tries left · resets in ${ltResetIn()}`;
+  return `Free tries reset in ${ltResetIn(lt.tab, true)}`;
+}
+// Signed in: the pill shows when a running subscription renews the plan's credits; hidden when nothing renews
+function ltRenewLabel() {
+  if (!BOOT.renewsAt) return '';
+  const days = Math.ceil((new Date(BOOT.renewsAt) - Date.now()) / 864e5);
+  return days > 0 ? `Credits renew in ${days} day${days === 1 ? '' : 's'}` : '';
+}
+// Keeps the countdown current and gives the tries back when the 24 hours are up
+let ltTimer = null;
+function ltStartTimer() {
+  clearInterval(ltTimer);
+  ltTimer = setInterval(() => {
+    const pill = $('#lt-free');
+    if (!pill) { clearInterval(ltTimer); return; }
+    if (lt.status === 'limit' && ltLeft()) { lt.status = 'idle'; rerenderLandTry(); return; }
+    pill.lastChild.textContent = ' ' + ltTriesLabel();
+    const wait = $('#lt-wait');
+    if (wait) wait.textContent = ltResetIn(lt.tab, true);
+  }, 30000);
+}
 const ltWords = () => countWords(lt.text);
 const ltReady = () => { const w = ltWords(); return w >= CONFIG.detector.minWords && w <= ltMax() && lt.status !== 'loading'; };
 function ltCountText() {
@@ -8034,7 +8078,7 @@ function landTryHtml({ intro = false } = {}) {
   return `<div class="land-try${intro ? ' lt-intro' : ''}" id="land-try">
     <div class="lt-top">
       <div class="seg lt-seg" role="tablist" aria-label="Free tool">${tab('detect', 'AI Detector', 'scan')}${tab('humanize', 'Humanizer', 'sparkles')}</div>
-      ${app ? '' : `<span class="lt-free">${icon('gift')} ${ltLeft() ? `${ltLeft()} free ${ltLeft() === 1 ? 'try' : 'tries'} left` : 'Free tries used'}</span>`}
+      ${app ? (ltRenewLabel() ? `<span class="lt-free">${icon('history')} ${esc(ltRenewLabel())}</span>` : '') : `<span class="lt-free" id="lt-free">${icon('gift')} ${esc(ltTriesLabel())}</span>`}
     </div>
     <section class="card qd lt-card" id="lt-panel" role="tabpanel" aria-labelledby="lt-tab-${lt.tab}">
       <div class="qd-input">
@@ -8065,7 +8109,7 @@ function ltResultHtml() {
     <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">${det ? 'Analyzing your text…' : 'Humanizing your text…'}</h2><p class="muted">${det ? 'This takes a few seconds.' : 'This can take up to a minute.'}</p>`;
   if (lt.status === 'limit') return `<span class="lt-lock" aria-hidden="true">${icon('lock')}</span>
     <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">You’ve used your free tries</h2>
-    <p class="muted qd-sub">Create a free account to keep going. You get ${CONFIG.signupCredits} credits to start.</p>
+    <p class="muted qd-sub">Sign up now for ${CONFIG.signupCredits} free credits, or come back in <span id="lt-wait">${ltResetIn(lt.tab, true)}</span>.</p>
     <div class="qd-actions"><button class="btn btn-primary" data-act="signup">Sign up free</button></div>`;
   if (lt.status === 'error') return `<div class="qd-gauge is-empty" aria-hidden="true"><b>—%</b></div>
     <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">${det ? 'Couldn’t check the text' : 'Couldn’t humanize the text'}</h2>
@@ -8120,6 +8164,7 @@ function bindLandTry() {
   $('#lt-file').addEventListener('change', (e) => { ltTakeFile(e.target.files[0]); e.target.value = ''; });
   const g = $('#lt-result .qd-gauge[data-v]');
   if (g && lt.animate) { lt.animate = false; requestAnimationFrame(() => requestAnimationFrame(() => { g.style.setProperty('--v', g.dataset.v); g.style.setProperty('--vi', g.dataset.v); })); }
+  if ($('#lt-free')) ltStartTimer();
 }
 
 // Upload: the file's text goes into the box (.txt is read here, .docx/.pdf on the server)
@@ -8142,7 +8187,7 @@ function ltSyncWorkDoc() { if (ltApp()) { workDoc.text = lt.text; workDoc.file =
 function ltLimit() {
   lt.status = 'limit'; rerenderLandTry();
   openSignup({ intent: lt.tab === 'detect' ? 'turnitin' : 'humanizer', title: 'You’ve used your free tries',
-    lead: `Create a free account to keep checking and humanizing. You get ${CONFIG.signupCredits} credits to start.` });
+    lead: `Sign up now for ${CONFIG.signupCredits} free credits, or come back in ${ltResetIn(lt.tab, true)}.` });
 }
 
 async function runLandTry() {
@@ -8168,7 +8213,7 @@ async function runLandTry() {
   } catch (err) {
     if (lt.tab !== tab) return;
     if (!app && err.code === 'REGISTER_REQUIRED') {
-      store.set(`lt-runs-${tab}`, CONFIG.landing.tryIt.freeRuns);
+      ltSpendTry(tab, CONFIG.landing.tryIt.freeRuns);
       if (!det) state.guestRunsUsed = 1;
       return ltLimit();
     }
@@ -8178,7 +8223,7 @@ async function runLandTry() {
     return;
   }
   if (lt.tab !== tab) return;
-  if (!app) store.set(`lt-runs-${tab}`, ltUsed(tab) + 1);
+  if (!app) ltSpendTry(tab);
   lt.status = 'done'; lt.animate = det && !matchMedia('(prefers-reduced-motion: reduce)').matches;
   rerenderLandTry('#lt-result-h');
   if (app) rerenderDocs();
@@ -8253,9 +8298,7 @@ function renderLanding({ tryIt = false } = {}) {
 
     ${tryIt ? `<section class="land-hero land-hero-try" aria-labelledby="hero-h">
       <div class="land-hero-text">
-        <h1 class="hero-title" id="hero-h">${esc(L.tryIt.title)}</h1>
-        <p class="hero-sub">${esc(L.tryIt.subtitle)}</p>
-      </div>
+        <h1 class="hero-title" id="hero-h">${esc(L.tryIt.title)}</h1>      </div>
       ${landTryHtml({ intro: true })}
     </section>` : `<section class="land-hero" aria-labelledby="hero-h">
       <div class="land-hero-text">
@@ -8465,7 +8508,7 @@ function signUp() {
 }
 async function signOut() {
   try { await API.logout(); } catch { /* the session is gone either way */ }
-  BOOT.user = null; BOOT.plan = null; CONFIG.billing.plan = null; CONFIG.user.isAdmin = false;
+  BOOT.user = null; BOOT.plan = null; BOOT.renewsAt = null; CONFIG.billing.plan = null; CONFIG.user.isAdmin = false;
   Object.assign(state, { signedIn: false, credits: [], docs: [], scans: [], scansLoaded: false, balance: 0, avatarUrl: null, earn: null, billing: null, assign: null, veil: {}, adm: null });
   clearTimeout(scanPollTimer);
   renderSidebar();
