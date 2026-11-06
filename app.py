@@ -471,6 +471,7 @@ _NEW_APP_SCREENS = {
     "/check": "check",
     "/humanizer": "humanizer",
     "/ru/humanizer": "humanizer",
+    "/ai-detector": "home",
     "/turnitin": "turnitin",
     "/assignment": "assignment",
     "/assignments": "assignment",
@@ -494,12 +495,11 @@ def _redirect_old_pages_to_new_app():
         return None
     if (os.environ.get("LEGACY_UI") or "").strip().lower() in {"1", "true", "yes"}:
         return None
-    from services.seo import GUEST_LANDING_PATHS, guest_landings_enabled
+    from services.seo import APP_LANDING_PATHS, GUEST_LANDING_PATHS, guest_landings_enabled
 
-    if (
-        guest_landings_enabled()
-        and request.path in GUEST_LANDING_PATHS
-        and economy_auth.current_user() is None
+    if economy_auth.current_user() is None and (
+        request.path in APP_LANDING_PATHS
+        or (guest_landings_enabled() and request.path in GUEST_LANDING_PATHS)
     ):
         return None
     if screen == "home" and economy_auth.current_user() is None:
@@ -2377,11 +2377,32 @@ def _render_landing(template: str, *, signup_next: str):
     )
 
 
+def _serve_app_landing() -> bool:
+    """Guests get the app's landing at its public URL (no redirect to /app); ?classic=1 and
+    LEGACY_UI keep the old pages."""
+    return (
+        economy_auth.current_user() is None
+        and request.args.get("classic") != "1"
+        and (os.environ.get("LEGACY_UI") or "").strip().lower() not in {"1", "true", "yes"}
+    )
+
+
+def _render_app_landing():
+    from services.site_content import tool_landing
+
+    landing = tool_landing(request.path)
+    boot = _app_v2_boot()
+    boot["landing"] = landing
+    return render_template("app_v2.html", boot=boot, app_landing=landing)
+
+
 @app.route("/")
 def index():
     """Public landing for guests; Format tab (V2 when ``FORMATTER_V2_ENABLED``) otherwise."""
     if _serve_public_landing():
         return _render_landing("landing/home.html", signup_next="/")
+    if _serve_app_landing():
+        return _render_app_landing()
     if formatter_v2_enabled():
         return render_template("format_v2.html", nav_active="home")
     return render_template("index.html", nav_active="home")
@@ -3674,6 +3695,8 @@ def editor():
 def humanizer():
     if _serve_public_landing():
         return _render_landing("landing/humanizer_en.html", signup_next="/humanizer")
+    if _serve_app_landing():
+        return _render_app_landing()
     from services.economy.pricing import FEATURE_COSTS
     from services.economy.site_settings import humanize_credit_cost
 
@@ -3694,6 +3717,15 @@ def humanizer():
         discount_percent=discount_percent,
         discounted_cost=discounted_cost,
     )
+
+
+@app.route("/ai-detector")
+def ai_detector_page():
+    """Guests: the app landing opened on the free AI detector (there is no older page for it).
+    Signed-in users go to the dashboard, where the detector is."""
+    if economy_auth.current_user() is None:
+        return _render_app_landing()
+    return redirect("/app#/home")
 
 
 @app.route("/ru/humanizer")

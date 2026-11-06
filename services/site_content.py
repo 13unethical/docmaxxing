@@ -373,22 +373,25 @@ def humanizer_ru_faq() -> list[FaqItem]:
 
 def home_faq() -> list[FaqItem]:
     f = free_limits_context()
+    d = detector_limits_context()
+    t = LANDING_TRY
     return [
         (
             "What is DocMaxxing?",
-            "A set of writing tools for students in one place: an AI humanizer, a free essay formatter, "
-            "AI and plagiarism checks, a document editor, a slide maker and assignment help.",
+            "A set of writing tools for students in one place: a free AI detector, an AI humanizer, a free "
+            "essay formatter, a Turnitin check, a document editor, a slide maker and assignment help.",
         ),
         (
             "Which tools are free?",
-            f"Formatting is free. The AI humanizer is free for up to {f['guest_words_s']} words, "
-            f"{_times_en(f['guest_daily'])} a day without an account, and up to {f['user_words_s']} words, "
-            f"{_times_en(f['user_daily'])} a day with a free account.",
+            f"The AI detector, the humanizer and formatting. On this page you get {t['free_runs']} free AI checks "
+            f"and {t['free_runs']} free humanizer runs a day, up to {t['max_words_s']} words each, no account "
+            f"needed. A free account gives you {d['user_daily']} AI checks a day of up to {d['user_words_s']} words "
+            f"and {f['user_daily']} humanizer runs a day of up to {f['user_words_s']} words.",
         ),
         (
             "Do I need an account?",
-            "Not to try the humanizer or the formatter. An account keeps your history, raises the free "
-            "humanizer limit and unlocks the editor, slides, AI checks and assignment help.",
+            "Not to try the AI detector, the humanizer or the formatter. An account keeps your history, raises "
+            "the free limits and unlocks the editor, slides, the Turnitin check and assignment help.",
         ),
         (
             "How do credits work?",
@@ -417,11 +420,134 @@ def home_faq() -> list[FaqItem]:
     ]
 
 
+def ai_detector_faq() -> list[FaqItem]:
+    d = detector_limits_context()
+    t = LANDING_TRY
+    c = _costs()
+    return [
+        (
+            "Is the AI detector free?",
+            f"Yes. Without an account you get {t['free_runs']} checks a day of up to {t['max_words_s']} words "
+            f"each. A free account gives you {d['user_daily']} checks a day of up to {d['user_words_s']} words. "
+            "No card needed.",
+        ),
+        (
+            "How does the AI detector work?",
+            "It scores your text sentence by sentence with a model trained on essays written by students and "
+            "by AI tools, then shows the overall AI score and highlights the sentences that look AI-written.",
+        ),
+        (
+            "How accurate is it?",
+            "We tune it against real Turnitin reports, so its scores usually land close to what Turnitin shows. "
+            "Still, every AI detector is statistical and can be wrong, including on text written entirely by a "
+            "person. Treat the score as a hint, not a verdict.",
+        ),
+        (
+            "Is it the same as Turnitin?",
+            "No. It is our own detector. If you need the real Turnitin AI and similarity report, use the "
+            f"Turnitin check in the app ({c['turnitin']} credits per document).",
+        ),
+        (
+            "What can I do if part of my text is flagged?",
+            "Rewrite the flagged sentences in your own words, or run them through the humanizer on this page "
+            "and read the result before you use it. Then check again.",
+        ),
+        (
+            "Which languages does it support?",
+            "English only for now.",
+        ),
+        (
+            "Do you keep my text?",
+            "We use it only to run the check. We don’t publish it or share it with your university. See the "
+            '<a href="/privacy">Privacy Policy</a>.',
+        ),
+    ]
+
+
 _LANDING_FAQS = {
     "/": home_faq,
+    "/ai-detector": ai_detector_faq,
     "/humanizer": humanizer_en_faq,
     "/ru/humanizer": humanizer_ru_faq,
 }
+
+# Free tries on the app landing's detector / humanizer box for visitors without an account
+# (sent to the app in the boot data, so the page and the box show the same numbers).
+LANDING_TRY = {"free_runs": 3, "max_words": 1000, "max_words_s": _n(1000)}
+
+
+def detector_limits_context() -> dict[str, Any]:
+    from services.ai_detector import limits
+
+    lim = limits()
+    return {"user_daily": lim.user_daily, "user_words_s": _n(lim.user_words)}
+
+
+# The app landing at "/", "/ai-detector" and "/humanizer": which tab of the free box opens first,
+# the hero title (the page's <h1>) and an "about" block shown under the box.
+_TOOL_LANDINGS: dict[str, dict[str, Any]] = {
+    "/": {
+        "tab": "detect",
+        "hero": "Check your text for AI",
+        "about_title": "Free AI detector and humanizer for students",
+        "about": (
+            ("Check for AI before you submit",
+             "Paste your essay and get an AI score in seconds, with the sentences that look AI-written "
+             "highlighted. No account needed."),
+            ("Humanize the flagged parts",
+             "Rewrite stiff, AI-sounding sentences so they read like you wrote them, keeping your argument, "
+             "numbers and citations."),
+            ("Format and submit",
+             "Apply APA, MLA, Harvard or Chicago to the whole document for free, then run a Turnitin check if "
+             "you want the real report."),
+        ),
+    },
+    "/ai-detector": {
+        "tab": "detect",
+        "hero": "Free AI Detector",
+        "about_title": "Check your essay for AI, free",
+        "about": (
+            ("Sentence-level highlights",
+             "See which sentences look AI-written, not just one number for the whole text."),
+            ("Tuned on real Turnitin reports",
+             "We compare our scores with Turnitin results on student essays and retrain the detector, so the "
+             "score is a useful preview before you submit."),
+            ("Fix what’s flagged in one click",
+             "Send the flagged text to the humanizer, read the result, and check again."),
+        ),
+    },
+    "/humanizer": {
+        "tab": "humanize",
+        "hero": "Free AI Humanizer",
+        "about_title": "Turn AI drafts into natural writing",
+        "about": (
+            ("Rewrites, not synonyms",
+             "The humanizer rewrites whole sentences and paragraphs, changing rhythm and structure while keeping "
+             "your point."),
+            ("Keeps your meaning and citations",
+             "Numbers, in-text citations, headings and reference lists stay as they are."),
+            ("Check the result right away",
+             "Switch to the AI detector tab and see how the new version scores."),
+        ),
+    },
+}
+
+
+def tool_landing(path: str) -> dict[str, Any] | None:
+    """What the app landing shows at ``path`` (None if the path is not one of its pages)."""
+    page = _TOOL_LANDINGS.get(path)
+    if page is None:
+        return None
+    return {
+        "path": path,
+        "tab": page["tab"],
+        "hero": page["hero"],
+        "aboutTitle": page["about_title"],
+        "about": [list(item) for item in page["about"]],
+        "faq": [list(item) for item in faq_items_for_path(path) or []],
+        "freeRuns": LANDING_TRY["free_runs"],
+        "maxWords": LANDING_TRY["max_words"],
+    }
 
 
 def faq_items_for_path(path: str) -> list[FaqItem] | None:

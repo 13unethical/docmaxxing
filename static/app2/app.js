@@ -1575,6 +1575,7 @@ const LANDING_SHOTS = {
    ========================================================= */
 const BOOT = window.DMX_BOOT || {};
 const API = window.DMX.api;
+const SERVER_TITLE = document.title;
 (function applyBoot() {
   const c = BOOT.costs || {};
   const cr = (n) => `${n} credits`;
@@ -1592,6 +1593,7 @@ const API = window.DMX.api;
     if (step) step.textGuest = `${freeHumanizeNote(false)} without an account. A free account raises it to ${freeHumanizeNote(true).replace(/^Free: up to /, '')}.`;
   }
   Object.assign(item('workspace'), { price: `${cr(c.humanizer)} per humanize` });
+  if (BOOT.landing) Object.assign(CONFIG.landing.tryIt, { freeRuns: BOOT.landing.freeRuns, maxWords: BOOT.landing.maxWords });
   CONFIG.slides.price = cr(c.presentation);
   CONFIG.slides.perSlidePrice = c.presentationPerSlide ?? CONFIG.slides.perSlidePrice;
   Object.assign(item('presentation'), { price: `from ${cr(c.presentation + CONFIG.slides.perSlidePrice * CONFIG.slides.counts[0])}` });
@@ -2739,12 +2741,14 @@ function render() {
   if (isPublic) {
     document.body.classList.remove('on-editor', 'on-format', 'on-assign');
     main.innerHTML = renderLanding({ tryIt: true });
-    document.title = CONFIG.brand;
+    document.title = BOOT.landing ? SERVER_TITLE : CONFIG.brand;
     window.scrollTo(0, 0);
     bindLanding();
     bindLandTry();
     return;
   }
+  // The landing is also served at /, /ai-detector and /humanizer; the app itself lives at /app
+  if (BOOT.landing && location.pathname !== '/app') history.replaceState(null, '', '/app' + location.search + location.hash);
   const item = ALL_ITEMS.find(i => i.route === route);
   document.body.classList.toggle('on-editor', item.id === 'workspace');
   document.body.classList.toggle('on-format', item.id === 'format');
@@ -7980,7 +7984,7 @@ function reviewHtml(r) {
     <figcaption><q>${esc(r.quote)}</q><span>${esc(r.tag)}</span></figcaption>
   </figure>`;
 }
-const REVEAL = ['.land-stats li', '.pub-sec > h2', '.pub-sec > h2 + .muted', '.land-steps > li', '.bento-tile', '.land-video', '.land-veil-text > *', '.land-veil > .veil-demo',
+const REVEAL = ['.land-stats li', '.pub-sec > h2', '.pub-sec > h2 + .muted', '.land-about > .card', '.land-steps > li', '.bento-tile', '.land-video', '.land-veil-text > *', '.land-veil > .veil-demo',
   '.land-plans .plan', '.land-review', '.pub-sec-center > .btn', '.land-faq details', '.land-final-text > *', '.land-final-shot', '.lf-top > *', '.lf-word'];
 function revealLanding() {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return;
@@ -8013,7 +8017,7 @@ function landNavHtml() {
 const appLinkAttrs = (item) => `href="${esc(itemHref(item))}" ${itemLinkAttrs(item)}`;
 
 /* ---------- Detector / humanizer box: landing-try hero (3 free tries per tool) and the dashboard's Start here (credits) ---------- */
-const lt = { tab: 'detect', text: '', status: 'idle', result: null, error: null, animate: false };
+const lt = { tab: BOOT.landing?.tab || 'detect', text: '', status: 'idle', result: null, error: null, animate: false };
 const ltApp = () => state.signedIn && !PUBLIC_ROUTES.includes(currentRoute());
 const ltMax = () => !ltApp() ? CONFIG.landing.tryIt.maxWords : lt.tab === 'detect' ? CONFIG.detector.maxWords : CONFIG.wordLimit;
 // Free tries are counted per tool on this device: 3 for the detector and 3 for the humanizer (the server keeps its own daily limits).
@@ -8258,6 +8262,9 @@ function landTryAction(act, el) {
 
 function renderLanding({ tryIt = false } = {}) {
   const L = CONFIG.landing, P = CONFIG.pricing;
+  // At /, /ai-detector and /humanizer the server sends the page's hero, "about" block and FAQ (answers are our own HTML)
+  const page = BOOT.landing;
+  const faq = page?.faq?.length ? page.faq.map(([q, a]) => [esc(q), a]) : L.faq.map(([q, a]) => [esc(q), esc(a)]);
   // Product demo: the dashboard still with the AI Detector video over it (hero on the main landing, right under the tool on landing-try)
   const product = `<div class="land-product">
         <div class="land-product-frame"><img src="${LANDING_SHOTS.dashboard}" alt="The DocMaxxing dashboard: paste a text, check it for AI or humanize it, and see your credit and document history" width="1800" height="1125">
@@ -8298,7 +8305,7 @@ function renderLanding({ tryIt = false } = {}) {
 
     ${tryIt ? `<section class="land-hero land-hero-try" aria-labelledby="hero-h">
       <div class="land-hero-text">
-        <h1 class="hero-title" id="hero-h">${esc(L.tryIt.title)}</h1>      </div>
+        <h1 class="hero-title" id="hero-h">${esc(page?.hero || L.tryIt.title)}</h1>      </div>
       ${landTryHtml({ intro: true })}
     </section>` : `<section class="land-hero" aria-labelledby="hero-h">
       <div class="land-hero-text">
@@ -8313,6 +8320,8 @@ function renderLanding({ tryIt = false } = {}) {
     </section>`}
 
     <ul class="land-stats" aria-label="DocMaxxing in numbers">${L.stats.map(([n, t, ic]) => `<li><i class="land-stat-ic" aria-hidden="true"><svg viewBox="-5 -5 34 34"><g class="stk-bg">${ICONS[ic]}</g><g class="stk-fg">${ICONS[ic]}</g></svg></i><b>${esc(n)}</b><span>${esc(t)}</span></li>`).join('')}</ul>
+
+    ${page ? sec('about', page.aboutTitle, '', `<div class="land-about">${page.about.map(([t, x]) => `<div class="card"><h3>${esc(t)}</h3><p class="muted">${esc(x)}</p></div>`).join('')}</div>`) : ''}
 
     ${tryIt ? `<section class="pub-sec pub-sec-center land-demo" id="demo" aria-labelledby="demo-h">
       <h2 id="demo-h">${esc(L.tryIt.demoTitle)}</h2><p class="muted">${esc(L.tryIt.demoText)}</p>
@@ -8345,7 +8354,7 @@ function renderLanding({ tryIt = false } = {}) {
     ${sec('reviews', L.reviewsTitle, L.reviewsSub, `<div class="land-reviews">${L.reviews.map(reviewHtml).join('')}</div>
       <a class="btn" href="${esc(L.reviewsUrl)}" target="_blank" rel="noopener">${icon('telegram')} See all in Telegram</a>`, 'pub-sec-center')}
 
-    ${sec('faq', L.faqTitle, '', `<div class="land-faq">${L.faq.map(([q, a]) => `<details class="card"><summary><span>${esc(q)}</span><span class="faq-sign" aria-hidden="true"></span></summary><p class="muted">${esc(a)}</p></details>`).join('')}</div>`, 'pub-sec-center')}
+    ${sec('faq', L.faqTitle, '', `<div class="land-faq">${faq.map(([q, a]) => `<details class="card"><summary><span>${q}</span><span class="faq-sign" aria-hidden="true"></span></summary><p class="muted">${a}</p></details>`).join('')}</div>`, 'pub-sec-center')}
 
     <section class="land-final" aria-labelledby="final-h">
       <div class="land-final-text">

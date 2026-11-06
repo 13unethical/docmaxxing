@@ -5,11 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ seo.title }}</title>
 {% include "_seo_head.html" %}
-<link rel="stylesheet" href="{{ url_for('static', filename='app2/app.css') }}?v=20261105-2">
+<link rel="stylesheet" href="{{ url_for('static', filename='app2/app.css') }}?v=20261107-1">
 <script defer src="https://cloud.umami.is/script.js" data-website-id="177e569c-f873-485d-9ba7-cb75a43be7b6"></script>
 </head>
 <body>
-<div class="app" id="app">
+<div class="app{% if app_landing %} is-public{% endif %}" id="app">
   <header class="topbar">
     <button class="icon-btn" id="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="sidebar"></button>
     <a class="logo" href="#/home" id="topbar-logo"></a>
@@ -20,7 +20,30 @@
 
   <div class="main-col">
     <header class="app-header" id="app-header"></header>
-    <main class="main" id="main" tabindex="-1"></main>
+    <main class="main" id="main" tabindex="-1">{% if app_landing %}
+      {#- The same text the app renders over this on load; crawlers that don't run JavaScript read it here. #}
+      <div class="pub land">
+        <section class="land-hero land-hero-try" aria-labelledby="hero-h">
+          <div class="land-hero-text"><h1 class="hero-title" id="hero-h">{{ app_landing.hero }}</h1></div>
+        </section>
+        <section class="pub-sec" id="about" aria-labelledby="about-h">
+          <h2 id="about-h">{{ app_landing.aboutTitle }}</h2>
+          <div class="land-about">{% for title, text in app_landing.about %}
+            <div class="card"><h3>{{ title }}</h3><p class="muted">{{ text }}</p></div>{% endfor %}
+          </div>
+        </section>
+        {% if app_landing.faq %}<section class="pub-sec pub-sec-center" id="faq" aria-labelledby="faq-h">
+          <h2 id="faq-h">Questions</h2>
+          <div class="land-faq">{% for q, a in app_landing.faq %}
+            <details class="card"><summary><span>{{ q }}</span></summary><p class="muted">{{ a|safe }}</p></details>{% endfor %}
+          </div>
+        </section>{% endif %}
+        <nav class="pub-sec" aria-label="Tools">
+          <a href="/ai-detector">AI Detector</a> · <a href="/humanizer">AI Humanizer</a> · <a href="/formatter">Essay Formatter</a> ·
+          <a href="/pricing">Pricing</a> · <a href="/blog">Blog</a> · <a href="/faq">FAQ</a>
+        </nav>
+      </div>
+    {% endif %}</main>
   </div>
 </div>
 
@@ -70,7 +93,7 @@
 
 <script>window.DMX_BOOT = {{ boot|tojson }};</script>
 <script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
-<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261105-2"></script>
-<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261105-2"></script>
+<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261107-1"></script>
+<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261107-1"></script>
 </body>
 </html>

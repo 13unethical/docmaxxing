@@ -1193,6 +1193,9 @@ table.hist { width: 100%; border-collapse: collapse; min-width: 780px; font-size
 .land-stats li:hover .land-stat-ic { rotate: 0deg; translate: 0 -4px; }
 @media (prefers-reduced-motion: reduce) { .land-stat-ic { transition: none; } }
 /* Steps as wide rows: copy on one side, the full screenshot large on the other, sides alternating */
+.land-about { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-4); max-width: 1072px; margin: var(--space-5) auto 0; text-align: left; }
+.land-about h3 { margin: 0 0 var(--space-2); font-family: var(--font-display); font-size: 20px; }
+.land-about p { margin: 0; font-size: 16px; line-height: 1.55; }
 .land-steps { list-style: none; margin: var(--space-5) 0 0; padding: 0; display: grid; gap: var(--space-4); text-align: left; }
 .land-steps li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.9fr); align-items: center; gap: var(--space-6); padding: var(--space-5); }
 .land-steps li:nth-child(even) { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); }

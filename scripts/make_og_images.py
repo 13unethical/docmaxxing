@@ -1,4 +1,5 @@
-"""Render static/og/*.png (1200x630 Open Graph cards) and static/favicon.ico.
+"""Render static/og/*.png (1200x630 Open Graph cards), static/favicon.ico and the PNG app icons
+from the brand logo (static/brand/logo.png, the same image as LOGO_SVG in static/app2/app.js).
 
 Run from the repo root: python3 scripts/make_og_images.py
 """
@@ -11,6 +12,14 @@ from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "static"
+LOGO = STATIC / "brand" / "logo.png"
+ICONS = {
+    "icon.png": 512,
+    "apple-icon.png": 180,
+    "apple-touch-icon.png": 180,
+    "android-chrome-192x192.png": 192,
+    "android-chrome-512x512.png": 512,
+}
 SIZE = (1200, 630)
 BG = (11, 11, 15)
 SURFACE = (23, 23, 28)
@@ -28,7 +37,8 @@ _REGULAR_FONTS = (
 )
 
 CARDS = {
-    "default.png": ("DocMaxxing", "AI humanizer and writing tools for students", "Humanizer · Formatter · AI check · Slides"),
+    "default.png": ("AI Detector & Humanizer", "Free AI check and humanizer for students", "AI Detector · Humanizer · Formatter · Slides"),
+    "ai-detector.png": ("Free AI Detector", "See which sentences look AI-written", "Paste your essay · Get an AI score in seconds"),
     "humanizer.png": ("Free AI Humanizer", "Turn AI text into natural writing", "Paste a draft · Get readable text in seconds"),
 }
 
@@ -46,7 +56,7 @@ def _card(title: str, subtitle: str, footer: str) -> Image.Image:
     draw.rounded_rectangle((40, 40, SIZE[0] - 40, SIZE[1] - 40), radius=36, fill=SURFACE)
     draw.rectangle((40, 40, 56, SIZE[1] - 40), fill=ACCENT)
 
-    logo = Image.open(STATIC / "icon.png").convert("RGBA").resize((96, 96))
+    logo = Image.open(LOGO).convert("RGBA").resize((96, 96), Image.LANCZOS)
     img.paste(logo, (100, 100), logo)
     draw.text((216, 120), "DocMaxxing", font=_font(_BOLD_FONTS, 44), fill=TEXT)
 
@@ -62,8 +72,10 @@ def main() -> None:
     out_dir.mkdir(exist_ok=True)
     for name, (title, subtitle, footer) in CARDS.items():
         _card(title, subtitle, footer).save(out_dir / name, optimize=True)
-    icon = Image.open(STATIC / "icon.png").convert("RGBA")
-    icon.save(STATIC / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)])
+    logo = Image.open(LOGO).convert("RGBA")
+    for name, px in ICONS.items():
+        logo.resize((px, px), Image.LANCZOS).save(STATIC / name, optimize=True)
+    logo.save(STATIC / "favicon.ico", sizes=[(16, 16), (32, 32), (48, 48)])
 
 
 if __name__ == "__main__":

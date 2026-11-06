@@ -1,7 +1,7 @@
 """Old server-rendered pages send visitors to the matching screen of the new app.
 
-Public landing pages stay server-rendered for guests (and crawlers); signed-in users
-still go to the app.
+Public landing pages stay server-rendered for guests (and crawlers); without them, guests
+get the app's own landing at /, /ai-detector and /humanizer. Signed-in users go to the app.
 """
 
 from __future__ import annotations
@@ -104,8 +104,6 @@ def test_post_is_not_redirected(client):
 @pytest.mark.parametrize(
     ("path", "target"),
     [
-        ("/", "/app#/landing"),
-        ("/humanizer", "/app#/humanizer"),
         ("/pricing", "/app#/pricing"),
         ("/formatter", "/app#/format"),
     ],
@@ -117,6 +115,37 @@ def test_without_landing_pages_guests_go_to_the_app(client, monkeypatch, path, t
     assert resp.headers["Location"] == target
 
 
+@pytest.mark.parametrize(
+    ("path", "tab", "h1"),
+    [
+        ("/", "detect", "Check your text for AI"),
+        ("/ai-detector", "detect", "Free AI Detector"),
+        ("/humanizer", "humanize", "Free AI Humanizer"),
+    ],
+)
+def test_without_landing_pages_guests_get_the_app_landing_in_place(client, monkeypatch, path, tab, h1):
+    from services.seo import canonical_url
+
+    monkeypatch.setenv("GUEST_LANDING_PAGES", "0")
+    resp = client.get(path)
+    assert resp.status_code == 200, path
+    html = resp.get_data(as_text=True)
+    assert 'id="app"' in html
+    assert html.count("<h1") == 1
+    assert f'id="hero-h">{h1}</h1>' in html
+    assert f'"tab": "{tab}"' in html
+    assert '<meta name="robots" content="index, follow"' in html
+    assert f'<link rel="canonical" href="{canonical_url(path)}" />' in html
+    assert '"@type": "FAQPage"' in html
+    assert '<details class="card">' in html
+
+
+def test_ai_detector_page_sends_signed_in_users_to_the_dashboard(signed_in_client):
+    resp = signed_in_client.get("/ai-detector")
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == "/app#/home"
+
+
 def test_without_landing_pages_the_app_is_indexed_under_the_root(client, monkeypatch):
     from services.seo import SITE_URL, sitemap_xml
 
@@ -124,8 +153,9 @@ def test_without_landing_pages_the_app_is_indexed_under_the_root(client, monkeyp
     html = client.get("/app").get_data(as_text=True)
     assert '<meta name="robots" content="index, follow"' in html
     assert f'<link rel="canonical" href="{SITE_URL}" />' in html
+    assert '"landing":' not in html
     xml = sitemap_xml()
-    assert f"<loc>{SITE_URL}</loc>" in xml
-    for path in ("/humanizer", "/pricing", "/formatter"):
+    for path in ("", "/ai-detector", "/humanizer", "/faq"):
+        assert f"<loc>{SITE_URL}{path}</loc>" in xml
+    for path in ("/pricing", "/formatter"):
         assert f"<loc>{SITE_URL}{path}</loc>" not in xml
-    assert f"<loc>{SITE_URL}/faq</loc>" in xml

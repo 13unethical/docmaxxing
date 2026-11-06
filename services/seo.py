@@ -25,21 +25,23 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TITLE_MAX = 60
 DESCRIPTION_MAX = 155
 
-DEFAULT_TITLE = "DocMaxxing — AI Humanizer & Free Tools for Students"
+DEFAULT_TITLE = "Free AI Detector & AI Humanizer for Students | DocMaxxing"
 DEFAULT_DESCRIPTION = (
-    "Rewrite stiff AI drafts into natural writing, format essays in APA, MLA or Harvard "
-    "for free, and check your work against the brief. Built for students."
+    "Check your essay for AI for free, see which sentences look AI-written, and humanize "
+    "them into natural writing. Free formatting too. No sign-up needed."
 )
 DEFAULT_KEYWORDS = [
+    "AI detector",
+    "free AI detector",
     "AI humanizer",
     "free AI humanizer",
     "humanize AI text",
     "essay formatter",
-    "APA 7 formatter",
 ]
 
 OG_IMAGE_DEFAULT = "/static/og/default.png"
 OG_IMAGE_HUMANIZER = "/static/og/humanizer.png"
+OG_IMAGE_DETECTOR = "/static/og/ai-detector.png"
 OG_IMAGE_SIZE = (1200, 630)
 
 ROBOTS_INDEX = "index, follow"
@@ -90,7 +92,21 @@ _PAGES: tuple[PublicPage, ...] = (
         description=DEFAULT_DESCRIPTION,
         h1="AI Humanizer and Writing Tools for Students",
         keywords=tuple(DEFAULT_KEYWORDS),
-        sources=("templates/landing/home.html", "templates/landing/base.html"),
+        sources=("templates/app_v2.html", "static/app2/app.js", "services/site_content.py"),
+        software_app=True,
+    ),
+    PublicPage(
+        path="/ai-detector",
+        title="Free AI Detector — Check Essays for AI | DocMaxxing",
+        description=(
+            "Free AI detector for students: paste your essay, get an AI score and see which "
+            "sentences look AI-written. Tuned on real Turnitin reports. No sign-up."
+        ),
+        h1="Free AI Detector",
+        keywords=("AI detector", "free AI detector", "AI checker", "check essay for AI", "ChatGPT detector"),
+        og_image=OG_IMAGE_DETECTOR,
+        breadcrumb="AI Detector",
+        sources=("templates/app_v2.html", "static/app2/app.js", "services/site_content.py"),
         software_app=True,
     ),
     PublicPage(
@@ -104,7 +120,7 @@ _PAGES: tuple[PublicPage, ...] = (
         keywords=("AI humanizer", "free AI humanizer", "humanize AI text", "rewrite ChatGPT text"),
         og_image=OG_IMAGE_HUMANIZER,
         breadcrumb="AI Humanizer",
-        sources=("templates/landing/humanizer_en.html", "templates/landing/base.html"),
+        sources=("templates/app_v2.html", "static/app2/app.js", "services/site_content.py"),
         software_app=True,
     ),
     # On hold (noindex, unlinked) until there is a real Russian engine.
@@ -253,6 +269,9 @@ PUBLIC_PAGES: dict[str, PublicPage] = {page.path: page for page in _PAGES}
 
 # Public pages served to guests instead of the app (signed-in users go to /app#/<screen>).
 GUEST_LANDING_PATHS = frozenset({"/", "/humanizer", "/ru/humanizer", "/pricing", "/formatter"})
+# Without those pages, guests get the app's own landing at these URLs (no redirect), opened on
+# the matching tool and with the page's text already in the HTML for crawlers.
+APP_LANDING_PATHS = frozenset({"/", "/ai-detector", "/humanizer"})
 
 
 def normalize_path(path: str | None) -> str:
@@ -531,7 +550,8 @@ def sitemap_entries() -> list[SitemapEntry]:
     entries = [
         SitemapEntry(page.path, page_lastmod(page), dict(page.alternates))
         for page in _PAGES
-        if page.in_sitemap and (landings or page.path == "/" or page.path not in GUEST_LANDING_PATHS)
+        if page.in_sitemap
+        and (page.path in APP_LANDING_PATHS or landings or page.path not in GUEST_LANDING_PATHS)
     ]
     for post_page, lastmod in blog.sitemap_pages():
         entries.append(SitemapEntry(post_page.path, lastmod, dict(post_page.alternates)))
@@ -587,6 +607,7 @@ def webmanifest() -> dict[str, Any]:
         "theme_color": "#0b0b0f",
         "icons": [
             {"src": "/static/apple-touch-icon.png", "sizes": "180x180", "type": "image/png"},
+            {"src": "/static/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png"},
             {"src": "/static/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png"},
         ],
     }

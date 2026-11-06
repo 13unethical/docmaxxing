@@ -67,7 +67,7 @@ def test_homepage_has_seo_meta_tags():
     assert '<meta property="og:image:width" content="1200" />' in html
     assert '<meta property="og:image:height" content="630" />' in html
     assert "/apple-icon.png" in html
-    assert 'href="/favicon.ico"' in html
+    assert 'href="/favicon.ico?v=2"' in html
     assert 'href="/site.webmanifest"' in html
     types = _types(html)
     assert {"WebSite", "Organization", "SoftwareApplication"} <= set(types)
