@@ -63,6 +63,18 @@ RAWAI_MAX = int(os.environ.get("AI_DETECTOR_RAWAI_MAX", "3000"))
 # Turnitin labels of humanized text (/tt_labels_ours.jsonl, /batch_*.jsonl) are ~5% of the windows
 # but the only examples of what humanizers leave behind; each is repeated this many times.
 OURS_REPEAT = 1
+# Big-file Turnitin rounds (/batch_big*.jsonl): K candidates of the same source paragraph. Held-out
+# runs keep this share of their essays out of training and measure how often the candidate the model
+# scores lowest was flagged, i.e. what the humanizer would ship; the gate compares it with production
+# on the batches production was not trained on.
+PICK_BATCH_PREFIX = "batch_big"
+PICK_HOLDOUT = 0.2
+MAX_PICK_RISE = 0.01
+# Ranking loss on those candidates: every RANK_EVERY steps, up to RANK_TEXTS candidates of paragraphs
+# with both flagged and clean ones; flagged candidates must score above clean ones of the same paragraph.
+RANK_WEIGHT = 0.0
+RANK_EVERY = 4
+RANK_TEXTS = 16
 # Turnitin labels of the golden set (/data/eval_golden*.jsonl): humanized text, evaluation only.
 GOLDEN_GLOB = "eval_golden"
 # Held-out models per retrain (training seeds 0..N-1, same held-out reports); the gate uses their mean.
@@ -160,7 +172,8 @@ def _doc_rates(rows, scores, t: float = FLAG_THRESHOLD) -> dict:
 @app.function(image=gpu_image, gpu="L40S", timeout=4 * 3600,
               volumes={"/data": data, "/root/.cache/huggingface": hf_cache})
 def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: int = EXT_MAX,
-        batches: str = "", train_seed: int = -1, ours_repeat: int = OURS_REPEAT) -> dict:
+        batches: str = "", train_seed: int = -1, ours_repeat: int = OURS_REPEAT,
+        rank_weight: float = RANK_WEIGHT) -> dict:
     """``batches``: comma list of batch_<name>.jsonl to use ("none" = no batches, "" = all).
     ``train_seed``: shuffling/initialisation seed (default ``seed``); the held-out split always follows ``seed``."""
     import random
@@ -195,11 +208,23 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
     if train_seed >= 0:
         rng = random.Random(train_seed)
     ours = _read("/data/tt_labels_ours.jsonl")
+    pick_test: list[dict] = []
+    by_paragraph: dict = {}
+    used_batches: list[str] = []
     allowed = None if not batches else {b.strip() for b in batches.split(",") if b.strip() and b.strip() != "none"}
     for fname in sorted(os.listdir("/data")):
         if fname.startswith("batch_") and fname.endswith(".jsonl"):
             if allowed is None or fname[len("batch_"):-len(".jsonl")] in allowed:
-                ours += _read(f"/data/{fname}")
+                rows = _read(f"/data/{fname}")
+                used_batches.append(fname)
+                if fname.startswith(PICK_BATCH_PREFIX):
+                    if not final:
+                        pick_test += [dict(r, batch=fname) for r in rows if _pick_held(r["essay"])]
+                        rows = [r for r in rows if not _pick_held(r["essay"])]
+                    for r in rows:
+                        by_paragraph.setdefault((r["essay"], r["idx"]), []).append(r)
+                ours += rows
+    rank_groups = [g[:RANK_TEXTS] for g in by_paragraph.values() if len({bool(r["ai"]) for r in g[:RANK_TEXTS]}) == 2]
     train_rows += ours * max(1, ours_repeat)
     train_rows += [r for r in _read("/data/extra_train.jsonl") if not r["ai"]]
     ext = _read("/data/ext.jsonl")
@@ -222,7 +247,8 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
     rawai_train = [r for r in rawai if r.get("split") != "test"]
     train_rows += rng.sample(rawai_train, min(RAWAI_MAX, len(rawai_train)))
     corpus_test += [r for r in rawai if r.get("split") == "test"]
-    print(f"{name}: train {len(train_rows)} windows, held-out {len(vps_test)} windows from {len(held)} reports")
+    print(f"{name}: train {len(train_rows)} windows, held-out {len(vps_test)} windows from {len(held)} reports, "
+          f"{len(rank_groups)} ranking paragraphs")
 
     tok = AutoTokenizer.from_pretrained(BASE)
     model = Desklib.from_pretrained(BASE).cuda()
@@ -244,11 +270,32 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
     sched = get_linear_schedule_with_warmup(opt, int(0.1 * steps), steps)
     # Unweighted: up-weighting the AI class raised false positives on human text.
     loss_fn = nn.BCEWithLogitsLoss()
+
+    def rank_loss():
+        groups, n = [], 0
+        while n < RANK_TEXTS:
+            g = rng.choice(rank_groups)
+            if groups and n + len(g) > RANK_TEXTS:
+                break
+            groups.append(g)
+            n += len(g)
+        enc = tok([r["text"] for g in groups for r in g], truncation=True, max_length=MAX_LEN, padding=True,
+                  return_tensors="pt").to("cuda")
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            logits = model(enc["input_ids"], enc["attention_mask"]).float()
+        losses, k = [], 0
+        for g in groups:
+            lg, k = logits[k : k + len(g)], k + len(g)
+            ai = torch.tensor([bool(r["ai"]) for r in g], device="cuda")
+            losses.append(nn.functional.softplus(lg[~ai].unsqueeze(0) - lg[ai].unsqueeze(1)).mean())
+        return torch.stack(losses).mean()
+
     for epoch in range(epochs):
         model.train()
         order = list(range(len(train_rows)))
         rng.shuffle(order)
-        total = 0.0
+        total = rank_total = 0.0
+        rank_steps = 0
         for i in range(0, len(order), bs):
             batch = [train_rows[j] for j in order[i : i + bs]]
             enc = tok([r["text"] for r in batch], truncation=True, max_length=MAX_LEN, padding=True, return_tensors="pt").to("cuda")
@@ -257,14 +304,21 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
                 logits = model(enc["input_ids"], enc["attention_mask"]).float()
             loss = loss_fn(logits, target)
             loss.backward()
+            if rank_weight > 0 and rank_groups and (i // bs) % RANK_EVERY == 0:
+                rl = rank_loss()
+                (rank_weight * rl).backward()
+                rank_total += rl.item()
+                rank_steps += 1
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             sched.step()
             opt.zero_grad()
             total += loss.item() * len(batch)
-        print(f"{name}: epoch {epoch + 1} loss {total / len(train_rows):.4f}")
+        print(f"{name}: epoch {epoch + 1} loss {total / len(train_rows):.4f}"
+              + (f", rank loss {rank_total / rank_steps:.4f}" if rank_steps else ""))
 
-    metrics: dict = {"name": name, "reports": len(reports), "train_windows": len(train_rows)}
+    metrics: dict = {"name": name, "reports": len(reports), "train_windows": len(train_rows),
+                     "rank_weight": rank_weight, "batches": used_batches}
     by_t: dict = {str(t): {} for t in THRESHOLDS}
     if vps_test:
         s = predict([r["text"] for r in vps_test])
@@ -292,6 +346,24 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
             by_t[str(t)]["golden_fp"] = sum(p > t for p in clean) / max(1, len(clean))
     metrics["by_threshold"] = by_t
     metrics.update(by_t[str(FLAG_THRESHOLD)])
+    if pick_test:
+        scores = predict([r["text"] for r in pick_test])
+        metrics.update(_pick_metrics(pick_test, scores))
+        # Production trained on every batch it had, held-out essays included: compare only on batches
+        # it never saw (listed in its METRICS.json; unknown list = no comparison).
+        prod_seen = set()
+        if os.path.exists(f"{PROD_DIR}/METRICS.json"):
+            with open(f"{PROD_DIR}/METRICS.json") as fh:
+                prod_seen = set(json.load(fh).get("batches") or [])
+        unseen = [(r, s) for r, s in zip(pick_test, scores) if r["batch"] not in prod_seen]
+        if prod_seen and unseen and os.path.exists(f"{PROD_DIR}/config.json"):
+            rows_unseen = [r for r, _ in unseen]
+            new_unseen = _pick_metrics(rows_unseen, [s for _, s in unseen])
+            model = Desklib.from_pretrained(PROD_DIR).cuda()
+            prod_unseen = _pick_metrics(rows_unseen, predict([r["text"] for r in rows_unseen]))
+            if new_unseen and prod_unseen:
+                metrics["pick_unseen_flag_rate"] = new_unseen["pick_flag_rate"]
+                metrics["prod_pick_unseen_flag_rate"] = prod_unseen["pick_flag_rate"]
     print(json.dumps(metrics))
     if not final:
         return metrics
@@ -301,6 +373,33 @@ def fit(final: bool, name: str, seed: int = 0, epochs: int = EPOCHS, ext_max: in
         json.dump(metrics, fh)
     data.commit()
     return metrics
+
+
+def _pick_held(essay: str) -> bool:
+    import hashlib
+
+    return int(hashlib.sha1(essay.encode()).hexdigest(), 16) % 1000 < PICK_HOLDOUT * 1000
+
+
+def _pick_metrics(rows, scores) -> dict:
+    """Over source paragraphs with several labelled candidates: Turnitin flag rate of the candidate
+    scored lowest, of a random one and of the best one, and the mean within-paragraph AUC."""
+    groups: dict = {}
+    for r, s in zip(rows, scores):
+        groups.setdefault((r["essay"], r["idx"]), []).append((s, bool(r["ai"])))
+    groups = {k: v for k, v in groups.items() if len(v) >= 2}
+    if not groups:
+        return {}
+    n = len(groups)
+    aucs = [_auc([a for _, a in v], [s for s, _ in v]) for v in groups.values()]
+    aucs = [a for a in aucs if a is not None]
+    return {
+        "pick_paragraphs": n,
+        "pick_flag_rate": sum(min(v)[1] for v in groups.values()) / n,
+        "random_flag_rate": sum(sum(a for _, a in v) / len(v) for v in groups.values()) / n,
+        "oracle_flag_rate": sum(all(a for _, a in v) for v in groups.values()) / n,
+        "pick_within_auc": sum(aucs) / len(aucs) if aucs else None,
+    }
 
 
 def _turnitin_doc_corr(rows, scores, t: float = FLAG_THRESHOLD):
@@ -385,6 +484,9 @@ def gate(new: dict, prod: dict | None) -> tuple[bool, str]:
     recall, prod_recall = new.get("chatgpt_recall"), (prod or {}).get("chatgpt_recall")
     if recall is not None and prod_recall is not None and recall < prod_recall - MAX_CHATGPT_RECALL_DROP:
         return False, f"chatgpt_recall {recall:.3f} vs prod {prod_recall:.3f}"
+    pick, prod_pick = new.get("pick_unseen_flag_rate"), new.get("prod_pick_unseen_flag_rate")
+    if pick is not None and prod_pick is not None and pick > prod_pick + MAX_PICK_RISE:
+        return False, f"pick_unseen_flag_rate {pick:.3f} vs prod {prod_pick:.3f}"
     return True, "ok"
 
 
@@ -415,7 +517,8 @@ def promote(name: str, holdout_metrics: dict) -> str:
 
 
 @app.function(image=gpu_image, volumes={"/data": data}, timeout=6 * 3600, schedule=modal.Cron("0 22 * * 0"))
-def retrain(force: bool = False, promote_model: bool = True, ours_repeat: int = OURS_REPEAT, tag: str = "") -> dict:
+def retrain(force: bool = False, promote_model: bool = True, ours_repeat: int = OURS_REPEAT, tag: str = "",
+            rank_weight: float = RANK_WEIGHT) -> dict:
     """Weekly (Monday 03:00 Tashkent): train held-out + full models, promote the full one if the gate passes.
 
     ``promote_model=False``: train and judge only; promote later with ``promote`` if wanted."""
@@ -423,12 +526,14 @@ def retrain(force: bool = False, promote_model: bool = True, ours_repeat: int = 
 
     stamp = f"{datetime.now(timezone.utc):%Y%m%d}{tag}"
     holdout_calls = [
-        fit.spawn(final=False, name=f"auto_holdout_{stamp}_s{s}", train_seed=s, ours_repeat=ours_repeat)
+        fit.spawn(final=False, name=f"auto_holdout_{stamp}_s{s}", train_seed=s, ours_repeat=ours_repeat,
+                  rank_weight=rank_weight)
         for s in range(HOLDOUT_SEEDS)
     ]
-    final_call = fit.spawn(final=True, name=f"auto_{stamp}", ours_repeat=ours_repeat)
+    final_call = fit.spawn(final=True, name=f"auto_{stamp}", ours_repeat=ours_repeat, rank_weight=rank_weight)
     holdout = pick_threshold(average_metrics([c.get() for c in holdout_calls], name=f"auto_holdout_{stamp}"))
     final = final_call.get()
+    holdout["batches"] = final.get("batches")
     data.reload()
     prod = None
     if os.path.exists(f"{PROD_DIR}/METRICS.json"):
@@ -441,7 +546,8 @@ def retrain(force: bool = False, promote_model: bool = True, ours_repeat: int = 
         report["promoted"] = promote.local(final["name"], holdout)
     import shutil
 
-    for old in sorted(d for d in os.listdir("/data/models") if d.startswith("auto_"))[:-2]:
+    autos = [d for d in os.listdir("/data/models") if d.startswith("auto_")]
+    for old in sorted(autos, key=lambda d: os.path.getmtime(f"/data/models/{d}"))[:-2]:
         shutil.rmtree(f"/data/models/{old}", ignore_errors=True)
     with open("/data/retrain_log.jsonl", "a") as fh:
         fh.write(json.dumps(report) + "\n")
