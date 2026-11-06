@@ -185,3 +185,41 @@ def train(data: str, run: str, epochs: float = 2.0, learning_rate: float = 1e-4,
     hf_cache.commit()
     print(json.dumps({k: summary[k] for k in ("train_loss", "eval")}, default=str))
     return summary
+
+
+@app.function(
+    image=train_image,
+    gpu="H100",
+    timeout=8 * 3600,
+    retries=modal.Retries(max_retries=3, initial_delay=30.0),
+    volumes={"/sft": sft, "/adapters": adapters, "/root/.cache/huggingface": hf_cache},
+)
+def dpo(data: str, run: str, base: str = "v4", beta: float = 0.1, epochs: float = 2.0,
+        learning_rate: float = 2e-5, rpo_alpha: float = 0.0) -> dict:
+    """DPO on ``/<data>/pairs_{train,val}.jsonl`` (humanizer_student/dpo.py) from the merged ``base``
+    model; the adapter goes to ``/qwen3_8b_lora_<run>`` and is served with HUMANIZER_BASE_VERSION=<base>."""
+    import shutil
+
+    from transformers import TrainerCallback
+
+    from humanizer_student.dpo import DPOConfig, train_dpo
+
+    class CommitCheckpoints(TrainerCallback):
+        def on_save(self, args, state, control, **kwargs):
+            adapters.commit()
+
+    sft.reload()
+    adapters.reload()
+    work = f"/adapters/runs/{run}"
+    cfg = DPOConfig(base_model=f"/adapters/merged/qwen3_8b_humanizer_{base}", data_dir=f"/sft/{data}",
+                    output_dir=work, beta=beta, epochs=epochs, learning_rate=learning_rate,
+                    rpo_alpha=rpo_alpha or None)
+    summary = train_dpo(cfg, callbacks=[CommitCheckpoints()])
+    dest = f"/adapters/qwen3_8b_lora_{run}"
+    shutil.rmtree(dest, ignore_errors=True)
+    shutil.copytree(f"{work}/adapter", dest)
+    with open(f"{dest}/train_summary.json", "w") as fh:
+        json.dump({**summary, "data": data, "base": base}, fh, indent=2, default=str)
+    adapters.commit()
+    print(json.dumps({k: summary[k] for k in ("pairs", "train_loss", "eval")}, default=str))
+    return summary

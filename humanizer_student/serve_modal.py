@@ -28,7 +28,9 @@ import os
 
 import modal
 
-BASE_MODEL = "Qwen/Qwen3-8B"
+# A DPO adapter is trained on top of an already merged version (HUMANIZER_BASE_VERSION=v4).
+BASE_VERSION = os.environ.get("HUMANIZER_BASE_VERSION", "")
+BASE_MODEL = f"/adapters/merged/qwen3_8b_humanizer_{BASE_VERSION}" if BASE_VERSION else "Qwen/Qwen3-8B"
 # Baked into the images below so containers resolve the same paths as the deploying shell.
 MODEL_VERSION = os.environ.get("HUMANIZER_MODEL_VERSION", "v1")
 ADAPTER_PATH = f"/adapters/qwen3_8b_lora_{MODEL_VERSION}"
@@ -62,7 +64,8 @@ serve_image = (
 merge_image = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("torch", "transformers", "peft", "accelerate", "huggingface_hub[hf_transfer]")
-    .env({"HF_HUB_ENABLE_HF_TRANSFER": "1", "HUMANIZER_MODEL_VERSION": MODEL_VERSION})
+    .env({"HF_HUB_ENABLE_HF_TRANSFER": "1", "HUMANIZER_MODEL_VERSION": MODEL_VERSION,
+          "HUMANIZER_BASE_VERSION": BASE_VERSION})
 )
 
 app = modal.App(APP_NAME)
