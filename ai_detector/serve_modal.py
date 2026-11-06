@@ -12,7 +12,8 @@ Deploy:
     modal deploy ai_detector/serve_modal.py
 
 The site posts ``{"texts": [...]}`` to ``<url>/score`` with ``Authorization: Bearer <key>``
-and gets ``{"probs": [...], "model": "<version>"}`` back (see services/ai_detector.py).
+and gets ``{"probs": [...], "model": "<version>", "threshold": <float>}`` back (see services/ai_detector.py);
+the threshold is the one the retrain picked for these weights (``THRESHOLD`` next to them).
 """
 
 from __future__ import annotations
@@ -71,6 +72,13 @@ with image.imports():
         return AutoTokenizer.from_pretrained(path), model.eval()
 
 
+def read_threshold() -> float | None:
+    try:
+        return float(open(f"{MODEL_DIR}/THRESHOLD").read())
+    except (OSError, ValueError):
+        return None
+
+
 @app.function(image=image, volumes={"/data": data}, timeout=600)
 def promote(name: str = "final") -> str:
     import shutil
@@ -106,6 +114,7 @@ class Detector:
 
         self.tok, self.model = load_model(MODEL_DIR)
         self.version = open(f"{MODEL_DIR}/VERSION").read().strip()
+        self.threshold = read_threshold()
         self.lock = threading.Lock()
 
     @modal.enter(snap=False)
@@ -120,6 +129,7 @@ class Detector:
         if current != self.version:
             self.tok, self.model = load_model(MODEL_DIR)
             self.version = current
+            self.threshold = read_threshold()
         self.model = self.model.cuda()
         self.probs(["Warm-up sentence for the detector."])
 
@@ -151,6 +161,7 @@ class Detector:
                 raise HTTPException(status_code=422, detail="texts must be a list of strings")
             if len(texts) > MAX_TEXTS:
                 raise HTTPException(status_code=413, detail=f"at most {MAX_TEXTS} texts")
-            return {"probs": await run_in_threadpool(self.probs, texts), "model": self.version}
+            return {"probs": await run_in_threadpool(self.probs, texts), "model": self.version,
+                    "threshold": self.threshold}
 
         return web

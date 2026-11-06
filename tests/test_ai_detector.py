@@ -57,6 +57,26 @@ def test_document_score_is_the_share_of_flagged_words(monkeypatch):
     assert result["verdict"] == "mixed"
 
 
+def test_threshold_served_with_the_weights_applies_unless_set_in_env(monkeypatch):
+    class Res:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"probs": [0.3], "model": "m", "threshold": 0.25}
+
+    monkeypatch.setenv("AI_DETECTOR_URL", "https://detector.test")
+    monkeypatch.setenv("AI_DETECTOR_API_KEY", "k")
+    monkeypatch.delenv("AI_DETECTOR_THRESHOLD", raising=False)
+    monkeypatch.setattr(ai_detector, "_served_threshold", None)
+    monkeypatch.setattr(ai_detector.requests, "post", lambda *a, **kw: Res())
+    assert ai_detector.threshold() == 0.5
+    assert ai_detector.score_texts(["text"]) == [0.3]
+    assert ai_detector.threshold() == 0.25
+    monkeypatch.setenv("AI_DETECTOR_THRESHOLD", "0.6")
+    assert ai_detector.threshold() == 0.6
+
+
 def test_short_text_is_refused():
     assert ai_detector.detect("Too short to judge.", score=_fake_score) == {"too_short": True}
 

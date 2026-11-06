@@ -6,7 +6,8 @@ words in sentences above the threshold, like Turnitin's "% of text flagged as AI
 
 Environment:
   AI_DETECTOR_URL / AI_DETECTOR_API_KEY   Modal endpoint (ai_detector/serve_modal.py)
-  AI_DETECTOR_THRESHOLD=0.5               sentence counts as AI above this probability
+  AI_DETECTOR_THRESHOLD=<float>           sentence counts as AI above this probability (default: the one
+                                          the detector serves with its weights, else 0.5)
   FREE_DETECT_GUEST_WORDS=1500            words per check without an account
   FREE_DETECT_GUEST_DAILY=10              checks per UTC day without an account (per IP + session)
   FREE_DETECT_USER_WORDS=5000             words per check for a signed-in user
@@ -67,11 +68,14 @@ def limits() -> DetectLimits:
     )
 
 
+_served_threshold: float | None = None
+
+
 def threshold() -> float:
     try:
-        return float(os.environ.get("AI_DETECTOR_THRESHOLD") or 0.5)
+        return float(os.environ.get("AI_DETECTOR_THRESHOLD") or _served_threshold or 0.5)
     except ValueError:
-        return 0.5
+        return _served_threshold or 0.5
 
 
 @dataclass
@@ -120,6 +124,7 @@ def windows(sentences: list[Sentence]) -> list[tuple[int, int]]:
 
 
 def _score_remote(texts: list[str]) -> tuple[list[float], str]:
+    global _served_threshold
     url = (os.environ.get("AI_DETECTOR_URL") or "").strip().rstrip("/")
     key = (os.environ.get("AI_DETECTOR_API_KEY") or "").strip()
     if not url or not key:
@@ -135,6 +140,9 @@ def _score_remote(texts: list[str]) -> tuple[list[float], str]:
     probs = body.get("probs")
     if not isinstance(probs, list) or len(probs) != len(texts):
         raise DetectorUnavailable("bad detector response")
+    served = body.get("threshold")
+    if isinstance(served, (int, float)) and 0 < served < 1:
+        _served_threshold = float(served)
     return [float(p) for p in probs], str(body.get("model") or "")
 
 
