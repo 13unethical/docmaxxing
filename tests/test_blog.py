@@ -78,8 +78,12 @@ PUBLISHED = {
     "does-turnitin-detect-chatgpt",
     "turnitin-ai-score-asterisk",
     "how-ai-detectors-work",
+    "what-is-a-good-turnitin-ai-score",
+    "essay-flagged-as-ai-but-i-wrote-it",
+    "free-gptzero-alternative",
     "kak-oboyti-proverku-turnitin-na-ii",
     "kak-procitirovat-chatgpt-apa-7",
+    "turnitin-vysokiy-procent-ii",
 }
 
 
