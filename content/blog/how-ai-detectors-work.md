@@ -4,7 +4,6 @@ seo_title: How AI Detectors Work — and Why They Flag Humans
 description: AI detectors guess from statistical patterns, not proof. Learn how they score text, why human essays get flagged, and how to protect yourself.
 date: 2026-11-02
 lang: en
-draft: true
 ---
 
 AI detectors such as Turnitin's AI indicator, GPTZero or ZeroGPT promise to tell human writing from machine writing. They can be useful as a rough signal, but none of them can *prove* who wrote a text. Understanding how they work explains both what they catch and why they sometimes flag essays that a person wrote from scratch.

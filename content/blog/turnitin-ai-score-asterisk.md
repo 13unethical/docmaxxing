@@ -4,7 +4,6 @@ seo_title: What Does *% Mean in Turnitin's AI Report?
 description: Turnitin shows an asterisk instead of a number for low AI scores. Here's what *% means, why it's there, and what to do if your teacher asks about it.
 date: 2026-11-02
 lang: en
-draft: true
 ---
 
 If you've seen a Turnitin AI writing report with **\*%** instead of a number, you're not alone. It's one of the most searched questions about Turnitin, and the short answer is reassuring: the asterisk means the detector found only a small amount of text it considers AI-like — too little for Turnitin to show a reliable number.

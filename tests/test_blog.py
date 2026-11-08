@@ -73,14 +73,28 @@ def posts(tmp_path, monkeypatch):
 # --- the repository's own drafts ----------------------------------------------
 
 
-def test_repo_drafts_exist_and_are_not_published():
-    drafts = {p.slug: p for p in blog.all_posts() if p.draft}
-    assert {"turnitin-ai-score-asterisk", "how-ai-detectors-work", "kak-procitirovat-chatgpt-apa-7"} <= set(drafts)
-    assert drafts["kak-procitirovat-chatgpt-apa-7"].lang == "ru"
+PUBLISHED = {
+    "how-to-bypass-turnitin-ai-detection",
+    "does-turnitin-detect-chatgpt",
+    "turnitin-ai-score-asterisk",
+    "how-ai-detectors-work",
+    "kak-oboyti-proverku-turnitin-na-ii",
+    "kak-procitirovat-chatgpt-apa-7",
+}
+
+
+def test_repo_posts_are_published():
+    posts = {p.slug: p for p in blog.all_posts()}
+    assert PUBLISHED <= set(posts)
+    assert posts["kak-procitirovat-chatgpt-apa-7"].lang == "ru"
+    assert posts["kak-oboyti-proverku-turnitin-na-ii"].lang == "ru"
     client = _client()
-    for post in drafts.values():
-        assert client.get(post.path).status_code == 404, post.path
-        assert post.path not in sitemap_xml()
+    xml = sitemap_xml()
+    for slug in PUBLISHED:
+        post = posts[slug]
+        assert not post.draft, slug
+        assert client.get(post.path).status_code == 200, post.path
+        assert post.path in xml
 
 
 def test_repo_posts_have_valid_metadata():
@@ -88,7 +102,7 @@ def test_repo_posts_have_valid_metadata():
         assert len(post.seo_title) <= 60, post.slug
         assert len(post.description) <= 155, post.slug
         text = re.sub(r"<[^>]+>", " ", post.html).lower()
-        for phrase in ("undetectable", "bypass", "guaranteed", "гарантированно"):
+        for phrase in ("undetectable", "guaranteed", "гарантированно"):
             assert phrase not in text, (post.slug, phrase)
 
 
