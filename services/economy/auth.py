@@ -8,8 +8,11 @@ bonus subject to soft IP / device fingerprint anti-abuse limits.
 from __future__ import annotations
 
 import functools
+import hashlib
+import hmac
 import os
 import re
+import secrets
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -26,6 +29,7 @@ from .wallet import WalletService
 _wallet = WalletService()
 
 SESSION_KEY = "user_id"
+AUTH_SID_KEY = "auth_sid"
 _FINGERPRINT_RE = re.compile(r"^[a-fA-F0-9]{16,128}$")
 
 
@@ -39,6 +43,10 @@ class DuplicateEmail(AuthError):
 
 class EmailNotVerified(AuthError):
     """Raised when a verified email is required."""
+
+
+class WrongPassword(AuthError):
+    """Raised when the current password given to confirm a change is wrong."""
 
 
 def _row_to_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -74,11 +82,6 @@ def normalize_email(email: str) -> str:
     return (email or "").strip().lower()
 
 
-def is_bootstrap_admin_email(email: str) -> bool:
-    configured = normalize_email(os.environ.get("ADMIN_EMAIL") or "")
-    return bool(configured) and normalize_email(email) == configured
-
-
 def normalize_fingerprint(raw: str | None) -> str | None:
     text = (raw or "").strip()
     if not text or not _FINGERPRINT_RE.match(text):
@@ -87,12 +90,10 @@ def normalize_fingerprint(raw: str | None) -> str | None:
 
 
 def client_ip_from_request() -> str | None:
-    """Best-effort client IP (honours first X-Forwarded-For hop when present)."""
-    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-    if forwarded:
-        return forwarded[:64]
-    addr = (request.remote_addr or "").strip()
-    return addr[:64] if addr else None
+    """Client IP for signup checks and audit logs (forwarding headers only from a trusted proxy)."""
+    from services.free_humanize import client_ip
+
+    return client_ip(request)
 
 
 def fingerprint_already_bonus(fingerprint: str | None) -> bool:
@@ -153,9 +154,10 @@ def create_user(
         raise AuthError("Password must be at least 6 characters.")
 
     password_hash = generate_password_hash(password)
-    is_admin = 1 if is_bootstrap_admin_email(email) else 0
-    # Bootstrap admin is treated as verified.
-    is_verified = 1 if is_admin else 0
+    # Every account starts as an unverified non-admin, whatever ADMIN_EMAIL says: admin is
+    # granted only to a verified account (admin panel or scripts/grant_admin.py).
+    is_admin = 0
+    is_verified = 0
     referrer_id = lookup_referrer_id(referral_code)
     fingerprint = normalize_fingerprint(device_fingerprint)
     ip = (ip_address or "").strip()[:64] or None
@@ -203,7 +205,6 @@ def create_user(
         details={
             "referrer_id": referrer_id,
             "welcome_bonus": bool(grant_welcome),
-            "is_admin": bool(is_admin),
         },
         source_ref=f"users:{user_id}",
     )
@@ -248,7 +249,7 @@ def mark_email_verified(user_id: int, email: str | None = None) -> dict[str, Any
             raise AuthError("Verification does not match this account.")
         conn.execute(
             "UPDATE users SET is_verified = 1, "
-            "verification_code = NULL, verification_code_expires = NULL "
+            "verification_code = NULL, verification_code_expires = NULL, verification_attempts = 0 "
             "WHERE id = ?",
             (int(user_id),),
         )
@@ -262,22 +263,50 @@ def mark_email_verified(user_id: int, email: str | None = None) -> dict[str, Any
     return user
 
 
+OTP_DEFAULT_MAX_ATTEMPTS = 5
+_OTP_DIGEST_PREFIX = "h1$"
+_OTP_WRONG = "Incorrect code. Please try again."
+_OTP_EXPIRED = "This code has expired. Please request a new one."
+_OTP_NONE = "No verification code on file. Please request a new one."
+_OTP_EXHAUSTED = "Too many incorrect codes. Please request a new one."
+
+
+def otp_max_attempts() -> int:
+    from services.rate_limit import env_limit
+
+    return env_limit("OTP_MAX_ATTEMPTS", OTP_DEFAULT_MAX_ATTEMPTS)
+
+
+def _otp_digest(user_id: int, code: str) -> str:
+    """Keyed hash of a code for one account; the plaintext code is never stored."""
+    key = (os.environ.get("SECRET_KEY") or "").encode("utf-8") or b"docmaxxing-otp"
+    mac = hmac.new(key, f"otp:{int(user_id)}:{code}".encode("utf-8"), hashlib.sha256)
+    return _OTP_DIGEST_PREFIX + mac.hexdigest()
+
+
+def _otp_matches(user_id: int, stored: str, code: str) -> bool:
+    if stored.startswith(_OTP_DIGEST_PREFIX):
+        return hmac.compare_digest(stored, _otp_digest(user_id, code))
+    # Plaintext codes written before hashing; they expire within OTP_TTL_MINUTES of deploy.
+    return len(stored) == len(code) and hmac.compare_digest(stored, code)
+
+
 def issue_verification_otp(user_id: int) -> str:
-    """Create a fresh 6-digit OTP (15 min TTL) and persist it on the user row."""
+    """Create a fresh 6-digit OTP (15 min TTL); it replaces any earlier code and its attempts.
+
+    Only a keyed hash is stored. The plaintext is returned once, for the email.
+    """
     code = generate_otp_code()
     expires = datetime.utcnow() + timedelta(minutes=OTP_TTL_MINUTES)
     expires_iso = expires.strftime("%Y-%m-%d %H:%M:%S")
     with connect() as conn:
-        row = conn.execute(
-            "SELECT id FROM users WHERE id = ?", (int(user_id),)
-        ).fetchone()
-        if row is None:
-            raise AuthError("User not found.")
-        conn.execute(
-            "UPDATE users SET verification_code = ?, verification_code_expires = ? "
-            "WHERE id = ?",
-            (code, expires_iso, int(user_id)),
+        cur = conn.execute(
+            "UPDATE users SET verification_code = ?, verification_code_expires = ?, "
+            "verification_attempts = 0 WHERE id = ?",
+            (_otp_digest(int(user_id), code), expires_iso, int(user_id)),
         )
+        if cur.rowcount != 1:
+            raise AuthError("User not found.")
     try:
         g._economy_user = None
     except RuntimeError:
@@ -297,39 +326,81 @@ def _parse_utc_naive(value: str | None) -> datetime | None:
     return None
 
 
+def _check_and_consume_otp(user_id: int, code: str) -> str:
+    """One locked read-check-write. Returns 'consumed', 'already', or a public error message.
+
+    Wrong guesses are counted on the account row (shared by every worker); the code is erased
+    when it expires or after ``OTP_MAX_ATTEMPTS`` wrong guesses. Only the request whose update
+    clears the code it matched verifies the account, so a code works once.
+    """
+    max_attempts = otp_max_attempts()
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT is_verified, verification_code, verification_code_expires, verification_attempts "
+            "FROM users WHERE id = ?",
+            (int(user_id),),
+        ).fetchone()
+        if row is None:
+            return _OTP_NONE
+        if bool(row["is_verified"]):
+            return "already"
+        stored = (row["verification_code"] or "").strip()
+        if not stored:
+            return _OTP_NONE
+        expires = _parse_utc_naive(row["verification_code_expires"])
+        if expires is None or datetime.utcnow() > expires:
+            conn.execute(
+                "UPDATE users SET verification_code = NULL, verification_code_expires = NULL "
+                "WHERE id = ? AND verification_code = ?",
+                (int(user_id), stored),
+            )
+            return _OTP_EXPIRED
+        attempts = int(row["verification_attempts"] or 0)
+        if attempts >= max_attempts:
+            conn.execute(
+                "UPDATE users SET verification_code = NULL, verification_code_expires = NULL "
+                "WHERE id = ? AND verification_code = ?",
+                (int(user_id), stored),
+            )
+            return _OTP_EXHAUSTED
+        if not _otp_matches(int(user_id), stored, code):
+            attempts += 1
+            if attempts >= max_attempts:
+                conn.execute(
+                    "UPDATE users SET verification_attempts = ?, verification_code = NULL, "
+                    "verification_code_expires = NULL WHERE id = ? AND verification_code = ?",
+                    (attempts, int(user_id), stored),
+                )
+                return _OTP_EXHAUSTED
+            conn.execute(
+                "UPDATE users SET verification_attempts = ? WHERE id = ? AND verification_code = ?",
+                (attempts, int(user_id), stored),
+            )
+            return _OTP_WRONG
+        cur = conn.execute(
+            "UPDATE users SET is_verified = 1, verification_code = NULL, "
+            "verification_code_expires = NULL, verification_attempts = 0 "
+            "WHERE id = ? AND is_verified = 0 AND verification_code = ?",
+            (int(user_id), stored),
+        )
+        return "consumed" if cur.rowcount == 1 else _OTP_NONE
+
+
 def verify_email_otp(user_id: int, code: str) -> dict[str, Any]:
     """Validate a submitted OTP and mark the user verified on success."""
     cleaned = re.sub(r"\D", "", (code or "").strip())
     if len(cleaned) != 6:
         raise AuthError("Enter the 6-digit code from your email.")
 
-    with connect() as conn:
-        row = conn.execute(
-            "SELECT id, email, is_verified, verification_code, verification_code_expires "
-            "FROM users WHERE id = ?",
-            (int(user_id),),
-        ).fetchone()
-        if row is None:
-            raise AuthError("User not found.")
-        if bool(row["is_verified"]):
-            return get_user(int(user_id))  # type: ignore[return-value]
-
-        stored = (row["verification_code"] or "").strip()
-        if not stored:
-            raise AuthError("No verification code on file. Please request a new one.")
-        if stored != cleaned:
-            raise AuthError("Incorrect code. Please try again.")
-
-        expires = _parse_utc_naive(row["verification_code_expires"])
-        if expires is None or datetime.utcnow() > expires:
-            raise AuthError("This code has expired. Please request a new one.")
-
-        conn.execute(
-            "UPDATE users SET is_verified = 1, "
-            "verification_code = NULL, verification_code_expires = NULL "
-            "WHERE id = ?",
-            (int(user_id),),
-        )
+    outcome = _check_and_consume_otp(int(user_id), cleaned)
+    if outcome == "already":
+        user = get_user(int(user_id))
+        if user is None:
+            raise AuthError(_OTP_NONE)
+        return user
+    if outcome != "consumed":
+        raise AuthError(outcome)
 
     try:
         g._economy_user = None
@@ -370,13 +441,24 @@ def set_avatar_file(user_id: int, filename: str | None) -> dict[str, Any]:
     return user
 
 
+_DUMMY_PASSWORD_HASH: list[str] = []
+
+
+def _dummy_password_hash() -> str:
+    if not _DUMMY_PASSWORD_HASH:
+        _DUMMY_PASSWORD_HASH.append(generate_password_hash(secrets.token_urlsafe(16)))
+    return _DUMMY_PASSWORD_HASH[0]
+
+
 def verify_credentials(email: str, password: str) -> dict[str, Any] | None:
+    """The account for a correct email + password, else None (same work for unknown emails)."""
     email = normalize_email(email)
     with connect() as conn:
         row = conn.execute(
             "SELECT * FROM users WHERE email = ?", (email,)
         ).fetchone()
     if row is None:
+        check_password_hash(_dummy_password_hash(), password or "")
         return None
     if not check_password_hash(row["password_hash"], password or ""):
         return None
@@ -391,9 +473,94 @@ def get_user(user_id: int) -> dict[str, Any] | None:
     return _row_to_user(row)
 
 
+def _sid_hash(sid: str) -> str:
+    return hashlib.sha256(sid.encode("utf-8")).hexdigest()
+
+
+# Rows idle longer than the 30-day session cookie lifetime (plus the last_seen refresh
+# interval) can no longer match a live cookie; dropping a row only ever signs someone out.
+_SESSION_IDLE_DAYS = 31
+_SESSION_TOUCH_SECONDS = 3600
+_MAX_SESSIONS_PER_USER = 50
+
+
+def register_session(user_id: int) -> str:
+    """Record a new sign-in server-side and return its id (only its hash is stored)."""
+    sid = secrets.token_urlsafe(32)
+    uid = int(user_id)
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO auth_sessions (sid_hash, user_id) VALUES (?, ?)", (_sid_hash(sid), uid)
+        )
+        conn.execute(
+            "DELETE FROM auth_sessions WHERE last_seen < datetime('now', ?)",
+            (f"-{_SESSION_IDLE_DAYS} days",),
+        )
+        conn.execute(
+            "DELETE FROM auth_sessions WHERE user_id = ? AND sid_hash NOT IN ("
+            " SELECT sid_hash FROM auth_sessions WHERE user_id = ?"
+            " ORDER BY last_seen DESC, created_at DESC LIMIT ?)",
+            (uid, uid, _MAX_SESSIONS_PER_USER),
+        )
+    return sid
+
+
+def _session_active(sid: str, user_id: int) -> bool:
+    """True only while the server still holds this sign-in for this account."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT user_id, "
+            " (julianday('now') - julianday(last_seen)) * 86400 AS idle_seconds "
+            "FROM auth_sessions WHERE sid_hash = ?",
+            (_sid_hash(sid),),
+        ).fetchone()
+        if row is None or int(row["user_id"]) != int(user_id):
+            return False
+        idle = float(row["idle_seconds"] or 0)
+        if idle > _SESSION_IDLE_DAYS * 86400:
+            return False
+        if idle > _SESSION_TOUCH_SECONDS:
+            conn.execute(
+                "UPDATE auth_sessions SET last_seen = datetime('now') WHERE sid_hash = ?",
+                (_sid_hash(sid),),
+            )
+    return True
+
+
+def _end_session(sid: str) -> None:
+    with connect() as conn:
+        conn.execute("DELETE FROM auth_sessions WHERE sid_hash = ?", (_sid_hash(sid),))
+
+
+def end_all_sessions(user_id: int) -> None:
+    """Sign the account out everywhere (every copy of every session cookie and the extension)."""
+    with connect() as conn:
+        conn.execute("DELETE FROM auth_sessions WHERE user_id = ?", (int(user_id),))
+        conn.execute(
+            "UPDATE extension_tokens SET revoked = 1 WHERE user_id = ? AND revoked = 0", (int(user_id),)
+        )
+
+
+def _start_fresh_session() -> None:
+    """Drop everything the previous (possibly attacker-prepared) session carried."""
+    from services import csrf
+
+    session.clear()
+    csrf.rotate()
+
+
 def login_user(user_id: int) -> None:
+    previous = session.get(AUTH_SID_KEY)
+    if isinstance(previous, str) and previous:
+        _end_session(previous)
+    _start_fresh_session()
     session[SESSION_KEY] = int(user_id)
+    session[AUTH_SID_KEY] = register_session(int(user_id))
     session.permanent = True
+    try:
+        g._economy_user = None
+    except RuntimeError:
+        pass
 
 
 def log_login_attempt(email: str, user: dict[str, Any] | None) -> None:
@@ -430,18 +597,38 @@ def logout_user() -> None:
             actor_id=int(uid),
             summary="Signed out",
         )
-    session.pop(SESSION_KEY, None)
+    sid = session.get(AUTH_SID_KEY)
+    if isinstance(sid, str) and sid:
+        _end_session(sid)
+    g._economy_user = None
+    _start_fresh_session()
 
 
 def current_user() -> dict[str, Any] | None:
-    """Return the logged-in user (cached per request via flask.g)."""
+    """Return the logged-in user (cached per request via flask.g).
+
+    The cookie authenticates only while its sign-in id is registered server-side for the
+    same account. Cookies without one (issued before sign-in ids existed), signed-out,
+    password-changed or unknown ids are cleared and the visitor must sign in again.
+    The account row is re-read every request, so blocking, demotion or a lost email
+    verification apply at once.
+    """
     uid = session.get(SESSION_KEY)
     if not uid:
         return None
     cached = getattr(g, "_economy_user", None)
     if cached and cached.get("id") == uid:
         return cached
-    user = get_user(int(uid))
+    sid = session.get(AUTH_SID_KEY)
+    try:
+        uid_int = int(uid)
+    except (TypeError, ValueError):
+        uid_int = None
+    if uid_int is None or not isinstance(sid, str) or not sid or not _session_active(sid, uid_int):
+        _start_fresh_session()
+        g._economy_user = None
+        return None
+    user = get_user(uid_int)
     if user is None or user.get("is_blocked"):
         session.pop(SESSION_KEY, None)
         return None
@@ -480,7 +667,11 @@ def change_password(
     current_password: str,
     new_password: str,
 ) -> None:
-    """Change password after verifying the current one."""
+    """Change password after verifying the current one.
+
+    Every session of the account ends (database trigger on ``password_hash``); the route
+    signs the caller back in with a fresh session.
+    """
     if not new_password or len(new_password) < 6:
         raise AuthError("New password must be at least 6 characters.")
     with connect() as conn:
@@ -490,7 +681,7 @@ def change_password(
         if row is None:
             raise AuthError("User not found.")
         if not check_password_hash(row["password_hash"], current_password or ""):
-            raise AuthError("Current password is incorrect.")
+            raise WrongPassword("Current password is incorrect.")
         conn.execute(
             "UPDATE users SET password_hash = ? WHERE id = ?",
             (generate_password_hash(new_password), user_id),
@@ -498,12 +689,13 @@ def change_password(
 
 
 def is_admin(user: dict[str, Any] | None = None) -> bool:
+    """The one admin check: admin flag and a verified email, both from the account row."""
     user = user if user is not None else current_user()
-    return bool(user and user.get("is_admin"))
+    return bool(user and user.get("is_admin") is True and user_email_verified(user))
 
 
 def admin_required(view: Callable) -> Callable:
-    """Guard admin views. Requires login + is_admin flag."""
+    """Guard admin views. Requires login + :func:`is_admin`."""
 
     @functools.wraps(view)
     def wrapped(*args: Any, **kwargs: Any):
@@ -521,7 +713,10 @@ def admin_required(view: Callable) -> Callable:
                     401,
                 )
             return redirect(url_for("login", next=request.path))
-        if not user.get("is_admin"):
+        from services import csrf
+
+        cross_site_api = request.path.startswith("/api/") and csrf.cross_site_request()
+        if cross_site_api or not is_admin(user):
             if _wants_json():
                 return (
                     jsonify(
@@ -536,6 +731,7 @@ def admin_required(view: Callable) -> Callable:
             return redirect(url_for("index"))
         return view(*args, **kwargs)
 
+    wrapped.admin_guard = "admin_required"
     return wrapped
 
 

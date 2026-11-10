@@ -99,9 +99,11 @@ def test_delivery_packages_client_file_only():
     assert all(not f.filename.endswith(".json") for f in package.files)
 
 
-def test_delivery_uses_formatted_docx(tmp_path):
+def test_delivery_uses_formatted_docx(tmp_path, monkeypatch):
     """Client download must ship Format Engine DOCX, not a markdown rebuild."""
-    formatted = tmp_path / "formatted.docx"
+    monkeypatch.setenv("PROJECT_STORAGE_DIR", str(tmp_path / "projects"))
+    formatted = (tmp_path / "projects").resolve() / "proj-formatted-zip" / "formatted" / "formatted.docx"
+    formatted.parent.mkdir(parents=True)
     doc = Document()
     doc.add_heading("Formatted Title", level=1)
     p = doc.add_paragraph("Body with academic formatting.")

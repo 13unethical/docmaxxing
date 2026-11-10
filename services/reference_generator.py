@@ -13,11 +13,14 @@ from html import unescape
 from typing import Any
 from urllib.parse import urlparse
 
-import requests
 from bs4 import BeautifulSoup
+
+from services import safe_fetch
 
 # Reasonable timeout; some academic sites are slow
 REQUEST_TIMEOUT = 18
+MAX_PAGE_BYTES = 2 * 1024 * 1024
+HTML_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
 USER_AGENT = (
     "Mozilla/5.0 (compatible; AcademicRefGenerator/1.0; "
     "+https://example.org/edu-tool)"
@@ -124,19 +127,21 @@ def _parse_iso_date(iso: str | None) -> tuple[str, str | None]:
 
 
 def _assert_public_http_url(url: str) -> None:
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError("Only http:// and https:// URLs are supported.")
+    safe_fetch.parse_target(url)
 
 
 def fetch_page_metadata(url: str) -> dict[str, Any]:
-    """HTTP GET and extract title, authors, date, site label from HTML."""
-    _assert_public_http_url(url)
+    """HTTP GET (SSRF-guarded) and extract title, authors, date, site label from HTML."""
     headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"}
-    r = requests.get(url, timeout=REQUEST_TIMEOUT, headers=headers, allow_redirects=True)
-    r.raise_for_status()
-    final_url = str(r.url)
-    soup = BeautifulSoup(r.content, "html.parser")
+    page = safe_fetch.fetch(
+        url,
+        headers=headers,
+        allowed_content_types=HTML_CONTENT_TYPES,
+        max_bytes=MAX_PAGE_BYTES,
+        total_timeout=REQUEST_TIMEOUT,
+    )
+    final_url = page.url
+    soup = BeautifulSoup(page.content, "html.parser")
 
     def read_meta_tag(prop: str | None = None, name: str | None = None, itemprop: str | None = None) -> str | None:
         tag = None

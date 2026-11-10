@@ -25,7 +25,7 @@ from services.reviewer_engine import ReviewerEngineService
 from services.revision_engine import RevisionEngineService
 from services.writer_engine import WriterEngineService
 from services.writer_engine.models import WriterSectionStatus
-from tests.assignment_helpers import prepare_project_for_research
+from tests.assignment_helpers import current_quote_id, prepare_project_for_research
 
 
 def _humanized_draft() -> dict:
@@ -155,7 +155,7 @@ def test_finalize_detection_rebuilds_report_missing_from_worker_memory(tmp_path)
     project_id = bundle.project.id
     service_a.analyze_requirements(project_id)
     service_a.calculate_pricing(project_id)
-    service_a.confirm_payment(project_id)
+    service_a.confirm_payment(project_id, quote_id=current_quote_id(service_a, project_id))
     service_a.run_research(project_id)
     service_a.run_blueprint(project_id)
     session = service_a.start_writer(project_id)

@@ -57,6 +57,8 @@ class Job:
     operation: str
     payload: dict[str, Any] = field(default_factory=dict)
     max_retries: int = 3
+    # "user:<id>" or "guest:<session id>"; None means only admins may see the job.
+    owner: str | None = None
 
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     status: JobStatus = JobStatus.QUEUED
@@ -122,4 +124,20 @@ class Job:
             "started_at": _iso(self.started_at),
             "finished_at": _iso(self.finished_at),
             "logs": [entry.to_dict() for entry in self.logs],
+        }
+
+    def to_public_dict(self) -> dict[str, Any]:
+        """Status only: no payload, result text, logs or error details."""
+        return {
+            "id": self.id,
+            "provider": self.provider,
+            "operation": self.operation,
+            "status": self.status.value,
+            "progress": self.progress,
+            "attempts": self.attempts,
+            "error_code": self.error_code,
+            "elapsed_seconds": self.elapsed_seconds,
+            "created_at": _iso(self.created_at),
+            "started_at": _iso(self.started_at),
+            "finished_at": _iso(self.finished_at),
         }

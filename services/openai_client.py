@@ -13,6 +13,8 @@ from typing import Any
 
 import requests
 
+from services.secret_redaction import describe_exception
+
 _URL = "https://api.openai.com/v1/chat/completions"
 _DEFAULT_MODEL = "gpt-4o"
 _RETRYABLE_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
@@ -116,7 +118,7 @@ def generate_text(
             if res.status_code not in _RETRYABLE_HTTP_STATUS:
                 break
         except _NETWORK_EXCEPTIONS as exc:
-            error = repr(exc)
+            error = describe_exception(exc)
         if attempt < max_retries:
             time.sleep(min(30.0, 2.0 * (2**attempt)) + random.uniform(0, 0.5))
     diag["error_message"] = error

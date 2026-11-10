@@ -2,6 +2,7 @@
 <html lang="{{ seo.lang }}">
   <head>
     <meta charset="UTF-8" />
+    {% include "_csrf_head.html" %}
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{% block title %}{{ seo.title }}{% endblock %}</title>
     {% include "_seo_head.html" %}
@@ -283,6 +284,7 @@
                   Billing
                 </a>
                 <form method="post" action="{{ url_for('logout') }}" class="nav-user-dropdown-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                   <button type="submit" class="nav-user-dropdown-link nav-user-dropdown-link--btn">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                       <path d="M10 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>

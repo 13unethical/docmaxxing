@@ -96,7 +96,10 @@ def public_error_message(raw: str | None, *, error_code: str | None = None) -> s
         return _USER_CHECK_FAILED
     # Keep short, already-human copy (no paths, env vars, or dumps).
     if text and len(text) <= 120 and "`" not in text and "/" not in text and "\\" not in text:
-        return text
+        from services.public_errors import is_public_text
+
+        if is_public_text(text):
+            return text
     return _USER_CHECK_FAILED
 
 
@@ -1246,6 +1249,15 @@ class TurnitinService:
         """Background thread: wait for report re-download and persist paths."""
 
         def _run() -> None:
+            try:
+                _persist()
+            finally:
+                try:
+                    self.store.release_fetch(submission_id)
+                except Exception:  # noqa: BLE001
+                    log.exception("turnitin fetch claim release failed submission=%s", submission_id)
+
+        def _persist() -> None:
             timeout = int(os.environ.get("PLAGDETECT_HIGHLIGHTS_TIMEOUT", "180")) + 90
             try:
                 job_manager.wait(job_id, timeout=timeout)

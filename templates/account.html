@@ -102,6 +102,7 @@
     <section class="acct-card">
       <h2 class="acct-card-title">Change password</h2>
       <form method="post" action="{{ url_for('account') }}" class="acct-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <input type="hidden" name="action" value="password" />
         <label class="acct-field">
           <span class="acct-label">Current password</span>

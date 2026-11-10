@@ -173,6 +173,21 @@ def _period_key(window: str, started_at: str) -> str:
     return "day:" + _now().strftime("%Y-%m-%d") if window == "day" else "pass:" + started_at
 
 
+def allowance_rule(user_id: int, feature: str) -> dict[str, Any] | None:
+    """How the user's active pass covers ``feature``: unlimited, a quota in one period, or not at all."""
+    current = active_plan(user_id)
+    if current is None:
+        return None
+    plan = PLANS[current["plan_id"]]
+    if feature in plan["unlimited"]:
+        return {"mode": "unlimited", "period_key": None, "limit": None}
+    rule = plan["free"].get(feature)
+    if rule is None:
+        return None
+    window, limit = rule
+    return {"mode": "quota", "period_key": _period_key(window, current["started_at"]), "limit": int(limit)}
+
+
 def consume_free_use(user_id: int, feature: str) -> str | None:
     """Spend one plan allowance for ``feature``. Returns "unlimited", "quota" or None (pay as usual)."""
     current = active_plan(user_id)

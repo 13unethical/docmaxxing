@@ -6,10 +6,10 @@ import json
 import ast
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Protocol
 
 from formatter.document_io import extract_text_from_document_bytes
+from services import free_ai_quota, project_files
 from services.assignment_pipeline.models import utc_now
 from services.assignment_llm import (
     STAGE_REQUIREMENT_ANALYSIS,
@@ -52,9 +52,14 @@ class GeminiRequirementAnalyzer:
     def analyze(self, payload: AnalyzerInput) -> RequirementJSON:
         project = payload.project
         base = payload.requirement
-        sections = _collect_source_text(payload.files)
+        sections = _collect_source_text(payload.files, payload.project.id)
         system_prompt = _requirement_system_prompt()
         user_prompt = _requirement_user_prompt(project, sections)
+        if len(system_prompt) + len(user_prompt) > free_ai_quota.max_chars("analyze"):
+            raise free_ai_quota.QuotaRefused(free_ai_quota.INPUT_TOO_LONG)
+        if not free_ai_quota.allow("analyze"):
+            grant = free_ai_quota.active()
+            raise free_ai_quota.QuotaRefused((grant.reason if grant else None) or free_ai_quota.NO_QUOTA_SCOPE)
 
         last_error = "LLM did not return a valid Requirement JSON object"
         for attempt in range(self._INVALID_JSON_RETRIES + 1):
@@ -266,7 +271,7 @@ def _requirement_user_prompt(project: Project, sections: dict[str, str]) -> str:
     )
 
 
-def _collect_source_text(files: list[ProjectFile]) -> dict[str, str]:
+def _collect_source_text(files: list[ProjectFile], project_id: str) -> dict[str, str]:
     grouped: dict[str, list[str]] = {
         "assignment_brief": [],
         "rubric": [],
@@ -274,7 +279,7 @@ def _collect_source_text(files: list[ProjectFile]) -> dict[str, str]:
         "uploaded_files": [],
     }
     for file in files:
-        snippet = _extract_file_text(file)
+        snippet = _extract_file_text(file, project_id)
         line = f"[{file.file_type.value}] {file.original_filename}\n{snippet}".strip()
         grouped["uploaded_files"].append(line)
         if file.file_type == ProjectFileType.ASSIGNMENT_BRIEF:
@@ -291,15 +296,12 @@ def _collect_source_text(files: list[ProjectFile]) -> dict[str, str]:
     }
 
 
-def _extract_file_text(file: ProjectFile) -> str:
-    path = Path(file.storage_path)
-    if not path.exists() or not path.is_file():
-        return "(file content unavailable in storage; using metadata only)"
-    suffix = path.suffix.lower()
+def _extract_file_text(file: ProjectFile, project_id: str) -> str:
     try:
-        raw = path.read_bytes()
-    except OSError:
-        return "(unable to read file content)"
+        raw = project_files.read_project_record(project_id, file)
+    except project_files.ProjectFileDenied:
+        return "(file content unavailable in storage; using metadata only)"
+    suffix = project_files.storage_suffix(file.storage_path)
     try:
         if suffix in {".txt", ".md"}:
             text = raw.decode("utf-8", errors="replace")

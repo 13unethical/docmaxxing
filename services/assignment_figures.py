@@ -5,13 +5,15 @@ from __future__ import annotations
 import io
 import re
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
 from docx import Document
 from docx.shared import Inches
+
+from services import project_files, safe_fetch
 
 IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif"})
 
@@ -41,6 +43,7 @@ _INSERT_PHOTOS_RE = re.compile(
 _HEADING_LINE_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
 
 _MAX_FIGURE_WIDTH_IN = 5.5
+_MAX_FIGURE_BYTES = 25 * 1024 * 1024
 _MAX_IMAGES_PER_SECTION = 2
 _COMMONS_UA = "DocmaxxingAssignmentBot/1.0 (academic formatter; local)"
 _COMMONS_API = "https://commons.wikimedia.org/w/api.php"
@@ -63,8 +66,8 @@ def brief_requires_photos(*texts: str | None) -> bool:
     return bool(_BRIEF_PHOTOS_RE.search(blob))
 
 
-def collect_assignment_images(files: list[Any]) -> list[dict[str, str]]:
-    """Return image attachment metadata from project files."""
+def collect_assignment_images(files: list[Any], *, project_id: str) -> list[dict[str, str]]:
+    """Return image attachment metadata from the project's own stored files."""
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for file in files or []:
@@ -73,18 +76,16 @@ def collect_assignment_images(files: list[Any]) -> list[dict[str, str]]:
         file_id = str(getattr(file, "id", "") or "")
         if not is_image_filename(original) and not is_image_filename(storage):
             continue
-        path = Path(storage)
-        if not path.is_file():
+        if not project_files.project_record_exists(project_id, file):
             continue
-        key = str(path.resolve())
-        if key in seen:
+        if storage in seen:
             continue
-        seen.add(key)
+        seen.add(storage)
         out.append(
             {
                 "file_id": file_id,
-                "filename": Path(original).name or path.name,
-                "storage_path": str(path),
+                "filename": Path(original).name or PurePosixPath(storage).name,
+                "storage_path": storage,
                 "source": "upload",
             }
         )
@@ -106,17 +107,17 @@ def _figure_lookup_keys(name: str) -> list[str]:
     return [k for k in keys if k]
 
 
-def images_by_filename(images: list[dict[str, Any]] | None) -> dict[str, Path]:
-    mapping: dict[str, Path] = {}
+def images_by_filename(images: list[dict[str, Any]] | None, *, project_id: str) -> dict[str, str]:
+    """Lookup key -> storage path, only for images stored in the project's own files."""
+    mapping: dict[str, str] = {}
     for item in images or []:
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or not project_files.project_record_exists(project_id, item):
             continue
-        path = Path(str(item.get("storage_path") or item.get("path") or ""))
-        if not path.is_file():
-            continue
-        name = Path(str(item.get("filename") or path.name)).name
-        for key in _figure_lookup_keys(name) + _figure_lookup_keys(path.name):
-            mapping[key] = path
+        storage = str(item.get("storage_path") or "")
+        stored_name = PurePosixPath(storage).name
+        name = Path(str(item.get("filename") or stored_name)).name
+        for key in _figure_lookup_keys(name) + _figure_lookup_keys(stored_name):
+            mapping[key] = storage
     return mapping
 
 
@@ -146,11 +147,11 @@ def restore_figure_markers(text: str, figures: list[str]) -> str:
     return re.sub(r"\n{3,}", "\n\n", restored).strip()
 
 
-def _docx_safe_image_stream(path: Path) -> io.BytesIO:
+def _docx_safe_image_stream(data: bytes) -> io.BytesIO:
     """Re-encode images python-docx rejects (e.g. JPEG with ICC APP2 segments)."""
     from PIL import Image
 
-    with Image.open(path) as im:
+    with Image.open(io.BytesIO(data)) as im:
         im = im.convert("RGB") if im.mode not in {"RGB", "L"} else im
         buf = io.BytesIO()
         im.save(buf, format="JPEG", quality=90, optimize=True)
@@ -162,10 +163,11 @@ def embed_figures_in_docx_bytes(
     docx_bytes: bytes,
     images: list[dict[str, Any]] | None,
     *,
+    project_id: str,
     max_width_in: float = _MAX_FIGURE_WIDTH_IN,
 ) -> bytes:
-    """Replace [[FIGURE:...]] paragraph text with embedded pictures."""
-    mapping = images_by_filename(images)
+    """Replace [[FIGURE:...]] paragraph text with embedded pictures from the project's files."""
+    mapping = images_by_filename(images, project_id=project_id)
     if not mapping or not docx_bytes:
         return docx_bytes
 
@@ -194,6 +196,10 @@ def embed_figures_in_docx_bytes(
                     break
         if path is None:
             continue
+        try:
+            data = project_files.read_project_file(project_id, path, max_bytes=_MAX_FIGURE_BYTES)
+        except project_files.ProjectFileDenied:
+            continue
 
         for run in paragraph.runs:
             run.text = ""
@@ -204,9 +210,9 @@ def embed_figures_in_docx_bytes(
         run = paragraph.add_run()
         try:
             try:
-                run.add_picture(str(path), width=Inches(max_width_in))
+                run.add_picture(io.BytesIO(data), width=Inches(max_width_in))
             except Exception:  # noqa: BLE001
-                run.add_picture(_docx_safe_image_stream(path), width=Inches(max_width_in))
+                run.add_picture(_docx_safe_image_stream(data), width=Inches(max_width_in))
             changed = True
         except Exception:  # noqa: BLE001
             paragraph.add_run(match.group(0))
@@ -444,6 +450,7 @@ def download_image(
     *,
     session: requests.Session | None = None,
 ) -> Path:
+    safe_fetch.parse_target(url)
     http = session or requests.Session()
     response = http.get(url, headers={"User-Agent": _COMMONS_UA}, timeout=60)
     response.raise_for_status()
@@ -524,7 +531,7 @@ def fetch_commons_figures(
     return out
 
 
-def ensure_figure_markers(content: str, images: list[dict[str, Any]] | None) -> str:
+def ensure_figure_markers(content: str, images: list[dict[str, Any]] | None, *, project_id: str) -> str:
     """Insert [[FIGURE:...]] into section bodies that still lack markers."""
     if not images:
         return content or ""
@@ -536,7 +543,7 @@ def ensure_figure_markers(content: str, images: list[dict[str, Any]] | None) -> 
         if not isinstance(item, dict):
             continue
         fname = str(item.get("filename") or "").strip()
-        if not fname or not Path(str(item.get("storage_path") or "")).is_file():
+        if not fname or not project_files.project_record_exists(project_id, item):
             continue
         if re.search(rf"\[\[\s*FIGURE\s*:\s*{re.escape(fname)}", text, re.I):
             continue
@@ -635,23 +642,20 @@ def ensure_figure_markers(content: str, images: list[dict[str, Any]] | None) -> 
     return body.strip()
 
 
-def merge_image_lists(*lists: list[dict[str, Any]] | None) -> list[dict[str, str]]:
-    """Dedupe image dicts by resolved storage path."""
+def merge_image_lists(*lists: list[dict[str, Any]] | None, project_id: str) -> list[dict[str, str]]:
+    """Dedupe image dicts by storage path, keeping only images stored in the project's own files."""
     out: list[dict[str, str]] = []
     seen: set[str] = set()
     for group in lists:
         for item in group or []:
-            if not isinstance(item, dict):
+            if not isinstance(item, dict) or not project_files.project_record_exists(project_id, item):
                 continue
-            path = Path(str(item.get("storage_path") or ""))
-            if not path.is_file():
+            storage = str(item.get("storage_path") or "")
+            if storage in seen:
                 continue
-            key = str(path.resolve())
-            if key in seen:
-                continue
-            seen.add(key)
+            seen.add(storage)
             record = {str(k): str(v) for k, v in item.items() if v is not None}
-            record["filename"] = Path(str(item.get("filename") or path.name)).name
-            record["storage_path"] = str(path)
+            record["filename"] = Path(str(item.get("filename") or PurePosixPath(storage).name)).name
+            record["storage_path"] = storage
             out.append(record)
     return out

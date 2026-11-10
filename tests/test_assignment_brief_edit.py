@@ -7,6 +7,7 @@ import pytest
 from services.assignment_pipeline.service import AssignmentPipelineService
 from services.assignment_project import ProjectService
 from services.assignment_project.store import ProjectStore
+from tests.assignment_helpers import current_quote_id
 from tests.test_assignment_project import _StubRequirementAnalyzer
 
 
@@ -70,6 +71,6 @@ def test_out_of_range_length_rejected(service):
 
 def test_brief_locked_after_payment(service):
     priced = _priced_project(service)
-    service.confirm_payment(priced.project.id)
+    service.confirm_payment(priced.project.id, quote_id=current_quote_id(service, priced.project.id))
     with pytest.raises(ValueError):
         service.update_brief(priced.project.id, word_count=1500)

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 import uuid
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
 from formatter.document_io import extract_text_from_document_bytes
+from services import project_files
 from services.assignment_pipeline.models import utc_now
 from services.research_engine.models import ParsedDocument
 
@@ -26,7 +27,9 @@ _MATERIAL_ORDER = (
 )
 
 
-def writer_source_material(files: list[Any], *, note: str = "", max_chars: int = MAX_WRITER_MATERIAL_CHARS) -> str:
+def writer_source_material(
+    files: list[Any], *, project_id: str, note: str = "", max_chars: int = MAX_WRITER_MATERIAL_CHARS
+) -> str:
     """Uploaded files as readable text (line breaks kept), brief and rubric first, bounded in total."""
 
     def rank(file_record: Any) -> int:
@@ -44,20 +47,22 @@ def writer_source_material(files: list[Any], *, note: str = "", max_chars: int =
     for file_record in sorted(files, key=rank):
         if room <= 500:
             break
-        text = _extract_project_file_text(file_record, keep_lines=True, limit=room)
+        text = _extract_project_file_text(file_record, project_id=project_id, keep_lines=True, limit=room)
         parts.append(text)
         room -= len(text)
     return "\n\n".join(parts).strip()
 
 
-def build_parsed_documents(files: list[Any], parsed_payload: list[dict] | None = None) -> list[ParsedDocument]:
+def build_parsed_documents(
+    files: list[Any], parsed_payload: list[dict] | None = None, *, project_id: str
+) -> list[ParsedDocument]:
     """Prefer explicit parsed payloads; otherwise extract real text from stored files."""
     if parsed_payload:
         return [ParsedDocument.from_dict(item) for item in parsed_payload]
 
     documents: list[ParsedDocument] = []
     for file_record in files:
-        text = _extract_project_file_text(file_record)
+        text = _extract_project_file_text(file_record, project_id=project_id)
         file_type = file_record.file_type
         file_type_value = file_type.value if hasattr(file_type, "value") else str(file_type)
         documents.append(
@@ -74,22 +79,22 @@ def build_parsed_documents(files: list[Any], parsed_payload: list[dict] | None =
     return documents
 
 
-def _extract_project_file_text(file_record: Any, *, keep_lines: bool = False, limit: int = _MAX_CHARS_PER_FILE) -> str:
-    path = Path(getattr(file_record, "storage_path", "") or "")
+def _extract_project_file_text(
+    file_record: Any, *, project_id: str, keep_lines: bool = False, limit: int = _MAX_CHARS_PER_FILE
+) -> str:
+    storage_path = str(getattr(file_record, "storage_path", "") or "")
     file_type = getattr(file_record, "file_type", "")
     file_type_value = file_type.value if hasattr(file_type, "value") else str(file_type)
-    original = getattr(file_record, "original_filename", "") or path.name
+    original = getattr(file_record, "original_filename", "") or PurePosixPath(storage_path).name
     header = f"[{file_type_value}] {original}"
-    if not path.exists() or not path.is_file():
-        return f"{header}\n(file content unavailable in storage)"
     try:
-        raw = path.read_bytes()
-    except OSError:
-        return f"{header}\n(unable to read file content)"
+        raw = project_files.read_project_record(project_id, file_record)
+    except project_files.ProjectFileDenied:
+        return f"{header}\n(file content unavailable in storage)"
     if not raw:
         return f"{header}\n(empty file)"
 
-    suffix = path.suffix.lower()
+    suffix = project_files.storage_suffix(storage_path)
     try:
         if suffix in {".txt", ".md"}:
             text = raw.decode("utf-8", errors="replace")

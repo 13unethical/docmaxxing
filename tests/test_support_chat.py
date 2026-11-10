@@ -66,56 +66,56 @@ def test_extract_user_id_variants():
     assert extract_user_id_from_telegram_text("no id here") is None
 
 
-def test_parse_admin_reply_from_update():
-    payload = {
+def _admin_update(reply_to_id, *, text="Sure, refunding now.", update_id=1, reply_text="", chat=999, sender=999):
+    return {
+        "update_id": update_id,
         "message": {
-            "text": "Sure, refunding now.",
-            "reply_to_message": {
-                "text": "Support from Ann\n\nNeed help\n\nUser ID: 15",
-            },
-            "chat": {"id": 1},
-        }
+            "message_id": 7000 + update_id,
+            "from": {"id": sender, "is_bot": False},
+            "chat": {"id": chat},
+            "text": text,
+            "reply_to_message": {"message_id": reply_to_id, "text": reply_text, "chat": {"id": chat}},
+        },
     }
-    parsed = parse_admin_reply_from_update(payload)
-    assert parsed == {"user_id": 15, "message": "Sure, refunding now.", "via": "user_id_footer"}
+
+
+def test_user_id_footer_text_never_routes_a_reply(economy_db, monkeypatch):
+    monkeypatch.setenv("CHAT_ID", "999")
+    payload = _admin_update(424242, reply_text=f"Support from Ann\n\nNeed help\n\nUser ID: {economy_db}")
+    assert parse_admin_reply_from_update(payload) is None
     assert parse_admin_reply_from_update({"message": {"text": "no reply"}}) is None
 
 
-def test_parse_admin_reply_via_telegram_map(economy_db):
+def test_parse_admin_reply_via_telegram_map(economy_db, monkeypatch):
     from services.economy.support_chat import bind_telegram_message
 
+    monkeypatch.setenv("CHAT_ID", "999")
     uid = economy_db
-    bind_telegram_message(telegram_message_id=555001, user_id=uid, support_message_id=None)
-    parsed = parse_admin_reply_from_update(
-        {
-            "message": {
-                "text": "Mapped reply",
-                "reply_to_message": {"message_id": 555001, "text": "no footer here"},
-            }
-        }
-    )
-    assert parsed == {"user_id": uid, "message": "Mapped reply", "via": "telegram_map"}
+    bind_telegram_message(telegram_message_id=555001, user_id=uid, support_message_id=None, chat_id="999")
+    parsed = parse_admin_reply_from_update(_admin_update(555001, text="Mapped reply", reply_text="no footer here"))
+    assert parsed is not None
+    assert (parsed["user_id"], parsed["message"], parsed["via"]) == (uid, "Mapped reply", "telegram_map")
 
 
 def test_telegram_webhook_persists_admin_reply(economy_db, monkeypatch):
     uid = economy_db
-    monkeypatch.setenv("CHAT_ID", "999")
-    monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET", raising=False)
-
     from app import app
+    from services.economy.support_chat import bind_telegram_message
 
+    monkeypatch.setenv("CHAT_ID", "999")
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "tg-test-secret")
     client = app.test_client()
+    bind_telegram_message(telegram_message_id=31337, user_id=uid, chat_id="999")
+    update = _admin_update(31337, text="Here is the fix.", reply_text="Hello")
+    assert client.post("/api/telegram-webhook", json=update).status_code == 401
+    wrong = {"X-Telegram-Bot-Api-Secret-Token": "nope"}
+    assert client.post("/api/telegram-webhook", json=update, headers=wrong).status_code == 401
+    assert list_support_messages(uid) == []
+
     res = client.post(
         "/api/telegram-webhook",
-        json={
-            "message": {
-                "text": "Here is the fix.",
-                "chat": {"id": 999},
-                "reply_to_message": {
-                    "text": f"Hello\n\nUser ID: {uid}",
-                },
-            }
-        },
+        json=update,
+        headers={"X-Telegram-Bot-Api-Secret-Token": "tg-test-secret"},
     )
     assert res.status_code == 200
     body = res.get_json()

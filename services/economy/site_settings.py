@@ -11,6 +11,7 @@ admin humanizer usage) use the same **05:00→05:00** period key as
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -267,6 +268,9 @@ def get_admin_dashboard_stats() -> dict[str, Any]:
             "discount": status,
         }
     except Exception as exc:  # noqa: BLE001
+        from services.public_errors import admin_detail
+
+        logging.getLogger(__name__).exception("admin dashboard stats failed")
         day = humanizer_stats_day_iso()
         return {
             "today": {
@@ -282,7 +286,7 @@ def get_admin_dashboard_stats() -> dict[str, Any]:
                 "active": False,
                 "percent": 50,
                 "source": "none",
-                "error": str(exc),
+                "error": admin_detail(exc)["error"],
             },
         }
 

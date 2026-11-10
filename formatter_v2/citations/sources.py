@@ -14,6 +14,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from formatter_v2.citations.models import CSLDate, CSLItem, CSLName, CSLType
+from services import safe_fetch
 
 DEFAULT_TIMEOUT_S = 12.0
 CROSSREF_SCORE_THRESHOLD = 50.0
@@ -169,10 +170,18 @@ def from_url(url: str, *, timeout: float = DEFAULT_TIMEOUT_S) -> SourceResult:
         return None, "Empty URL"
     if not re.match(r"^https?://", cleaned, flags=re.I):
         cleaned = "https://" + cleaned
-    response, err = _safe_get(cleaned, headers={"User-Agent": "DocMaxxingFormatter/2.0"}, timeout=timeout)
-    if err or response is None:
-        return None, err or "Could not load the page"
-    soup = BeautifulSoup(response.text, "html.parser")
+    try:
+        page = safe_fetch.fetch(
+            cleaned,
+            headers={"User-Agent": "DocMaxxingFormatter/2.0"},
+            allowed_content_types=("text/html", "application/xhtml+xml"),
+            total_timeout=timeout,
+        )
+    except safe_fetch.UnsafeUrlError:
+        return None, "This address cannot be used"
+    except safe_fetch.FetchError:
+        return None, "Could not load the page"
+    soup = BeautifulSoup(page.content, "html.parser")
 
     def meta(*names: str) -> str | None:
         for name in names:

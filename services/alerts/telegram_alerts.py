@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+from services.secret_redaction import describe_exception, redact
+
 logger = logging.getLogger(__name__)
 
 _LOCK = threading.Lock()
@@ -81,12 +83,12 @@ def send_telegram_alert(text: str, *, key: str, cooldown_sec: int) -> bool:
             logger.warning(
                 "telegram alert failed status=%s body=%s",
                 res.status_code,
-                (res.text or "")[:200],
+                redact((res.text or "")[:200]),
             )
             return False
         return True
-    except Exception:  # noqa: BLE001
-        logger.exception("telegram alert request failed")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("telegram alert request failed: %s", describe_exception(exc))
         return False
 
 

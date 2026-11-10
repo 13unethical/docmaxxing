@@ -13,6 +13,7 @@
           {% endif %}
 
           <form method="post" action="{{ url_for('register') }}" class="auth-form" data-dm-register-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
             <input type="hidden" name="referral_code" value="{{ referral_code or '' }}" />
             <input type="hidden" name="device_fingerprint" value="" data-dm-fingerprint />
             <label class="auth-field">

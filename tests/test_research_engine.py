@@ -158,7 +158,7 @@ def test_build_parsed_documents_from_project_files():
             {"file_type": "rubric", "original_filename": "rubric.pdf"},
         ]
     )
-    docs = build_parsed_documents(bundle.files)
+    docs = build_parsed_documents(bundle.files, project_id=bundle.project.id)
     assert len(docs) == 2
     assert all(doc.text for doc in docs)
     assert docs[0].file_type == "assignment_brief"

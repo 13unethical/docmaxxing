@@ -76,7 +76,10 @@ def test_email_otp_roundtrip(economy, monkeypatch):
             "SELECT verification_code, verification_code_expires FROM users WHERE id = ?",
             (user["id"],),
         ).fetchone()
-    assert row["verification_code"] == code
+    # Only a keyed hash is stored, never the code itself.
+    assert row["verification_code"]
+    assert code not in row["verification_code"]
+    assert row["verification_code"].startswith("h1$")
     assert row["verification_code_expires"]
 
     with pytest.raises(economy_auth.AuthError):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from services import free_ai_quota
 from services.gemini_client import generate_json, gemini_enabled, gemini_model
 
 _NUMBER_RE = re.compile(
@@ -178,7 +179,7 @@ def explain_check_results(
     if not has_brief:
         summary_local = _filter_compliance_claims_without_brief(summary_local)
 
-    if not diagnostics["enabled"]:
+    def local_result(diag: dict[str, Any]) -> dict[str, Any]:
         risks = _filter_string_list(_major_risks(validations, has_brief=has_brief), allowed, has_brief=has_brief)
         return {
             "compliance_analysis": {
@@ -186,9 +187,12 @@ def explain_check_results(
                 "alignment_level": _alignment_level(readiness_score),
                 "major_risks": risks,
             },
-            "gemini_diagnostics": diagnostics,
+            "gemini_diagnostics": diag,
             "source": "local",
         }
+
+    if not diagnostics["enabled"]:
+        return local_result(diagnostics)
 
     validation_lines = []
     for v in validations[:14]:
@@ -229,22 +233,19 @@ STRICT RULES:
         + "\n".join(validation_lines)
     )
 
+    if len(system_prompt) + len(user_prompt) > free_ai_quota.max_chars("document"):
+        free_ai_quota.skip(free_ai_quota.INPUT_TOO_LONG)
+        return local_result(diagnostics)
+    if not free_ai_quota.allow("document"):
+        return local_result(diagnostics)
+
     payload, diagnostics = generate_json(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         temperature=0.2,
     )
     if not payload:
-        risks = _filter_string_list(_major_risks(validations, has_brief=has_brief), allowed, has_brief=has_brief)
-        return {
-            "compliance_analysis": {
-                "summary": summary_local,
-                "alignment_level": _alignment_level(readiness_score),
-                "major_risks": risks,
-            },
-            "gemini_diagnostics": diagnostics,
-            "source": "local",
-        }
+        return local_result(diagnostics)
 
     summary = _filter_sentences_with_unknown_numbers(
         str(payload.get("summary") or summary_local).strip(), allowed

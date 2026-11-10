@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from services.citation_engine import generate_citation
 from services.reference_generator import fetch_page_metadata
+from services.safe_fetch import FetchResult
 
 
 def _mock_html_response(html: str, url: str = "https://example.org/article"):
-    response = MagicMock()
-    response.url = url
-    response.content = html.encode("utf-8")
-    response.raise_for_status = MagicMock()
-    return response
+    return FetchResult(url=url, status=200, content_type="text/html", content=html.encode("utf-8"))
 
 
 def test_fetch_page_metadata_reads_og_title():
@@ -26,7 +23,7 @@ def test_fetch_page_metadata_reads_og_title():
     <meta property="article:published_time" content="2021-09-15" />
     </head><title>Ignored</title></html>
   """
-    with patch("services.reference_generator.requests.get") as get:
+    with patch("services.reference_generator.safe_fetch.fetch") as get:
         get.return_value = _mock_html_response(html)
         meta = fetch_page_metadata("https://example.org/article")
 
@@ -43,7 +40,7 @@ def test_generate_citation_url_harvard_from_metadata():
     <meta property="article:published_time" content="2021-09-01" />
     </head></html>
     """
-    with patch("services.reference_generator.requests.get") as get:
+    with patch("services.reference_generator.safe_fetch.fetch") as get:
         get.return_value = _mock_html_response(html, "https://news.example.org/story/1")
         result = generate_citation(
             mode="url",

@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  {% include "_csrf_head.html" %}
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Veil — Study Overlay for Chrome</title>
   <meta name="description" content="Veil explains selected text, formulas, and diagrams in a panel on the page you are already reading. It uses your DocMaxxing credits." />
@@ -1408,10 +1409,12 @@
           {% elif veil_pass and veil_pass.active %}
             <a class="veil-cta-primary" href="{{ url_for('veil_download') }}">Download Veil.zip</a>
             <form method="post" action="{{ url_for('veil_unlock') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
               <button class="veil-cta-secondary" type="submit">Add {{ veil_pass_days }} days — {{ "{:,}".format(veil_pass_cost) }} credits</button>
             </form>
           {% else %}
             <form method="post" action="{{ url_for('veil_unlock') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
               <button class="veil-cta-primary" type="submit">Pay {{ "{:,}".format(veil_pass_cost) }} credits for {{ veil_pass_days }} days</button>
             </form>
             {% if coin_balance < veil_pass_cost %}

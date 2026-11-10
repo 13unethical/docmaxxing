@@ -111,25 +111,18 @@ def send_verification_otp_email(
 </html>
 """
 
+    # The code is in the subject and bodies: never log them, and keep SMTP error text (which can
+    # quote the message) out of logs and of the raised error.
     if not smtp_configured():
-        logger.warning(
-            "MAIL_SERVER not set — OTP for %s is %s (not emailed)",
-            to_email,
-            code,
-        )
+        logger.warning("MAIL_SERVER not set — verification code not emailed")
         return False
 
-    logger.info(
-        "Sending OTP verification email to=%s subject=%r code=%s",
-        to_email,
-        subject,
-        code,
-    )
+    logger.info("Sending verification code email")
     try:
         _smtp_send(to_email, subject, text_body, html_body)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to send OTP email to %s", to_email)
-        raise EmailVerifyError(f"Could not send verification email: {exc}") from exc
+        logger.error("Verification code email failed: %s", type(exc).__name__)
+        raise EmailVerifyError("Could not send verification email.") from None
     return True
 
 
@@ -163,8 +156,8 @@ def send_veil_link_email(*, to_email: str, link: str) -> bool:
     try:
         _smtp_send(to_email, subject, text_body, html_body)
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Failed to send Veil link email to %s", to_email)
-        raise EmailVerifyError(f"Could not send the email: {exc}") from exc
+        logger.error("Veil link email failed: %s", type(exc).__name__)
+        raise EmailVerifyError("Could not send the email.") from None
     return True
 
 

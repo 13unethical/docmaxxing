@@ -4,7 +4,7 @@ Flask entrypoint. All document logic lives under `formatter/` for clarity.
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 try:
     from dotenv import load_dotenv
@@ -13,13 +13,16 @@ try:
 except ImportError:
     pass
 
+import functools
+import hashlib
+import hmac
 import io
 import json
 import os
 import re
+import sqlite3
 import threading
 import time
-import traceback
 import uuid
 from typing import Any
 
@@ -58,10 +61,29 @@ from services.assignment_pipeline.handlers import StageResult
 from services.assignment_pipeline.models import utc_now
 from services.assignment_project import ProjectService
 from services.assignment_project.paths import assignment_storage_root, project_files_dir
-from services.assignment_project.store import ProjectStore
+from services.assignment_project.project_lock import BILLING_LOCK, project_file_lock
+from services.assignment_project import access as assignment_access
+from services.assignment_project.refunds import refund_assignment
+from services.assignment_project.service import (
+    PAYMENT_CYCLE_KEY,
+    PAYMENT_QUOTE_KEY,
+    PRICING_KEY,
+    DeliveryPackageStaleError,
+    PaidScopeLimitExceededError,
+    PaymentRequiredError,
+    PaymentStateUnavailableError,
+    PriceChangedError,
+    ProjectChangedError,
+    QuoteRequiredError,
+    RefundNotEligibleError,
+    RequirementsLockedError,
+    ResearchPlanChangedError,
+    RevisionLimitError,
+    RevisionScopeExceededError,
+)
+from services.assignment_project.store import ProjectStore, ProjectUpdateConflictError
 from services.assignment_project.trace_log import trace, trace_startup
 from services.research_engine import ResearchEngineService
-from services.research_engine.models import ParsedDocument
 from services.blueprint_engine import BlueprintEngineService
 from services.writer_engine import WriterEngineService
 from services.reviewer_engine import GeminiAcademicReviewer, ReviewerEngineService
@@ -74,13 +96,14 @@ from services.ai_detection_engine import AIDetectionEngineService
 from services.ai_detection_engine.zerogpt_detector import ZeroGPTAIDetector
 from services.delivery_engine import DeliveryEngineService
 from services.llm_errors import llm_error_http_status, user_friendly_llm_error
+from services import free_ai_quota, free_humanize, project_files
+from services.secret_redaction import describe_exception, install_log_redaction, redact, redact_data
 from services.zerogpt_business import (
     ZeroGPTClient,
     ZeroGPTDetectionProvider,
     ZeroGPTError,
     ZeroGPTHumanizerProvider,
     ZeroGPTProviderError,
-    orchestrator_review,
 )
 from services.citation_service import CitationService, CrossrefProvider
 from services.economy import (
@@ -142,6 +165,8 @@ from services.economy.usage import (
 )
 from services.turnitin_service import TurnitinService, init_db as turnitin_init_db
 
+install_log_redaction()
+
 app = Flask(__name__)
 # Document / assignment uploads may be large; avatar route enforces its own 2 MB cap.
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
@@ -200,6 +225,85 @@ def _require_strong_secret_key() -> str:
 
 app.secret_key = _require_strong_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days
+# Host-only cookie (no SESSION_COOKIE_DOMAIN) on path "/". Secure is not derived from
+# X-Forwarded-Proto; only `python app.py` with DEV_INSECURE_COOKIES=1 may turn it off.
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_PATH="/",
+    SESSION_COOKIE_DOMAIN=None,
+)
+
+
+def _require_secure_session_cookies() -> None:
+    """Refuse to serve with a session cookie a network attacker or page script could read."""
+    cfg = app.config
+    if not (
+        cfg.get("SESSION_COOKIE_SECURE") is True
+        and cfg.get("SESSION_COOKIE_HTTPONLY") is True
+        and cfg.get("SESSION_COOKIE_SAMESITE") in ("Lax", "Strict")
+        and not cfg.get("SESSION_COOKIE_DOMAIN")
+    ):
+        raise SystemExit("FATAL: insecure session cookie configuration.")
+
+
+_require_secure_session_cookies()
+
+
+def _report_public_origin() -> None:
+    from services.public_origin import configuration_problem
+
+    problem = configuration_problem()
+    if problem:
+        app.logger.error(
+            "PUBLIC_BASE_URL unusable (%s): Veil download, emailed links and referral links are off.",
+            problem,
+        )
+
+
+_report_public_origin()
+
+
+@app.before_request
+def _csrf_protect():
+    """Every state-changing request needs the session's CSRF token (runs before all other hooks)."""
+    from services import csrf
+
+    if not csrf.requires_check() or csrf.token_valid():
+        return None
+    app.logger.warning("csrf rejected method=%s endpoint=%s", request.method, request.endpoint)
+    return csrf.rejection(economy_auth._wants_json())
+
+
+@app.after_request
+def _csrf_send_rotated_token(response):
+    from services import csrf
+
+    token = csrf.issued_token()
+    if token:
+        response.headers[csrf.HEADER] = token
+        response.headers["Cache-Control"] = "no-store"
+    elif csrf.embedded_in_page():
+        response.headers["Cache-Control"] = "private, no-cache"
+    return response
+
+
+@app.context_processor
+def _csrf_template_helpers():
+    from services import csrf
+
+    return {"csrf_token": csrf.page_token}
+
+
+@app.get("/api/csrf-token")
+def api_csrf_token():
+    """Same-origin pages re-read the token here after it rotated in another tab."""
+    from services import csrf
+
+    response = jsonify({"success": True, "csrf_token": csrf.get_token()})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 economy_init_db()
 turnitin_init_db()
@@ -318,22 +422,11 @@ def _send_user_verification_email(user: dict, *, background: bool = False) -> st
     try:
         code = economy_auth.issue_verification_otp(user_id)
     except economy_auth.AuthError:
-        app.logger.exception("OTP issue failed user_id=%s", user_id)
+        app.logger.error("OTP issue failed user_id=%s", user_id)
         return None
-
-    # Re-read from DB so the emailed value matches what verify will check.
-    from services.economy.db import connect as economy_connect
-
-    with economy_connect() as conn:
-        row = conn.execute(
-            "SELECT email, verification_code FROM users WHERE id = ?",
-            (user_id,),
-        ).fetchone()
-    if row is None or not row["verification_code"]:
-        app.logger.error("OTP missing after issue user_id=%s", user_id)
-        return None
-    code = str(row["verification_code"]).strip()
-    to_email = str(row["email"] or user.get("email") or "").strip()
+    # The row keeps only a hash; this request emails the code it just issued.
+    account = economy_auth.get_user(user_id) or user
+    to_email = str(account.get("email") or "").strip()
     name = user.get("name")
 
     def _do_send() -> None:
@@ -347,7 +440,7 @@ def _send_user_verification_email(user: dict, *, background: bool = False) -> st
         try:
             _send_otp(to_email=to_email, code=code, name=name)
         except _EmailVerifyError:
-            app.logger.exception("OTP email failed user_id=%s to=%s", user_id, to_email)
+            app.logger.error("OTP email failed user_id=%s", user_id)
 
     if background:
         def _run() -> None:
@@ -358,6 +451,181 @@ def _send_user_verification_email(user: dict, *, background: bool = False) -> st
     else:
         _do_send()
     return code
+
+
+# New verification codes per account and per client network (IPv4 address or IPv6 /64), and
+# code guesses per client network, shared by all workers. A code itself allows OTP_MAX_ATTEMPTS (5) wrong guesses before it is erased.
+OTP_RESEND_DEFAULT_PER_HOUR = 5
+OTP_RESEND_DEFAULT_PER_DAY = 20
+OTP_RESEND_DEFAULT_PER_IP_HOUR = 30
+OTP_VERIFY_DEFAULT_PER_IP_15MIN = 30
+_OTP_RESEND_WAIT_MESSAGE = "Please wait a few minutes before requesting another code."
+_OTP_VERIFY_WAIT_MESSAGE = "Too many attempts. Please wait a few minutes and try again."
+
+
+# Every new account is emailed a code, so creating accounts is itself a way to send mail.
+# Sign-up attempts are limited per client network (IPv4 address or IPv6 /64), and every
+# verification email - at sign-up or resent - also counts per recipient address (an address
+# that was deleted and registered again keeps its count) and per network. Counts are taken
+# before the account is created or the email leaves and are never given back: a failed SMTP
+# send keeps its slot and slots expire with their window, so there is nothing to release
+# twice and no permanent lockout. The network limits leave room for a class signing up
+# together behind one campus NAT.
+REGISTER_DEFAULT_PER_IP_HOUR = 20
+REGISTER_DEFAULT_PER_IP_DAY = 60
+# One sign-up email plus the account's own resend allowance (OTP_RESEND_DEFAULT_PER_*).
+VERIFY_MAIL_DEFAULT_PER_ADDRESS_HOUR = 6
+VERIFY_MAIL_DEFAULT_PER_ADDRESS_DAY = 21
+VERIFY_MAIL_DEFAULT_PER_IP_HOUR = 30
+VERIFY_MAIL_DEFAULT_PER_IP_DAY = 100
+_REGISTER_WAIT_MESSAGE = "Too many sign-up attempts from your network. Please try again later."
+
+
+def _client_source() -> str:
+    from services import rate_limit
+
+    return rate_limit.source_id(economy_auth.client_ip_from_request())
+
+
+def _register_wait() -> int | None:
+    """Seconds until this network may try another sign-up, else None (counted)."""
+    from services import rate_limit
+
+    return rate_limit.hit(
+        f"register:ip:{_client_source()}",
+        [
+            (rate_limit.env_limit("REGISTER_LIMIT_PER_IP_HOUR", REGISTER_DEFAULT_PER_IP_HOUR), 3600),
+            (rate_limit.env_limit("REGISTER_LIMIT_PER_IP_DAY", REGISTER_DEFAULT_PER_IP_DAY), 86400),
+        ],
+    )
+
+
+def _verify_mail_limits(email: str) -> list[tuple[str, list[tuple[int, int]]]]:
+    from services import rate_limit
+
+    address = hashlib.sha256(economy_auth.normalize_email(email).encode("utf-8")).hexdigest()[:40]
+    return [
+        (
+            f"verify_mail:addr:{address}",
+            [
+                (rate_limit.env_limit("VERIFY_EMAIL_LIMIT_PER_ADDRESS_HOUR", VERIFY_MAIL_DEFAULT_PER_ADDRESS_HOUR), 3600),
+                (rate_limit.env_limit("VERIFY_EMAIL_LIMIT_PER_ADDRESS_DAY", VERIFY_MAIL_DEFAULT_PER_ADDRESS_DAY), 86400),
+            ],
+        ),
+        (
+            f"verify_mail:ip:{_client_source()}",
+            [
+                (rate_limit.env_limit("VERIFY_EMAIL_LIMIT_PER_IP_HOUR", VERIFY_MAIL_DEFAULT_PER_IP_HOUR), 3600),
+                (rate_limit.env_limit("VERIFY_EMAIL_LIMIT_PER_IP_DAY", VERIFY_MAIL_DEFAULT_PER_IP_DAY), 86400),
+            ],
+        ),
+    ]
+
+
+def _send_signup_verification_email(user: dict) -> str | None:
+    """The sign-up code, unless this address or network has used up its verification emails.
+
+    Then no code is issued at all; the account exists and the code page offers a resend.
+    """
+    from services import rate_limit
+
+    if rate_limit.hit_all(_verify_mail_limits(str(user.get("email") or ""))) is not None:
+        app.logger.warning("sign-up verification email not sent: send limit reached user_id=%s", user.get("id"))
+        return None
+    return _send_user_verification_email(user, background=True)
+
+
+def _otp_resend_wait(user_id: int) -> int | None:
+    """Seconds until this account (and client IP) may get another code, else None (counted)."""
+    from services import rate_limit
+
+    account = economy_auth.get_user(int(user_id)) or {}
+    return rate_limit.hit_all(
+        [
+            (
+                f"otp_issue:user:{int(user_id)}",
+                [
+                    (rate_limit.env_limit("OTP_RESEND_LIMIT_PER_HOUR", OTP_RESEND_DEFAULT_PER_HOUR), 3600),
+                    (rate_limit.env_limit("OTP_RESEND_LIMIT_PER_DAY", OTP_RESEND_DEFAULT_PER_DAY), 86400),
+                ],
+            ),
+            (
+                f"otp_issue:ip:{_client_source()}",
+                [(rate_limit.env_limit("OTP_RESEND_LIMIT_PER_IP_HOUR", OTP_RESEND_DEFAULT_PER_IP_HOUR), 3600)],
+            ),
+            *_verify_mail_limits(str(account.get("email") or "")),
+        ]
+    )
+
+
+def _otp_verify_wait() -> int | None:
+    from services import rate_limit
+
+    return rate_limit.hit(
+        f"otp_verify:ip:{_client_source()}",
+        [(rate_limit.env_limit("OTP_VERIFY_LIMIT_PER_IP_15MIN", OTP_VERIFY_DEFAULT_PER_IP_15MIN), 900)],
+    )
+
+
+_SIGN_IN_WAIT_MESSAGE = "Too many sign-in attempts. Please wait a few minutes and try again."
+
+
+def _password_sign_in(email: str, password: str):
+    """Check email + password under the shared failure limits.
+
+    Returns ``(user, None)`` or ``(None, None)`` for a wrong email or password (one answer for
+    both), or ``(None, seconds)`` when this account or client IP must wait; the password is then
+    not checked at all.
+    """
+    from services.economy import login_throttle
+
+    gate = login_throttle.begin(
+        "login", economy_auth.normalize_email(email), economy_auth.client_ip_from_request()
+    )
+    if isinstance(gate, int):
+        from services.economy.activity_log import log_activity
+
+        log_activity(
+            "auth.login_throttled",
+            category="auth",
+            user_email=economy_auth.normalize_email(email) or None,
+            summary="Sign-in attempts throttled",
+            status_code=429,
+        )
+        return None, gate
+    user = economy_auth.verify_credentials(email, password)
+    economy_auth.log_login_attempt(email, user)
+    if user is None:
+        gate.failed()
+        return None, None
+    gate.succeeded()
+    return user, None
+
+
+def _change_password_checked(user_id: int, *, current_password: str, new_password: str) -> int | None:
+    """``change_password`` under the same failure limits as sign-in (per account and IP).
+
+    Returns seconds to wait when limited; raises ``AuthError`` for a wrong current password.
+    """
+    from services.economy import login_throttle
+
+    gate = login_throttle.begin(
+        "password_change", f"user:{int(user_id)}", economy_auth.client_ip_from_request()
+    )
+    if isinstance(gate, int):
+        return gate
+    try:
+        economy_auth.change_password(
+            int(user_id), current_password=current_password, new_password=new_password
+        )
+    except economy_auth.WrongPassword:
+        gate.failed()
+        raise
+    except economy_auth.AuthError:
+        gate.release()
+        raise
+    gate.succeeded()
+    return None
 
 
 def _load_owned_project(project_id: str):
@@ -392,6 +660,62 @@ def _require_project_owner_response(project_id: str):
     return err
 
 
+def _is_verified_admin() -> bool:
+    user = economy_auth.current_user()
+    return economy_auth.is_admin(user) if user else False
+
+
+def _not_found():
+    return jsonify({"error": "Not found"}), 404
+
+
+def _public_error(exc: BaseException, fallback: str | None = None) -> str:
+    """Exception text only when it is user-facing copy; paths, SQL, provider output etc. are not."""
+    from services.public_errors import GENERIC_MESSAGE, public_text
+
+    return public_text(exc, fallback or GENERIC_MESSAGE)
+
+
+def _admin_error(exc: BaseException) -> dict[str, str]:
+    from services.public_errors import admin_detail
+
+    return admin_detail(exc)
+
+
+def _internal_tools_enabled() -> bool:
+    return (os.environ.get("INTERNAL_TOOLS_ENABLED") or "").strip() == "1"
+
+
+def internal_tool(view):
+    """Debug/test endpoints: 404 unless INTERNAL_TOOLS_ENABLED=1 and the caller is a verified admin."""
+
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        from services import csrf
+
+        if not _internal_tools_enabled() or csrf.cross_site_request() or not _is_verified_admin():
+            return _not_found()
+        return view(*args, **kwargs)
+
+    wrapped.admin_guard = "internal_tool"
+    return wrapped
+
+
+def admin_only(view):
+    """Operational endpoints for verified admins; everyone else gets 404."""
+
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        from services import csrf
+
+        if csrf.cross_site_request() or not _is_verified_admin():
+            return _not_found()
+        return view(*args, **kwargs)
+
+    wrapped.admin_guard = "admin_only"
+    return wrapped
+
+
 # Pages + APIs that must never be usable before email verification.
 _EMAIL_VERIFIED_PREFIXES = (
     "/workspace",
@@ -404,6 +728,13 @@ _EMAIL_VERIFIED_PREFIXES = (
     "/api/humanizer",
     "/api/turnitin",
     "/api/assignment",
+    "/api/writer",
+    "/api/ai-detection",
+    "/api/research",
+    "/api/blueprint",
+    "/api/reviewer",
+    "/api/revision",
+    "/api/project",
 )
 
 
@@ -456,7 +787,94 @@ def _assignment_project_ownership_guard():
         return None
     if len(project_id) < 10:
         return None
-    return _require_project_owner_response(project_id)
+    denied = _require_project_owner_response(project_id)
+    if denied is not None:
+        return denied
+    action = rest[len(project_id) :]
+    lock = _content_lock_for_caller(project_id)
+    if lock == "unavailable":
+        return _project_content_unavailable()
+    if lock == "locked":
+        if not assignment_access.refunded_action_allowed(request.method, action):
+            return _not_found()
+        g.project_content_locked = True
+    return None
+
+
+def _project_content_unavailable():
+    return jsonify({"success": False, "error": "PROJECT_UNAVAILABLE",
+                    "message": "This project is temporarily unavailable. Please try again shortly."}), 503
+
+
+def _generated_content_refunded(project_id: str) -> bool:
+    """Reconcile with the wallet ledger, then report whether the project's content is refunded.
+
+    The ledger is consulted for the current payment cycle even when the project JSON no
+    longer claims a confirmed payment, so a stale or hand-edited file cannot reopen refunded
+    content. Raises ``KeyError`` for unknown projects and anything else when unreadable.
+    """
+    project_service.reconcile_payment_state(project_id)
+    artifacts = project_service.store.require_project(project_id).artifacts or {}
+    if assignment_access.generated_content_locked(artifacts):
+        return True
+    evidence = project_service.ledger_refund_evidence(project_id, artifacts)
+    return evidence is not None and evidence.get("status") != "voided"
+
+
+def _content_lock_for_caller(project_id: str) -> str:
+    """``open``, ``locked`` (refunded: generated content hidden) or ``unavailable``.
+
+    The wallet ledger outranks the project JSON. When it cannot be reconciled, nothing is
+    decided from possibly stale JSON: everyone but a verified admin gets ``unavailable``.
+    """
+    if _is_verified_admin():
+        return "open"
+    try:
+        refunded = _generated_content_refunded(project_id)
+    except KeyError:
+        return "open"
+    except Exception:  # noqa: BLE001
+        app.logger.exception("assignment ledger reconciliation failed project_id=%s", project_id)
+        return "unavailable"
+    return "locked" if refunded else "open"
+
+
+def _download_access_denied(project_id: str):
+    """Generated files: a verified admin, or the owner of a project the wallet ledger hasn't refunded.
+
+    The ledger outranks the project JSON, so it is reconciled first; when it can't be read
+    the download is refused rather than served from possibly stale JSON.
+    """
+    if _is_verified_admin():
+        return None
+    project_id = str(project_id or "").strip()
+    user_id = economy_auth.current_user_id()
+    if not project_id or not user_id:
+        return _not_found()
+    try:
+        project = project_service.store.require_project(project_id)
+    except KeyError:
+        return _not_found()
+    owner = str(project.user_id or "").strip()
+    if not owner or owner != str(user_id):
+        return _not_found()
+    try:
+        refunded = _generated_content_refunded(project_id)
+    except KeyError:
+        return _not_found()
+    except Exception:  # noqa: BLE001
+        app.logger.exception("ledger reconciliation failed before download project_id=%s", project_id)
+        return jsonify(
+            {"error": "DOWNLOAD_UNAVAILABLE", "message": "Downloads are temporarily unavailable. Please try again shortly."}
+        ), 503
+    if refunded:
+        return _not_found()
+    return None
+
+
+def _delivery_access_denied(package):
+    """``package`` must already be the project's persisted package (``trusted_delivery_package``)."""
+    return _download_access_denied(getattr(package, "project_id", None))
 
 
 # Old server-rendered pages -> screens of the single-page app at /app.
@@ -538,34 +956,14 @@ def _refund_safe(user_id: int, cost: int, feature: str, *, ref_id: str | None = 
 
 
 def _assignment_auto_refund(project_id: str, *, reason: str) -> dict[str, Any] | None:
-    """Refund a paid undelivered assignment. Returns payload or None if ineligible."""
+    """Automatic refund through the same rules as the user route; None when not eligible."""
     user_id = economy_auth.current_user_id()
     if not user_id:
         return None
     try:
-        art = project_service.store.require_bundle(project_id).project.artifacts or {}
-    except KeyError:
+        refund = refund_assignment(project_service, wallet, project_id, reason=reason)
+    except (KeyError, RefundNotEligibleError):
         return None
-    if art.get("plan_free_paper") and art.get("payment_confirmed") and not art.get("payment_refunded") \
-            and not art.get("delivery_package"):
-        from services.economy.plans import release_free_use
-
-        release_free_use(int(user_id), "assignment")
-        project_service.mark_assignment_refunded(project_id, 0)
-        return {"refunded": True, "coins_refunded": 0, "balance": wallet.get_balance(int(user_id))}
-    try:
-        coins = project_service.assert_assignment_refund_eligible(project_id)
-    except (KeyError, ValueError):
-        return None
-    try:
-        wallet.refund(
-            int(user_id),
-            int(coins),
-            "assignment",
-            ref_id=project_id,
-            meta={"reason": reason[:200]},
-        )
-        project_service.mark_assignment_refunded(project_id, coins)
     except Exception:  # noqa: BLE001
         app.logger.exception(
             "assignment auto-refund failed project_id=%s user=%s", project_id, user_id
@@ -575,14 +973,10 @@ def _assignment_auto_refund(project_id: str, *, reason: str) -> dict[str, Any] |
         "assignment auto-refunded project_id=%s user=%s coins=%s reason=%s",
         project_id,
         user_id,
-        coins,
+        refund["coins_refunded"],
         reason[:120],
     )
-    return {
-        "refunded": True,
-        "coins_refunded": int(coins),
-        "balance": wallet.get_balance(int(user_id)),
-    }
+    return refund
 
 
 def _record_usage_safe(
@@ -709,6 +1103,13 @@ TELEGRAM_TEXT_MAX_LEN = 4096
 
 def _project_api_payload(bundle, *, include_pipeline: bool = True) -> dict[str, Any]:
     payload = bundle.to_dict()
+    locked = assignment_access.generated_content_locked(bundle.project.artifacts) or g.get("project_content_locked")
+    if locked and not _is_verified_admin():
+        try:
+            payload["chat_transcript"] = project_service.get_chat_transcript(bundle.project.id)
+        except Exception:  # noqa: BLE001
+            payload["chat_transcript"] = []
+        return assignment_access.redact_project_payload(payload)
     if include_pipeline:
         try:
             payload["pipeline"] = assignment_pipeline.get_project(bundle.project.id).to_dict()
@@ -860,7 +1261,7 @@ def inject_account():
         "current_user": user,
         "coin_balance": balance,
         "welcome_bonus": WELCOME_BONUS,
-        "is_admin": bool(user and user.get("is_admin")),
+        "is_admin": bool(user and economy_auth.is_admin(user)),
         "is_humanizer_discount_active": bool(discount.get("active"))
         and int(discount.get("percent") or 0) > 0,
         "humanizer_discount_percent": int(discount.get("percent") or 0),
@@ -872,10 +1273,9 @@ def inject_account():
 
 
 def _safe_local_path(url: str | None) -> str | None:
-    path = (url or "").strip()
-    if path.startswith("/") and not path.startswith("//"):
-        return path
-    return None
+    from services.safe_redirect import safe_local_path
+
+    return safe_local_path(url)
 
 
 def _redirect_after_auth(*, default: str | None = None) -> Any:
@@ -926,6 +1326,15 @@ def register():
             form={"email": email, "name": name},
             referral_code=referral_code,
         ), 400
+    wait = _register_wait()
+    if wait is not None:
+        return render_template(
+            "register.html",
+            nav_active=None,
+            error=_REGISTER_WAIT_MESSAGE,
+            form={"email": email, "name": name},
+            referral_code=referral_code,
+        ), 429, {"Retry-After": str(wait)}
     try:
         user = economy_auth.create_user(
             email,
@@ -939,7 +1348,7 @@ def register():
         return render_template(
             "register.html",
             nav_active=None,
-            error=str(exc),
+            error=_public_error(exc),
             form={"email": email, "name": name},
             referral_code=referral_code,
         ), 400
@@ -955,7 +1364,7 @@ def register():
         return render_template(
             "register.html",
             nav_active=None,
-            error=str(exc),
+            error=_public_error(exc),
             form={"email": email, "name": name},
             referral_code=referral_code,
         ), 400
@@ -965,7 +1374,7 @@ def register():
     # Always land on the notice page until the address is verified
     # (bootstrap admin is created already verified and may skip).
     if not economy_auth.user_email_verified(user):
-        _send_user_verification_email(user, background=True)
+        _send_signup_verification_email(user)
         if next_url:
             session["post_verify_next"] = next_url
         return redirect(url_for("verify_email_code"))
@@ -989,16 +1398,16 @@ def verify_email_code():
     if request.method == "POST":
         action = (request.form.get("action") or "verify").strip().lower()
         if action == "resend":
+            if user and _otp_resend_wait(int(user["id"])) is not None:
+                return render_template(
+                    "verify_email.html",
+                    nav_active=None,
+                    email=user.get("email"),
+                    error=_OTP_RESEND_WAIT_MESSAGE,
+                    otp_minutes=OTP_TTL_MINUTES,
+                ), 429
             if user:
-                code = _send_user_verification_email(user)
-                resent = True
-                if code and (os.environ.get("EXPOSE_VERIFY_CODE") or "").strip().lower() in (
-                    "1",
-                    "true",
-                    "yes",
-                ):
-                    # Local/debug only — never enable in production.
-                    app.logger.info("EXPOSE_VERIFY_CODE user=%s code=%s", user.get("id"), code)
+                _send_user_verification_email(user)
             return render_template(
                 "verify_email.html",
                 nav_active=None,
@@ -1008,12 +1417,20 @@ def verify_email_code():
             )
 
         submitted = (request.form.get("code") or request.form.get("verification_code") or "").strip()
+        if _otp_verify_wait() is not None:
+            return render_template(
+                "verify_email.html",
+                nav_active=None,
+                email=(user or {}).get("email"),
+                error=_OTP_VERIFY_WAIT_MESSAGE,
+                otp_minutes=OTP_TTL_MINUTES,
+            ), 429
         try:
             assert user is not None
             economy_auth.verify_email_otp(int(user["id"]), submitted)
             return _redirect_after_auth(default=url_for("workspace"))
         except economy_auth.AuthError as exc:
-            error = str(exc)
+            error = _public_error(exc)
 
     return render_template(
         "verify_email.html",
@@ -1032,6 +1449,14 @@ def verify_email_resend():
     user = economy_auth.current_user()
     if user and economy_auth.user_email_verified(user):
         return redirect(url_for("workspace"))
+    if user and _otp_resend_wait(int(user["id"])) is not None:
+        return render_template(
+            "verify_email.html",
+            nav_active=None,
+            email=user.get("email"),
+            error=_OTP_RESEND_WAIT_MESSAGE,
+            otp_minutes=OTP_TTL_MINUTES,
+        ), 429
     if user:
         _send_user_verification_email(user)
     return redirect(url_for("verify_email_code", resent=1))
@@ -1051,7 +1476,7 @@ def verify_email_legacy_token(token: str):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    next_url = request.values.get("next") or ""
+    next_url = _safe_local_path(request.values.get("next")) or ""
     existing = economy_auth.current_user()
     if existing:
         if not economy_auth.user_email_verified(existing):
@@ -1062,8 +1487,15 @@ def login():
 
     email = (request.form.get("email") or "").strip()
     password = request.form.get("password") or ""
-    user = economy_auth.verify_credentials(email, password)
-    economy_auth.log_login_attempt(email, user)
+    user, wait = _password_sign_in(email, password)
+    if wait is not None:
+        return render_template(
+            "login.html",
+            nav_active=None,
+            error=_SIGN_IN_WAIT_MESSAGE,
+            form={"email": email},
+            next_url=next_url,
+        ), 429, {"Retry-After": str(wait)}
     if user is None:
         return render_template(
             "login.html",
@@ -1084,7 +1516,7 @@ def login():
     economy_auth.login_user(user["id"])
     if not economy_auth.user_email_verified(user):
         return redirect(url_for("verify_email_code"))
-    if next_url.startswith("/") and not next_url.startswith("//"):
+    if next_url:
         return redirect(next_url)
     return redirect(url_for("index"))
 
@@ -1114,7 +1546,7 @@ def account():
                 )
                 profile_message = "Display name updated."
             except economy_auth.AuthError as exc:
-                profile_error = str(exc)
+                profile_error = _public_error(exc)
         elif action == "password":
             current_password = request.form.get("current_password") or ""
             new_password = request.form.get("new_password") or ""
@@ -1123,14 +1555,16 @@ def account():
                 password_error = "New password and confirmation do not match."
             else:
                 try:
-                    economy_auth.change_password(
+                    if _change_password_checked(
                         int(user["id"]),
                         current_password=current_password,
                         new_password=new_password,
-                    )
-                    password_message = "Password updated."
+                    ) is not None:
+                        password_error = _SIGN_IN_WAIT_MESSAGE
+                    else:
+                        password_message = "Password updated."
                 except economy_auth.AuthError as exc:
-                    password_error = str(exc)
+                    password_error = _public_error(exc)
 
     return render_template(
         "account.html",
@@ -1260,17 +1694,18 @@ def api_admin_daily_stats():
                 },
                 "settings": {},
                 "discount": {"active": False, "percent": 0, "source": "none"},
-                "warning": str(exc),
+                "warning": _admin_error(exc)["error"],
             }
         )
 
 
-@app.get("/api/admin/pipeline-preflight")
+@app.route("/api/admin/pipeline-preflight", methods=["GET", "POST"])
 @economy_auth.admin_required
 def api_admin_pipeline_preflight():
     """Check assignment providers without generating a project or spending credits.
 
-    Query ``browser=1`` also snapshots the StealthWriter tab (no Humanize click).
+    GET only reads configuration. POST with ``browser=1`` (query) also starts the browser
+    engine and snapshots the StealthWriter tab (no Humanize click), so it needs the CSRF token.
     """
     from services.assignment_project.preflight import (
         static_provider_checks,
@@ -1278,7 +1713,7 @@ def api_admin_pipeline_preflight():
     )
 
     payload = static_provider_checks()
-    probe_browser = str(request.args.get("browser") or "").strip().lower() in {
+    probe_browser = request.method == "POST" and str(request.args.get("browser") or "").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -1299,7 +1734,7 @@ def api_admin_pipeline_preflight():
         payload = with_stealthwriter_snapshot(payload, snapshot)
     except Exception as exc:  # noqa: BLE001
         app.logger.exception("pipeline preflight stealthwriter probe failed")
-        payload = with_stealthwriter_snapshot(payload, None, error=str(exc))
+        payload = with_stealthwriter_snapshot(payload, None, error=_admin_error(exc)["error"])
     return jsonify({"success": True, **payload})
 
 
@@ -1374,7 +1809,7 @@ def api_admin_site_settings():
         )
     except Exception as exc:  # noqa: BLE001
         app.logger.exception("admin site-settings update failed")
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": False, **_admin_error(exc)}), 500
 
 
 @app.get("/api/admin/users")
@@ -1436,7 +1871,7 @@ def api_admin_set_balance(user_id: int):
             reason=reason,
         )
     except AdminError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify({"success": True, **result})
 
 
@@ -1455,7 +1890,7 @@ def api_admin_set_role(user_id: int):
             actor_id=int(actor_id),
         )
     except AdminError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify({"success": True, **result})
 
 
@@ -1467,7 +1902,7 @@ def api_admin_delete_user(user_id: int):
     try:
         result = admin_service.delete_user(user_id, actor_id=int(actor_id))
     except AdminError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify({"success": True, **result})
 
 
@@ -1486,7 +1921,7 @@ def api_admin_user_ledger(user_id: int):
     try:
         payload = admin_service.get_ledger(user_id, limit=limit, offset=offset)
     except AdminError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 404
+        return jsonify({"success": False, "error": _public_error(exc)}), 404
     return jsonify({"success": True, **payload})
 
 
@@ -1505,7 +1940,7 @@ def api_admin_user_purchases(user_id: int):
     try:
         payload = admin_service.get_purchases(user_id, limit=limit, offset=offset)
     except AdminError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 404
+        return jsonify({"success": False, "error": _public_error(exc)}), 404
     return jsonify({"success": True, **payload})
 
 
@@ -1528,7 +1963,7 @@ def api_admin_purchases():
             search=search, status=status, limit=limit, offset=offset
         )
     except AdminError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify({"success": True, **payload})
 
 
@@ -1547,7 +1982,7 @@ def api_admin_user_usage(user_id: int):
     try:
         payload = admin_service.get_usage(user_id, limit=limit, offset=offset)
     except AdminError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 404
+        return jsonify({"success": False, "error": _public_error(exc)}), 404
     return jsonify({"success": True, **payload})
 
 
@@ -1620,7 +2055,7 @@ def api_admin_dataset_stats():
         samples = get_dataset_recent_samples(limit=10)
     except Exception as exc:  # noqa: BLE001
         app.logger.exception("dataset-stats failed")
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": False, **_admin_error(exc)}), 500
     return jsonify({"success": True, **stats, **samples})
 
 
@@ -1630,7 +2065,7 @@ def _admin_panel_call(fn, *args, **kwargs):
     try:
         return jsonify({"success": True, **fn(*args, **kwargs)})
     except AdminPanelError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
 
 
 def _admin_int(name: str, default: int = 0) -> int:
@@ -1806,6 +2241,11 @@ def api_auth_register():
     next_url = _safe_local_path(str(payload.get("next") or ""))
     if password != password_confirm:
         return jsonify({"success": False, "error": "Passwords do not match."}), 400
+    wait = _register_wait()
+    if wait is not None:
+        return jsonify({"success": False, "error": _REGISTER_WAIT_MESSAGE, "code": "TOO_MANY_ATTEMPTS"}), 429, {
+            "Retry-After": str(wait)
+        }
     try:
         user = economy_auth.create_user(
             email,
@@ -1816,23 +2256,24 @@ def api_auth_register():
             device_fingerprint=fingerprint or None,
         )
     except DisposableEmailError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     except economy_auth.DuplicateEmail as exc:
-        return jsonify({"success": False, "error": str(exc)}), 409
+        return jsonify({"success": False, "error": _public_error(exc)}), 409
     except economy_auth.AuthError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     session.pop("pending_referral_code", None)
     economy_auth.login_user(user["id"])
     needs_verify = not economy_auth.user_email_verified(user)
     if needs_verify:
-        verify_code = _send_user_verification_email(user, background=True)
+        verify_code = _send_signup_verification_email(user)
         if next_url:
             session["post_verify_next"] = next_url
     else:
         verify_code = None
     payload_out = _auth_success_payload(user)
     payload_out["email_verification_required"] = needs_verify
-    if verify_code and (os.environ.get("EXPOSE_VERIFY_CODE") or "").strip().lower() in (
+    # Local debug server only: a production (non-debug) app never returns the code.
+    if verify_code and app.debug and (os.environ.get("EXPOSE_VERIFY_CODE") or "").strip().lower() in (
         "1",
         "true",
         "yes",
@@ -1846,8 +2287,11 @@ def api_auth_login():
     payload = request.get_json(silent=True) or {}
     email = str(payload.get("email") or "").strip()
     password = str(payload.get("password") or "")
-    user = economy_auth.verify_credentials(email, password)
-    economy_auth.log_login_attempt(email, user)
+    user, wait = _password_sign_in(email, password)
+    if wait is not None:
+        return jsonify({"success": False, "error": _SIGN_IN_WAIT_MESSAGE, "code": "TOO_MANY_ATTEMPTS"}), 429, {
+            "Retry-After": str(wait)
+        }
     if user is None:
         return jsonify({"success": False, "error": "Incorrect email or password."}), 401
     if user.get("is_blocked"):
@@ -1882,9 +2326,9 @@ def api_upload_avatar():
         )
         updated = economy_auth.set_avatar_file(int(user["id"]), relative)
     except AvatarUploadError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     except economy_auth.AuthError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify(
         {
             "success": True,
@@ -1903,7 +2347,7 @@ def api_account_profile():
             int(economy_auth.current_user_id()), name=str(payload.get("name") or "")
         )
     except economy_auth.AuthError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify({"success": True, "name": user.get("name") or ""})
 
 
@@ -1914,15 +2358,23 @@ def api_account_password():
     new_password = str(payload.get("new_password") or "")
     if new_password != str(payload.get("confirm_password") or ""):
         return jsonify({"success": False, "error": "New password and confirmation do not match."}), 400
+    user_id = int(economy_auth.current_user_id())
     try:
-        economy_auth.change_password(
-            int(economy_auth.current_user_id()),
+        wait = _change_password_checked(
+            user_id,
             current_password=str(payload.get("current_password") or ""),
             new_password=new_password,
         )
     except economy_auth.AuthError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
-    return jsonify({"success": True})
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
+    if wait is not None:
+        return jsonify({"success": False, "error": _SIGN_IN_WAIT_MESSAGE, "code": "TOO_MANY_ATTEMPTS"}), 429, {
+            "Retry-After": str(wait)
+        }
+    # Every session of the account ended with the password change; this browser proved the
+    # old password just now, so it continues on a fresh session (new id and CSRF token).
+    economy_auth.login_user(user_id)
+    return jsonify({"success": True, "other_sessions_signed_out": True})
 
 
 _CONTACT_LIMIT_PER_HOUR = 5
@@ -1932,6 +2384,8 @@ _CONTACT_LIMIT_PER_HOUR = 5
 def api_contact():
     """Help page form for visitors without an account; signed-in users go through /api/feedback."""
     payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "Body must be a JSON object."}), 400
     email = str(payload.get("email") or "").strip()[:200]
     topic = str(payload.get("topic") or "").strip()[:80]
     message = str(payload.get("message") or "").strip()
@@ -1945,6 +2399,21 @@ def api_contact():
     sent = [t for t in session.get("contact_sent", []) if now - t < 3600]
     if len(sent) >= _CONTACT_LIMIT_PER_HOUR:
         return jsonify({"success": False, "error": "Too many messages. Please try again later."}), 429
+    from services import rate_limit
+
+    wait = rate_limit.hit(
+        f"contact:ip:{_client_source()}",
+        [
+            (rate_limit.env_limit("CONTACT_LIMIT_PER_IP_HOUR", 10), 3600),
+            (rate_limit.env_limit("CONTACT_LIMIT_PER_IP_DAY", 30), 86400),
+        ],
+    )
+    if wait:
+        return (
+            jsonify({"success": False, "error": "Too many messages. Please try again later."}),
+            429,
+            {"Retry-After": str(wait)},
+        )
     text = f"Help form (no account)\nEmail: {email}\nTopic: {topic or '-'}\n\n{message}"
     _tg, err, err_status = _send_telegram_text(text)
     if err:
@@ -2050,7 +2519,8 @@ def api_economy_checkout():
             customer_email=str(user.get("email") or "") or None,
         )
     except PaddleGatewayError as exc:
-        return jsonify({"error": str(exc)}), 400
+        app.logger.warning("paddle checkout failed: %s", exc)
+        return jsonify({"error": "PAYMENT_PROVIDER_ERROR", "message": "Payment could not be started. Please try again later."}), 400
     return jsonify({"success": True, **checkout})
 
 
@@ -2075,7 +2545,7 @@ def api_paddle_webhook():
     except PaddleGatewayError as exc:
         app.logger.exception("paddle webhook fulfill failed: %s", exc)
         # 500 so Paddle retries; idempotency protects double-credit on success path.
-        return jsonify({"error": str(exc)}), 500
+        return jsonify({"error": "fulfillment_failed"}), 500
 
     return jsonify({"ok": True, **result}), 200
 
@@ -2137,7 +2607,7 @@ def api_lemon_squeezy_webhook():
             preview.get("event_name"),
             preview.get("order_id"),
         )
-        return jsonify({"error": "invalid_signature", "message": str(exc)}), 403
+        return jsonify({"error": "invalid_signature"}), 403
 
     if payload is None:
         app.logger.warning("lemon-squeezy webhook: invalid JSON body")
@@ -2149,7 +2619,7 @@ def api_lemon_squeezy_webhook():
         app.logger.warning("lemon-squeezy webhook rejected: %s", exc)
         # 400 for bad custom_data / unknown variant — Lemon should not infinite-retry.
         # Telegram alert is sent inside the gateway for fulfill failures.
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": "invalid_payload"}), 400
     except Exception as exc:  # noqa: BLE001
         app.logger.exception("lemon-squeezy webhook fulfill failed: %s", exc)
         notify_unhandled_payment(
@@ -2190,7 +2660,7 @@ def api_payments_create():
                 quantity=None if plan_id else payload.get("quantity"),
             )
         except PlanError as exc:
-            return jsonify({"error": "INVALID_ITEM", "message": str(exc)}), 400
+            return jsonify({"error": "INVALID_ITEM", "message": _public_error(exc)}), 400
         from services.economy import lemon_plans
         from services.economy.lemon_api import LemonApiError
 
@@ -2245,7 +2715,8 @@ def api_payments_create():
             )
     except CryptomusGatewayError as exc:
         app.logger.warning("cryptomus create invoice failed: %s", exc)
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": "PAYMENT_PROVIDER_ERROR",
+                        "message": "Payment could not be started. Please try again later."}), 400
     return jsonify({"success": True, **invoice})
 
 
@@ -2261,12 +2732,9 @@ def api_cryptomus_webhook():
     except CryptomusGatewayError:
         return jsonify({"error": "invalid_json"}), 400
 
-    # Prefer original client IP behind nginx (docs IP allowlist).
-    remote = (
-        (request.headers.get("X-Real-IP") or "").strip()
-        or (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-        or request.remote_addr
-    )
+    from services import free_humanize
+
+    remote = free_humanize.client_ip(request)
 
     try:
         result = cryptomus_handle_webhook(payload, remote_addr=remote)
@@ -2275,11 +2743,10 @@ def api_cryptomus_webhook():
         return jsonify({"error": "invalid_signature"}), 400
     except CryptomusGatewayError as exc:
         app.logger.exception("cryptomus webhook fulfill failed: %s", exc)
-        msg = str(exc)
-        if "Unknown order_id" in msg:
+        if "Unknown order_id" in str(exc):
             # Signed but unknown — acknowledge so Cryptomus stops retrying forever.
-            return jsonify({"error": msg}), 200
-        return jsonify({"error": msg}), 500
+            return jsonify({"error": "unknown_order"}), 200
+        return jsonify({"error": "fulfillment_failed"}), 500
 
     # Cryptomus expects HTTP 200 on successful receipt.
     return jsonify({"ok": True, **result}), 200
@@ -2342,7 +2809,8 @@ def api_economy_topup():
             meta={"mock": True, "package": pkg["id"], "usd": pkg["usd"]},
         )
     except PaddleGatewayError as exc:
-        return jsonify({"error": str(exc)}), 400
+        app.logger.warning("paddle checkout failed: %s", exc)
+        return jsonify({"error": "PAYMENT_PROVIDER_ERROR", "message": "Payment could not be started. Please try again later."}), 400
 
     return jsonify(
         {
@@ -2434,6 +2902,19 @@ def site_webmanifest():
     return Response(json.dumps(webmanifest()), mimetype="application/manifest+json")
 
 
+@app.errorhandler(500)
+def internal_error(_error):
+    """Unhandled exceptions: Flask has already logged them; the client never sees their text."""
+    message = "Something went wrong. Please try again."
+    if request.path.startswith("/api/"):
+        return jsonify({"success": False, "error": "INTERNAL_ERROR", "message": message}), 500
+    return (
+        f"<!doctype html><title>Server error</title><p>{message}</p>",
+        500,
+        {"Content-Type": "text/html; charset=utf-8"},
+    )
+
+
 @app.errorhandler(404)
 def not_found(_error):
     if request.path.startswith("/api/"):
@@ -2481,14 +2962,20 @@ def check():
     return render_template("check.html", nav_active="check")
 
 
-def _public_origin() -> str:
-    """Origin the visitor used, including TLS terminated in front of gunicorn."""
-    configured = (os.environ.get("PUBLIC_BASE_URL") or "").strip().rstrip("/")
-    if configured:
-        return configured
-    proto = (request.headers.get("X-Forwarded-Proto") or request.scheme or "https").split(",")[0].strip()
-    host = (request.headers.get("X-Forwarded-Host") or request.host).split(",")[0].strip()
-    return f"{proto}://{host}"
+def _public_origin() -> str | None:
+    """Canonical origin from PUBLIC_BASE_URL (never from Host/X-Forwarded-*); None when unusable."""
+    from services.public_origin import PublicOriginError, canonical_origin
+
+    try:
+        return canonical_origin()
+    except PublicOriginError as exc:
+        app.logger.error("public origin unavailable: %s", exc)
+        return None
+
+
+def _origin_unavailable_response():
+    return jsonify({"success": False, "error": "ORIGIN_NOT_CONFIGURED",
+                    "message": "This feature is temporarily unavailable."}), 503
 
 
 def _veil_bearer_user():
@@ -2540,7 +3027,10 @@ def veil_download():
         return redirect(url_for("verify_email_code"))
     if not pass_status(int(user["id"]))["active"]:
         return redirect("/veil#access")
-    data = pack_extension(_public_origin())
+    origin = _public_origin()
+    if origin is None:
+        return _origin_unavailable_response()
+    data = pack_extension(origin)
     return send_file(
         io.BytesIO(data),
         mimetype="application/zip",
@@ -2598,9 +3088,39 @@ def api_veil_email_link():
     """Send the Veil page link to the user's email, to open on a computer."""
     from services.economy.email_verify import EmailVerifyError, send_veil_link_email
 
+    from services import rate_limit
+
     user = economy_auth.current_user()
+    origin = _public_origin()
+    if origin is None:
+        return _origin_unavailable_response()
+    # The account's address need not be verified, so this is limited like verification email.
+    address = hashlib.sha256(economy_auth.normalize_email(user["email"]).encode("utf-8")).hexdigest()[:40]
+    wait = rate_limit.hit_all(
+        [
+            (
+                f"veil_mail:addr:{address}",
+                [
+                    (rate_limit.env_limit("VEIL_EMAIL_LIMIT_PER_ADDRESS_HOUR", 3), 3600),
+                    (rate_limit.env_limit("VEIL_EMAIL_LIMIT_PER_ADDRESS_DAY", 10), 86400),
+                ],
+            ),
+            (
+                f"veil_mail:ip:{_client_source()}",
+                [
+                    (rate_limit.env_limit("VEIL_EMAIL_LIMIT_PER_IP_HOUR", 10), 3600),
+                    (rate_limit.env_limit("VEIL_EMAIL_LIMIT_PER_IP_DAY", 30), 86400),
+                ],
+            ),
+        ]
+    )
+    if wait is not None:
+        return jsonify({"success": False, "error": "RATE_LIMITED",
+                        "message": "We just emailed you. Please wait before asking again."}), 429, {
+            "Retry-After": str(wait)
+        }
     try:
-        sent = send_veil_link_email(to_email=user["email"], link=f"{_public_origin()}/app#/veil")
+        sent = send_veil_link_email(to_email=user["email"], link=f"{origin}/app#/veil")
     except EmailVerifyError:
         return jsonify({"success": False, "error": "EMAIL_FAILED",
                         "message": "We couldn't send the email. Please try again later."}), 502
@@ -2613,21 +3133,37 @@ def api_veil_email_link():
 @app.route("/veil/connect")
 @economy_auth.login_required
 def veil_connect():
+    """Page the extension opens to sign in; its script asks POST /api/veil/connect for a token."""
     from services.veil_access import pass_status
     from services.veil_extension import EXTENSION_ID
-    from services.veil_tokens import issue_token
 
     user = economy_auth.current_user()
     if not economy_auth.user_email_verified(user):
         return redirect(url_for("verify_email_code"))
     return render_template(
         "veil_connect.html",
-        token=issue_token(int(user["id"])),
         email=user["email"],
-        balance=wallet.get_balance(int(user["id"])),
         extension_id=EXTENSION_ID,
         veil_pass=pass_status(int(user["id"])),
     )
+
+
+@app.post("/api/veil/connect")
+@economy_auth.email_verified_required()
+def api_veil_connect():
+    """Issue the extension token for the signed-in account (session + CSRF); earlier ones stop working."""
+    from services.veil_tokens import issue_token
+
+    user = economy_auth.current_user()
+    user_id = int(user["id"])
+    response = jsonify({
+        "success": True,
+        "token": issue_token(user_id),
+        "email": user["email"],
+        "balance": wallet.get_balance(user_id),
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.get("/api/veil/me")
@@ -2637,6 +3173,10 @@ def api_veil_me():
     user = _veil_bearer_user()
     if user is None:
         return jsonify({"success": False, "error": "AUTH_REQUIRED", "message": "Please sign in."}), 401
+    if not economy_auth.user_email_verified(user):
+        return jsonify(
+            {"success": False, "error": "EMAIL_NOT_VERIFIED", "message": "Please verify your email first."}
+        ), 403
     status = pass_status(int(user["id"]))
     return jsonify(
         {
@@ -2713,6 +3253,24 @@ def _veil_images(raw) -> tuple[list[dict], str | None]:
     return blocks, None
 
 
+# Per account, shared by all workers. Env overrides must be positive integers.
+VEIL_ASK_DEFAULT_PER_MINUTE = 10
+VEIL_ASK_DEFAULT_PER_HOUR = 120
+VEIL_ASK_DEFAULT_PER_DAY = 600
+
+
+def _veil_ask_rate_limited(user_id: int) -> int | None:
+    """Seconds to wait when the account used up its Veil questions, else None (request counted)."""
+    from services import rate_limit
+
+    limits = [
+        (rate_limit.env_limit("VEIL_ASK_LIMIT_PER_MINUTE", VEIL_ASK_DEFAULT_PER_MINUTE), 60),
+        (rate_limit.env_limit("VEIL_ASK_LIMIT_PER_HOUR", VEIL_ASK_DEFAULT_PER_HOUR), 3600),
+        (rate_limit.env_limit("VEIL_ASK_LIMIT_PER_DAY", VEIL_ASK_DEFAULT_PER_DAY), 86400),
+    ]
+    return rate_limit.hit(f"veil_ask:user:{int(user_id)}", limits)
+
+
 @app.post("/api/veil/ask")
 def api_veil_ask():
     from services.claude_client import claude_enabled, generate_reply
@@ -2727,8 +3285,22 @@ def api_veil_ask():
     if not claude_enabled():
         return jsonify({"success": False, "error": "UNAVAILABLE", "message": "Veil is not configured yet."}), 503
 
-    payload = request.get_json(silent=True) or {}
-    text = str(payload.get("text") or "").strip()
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "BAD_REQUEST", "message": "Expected a JSON object."}), 400
+    raw_text = payload.get("text")
+    raw_model = payload.get("model")
+    raw_extended = payload.get("extended")
+    if (
+        (raw_text is not None and not isinstance(raw_text, str))
+        or (raw_model is not None and not isinstance(raw_model, str))
+        or (raw_extended is not None and not isinstance(raw_extended, bool))
+    ):
+        return jsonify({"success": False, "error": "BAD_REQUEST",
+                        "message": "text and model must be strings; extended must be true or false."}), 400
+    text = (raw_text or "").strip()
     if len(text) > 6000:
         return jsonify({"success": False, "error": "TOO_LONG", "message": "Question is too long (6000 characters max)."}), 400
     images, image_error = _veil_images(payload.get("images"))
@@ -2749,8 +3321,17 @@ def api_veil_ask():
             }
         ), 402
 
-    extended = bool(payload.get("extended"))
-    mode = "deep" if str(payload.get("model") or "").strip().lower() == "deep" else "fast"
+    retry_after = _veil_ask_rate_limited(user_id)
+    if retry_after is not None:
+        response = jsonify({"success": False, "error": "RATE_LIMITED",
+                            "message": "Too many questions in a row. Please wait a moment and try again.",
+                            "retry_after": retry_after})
+        response.status_code = 429
+        response.headers["Retry-After"] = str(retry_after)
+        return response
+
+    extended = raw_extended is True
+    mode = "deep" if (raw_model or "").strip().lower() == "deep" else "fast"
     prompt = text or "Explain this image."
     if extended:
         prompt += "\n\nGive a detailed, step-by-step explanation."
@@ -2889,7 +3470,9 @@ def _free_humanize_gate(user: dict | None, text: str, *, english_only: bool):
 
     if user is None:
         ip = free_humanize.client_ip(request)
-        if not free_humanize.guest_rate_limiter.allow(ip or "-", lim.guest_rate_per_minute):
+        if not free_humanize.guest_rate_limiter.allow(
+            free_humanize.source_id(ip), lim.guest_rate_per_minute
+        ):
             resp = jsonify(
                 {
                     "success": False,
@@ -3005,10 +3588,10 @@ def _detect_error(code: str, message: str, status: int, **extra):
 @app.post("/api/detector/free")
 def api_free_ai_detector():
     """Free AI check on our own detector. Turnitin itself is the paid check (/api/turnitin/...)."""
-    from services import ai_detector, free_humanize
+    from services import ai_detector, free_humanize, rate_limit
 
-    payload = request.get_json(silent=True) or {}
-    text = payload.get("text")
+    payload = request.get_json(silent=True)
+    text = payload.get("text") if isinstance(payload, dict) else None
     if not isinstance(text, str) or not text.strip():
         return _detect_error("TEXT_REQUIRED", "Paste some text to check.", 400)
     if len(text) > 200_000:
@@ -3029,20 +3612,28 @@ def api_free_ai_detector():
     if not _is_english_text(text):
         return _detect_error("ENGLISH_ONLY", "The AI detector works with English text for now.", 422)
 
+    # A guest session id lives in a cookie the client can drop, so the network pool is what
+    # bounds a guest; unverified accounts cost nothing to create, so they share one per network.
+    source = rate_limit.source_id(free_humanize.client_ip(request))
+    network = hashlib.sha256(f"{app.secret_key}|{source}".encode("utf-8")).hexdigest()
     if user is None:
-        ip = free_humanize.client_ip(request)
-        if not ai_detector.guest_rate_limiter.allow(ip or "-", 20):
+        wait = rate_limit.hit(f"detect:rate:{source}", [(lim.guest_rate_per_minute, 60)])
+        if wait is not None:
             resp, status = _detect_error("RATE_LIMITED", "Too many requests. Wait a minute and try again.", 429)
-            resp.headers["Retry-After"] = "60"
+            resp.headers["Retry-After"] = str(wait)
             return resp, status
         subject = "detect:" + free_humanize.guest_subject(
-            ip, free_humanize.guest_session_id(session), str(app.secret_key)
+            source, free_humanize.guest_session_id(session), str(app.secret_key)
         )
         daily = lim.guest_daily
+        pools = [(subject, daily), (f"detect:guest-net:{network}", lim.guest_ip_daily)]
     else:
         subject = f"detect:user:{int(user['id'])}"
         daily = lim.user_daily
-    if not free_humanize.reserve(subject, daily):
+        pools = [(subject, daily)]
+        if not economy_auth.user_email_verified(user):
+            pools.append((f"detect:unverified-net:{network}", lim.unverified_ip_daily))
+    if not free_humanize.reserve_all(pools):
         if user is None:
             return _detect_error(
                 "REGISTER_REQUIRED",
@@ -3055,20 +3646,21 @@ def api_free_ai_detector():
     try:
         result = ai_detector.detect(text)
     except ai_detector.DetectorUnavailable:
-        free_humanize.release(subject)
+        for pool, _limit in pools:
+            free_humanize.release(pool)
         app.logger.exception("free AI detector failed")
         return _detect_error(
             "DETECTOR_UNAVAILABLE", "The AI detector is busy right now. Try again in a minute — this check wasn’t counted.", 503
         )
     ai_detector.log_check(subject, text, result)
     if result.get("too_short"):
-        free_humanize.release(subject)
+        for pool, _limit in pools:
+            free_humanize.release(pool)
         return _detect_error(
             "TOO_SHORT", f"Paste at least {ai_detector.MIN_SCORED_WORDS} words of prose to get a reliable result.", 400
         )
-    return jsonify(
-        {"success": True, **result, "checks_left": free_humanize.remaining_today(subject, daily)}
-    )
+    checks_left = min(free_humanize.remaining_today(pool, limit) for pool, limit in pools)
+    return jsonify({"success": True, **result, "checks_left": checks_left})
 
 
 def _free_engine_unavailable():
@@ -3111,6 +3703,9 @@ def _free_humanize_boot(user: dict | None) -> dict[str, Any]:
     }
 
 
+_HUMANIZE_FAILED_MESSAGE = "Humanization failed. Credits for this run were not kept. Please try again."
+
+
 def _run_stealthwriter_humanize_job(text: str):
     """Run the production Humanizer job. Returns (job, error_response).
 
@@ -3138,7 +3733,7 @@ def _run_stealthwriter_humanize_job(text: str):
         return None, resp
 
     job = job_manager.create(
-        "stealthwriter", "humanize", {"text": text}, max_retries=MAX_RETRIES
+        "stealthwriter", "humanize", {"text": text}, max_retries=MAX_RETRIES, owner=_job_owner()
     )
     max_wait = (browser_worker.job_timeout + 30) * (job.max_retries + 1) + 30
     job_manager.wait(job.id, timeout=max_wait)
@@ -3162,11 +3757,14 @@ def _run_stealthwriter_humanize_job(text: str):
     if student is not None:
         return SimpleNamespace(id=student["request_id"], result=student), None
 
+    app.logger.warning(
+        "humanize job failed job_id=%s status=%s code=%s error=%s", job.id, status, job.error_code, job.error
+    )
     body = {
         "ok": False,
         "success": False,
-        "error": job.error or status.lower(),
-        "message": job.error or "Humanizer failed. Try again.",
+        "error": status.lower(),
+        "message": "Humanizer failed. Try again.",
         "job_id": job.id,
     }
     code = job.error_code
@@ -3179,6 +3777,7 @@ def _run_stealthwriter_humanize_job(text: str):
         return job, (jsonify(body), 401)
     if code == "NO_CHANGE":
         body["error"] = "NO_CHANGE"
+        body["message"] = "The text came back unchanged. Try again later."
         return job, (jsonify(body), 409)
     if code == "TIMEOUT":
         body["error"] = "timeout"
@@ -3331,13 +3930,14 @@ def api_extension_humanize():
                 "job_id": job.id if job is not None else None,
             }
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
+        app.logger.exception("extension humanize failed")
         _refund_extension_humanize()
         return jsonify(
             {
                 "ok": False,
                 "success": False,
-                "error": str(exc),
+                "error": "HUMANIZE_FAILED",
                 "message": "Humanizer failed. Try again.",
             }
         ), 500
@@ -3515,7 +4115,7 @@ def api_presentation_extract():
         else:
             text = _extract_requirement_text_from_upload(f)
     except (ValueError, PresentationError) as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     except RuntimeError as exc:
         app.logger.warning("presentation extract: %s", exc)
         return jsonify({"success": False, "error": "Could not read this file right now. Try again."}), 503
@@ -3547,7 +4147,7 @@ def api_presentation_export():
         deck = normalize_deck(payload.get("deck"))
         data = build_pptx(deck)
     except PresentationError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return send_file(
         io.BytesIO(data),
         mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -3583,9 +4183,11 @@ def api_referral_me():
     try:
         profile = get_referral_profile(int(user_id))
     except ReferralError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
-    link = url_for("register", ref=profile["referral_code"], _external=True)
-    profile["referral_link"] = link
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
+    origin = _public_origin()
+    profile["referral_link"] = (
+        f"{origin}{url_for('register', ref=profile['referral_code'])}" if origin else None
+    )
     return jsonify({"success": True, **profile})
 
 
@@ -3602,7 +4204,7 @@ def api_referral_convert():
     try:
         result = convert_balance_to_credits(int(economy_auth.current_user_id()), amount)
     except ReferralError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify({"success": True, **result})
 
 
@@ -3624,7 +4226,7 @@ def api_referral_withdraw():
             wallet_details=wallet_details,
         )
     except ReferralError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify({"success": True, **result})
 
 
@@ -3662,7 +4264,7 @@ def api_admin_withdrawal_approve(request_id: int):
             note=payload.get("note"),
         )
     except ReferralError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify({"success": True, **result})
 
 
@@ -3680,7 +4282,7 @@ def api_admin_withdrawal_reject(request_id: int):
             note=payload.get("note"),
         )
     except ReferralError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return jsonify({"success": True, **result})
 
 
@@ -3938,8 +4540,142 @@ def api_assignment_pipeline_stages():
 @economy_auth.login_required
 def api_assignment_projects_list():
     user_id = economy_auth.current_user_id()
+    admin = _is_verified_admin()
+    hidden: set[str] = set()
+    if not admin:
+        for project in project_service.store.list_projects_for_user(str(user_id)):
+            try:
+                if _generated_content_refunded(project.id):
+                    hidden.add(str(project.id))
+            except KeyError:
+                continue
+            except Exception:  # noqa: BLE001
+                app.logger.exception("assignment ledger reconciliation failed project_id=%s", project.id)
+                hidden.add(str(project.id))
     projects = project_service.list_projects_for_user(str(user_id))
+    if not admin:
+        projects = [
+            {**assignment_access.redact_project_dict(item), "has_delivery": False, "can_download": False}
+            if str(item.get("id")) in hidden
+            or assignment_access.generated_content_locked(item.get("artifacts"))
+            else item
+            for item in projects
+        ]
     return jsonify({"projects": projects})
+
+
+def _storage_path_refused():
+    app.logger.warning("assignment file metadata with client storage_path refused user_id=%s",
+                       economy_auth.current_user_id())
+    return (
+        jsonify({"error": "STORAGE_PATH_NOT_ALLOWED", "message": "File locations are chosen by the server."}),
+        400,
+    )
+
+
+def _inputs_locked_response(exc: RequirementsLockedError):
+    return jsonify({"error": "REQUIREMENTS_LOCKED", "message": _public_error(exc)}), 409
+
+
+def _payment_unavailable_response():
+    return jsonify({"error": "PAYMENT_UNAVAILABLE", "message": "Payment is temporarily unavailable."}), 503
+
+
+def _price_changed_response(project_id: str, exc: PriceChangedError):
+    """409 with the current quote; nothing was charged. Caller holds the billing lock."""
+    trace("api.confirm_payment.price_changed", project_id=project_id, reason=exc.reason)
+    try:
+        if exc.reason != "QUOTE_SUPERSEDED":
+            bundle = project_service.requote(project_id)
+        else:
+            bundle = project_service.store.require_bundle(project_id)
+    except PaymentStateUnavailableError:
+        return _payment_unavailable_response()
+    except ValueError:
+        bundle = project_service.store.require_bundle(project_id)
+    payload = _project_api_payload(bundle)
+    return (
+        jsonify({"error": "PRICE_CHANGED", "reason": exc.reason, "message": _public_error(exc), "project": payload}),
+        409,
+    )
+
+
+_QUOTE_ID_RE = re.compile(r"[0-9a-f]{32}")
+
+
+def _quote_required_response(project_id: str, bundle):
+    """409 without a charge: the request named no quote. Caller holds the billing lock.
+
+    The reply carries the project with a currently valid quote, so the page can show that
+    exact price and ask for a fresh confirmation.
+    """
+    paid = bool(bundle.project.artifacts.get("payment_confirmed"))
+    trace("api.confirm_payment.quote_required", project_id=project_id, payment_confirmed=paid)
+    if not paid:
+        current = (bundle.project.artifacts.get(PRICING_KEY) or {}).get("quote_id")
+        try:
+            try:
+                bundle = project_service.check_payment_ready(project_id, quote_id=current)
+            except (PriceChangedError, QuoteRequiredError):
+                bundle = project_service.requote(project_id)
+        except PaymentStateUnavailableError:
+            return _payment_unavailable_response()
+        except ValueError:
+            bundle = project_service.store.require_bundle(project_id)
+    return (
+        jsonify(
+            {
+                "error": "QUOTE_REQUIRED",
+                "message": "Review the current price and confirm it to continue.",
+                "payment_confirmed": paid,
+                "project": _project_api_payload(bundle),
+            }
+        ),
+        409,
+    )
+
+
+def _paid_confirmation_response(project_id: str, user_id: int, bundle, quote_id: str | None):
+    """Answer a confirmation for a project that is already paid; never charges.
+
+    Only a repeat of the quote that was paid is a replay, and it reports that payment's actual
+    debit. Caller holds the billing lock, after reconciling the project with the ledger.
+    """
+    from services.economy import assignment_payments as payment_ledger
+
+    if quote_id is None:
+        return _quote_required_response(project_id, bundle)
+    art = bundle.project.artifacts
+    cycle_id = art.get(PAYMENT_CYCLE_KEY)
+    try:
+        cycle = payment_ledger.get_cycle(str(cycle_id)) if cycle_id else None
+    except sqlite3.Error:
+        return _payment_unavailable_response()
+    paid_quote = str((cycle or {}).get("quote_id") or art.get(PAYMENT_QUOTE_KEY) or "")
+    if not paid_quote or quote_id != paid_quote:
+        trace("api.confirm_payment.quote_mismatch", project_id=project_id, cycle_id=cycle_id)
+        return (
+            jsonify(
+                {
+                    "error": "QUOTE_MISMATCH",
+                    "message": "This assignment is already paid at a different price. Reload the page.",
+                    "payment_confirmed": True,
+                    "project": _project_api_payload(bundle),
+                }
+            ),
+            409,
+        )
+    debit = 0
+    if cycle is not None and cycle.get("method") == payment_ledger.METHOD_COINS:
+        debit = int(cycle.get("coins") or 0)
+    trace("api.confirm_payment.replay", project_id=project_id, cycle_id=cycle_id, coins_charged=debit)
+    payload = _project_api_payload(bundle)
+    if isinstance(payload, dict):
+        payload["coins_charged"] = debit
+        payload["charged_now"] = 0
+        payload["idempotent_replay"] = True
+        payload["balance"] = wallet.get_balance(user_id)
+    return jsonify(payload)
 
 
 @app.post("/api/assignment/projects")
@@ -3953,6 +4689,14 @@ def api_assignment_project_create():
     files = payload.get("files")
     if files is not None and not isinstance(files, list):
         return jsonify({"error": "files must be an array"}), 400
+    manifest_files = (upload_manifest or {}).get("files")
+    if manifest_files is not None and not isinstance(manifest_files, list):
+        return jsonify({"error": "upload_manifest.files must be an array"}), 400
+    for entry in [*(files or []), *(manifest_files or [])]:
+        if not isinstance(entry, dict):
+            return jsonify({"error": "Each file entry must be an object"}), 400
+        if "storage_path" in entry:
+            return _storage_path_refused()
 
     session_uid = economy_auth.current_user_id()
     # Never trust client-supplied user_id (IDOR).
@@ -3969,7 +4713,7 @@ def api_assignment_project_create():
             upload_manifest=upload_manifest,
         )
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
 
     return jsonify(_project_api_payload(bundle)), 201
 
@@ -3999,6 +4743,8 @@ def api_assignment_project_add_file(project_id: str):
     if denied is not None:
         return denied
     payload = request.get_json(silent=True) or {}
+    if "storage_path" in payload:
+        return _storage_path_refused()
     original_filename = (payload.get("original_filename") or payload.get("name") or "").strip()
     file_type = (payload.get("file_type") or payload.get("source") or "").strip()
     if not original_filename or not file_type:
@@ -4008,13 +4754,16 @@ def api_assignment_project_add_file(project_id: str):
             project_id,
             file_type=file_type,
             original_filename=original_filename,
-            storage_path=payload.get("storage_path"),
             parsed=bool(payload.get("parsed", False)),
         )
     except KeyError:
         return jsonify({"error": "Project not found"}), 404
+    except RequirementsLockedError as exc:
+        return _inputs_locked_response(exc)
+    except PaymentStateUnavailableError:
+        return _payment_unavailable_response()
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     return jsonify(file_record.to_dict()), 201
 
 
@@ -4066,9 +4815,11 @@ def api_assignment_project_upload():
                 storage_path=note_path,
                 parsed=True,
             )
+    except PaymentStateUnavailableError:
+        return _payment_unavailable_response()
     except ValueError as exc:
         trace("api.upload.failed", error=str(exc))
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
 
     bundle_path = project_service.store._bundle_path(bundle.project.id)
     trace(
@@ -4105,13 +4856,24 @@ def api_assignment_project_analyze_requirements(project_id: str):
         "api.analyze.received",
         **project_service.store.lookup_diagnostics(project_id),
     )
+    grant = _free_ai_grant("analyze")
     try:
-        bundle = project_service.analyze_requirements(project_id)
+        with free_ai_quota.scope(grant):
+            bundle = project_service.analyze_requirements(project_id)
     except KeyError as exc:
         return _assignment_not_found("analyze-requirements", project_id, exc)
+    except free_ai_quota.QuotaRefused as exc:
+        trace("api.analyze.refused", project_id=project_id, reason=exc.reason)
+        grant.skip(exc.reason)
+        return _free_ai_refusal(grant)
+    except RequirementsLockedError as exc:
+        trace("api.analyze.locked", project_id=project_id)
+        return _inputs_locked_response(exc)
+    except PaymentStateUnavailableError:
+        return _payment_unavailable_response()
     except ValueError as exc:
         trace("api.analyze.failed", project_id=project_id, error=str(exc))
-        return jsonify({"error": str(exc)}), 502
+        return jsonify({"error": "Requirement analysis failed. Please try again."}), 502
     except Exception as exc:  # noqa: BLE001
         trace("api.analyze.error", project_id=project_id, error=str(exc), error_type=type(exc).__name__)
         raise
@@ -4137,9 +4899,13 @@ def api_assignment_project_pricing(project_id: str):
         bundle = project_service.calculate_pricing(project_id, priority=priority)
     except KeyError as exc:
         return _assignment_not_found("pricing", project_id, exc)
+    except RequirementsLockedError as exc:
+        return _inputs_locked_response(exc)
+    except PaymentStateUnavailableError:
+        return _payment_unavailable_response()
     except ValueError as exc:
         trace("api.pricing.failed", project_id=project_id, error=str(exc))
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
         trace("api.pricing.error", project_id=project_id, error=str(exc), error_type=type(exc).__name__)
         raise
@@ -4173,8 +4939,12 @@ def api_assignment_project_update_brief(project_id: str):
         bundle = project_service.update_brief(project_id, **fields)
     except KeyError as exc:
         return _assignment_not_found("brief", project_id, exc)
+    except RequirementsLockedError as exc:
+        return _inputs_locked_response(exc)
+    except PaymentStateUnavailableError:
+        return _payment_unavailable_response()
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     return jsonify(_project_api_payload(bundle))
 
 
@@ -4185,103 +4955,146 @@ def api_assignment_project_confirm_payment(project_id: str):
         "api.confirm_payment.received",
         **project_service.store.lookup_diagnostics(project_id),
     )
-    user_id = economy_auth.current_user_id()
-
-    # Determine coin cost before confirming (skip charge if already paid).
-    already_paid = False
-    coins = 0
-    try:
-        existing = project_service.store.require_bundle(project_id)
-        already_paid = bool(existing.project.artifacts.get("payment_confirmed"))
-        price_usd = existing.project.price
-        if price_usd is None:
-            pricing_artifact = existing.project.artifacts.get("pricing") or {}
-            price_usd = pricing_artifact.get("amount_usd")
-        if price_usd is not None:
-            coins = max(1, int(round(float(price_usd) * USD_TO_COINS)))
-    except KeyError as exc:
-        return _assignment_not_found("confirm-payment", project_id, exc)
-
-    charged_here = False
-    plan_free_paper = False
-    if not already_paid and coins > 0:
-        from services.economy.plans import consume_free_use
-        from services.economy.referral import apply_pro_discount
-
-        if consume_free_use(int(user_id), "assignment"):
-            plan_free_paper = True
-            coins = 0
-        user = economy_auth.current_user()
-        coins = apply_pro_discount(user, coins) if coins > 0 else 0
-        try:
-            if coins > 0:
-                wallet.debit(user_id, coins, "assignment", ref_id=project_id)
-            charged_here = True
-        except InsufficientCoins as exc:
-            return (
-                jsonify(
-                    {
-                        "error": "INSUFFICIENT_COINS",
-                        "message": f"Not enough coins. This project costs {exc.required}; you have {exc.balance}.",
-                        "required": exc.required,
-                        "balance": exc.balance,
-                    }
-                ),
-                402,
-            )
-
-    def _undo_charge() -> None:
-        if plan_free_paper:
-            from services.economy.plans import release_free_use
-
-            release_free_use(int(user_id), "assignment")
-        elif charged_here:
-            _refund_safe(user_id, coins, "assignment", ref_id=project_id)
+    user_id = int(economy_auth.current_user_id())
+    from services.economy import assignment_payments as payment_ledger
+    from services.economy.plans import allowance_rule
+    from services.economy.referral import apply_pro_discount
 
     try:
-        bundle = project_service.confirm_payment(project_id)
+        project_service.store.require_project(project_id)
     except KeyError as exc:
-        _undo_charge()
         return _assignment_not_found("confirm-payment", project_id, exc)
-    except ValueError as exc:
-        _undo_charge()
-        trace(
-            "api.confirm_payment.failed",
-            error=str(exc),
-            **project_service.store.lookup_diagnostics(project_id),
-        )
-        return jsonify({"error": str(exc)}), 400
-    except Exception:
-        _undo_charge()
-        raise
-    if charged_here and (coins > 0 or plan_free_paper):
+    # The body names the quote the student saw and nothing else; amount, volume, plan and
+    # status always come from the server's quote for the project's current inputs. No quote
+    # named means no consent to any price: nothing falls back to the current quote.
+    body = request.get_json(silent=True)
+    quote_id = body.get("quote_id") if isinstance(body, dict) else None
+    if quote_id is not None and not (isinstance(quote_id, str) and _QUOTE_ID_RE.fullmatch(quote_id)):
+        return jsonify({"error": "INVALID_QUOTE", "message": "Invalid quote reference."}), 400
+
+    # Same per-project lock as refunds and billable-input edits: a confirmation never
+    # interleaves with a refund, a reconciliation, another confirmation or a re-analysis.
+    with project_file_lock(project_id, name=BILLING_LOCK, root=project_service.store.storage_root):
         try:
-            project = bundle.project
-            project.artifacts["coins_charged"] = int(coins)
-            if plan_free_paper:
-                project.artifacts["plan_free_paper"] = True
-            project_service.store.save_project(project)
-            bundle = project_service.store.require_bundle(project_id)
+            project_service.reconcile_payment_state(project_id, locked=True)
         except Exception:  # noqa: BLE001
-            app.logger.exception("failed to persist coins_charged project_id=%s", project_id)
+            app.logger.exception("confirm-payment ledger check failed project_id=%s", project_id)
+            return _payment_unavailable_response()
+        try:
+            bundle = project_service.store.require_bundle(project_id)
+            if bundle.project.artifacts.get("payment_confirmed"):
+                return _paid_confirmation_response(project_id, user_id, bundle, quote_id)
+            if quote_id is None:
+                return _quote_required_response(project_id, bundle)
+            bundle = project_service.check_payment_ready(project_id, quote_id=quote_id)
+            quote = project_service.payable_quote(project_id, quote_id=quote_id)
+        except KeyError as exc:
+            return _assignment_not_found("confirm-payment", project_id, exc)
+        except PriceChangedError as exc:
+            return _price_changed_response(project_id, exc)
+        except QuoteRequiredError:
+            return _quote_required_response(project_id, project_service.store.require_bundle(project_id))
+        except PaymentStateUnavailableError:
+            return _payment_unavailable_response()
+        except ValueError as exc:
+            trace("api.confirm_payment.failed", error=str(exc), **project_service.store.lookup_diagnostics(project_id))
+            return jsonify({"error": _public_error(exc)}), 400
+
+        cycle = None
+        if quote is not None:
+            coins = apply_pro_discount(economy_auth.current_user(), int(quote["amount_coins"]))
+            try:
+                cycle = payment_ledger.open_cycle(
+                    user_id,
+                    project_id,
+                    coins=coins,
+                    allowance=allowance_rule(user_id, "assignment"),
+                    quote=quote,
+                )
+            except InsufficientCoins as exc:
+                return (
+                    jsonify(
+                        {
+                            "error": "INSUFFICIENT_COINS",
+                            "message": f"Not enough coins. This project costs {exc.required}; you have {exc.balance}.",
+                            "required": exc.required,
+                            "balance": exc.balance,
+                        }
+                    ),
+                    402,
+                )
+            except ValueError as exc:
+                return jsonify({"error": _public_error(exc)}), 400
+            if cycle.get("existing") and cycle.get("scope_hash") != quote["scope_hash"]:
+                # A live payment from an earlier version of the inputs: no new charge, no
+                # automatic refund; support reconciles it.
+                project_service.flag_payment_review(project_id, "payment_cycle_scope_mismatch")
+                trace(
+                    "api.confirm_payment.scope_mismatch",
+                    project_id=project_id,
+                    cycle_id=cycle.get("cycle_id"),
+                    quote_id=quote.get("quote_id"),
+                )
+                return (
+                    jsonify(
+                        {
+                            "error": "PAYMENT_SCOPE_MISMATCH",
+                            "message": "This assignment has a payment for an earlier version. Please contact support.",
+                        }
+                    ),
+                    409,
+                )
+            try:
+                bundle = project_service.confirm_payment(project_id, cycle=cycle, quote_id=quote["quote_id"])
+            except BaseException as exc:
+                if not cycle.get("existing"):
+                    # Only the cycle this request opened is voided; a pre-existing live
+                    # payment is never refunded as a side effect of a failed confirmation.
+                    try:
+                        payment_ledger.close_cycle(
+                            project_id,
+                            cycle["cycle_id"],
+                            user_id=user_id,
+                            kind="void",
+                            reason="confirm-payment-failed",
+                        )
+                    except Exception:  # noqa: BLE001
+                        app.logger.exception("confirm-payment void failed project_id=%s", project_id)
+                if isinstance(exc, KeyError):
+                    return _assignment_not_found("confirm-payment", project_id, exc)
+                if isinstance(exc, PriceChangedError):
+                    return _price_changed_response(project_id, exc)
+                if isinstance(exc, ValueError):
+                    trace("api.confirm_payment.failed", error=str(exc), project_id=project_id)
+                    return jsonify({"error": _public_error(exc)}), 400
+                raise
+
+    debit = 0
+    if cycle is not None and cycle.get("method") == payment_ledger.METHOD_COINS:
+        debit = int(cycle.get("coins") or 0)
+    charged_now = debit if cycle is not None and not cycle.get("existing") else 0
     trace(
         "api.confirm_payment.completed",
         project_id=project_id,
         price=bundle.project.price,
         payment_confirmed=bool(bundle.project.artifacts.get("payment_confirmed")),
-        coins_charged=coins if charged_here else 0,
+        coins_charged=debit,
+        charged_now=charged_now,
+        payment_cycle_id=cycle.get("cycle_id") if cycle else None,
     )
-    if charged_here and coins > 0:
+    if charged_now > 0:
         _record_usage_safe(
             user_id,
             feature=FEATURE_ASSIGNMENT,
-            credits_used=coins,
+            credits_used=charged_now,
             provider="AssignmentPipeline",
             request_id=project_id,
         )
     payload = _project_api_payload(bundle)
     if isinstance(payload, dict):
-        payload["coins_charged"] = coins if charged_here else 0
+        payload["coins_charged"] = debit
+        payload["charged_now"] = charged_now
+        payload["idempotent_replay"] = False
         payload["balance"] = wallet.get_balance(user_id)
     return jsonify(payload)
 
@@ -4289,50 +5102,67 @@ def api_assignment_project_confirm_payment(project_id: str):
 @app.post("/api/assignment/projects/<project_id>/refund-failed")
 @economy_auth.login_required
 def api_assignment_project_refund_failed(project_id: str):
-    """Refund coins when payment succeeded but delivery never completed."""
+    """Refund coins only for a server-recorded failure that left no generated text."""
     user_id = economy_auth.current_user_id()
     try:
-        art = project_service.store.require_bundle(project_id).project.artifacts or {}
-    except KeyError as exc:
-        return _assignment_not_found("refund-failed", project_id, exc)
-    if art.get("plan_free_paper"):
-        refund = _assignment_auto_refund(project_id, reason="user-refund-failed-assignment")
-        if refund is None:
-            return jsonify({"error": "Nothing to refund for this project."}), 400
-        payload = _project_api_payload(project_service.store.require_bundle(project_id))
-        if isinstance(payload, dict):
-            payload.update(refund)
-        return jsonify(payload)
-    try:
-        coins = project_service.assert_assignment_refund_eligible(project_id)
-    except KeyError as exc:
-        return _assignment_not_found("refund-failed", project_id, exc)
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    try:
-        wallet.refund(
-            int(user_id),
-            int(coins),
-            "assignment",
-            ref_id=project_id,
-            meta={"reason": "user-refund-failed-assignment"},
+        refund = refund_assignment(
+            project_service,
+            wallet,
+            project_id,
+            reason="user-refund-failed-assignment",
         )
-        bundle = project_service.mark_assignment_refunded(project_id, coins)
-    except Exception as exc:  # noqa: BLE001
+    except KeyError as exc:
+        return _assignment_not_found("refund-failed", project_id, exc)
+    except RefundNotEligibleError as exc:
+        status = 409 if exc.code == "ALREADY_REFUNDED" else 400
+        return jsonify({"error": "REFUND_NOT_AVAILABLE", "reason": exc.code, "message": _public_error(exc)}), status
+    except Exception:  # noqa: BLE001
         app.logger.exception("assignment refund-failed project_id=%s", project_id)
-        return jsonify({"error": str(exc) or "Refund failed. Please contact support."}), 502
+        return jsonify({"error": "Refund failed. Please contact support."}), 502
     trace(
         "api.refund_failed.completed",
         project_id=project_id,
-        coins_refunded=coins,
+        coins_refunded=refund["coins_refunded"],
         user_id=user_id,
     )
-    payload = _project_api_payload(bundle)
+    payload = _project_api_payload(project_service.store.require_bundle(project_id))
     if isinstance(payload, dict):
-        payload["coins_refunded"] = coins
-        payload["balance"] = wallet.get_balance(int(user_id))
-        payload["refunded"] = True
+        payload.update(refund)
     return jsonify(payload)
+
+
+@app.post("/api/admin/assignment/projects/<project_id>/refund")
+@admin_only
+def api_admin_assignment_refund(project_id: str):
+    """Exceptional refund outside the automatic rules (e.g. failure after text was generated)."""
+    payload = request.get_json(silent=True) or {}
+    reason = str(payload.get("reason") or "").strip()
+    if not reason:
+        return jsonify({"error": "REASON_REQUIRED", "message": "A refund reason is required."}), 400
+    admin_id = int(economy_auth.current_user_id())
+    try:
+        refund = refund_assignment(
+            project_service,
+            wallet,
+            project_id,
+            reason=f"admin: {reason[:180]}",
+            admin_id=admin_id,
+        )
+    except KeyError:
+        return _not_found()
+    except RefundNotEligibleError as exc:
+        status = 409 if exc.code == "ALREADY_REFUNDED" else 400
+        return jsonify({"error": "REFUND_NOT_AVAILABLE", "reason": exc.code, "message": _public_error(exc)}), status
+    except Exception:  # noqa: BLE001
+        app.logger.exception("admin assignment refund failed project_id=%s", project_id)
+        return jsonify({"error": "Refund failed."}), 502
+    app.logger.warning(
+        "admin assignment refund project_id=%s admin=%s coins=%s",
+        project_id,
+        admin_id,
+        refund["coins_refunded"],
+    )
+    return jsonify({"project_id": project_id, **refund})
 
 
 @app.post("/api/assignment/projects/<project_id>/research")
@@ -4352,7 +5182,7 @@ def api_assignment_project_research(project_id: str):
         return _assignment_not_found("research", project_id, exc)
     except ValueError as exc:
         trace("api.research.failed", project_id=project_id, error=str(exc))
-        return jsonify({"error": str(exc)}), 502
+        return jsonify({"error": _public_error(exc)}), 502
     except Exception as exc:  # noqa: BLE001
         trace(
             "api.research.error",
@@ -4407,9 +5237,13 @@ def api_assignment_project_blueprint(project_id: str):
         blueprint = project_service.run_blueprint(project_id, research_plan=research_plan)
     except KeyError as exc:
         return _assignment_not_found("blueprint", project_id, exc)
+    except PaymentRequiredError as exc:
+        return jsonify({"error": _public_error(exc)}), 400
+    except ResearchPlanChangedError as exc:
+        return jsonify({"error": "RESEARCH_PLAN_CHANGED", "message": _public_error(exc)}), 409
     except ValueError as exc:
         trace("api.blueprint.failed", project_id=project_id, error=str(exc))
-        return jsonify({"error": str(exc)}), 502
+        return jsonify({"error": _public_error(exc)}), 502
     except Exception as exc:  # noqa: BLE001
         trace(
             "api.blueprint.error",
@@ -4449,6 +5283,7 @@ def api_assignment_project_blueprint_update(project_id: str):
 
 
 @app.get("/api/debug/blueprint/<project_id>")
+@internal_tool
 def api_debug_blueprint_get(project_id: str):
     """Debug endpoint: return stored Blueprint JSON without transformations."""
     try:
@@ -4458,7 +5293,8 @@ def api_debug_blueprint_get(project_id: str):
     return jsonify(blueprint.to_dict())
 
 
-@app.get("/api/browser/runtime-test")
+@app.post("/api/browser/runtime-test")
+@admin_only
 def api_browser_runtime_test():
     """Temporary diagnostics: verify BrowserService can serve a page via CDP."""
     from services.browser.browser_service import BrowserService
@@ -4493,13 +5329,12 @@ def api_browser_runtime_test():
     try:
         return jsonify(_browser_submit(_work, timeout=90))
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
                     "success": False,
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
+                    **_admin_error(exc),
                 }
             ),
             500,
@@ -4507,14 +5342,19 @@ def api_browser_runtime_test():
 
 
 @app.get("/api/browser/health")
+@admin_only
 def api_browser_health():
-    """Aggregate Browser Service + provider diagnostics (Task 10 health)."""
+    """Read-only Browser Service snapshot: never starts the engine, Chrome or a provider tab.
+
+    ``POST /api/browser/connect`` starts the browser.
+    """
     from services.browser.browser_service import BrowserService
 
-    ensure_engine_started()
     try:
-        data = _browser_submit(lambda: BrowserService.instance().health(), timeout=15)
-    except Exception:  # noqa: BLE001  (worker busy or error → degraded, no Playwright)
+        if not _engine_started:
+            raise RuntimeError("engine not started")
+        data = _browser_submit(lambda: BrowserService.instance().passive_health(), timeout=15)
+    except Exception:  # noqa: BLE001  (engine off, worker busy or error → degraded, no Playwright)
         from services.browser.chrome_launcher import ChromeLauncher
 
         launcher = ChromeLauncher()
@@ -4532,7 +5372,8 @@ def api_browser_health():
     return jsonify(data)
 
 
-@app.get("/api/browser/cdp-diagnostics")
+@app.post("/api/browser/cdp-diagnostics")
+@admin_only
 def api_browser_cdp_diagnostics():
     """Diagnose the CDP connection layer (Chrome/Playwright versions, download-behavior support).
 
@@ -4547,20 +5388,20 @@ def api_browser_cdp_diagnostics():
         report = cdp_diagnostics(cdp_url)
         return jsonify({"success": bool(report.get("connect_ok")), **report})
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
                     "success": False,
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
+                    **_admin_error(exc),
                 }
             ),
             500,
         )
 
 
-@app.get("/api/browser/connect")
+@app.post("/api/browser/connect")
+@admin_only
 def api_browser_connect():
     """Start/reuse the long-lived Browser Service (auto-launches Chrome + CDP)."""
     from services.browser.browser_service import BrowserService
@@ -4579,21 +5420,21 @@ def api_browser_connect():
             }
         )
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
                     "success": False,
                     "connected": False,
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
+                    **_admin_error(exc),
                 }
             ),
             500,
         )
 
 
-@app.get("/api/browser/providers/stealthwriter/health")
+@app.post("/api/browser/providers/stealthwriter/health")
+@admin_only
 def api_browser_stealthwriter_health():
     """Temporary diagnostics: load StealthWriter public homepage (no login)."""
     from services.browser.providers.stealthwriter import StealthWriterProvider
@@ -4627,21 +5468,21 @@ def api_browser_stealthwriter_health():
             }
         )
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
                     "success": False,
                     "provider": "stealthwriter",
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
+                    **_admin_error(exc),
                 }
             ),
             500,
         )
 
 
-@app.get("/api/browser/providers/stealthwriter/session")
+@app.post("/api/browser/providers/stealthwriter/session")
+@admin_only
 def api_browser_stealthwriter_session():
     """Temporary diagnostics: check CDP StealthWriter session (verbose failure reporting)."""
     from services.browser.browser_service import BrowserService
@@ -4687,14 +5528,12 @@ def api_browser_stealthwriter_session():
     try:
         return jsonify(_browser_submit(_work, timeout=90))
     except Exception as exc:  # noqa: BLE001
-        tb = traceback.format_exc()
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
                     "success": False,
-                    "exception": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": tb,
+                    **_admin_error(exc),
                     "diagnostics": diag,
                 }
             ),
@@ -4702,7 +5541,8 @@ def api_browser_stealthwriter_session():
         )
 
 
-@app.get("/api/browser/providers/stealthwriter/login")
+@app.post("/api/browser/providers/stealthwriter/login")
+@admin_only
 def api_browser_stealthwriter_login():
     """Navigate attached Chrome to sign-in for interactive manual login."""
     from services.browser.providers.stealthwriter import start_interactive_login
@@ -4720,20 +5560,20 @@ def api_browser_stealthwriter_login():
             }
         )
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
                     "success": False,
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
+                    **_admin_error(exc),
                 }
             ),
             500,
         )
 
 
-@app.get("/api/browser/providers/stealthwriter/check-login")
+@app.post("/api/browser/providers/stealthwriter/check-login")
+@admin_only
 def api_browser_stealthwriter_check_login():
     """Verify interactive login; shut down runtime only after success."""
     from services.browser.providers.stealthwriter import check_interactive_login
@@ -4754,14 +5594,13 @@ def api_browser_stealthwriter_check_login():
             }
         )
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
                     "success": False,
                     "logged_in": False,
-                    "exception": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
+                    **_admin_error(exc),
                 }
             ),
             500,
@@ -4915,7 +5754,7 @@ def api_browser_stealthwriter_humanize():
 
         ensure_engine_started()
         job = job_manager.create(
-            "stealthwriter", "humanize", {"text": text}, max_retries=MAX_RETRIES
+            "stealthwriter", "humanize", {"text": text}, max_retries=MAX_RETRIES, owner=_job_owner()
         )
         max_wait = (browser_worker.job_timeout + 30) * (job.max_retries + 1) + 30
         job_manager.wait(job.id, timeout=max_wait)
@@ -4939,14 +5778,18 @@ def api_browser_stealthwriter_humanize():
         if status == "CANCELLED":
             return jsonify({"success": False, "error": "cancelled", "job_id": job.id}), 409
 
+        # Provider errors and the shared browser's page state go to the server log, never to the caller.
         code = job.error_code
+        if code != "TIMEOUT":
+            app.logger.warning(
+                "humanize job failed job_id=%s status=%s code=%s error=%s", job.id, status, code, job.error
+            )
         if code == "LOGIN_REQUIRED":
             return jsonify(
                 {
                     "success": False,
                     "error": "LOGIN_REQUIRED",
-                    "message": job.error
-                    or "StealthWriter session is not logged in. Upload browser_profiles/sessions/stealthwriter.json.",
+                    "message": "The humanizer service is temporarily unavailable. Try again in a few minutes.",
                     "job_id": job.id,
                 }
             ), 401
@@ -4956,7 +5799,7 @@ def api_browser_stealthwriter_humanize():
                     {
                         "success": False,
                         "error": "NO_CHANGE",
-                        "message": job.error,
+                        "message": "The text came back unchanged. Try again later.",
                         "job_id": job.id,
                     }
                 ),
@@ -4965,23 +5808,14 @@ def api_browser_stealthwriter_humanize():
         if code == "TIMEOUT":
             return jsonify({"success": False, "error": "timeout", "job_id": job.id}), 504
         if code == "AUTOMATION_ERROR" and job.error_details:
-            body = {
-                "success": False,
-                "error": job.error,
-                "job_id": job.id,
-                "diagnostics": job.error_details,
-            }
-            for key in (
-                "current_url",
-                "page_title",
-                "visible_buttons",
-                "textarea_count",
-                "dom_snippet",
-                "step",
-            ):
-                if key in job.error_details:
-                    body[key] = job.error_details[key]
-            return jsonify(body), 422
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "AUTOMATION_ERROR",
+                    "message": _HUMANIZE_FAILED_MESSAGE,
+                    "job_id": job.id,
+                }
+            ), 422
         if not job.is_terminal:
             return (
                 jsonify(
@@ -4989,24 +5823,18 @@ def api_browser_stealthwriter_humanize():
                 ),
                 202,
             )
-        return jsonify({"success": False, "error": job.error or "failed", "job_id": job.id}), 500
-    except Exception as exc:  # noqa: BLE001
+        return jsonify(
+            {"success": False, "error": "failed", "message": _HUMANIZE_FAILED_MESSAGE, "job_id": job.id}
+        ), 500
+    except Exception:  # noqa: BLE001
+        app.logger.exception("humanize request failed")
         _refund_humanize()
         _release_guest_trial()
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
-                }
-            ),
-            500,
-        )
+        return jsonify({"success": False, "error": "HUMANIZE_FAILED", "message": _HUMANIZE_FAILED_MESSAGE}), 500
 
 
-@app.get("/api/browser/providers/stealthwriter/status")
+@app.post("/api/browser/providers/stealthwriter/status")
+@admin_only
 def api_browser_stealthwriter_status():
     """Return StealthWriter session status from the dashboard sidebar."""
     from services.browser.providers.stealthwriter import get_session_status
@@ -5022,6 +5850,7 @@ def api_browser_stealthwriter_status():
             }
         )
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
@@ -5029,16 +5858,15 @@ def api_browser_stealthwriter_status():
                     "current_url": None,
                     "plan": None,
                     "username": None,
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
+                    **_admin_error(exc),
                 }
             ),
             500,
         )
 
 
-@app.get("/api/browser/providers/stealthwriter/verify-production")
+@app.post("/api/browser/providers/stealthwriter/verify-production")
+@admin_only
 def api_browser_stealthwriter_verify_production():
     """End-to-end check: session restored + real Humanize request completes."""
     from services.browser.browser_service import BrowserService
@@ -5071,7 +5899,7 @@ def api_browser_stealthwriter_verify_production():
         except sw.StealthWriterAutomationError as exc:
             result["processing_time_ms"] = int((time.monotonic() - started) * 1000)
             result["error"] = "HUMANIZE_FAILED"
-            result["message"] = str(exc)
+            result["message"] = _admin_error(exc)["error"]
             return result
 
         result["processing_time_ms"] = int((time.monotonic() - started) * 1000)
@@ -5110,21 +5938,21 @@ def api_browser_stealthwriter_verify_production():
     try:
         return jsonify(_browser_submit(_work, timeout=180))
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
                     "success": False,
                     "logged_in": False,
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
+                    **_admin_error(exc),
                 }
             ),
             500,
         )
 
 
-@app.get("/api/browser/providers/stealthwriter/open")
+@app.post("/api/browser/providers/stealthwriter/open")
+@admin_only
 def api_browser_stealthwriter_open():
     """Navigate attached Chrome to sign-in for one-time manual login (no automation)."""
     from services.browser.providers.stealthwriter import open_manual_login_browser
@@ -5141,47 +5969,87 @@ def api_browser_stealthwriter_open():
             }
         )
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("browser diagnostics failed path=%s", request.path)
         return (
             jsonify(
                 {
                     "success": False,
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
+                    **_admin_error(exc),
                 }
             ),
             500,
         )
 
 
+def _job_owner() -> str:
+    """Owner stamped on a job created in this request (signed-in user, else the guest session)."""
+    from services import free_humanize
+
+    user = economy_auth.current_user()
+    if user is not None:
+        return f"user:{int(user['id'])}"
+    return f"guest:{free_humanize.guest_session_id(session)}"
+
+
+def _job_viewer() -> str | None:
+    """Who is asking about jobs, without minting a guest session for strangers."""
+    from services import free_humanize
+
+    user = economy_auth.current_user()
+    if user is not None:
+        return f"user:{int(user['id'])}"
+    sid = session.get(free_humanize.GUEST_SESSION_KEY)
+    if isinstance(sid, str) and len(sid) >= 16:
+        return f"guest:{sid}"
+    return None
+
+
+def _visible_job(job_id: str):
+    """The job if the caller owns it (or is a verified admin), else None."""
+    job = job_manager.get(job_id) if job_manager is not None else None
+    if job is None:
+        return None
+    if _is_verified_admin():
+        return job
+    viewer = _job_viewer()
+    if viewer and job.owner and hmac.compare_digest(job.owner, viewer):
+        return job
+    return None
+
+
 @app.get("/api/jobs")
 def api_jobs_list():
-    """List all jobs (most recent last)."""
-    ensure_engine_started()
-    return jsonify({"jobs": [job.to_dict() for job in job_manager.list()]})
+    """The caller's jobs (all jobs for verified admins), most recent last."""
+    jobs = job_manager.list() if job_manager is not None else []
+    if not _is_verified_admin():
+        user = economy_auth.current_user()
+        if user is None:
+            return jsonify({"success": False, "error": "AUTH_REQUIRED", "message": "Please sign in to continue."}), 401
+        owner = f"user:{int(user['id'])}"
+        jobs = [job for job in jobs if job.owner == owner]
+    return jsonify({"jobs": [job.to_public_dict() for job in jobs]})
 
 
 @app.get("/api/jobs/<job_id>")
 def api_jobs_get(job_id: str):
-    """Return a single job by id."""
-    ensure_engine_started()
-    job = job_manager.get(job_id)
+    """Status of one job the caller owns."""
+    job = _visible_job(job_id)
     if job is None:
         return jsonify({"error": "job not found"}), 404
-    return jsonify(job.to_dict())
+    return jsonify(job.to_public_dict())
 
 
 @app.delete("/api/jobs/<job_id>")
 def api_jobs_cancel(job_id: str):
-    """Cancel a job (immediate if still queued; cooperative otherwise)."""
-    ensure_engine_started()
-    if job_manager.get(job_id) is None:
+    """Cancel a job the caller owns (immediate if still queued; cooperative otherwise)."""
+    if _visible_job(job_id) is None:
         return jsonify({"error": "job not found"}), 404
     cancelled = job_manager.cancel(job_id)
     return jsonify({"success": bool(cancelled), "job_id": job_id})
 
 
 @app.post("/api/browser/restart")
+@admin_only
 def api_browser_restart():
     """Force a full Browser Service restart (Chrome relaunch + reconnect + restore)."""
     from services.browser.browser_service import BrowserService
@@ -5193,24 +6061,16 @@ def api_browser_restart():
             browser_metrics.record_browser_restart()
         return jsonify({"success": True, "restart": result})
     except Exception as exc:  # noqa: BLE001
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": str(exc),
-                    "exception_type": type(exc).__name__,
-                    "traceback": traceback.format_exc(),
-                }
-            ),
-            500,
-        )
+        app.logger.exception("browser restart failed")
+        return jsonify({"success": False, "error": "Browser restart failed.", "exception_type": type(exc).__name__}), 500
 
 
 @app.get("/api/browser/metrics")
+@admin_only
 def api_browser_metrics():
-    """Engine metrics: uptime, job counts, avg exec time, restarts, retries."""
-    ensure_engine_started()
+    """Engine metrics: uptime, job counts, avg exec time, restarts, retries (read-only)."""
     data = browser_metrics.snapshot() if browser_metrics is not None else {}
+    data["engine_started"] = bool(_engine_started)
     data["active_jobs"] = job_manager.active_count() if job_manager is not None else 0
     data["total_jobs"] = len(job_manager.list()) if job_manager is not None else 0
     data["worker_ready"] = bool(browser_worker.is_ready()) if browser_worker is not None else False
@@ -5219,77 +6079,157 @@ def api_browser_metrics():
 
 @app.post("/api/blueprint/build")
 def api_blueprint_build():
-    """Standalone Blueprint Engine entrypoint."""
-    payload = request.get_json(silent=True) or {}
-    requirement_json = payload.get("requirement_json")
-    research_plan = payload.get("research_plan")
-    if not isinstance(requirement_json, dict):
-        return jsonify({"error": "requirement_json object is required"}), 400
-    if not isinstance(research_plan, dict):
-        return jsonify({"error": "research_plan object is required"}), 400
-    blueprint = blueprint_engine.build_blueprint(
-        requirement_json=requirement_json,
-        research_plan=research_plan,
-        project_id=payload.get("project_id"),
+    """Standalone Blueprint Engine: paid LLM call with no price of its own, so it is off."""
+    return _standalone_disabled("BLUEPRINT_API_DISABLED", _STANDALONE_ENGINE_DISABLED_MESSAGE)
+
+
+def _auth_required_json():
+    return (
+        jsonify({"success": False, "error": "AUTH_REQUIRED", "message": "Please sign in to continue."}),
+        401,
     )
-    return jsonify(blueprint.to_dict()), 201
+
+
+def _standalone_disabled(code: str, message: str):
+    return jsonify({"error": message, "code": code}), 403
+
+
+def _standalone_project_id_rejected():
+    return jsonify({"error": "project_id is not accepted here; use the assignment API"}), 400
+
+
+_STANDALONE_ENGINE_DISABLED_MESSAGE = (
+    "This standalone tool is not available. Use an assignment project instead."
+)
+from services.free_humanize import RateLimiter as _RateLimiter  # noqa: E402
+
+_standalone_session_rate_limiter = _RateLimiter()
+_STANDALONE_SESSIONS_PER_MINUTE = 20
+
+
+class _StandaloneSessionOwners:
+    """Owner of each standalone session, recorded server-side when it is created.
+
+    Assignment sessions share the same engines but are never registered here, so these routes
+    can't reach them; anything unregistered or owned by someone else reads as "not found".
+    """
+
+    def __init__(self) -> None:
+        self._owners: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def register(self, session_id: str, user_id: int) -> None:
+        with self._lock:
+            self._owners[str(session_id)] = int(user_id)
+
+    def owned(self, session_id: str, getter):
+        user_id = economy_auth.current_user_id()
+        if user_id is None:
+            return None
+        with self._lock:
+            owner_id = self._owners.get(str(session_id))
+        if owner_id is None or owner_id != user_id:
+            return None
+        try:
+            return getter(session_id)
+        except KeyError:
+            return None
+
+
+def _standalone_create_allowed(user_id: int) -> bool:
+    return _standalone_session_rate_limiter.allow(f"standalone:{int(user_id)}", _STANDALONE_SESSIONS_PER_MINUTE)
+
+
+def _standalone_rate_limited():
+    resp = jsonify({"error": "Too many requests. Wait a minute and try again.", "code": "RATE_LIMITED"})
+    resp.headers["Retry-After"] = "60"
+    return resp, 429
+
+
+# Standalone writer sessions are owned by the user who created them. Sessions created by the
+# assignment pipeline share writer_engine but have no entry here, so they are never exposed.
+_standalone_writer_owners: dict[str, int] = {}
+_standalone_writer_owners_lock = threading.Lock()
+
+_WRITER_API_DISABLED_MESSAGE = (
+    "Standalone AI writing is not available. Use an assignment project to generate text."
+)
+
+
+def _owned_standalone_writer_session(session_id: str):
+    """Return the caller's standalone session, or None (callers answer 404 either way)."""
+    user_id = economy_auth.current_user_id()
+    if user_id is None:
+        return None
+    with _standalone_writer_owners_lock:
+        owner_id = _standalone_writer_owners.get(session_id)
+    if owner_id is None or owner_id != user_id:
+        return None
+    try:
+        return writer_engine.get_session(session_id)
+    except KeyError:
+        return None
+
+
+def _writer_session_not_found():
+    return jsonify({"error": "Writer session not found"}), 404
+
+
+def _writer_api_disabled():
+    return jsonify({"error": _WRITER_API_DISABLED_MESSAGE, "code": "WRITER_API_DISABLED"}), 403
 
 
 @app.post("/api/writer/session")
 def api_writer_session_create():
+    user_id = economy_auth.current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Login required"}), 401
     payload = request.get_json(silent=True) or {}
+    if payload.get("project_id"):
+        return jsonify({"error": "project_id is not accepted here; use the assignment API"}), 400
     for key in ("requirement_json", "research_plan", "blueprint"):
         if not isinstance(payload.get(key), dict):
             return jsonify({"error": f"{key} object is required"}), 400
-    session = writer_engine.create_session(
-        requirement_json=payload["requirement_json"],
-        research_plan=payload["research_plan"],
-        blueprint=payload["blueprint"],
-        project_id=payload.get("project_id"),
-    )
+    try:
+        session = writer_engine.create_session(
+            requirement_json=payload["requirement_json"],
+            research_plan=payload["research_plan"],
+            blueprint=payload["blueprint"],
+        )
+    except ValueError as exc:
+        return jsonify({"error": _public_error(exc)}), 400
+    with _standalone_writer_owners_lock:
+        _standalone_writer_owners[session.id] = user_id
     return jsonify(session.to_dict()), 201
 
 
 @app.get("/api/writer/session/<session_id>")
 def api_writer_session_get(session_id: str):
-    try:
-        session = writer_engine.get_session(session_id)
-    except KeyError:
-        return jsonify({"error": "Writer session not found"}), 404
+    session = _owned_standalone_writer_session(session_id)
+    if session is None:
+        return _writer_session_not_found()
     return jsonify(session.to_dict())
 
 
 @app.post("/api/writer/session/<session_id>/advance")
 def api_writer_session_advance(session_id: str):
-    try:
-        session = writer_engine.advance_section(session_id)
-    except KeyError:
-        return jsonify({"error": "Writer session not found"}), 404
-    return jsonify(session.to_dict())
+    if _owned_standalone_writer_session(session_id) is None:
+        return _writer_session_not_found()
+    return _writer_api_disabled()
 
 
 @app.post("/api/writer/session/<session_id>/revise")
 def api_writer_session_revise(session_id: str):
-    payload = request.get_json(silent=True) or {}
-    try:
-        session = writer_engine.revise_section(session_id, payload.get("section_id"))
-    except KeyError:
-        return jsonify({"error": "Writer session not found"}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(session.to_dict())
+    if _owned_standalone_writer_session(session_id) is None:
+        return _writer_session_not_found()
+    return _writer_api_disabled()
 
 
 @app.post("/api/writer/session/<session_id>/merge")
 def api_writer_session_merge(session_id: str):
-    payload = request.get_json(silent=True) or {}
-    try:
-        draft = writer_engine.merge_draft(session_id, title=payload.get("title"))
-    except KeyError:
-        return jsonify({"error": "Writer session not found"}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(draft.to_dict()), 201
+    if _owned_standalone_writer_session(session_id) is None:
+        return _writer_session_not_found()
+    return _writer_api_disabled()
 
 
 @app.post("/api/assignment/projects/<project_id>/writer/start")
@@ -5304,7 +6244,7 @@ def api_assignment_writer_start(project_id: str):
         return jsonify({"error": "Project not found"}), 404
     except ValueError as exc:
         trace("api.writer.start.failed", project_id=project_id, error=str(exc))
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
         trace(
             "api.writer.start.error",
@@ -5338,6 +6278,8 @@ def api_assignment_writer_advance(project_id: str):
         session = project_service.advance_writer(project_id, writer_session=writer_session)
     except KeyError:
         return jsonify({"error": "Writer session not found"}), 404
+    except PaymentRequiredError as exc:
+        return jsonify({"error": _public_error(exc)}), 400
     except ValueError as exc:
         message = str(exc)
         trace("api.writer.advance.failed", project_id=project_id, error=message)
@@ -5378,7 +6320,7 @@ def api_assignment_writer_revise(project_id: str):
     except KeyError:
         return jsonify({"error": "Writer session not found"}), 404
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
         trace(
             "api.writer.revise.error",
@@ -5407,7 +6349,7 @@ def api_assignment_writer_merge(project_id: str):
         return jsonify({"error": "Writer session not found"}), 404
     except ValueError as exc:
         trace("api.writer.merge.failed", project_id=project_id, error=str(exc))
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
         trace(
             "api.writer.merge.error",
@@ -5453,6 +6395,7 @@ def api_assignment_draft_get(project_id: str):
 
 
 @app.get("/api/debug/draft/<project_id>")
+@internal_tool
 def api_debug_draft_get(project_id: str):
     """Debug endpoint: return stored Draft JSON without transformations."""
     try:
@@ -5463,6 +6406,7 @@ def api_debug_draft_get(project_id: str):
 
 
 @app.get("/api/debug/section-review/<project_id>")
+@internal_tool
 def api_debug_section_review_get(project_id: str):
     """Return all section review results for project draft without transformations."""
     try:
@@ -5594,8 +6538,7 @@ def _collect_debug_input_payload() -> tuple[dict[str, Any], list[dict[str, Any]]
                     {
                         "filename": filename,
                         "file_type": file_type,
-                        "message": str(exc),
-                        "traceback": traceback.format_exc(),
+                        **_admin_error(exc),
                     }
                 )
 
@@ -5608,18 +6551,21 @@ def _collect_debug_input_payload() -> tuple[dict[str, Any], list[dict[str, Any]]
 
 
 def _write_debug_text_file(project_id: str, filename: str, content: str) -> str:
+    from services.safe_paths import safe_child_path
+
     base = project_files_dir(project_id)
     base.mkdir(parents=True, exist_ok=True)
-    path = base / filename
+    path = safe_child_path(base, filename)
     path.write_text(content or "", encoding="utf-8")
     return str(path)
 
 
 def _write_project_binary_file(project_id: str, filename: str, raw: bytes) -> str:
+    from services.safe_paths import safe_child_path, upload_basename
+
     base = project_files_dir(project_id)
     base.mkdir(parents=True, exist_ok=True)
-    safe_name = Path(filename).name
-    path = base / f"{uuid.uuid4()}_{safe_name}"
+    path = safe_child_path(base, f"{uuid.uuid4()}_{upload_basename(filename)}")
     path.write_bytes(raw)
     return str(path)
 
@@ -5749,12 +6695,12 @@ def _debug_run_stage(stage: str, project_id: str) -> dict[str, Any]:
     started = time.perf_counter()
     try:
         if stage == "requirement":
-            output = project_service.analyze_requirements(project_id).requirement.to_dict()
+            with free_ai_quota.scope(_free_ai_grant("analyze")):
+                output = project_service.analyze_requirements(project_id).requirement.to_dict()
         elif stage == "research":
             bundle = project_service.get_project(project_id)
             if not bundle.project.artifacts.get("payment_confirmed"):
-                project_service.calculate_pricing(project_id, priority="standard")
-                project_service.confirm_payment(project_id)
+                raise ValueError("Payment is not confirmed for this project.")
             output = project_service.run_research(project_id).to_dict()
         elif stage == "blueprint":
             output = project_service.run_blueprint(project_id).to_dict()
@@ -5782,16 +6728,17 @@ def _debug_run_stage(stage: str, project_id: str) -> dict[str, Any]:
             "end_time": _debug_now_iso(),
             "duration_ms": int((ended - started) * 1000),
             "output": None,
-            "error": {"message": str(exc), "traceback": traceback.format_exc()},
+            "error": _admin_error(exc),
         }
 
 
 @app.post("/api/debug/full-pipeline")
+@internal_tool
 def api_debug_full_pipeline():
     try:
         payload, parsed_files, file_errors = _collect_debug_input_payload()
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
 
     total_start = _debug_now_iso()
     started = time.perf_counter()
@@ -5800,6 +6747,8 @@ def api_debug_full_pipeline():
 
     try:
         project_id = _prepare_debug_project(payload)
+    except ValueError as exc:
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
             return (
                 jsonify(
@@ -5813,8 +6762,7 @@ def api_debug_full_pipeline():
                     "errors": [
                         {
                             "stage": "setup",
-                            "message": str(exc),
-                            "traceback": traceback.format_exc(),
+                            **_admin_error(exc),
                         }
                     ],
                 }
@@ -5827,13 +6775,7 @@ def api_debug_full_pipeline():
         result = _debug_run_stage(stage, project_id)
         stages[stage] = result
         if not result["success"]:
-            errors.append(
-                {
-                    "stage": stage,
-                    "message": result["error"]["message"],
-                    "traceback": result["error"]["traceback"],
-                }
-            )
+            errors.append({"stage": stage, **result["error"]})
             break
 
     ended = time.perf_counter()
@@ -5861,6 +6803,7 @@ def api_debug_full_pipeline():
 
 
 @app.post("/api/debug/run-stage")
+@internal_tool
 def api_debug_run_stage():
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
@@ -5873,18 +6816,15 @@ def api_debug_run_stage():
     if not project_id:
         if stage != "requirement":
             return jsonify({"error": "project_id is required for stages other than requirement"}), 400
-        project_id = _prepare_debug_project(payload)
+        try:
+            project_id = _prepare_debug_project(payload)
+        except ValueError as exc:
+            return jsonify({"error": _public_error(exc)}), 400
 
     result = _debug_run_stage(stage, project_id)
     errors = []
     if not result["success"]:
-        errors.append(
-            {
-                "stage": stage,
-                "message": result["error"]["message"],
-                "traceback": result["error"]["traceback"],
-            }
-        )
+        errors.append({"stage": stage, **result["error"]})
 
     return jsonify(
         {
@@ -5898,6 +6838,7 @@ def api_debug_run_stage():
 
 
 @app.get("/api/debug/project/<project_id>")
+@internal_tool
 def api_debug_project_get(project_id: str):
     data: dict[str, Any] = {"project_id": project_id}
     errors: list[dict[str, str]] = []
@@ -5906,22 +6847,22 @@ def api_debug_project_get(project_id: str):
         data["requirement"] = project_service.get_project(project_id).requirement.to_dict()
     except Exception as exc:  # noqa: BLE001
         data["requirement"] = None
-        errors.append({"stage": "requirement", "message": str(exc)})
+        errors.append({"stage": "requirement", "message": _admin_error(exc)["error"]})
     try:
         data["research"] = project_service.get_research_plan(project_id).to_dict()
     except Exception as exc:  # noqa: BLE001
         data["research"] = None
-        errors.append({"stage": "research", "message": str(exc)})
+        errors.append({"stage": "research", "message": _admin_error(exc)["error"]})
     try:
         data["blueprint"] = project_service.get_blueprint(project_id).to_dict()
     except Exception as exc:  # noqa: BLE001
         data["blueprint"] = None
-        errors.append({"stage": "blueprint", "message": str(exc)})
+        errors.append({"stage": "blueprint", "message": _admin_error(exc)["error"]})
     try:
         data["draft"] = project_service.get_draft(project_id).to_dict()
     except Exception as exc:  # noqa: BLE001
         data["draft"] = None
-        errors.append({"stage": "writer", "message": str(exc)})
+        errors.append({"stage": "writer", "message": _admin_error(exc)["error"]})
 
     data["errors"] = errors
     return jsonify(data)
@@ -5929,18 +6870,8 @@ def api_debug_project_get(project_id: str):
 
 @app.post("/api/reviewer/review")
 def api_reviewer_review():
-    payload = request.get_json(silent=True) or {}
-    for key in ("requirement_json", "research_plan", "blueprint", "draft"):
-        if not isinstance(payload.get(key), dict):
-            return jsonify({"error": f"{key} object is required"}), 400
-    report = reviewer_engine.review_draft(
-        requirement_json=payload["requirement_json"],
-        research_plan=payload["research_plan"],
-        blueprint=payload["blueprint"],
-        draft=payload["draft"],
-        project_id=payload.get("project_id"),
-    )
-    return jsonify(report.to_dict()), 201
+    """Standalone reviewer: paid LLM call with no price of its own, so it is off."""
+    return _standalone_disabled("REVIEWER_API_DISABLED", _STANDALONE_ENGINE_DISABLED_MESSAGE)
 
 
 @app.post("/api/assignment/projects/<project_id>/review")
@@ -5952,8 +6883,9 @@ def api_assignment_project_review(project_id: str):
     except KeyError:
         return jsonify({"error": "Project or draft not found"}), 404
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("assignment review failed project_id=%s", project_id)
         message = str(exc)
         return jsonify({"error": user_friendly_llm_error(message)}), llm_error_http_status(message)
     return jsonify({
@@ -5975,22 +6907,8 @@ def api_assignment_project_review_report(project_id: str):
 
 @app.post("/api/revision/revise")
 def api_revision_revise():
-    payload = request.get_json(silent=True) or {}
-    for key in ("requirement_json", "research_plan", "blueprint", "draft", "review_report"):
-        if not isinstance(payload.get(key), dict):
-            return jsonify({"error": f"{key} object is required"}), 400
-    try:
-        result = revision_engine.revise_draft(
-            requirement_json=payload["requirement_json"],
-            research_plan=payload["research_plan"],
-            blueprint=payload["blueprint"],
-            draft=payload["draft"],
-            review_report=payload["review_report"],
-            project_id=payload.get("project_id"),
-        )
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
-    return jsonify(result.to_dict()), 201
+    """Standalone reviser: paid LLM call with no price of its own, so it is off."""
+    return _standalone_disabled("REVISION_API_DISABLED", _STANDALONE_ENGINE_DISABLED_MESSAGE)
 
 
 @app.post("/api/assignment/projects/<project_id>/revision")
@@ -6001,10 +6919,10 @@ def api_assignment_project_revision(project_id: str):
         return jsonify({"error": "review_report must be an object"}), 400
     try:
         result = project_service.run_revision(project_id, review_report=review_report)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     payload_out = result.to_dict() if hasattr(result, "to_dict") else result
     return jsonify({"revision_result": payload_out})
 
@@ -6083,13 +7001,14 @@ def api_workspace_detect():
     started = time.monotonic()
     try:
         raw = zerogpt_client.detect(text)
-    except (ZeroGPTError, ZeroGPTProviderError) as exc:
+    except (ZeroGPTError, ZeroGPTProviderError):
         _refund_safe(user_id, cost, "detect")
-        return jsonify({"error": str(exc)}), 502
-    except Exception as exc:  # noqa: BLE001
+        app.logger.exception("workspace/detect provider error")
+        return jsonify({"error": "AI detection is temporarily unavailable. Your credits were refunded."}), 502
+    except Exception:  # noqa: BLE001
         _refund_safe(user_id, cost, "detect")
         app.logger.exception("workspace/detect failed")
-        return jsonify({"error": f"Detection failed: {exc}"}), 502
+        return jsonify({"error": "AI detection is temporarily unavailable. Your credits were refunded."}), 502
 
     latency_ms = int((time.monotonic() - started) * 1000)
     data = raw.get("data") if isinstance(raw, dict) else {}
@@ -6164,7 +7083,7 @@ def api_workspace_citations_search():
         result = citation_service.search(query, style=style, limit=limit)
     except Exception as exc:  # noqa: BLE001 — provider network/parse errors
         app.logger.warning("citation search failed: %s", exc)
-        return jsonify({"error": f"Citation search failed: {exc}"}), 502
+        return jsonify({"error": "Citation search is temporarily unavailable. Please try again."}), 502
 
     return jsonify(result)
 
@@ -6209,7 +7128,7 @@ def api_workspace_export():
     try:
         data = html_to_docx(title, str(payload.get("html") or ""))
     except EditorExportError as exc:
-        return jsonify({"success": False, "error": str(exc)}), 400
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
     return send_file(
         io.BytesIO(data),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -6231,7 +7150,7 @@ def api_text_export():
     try:
         data = (text_to_pdf if fmt == "pdf" else text_to_docx)(title, str(payload.get("text") or ""))
     except TextExportError as exc:
-        return jsonify({"success": False, "error": "EXPORT_FAILED", "message": str(exc)}), 400
+        return jsonify({"success": False, "error": "EXPORT_FAILED", "message": _public_error(exc)}), 400
     name = re.sub(r"[^\w\s.-]", "", title, flags=re.UNICODE).strip() or "humanized"
     mimetype = (
         "application/pdf"
@@ -6241,53 +7160,70 @@ def api_text_export():
     return send_file(io.BytesIO(data), mimetype=mimetype, as_attachment=True, download_name=f"{name}.{fmt}")
 
 
+# Standalone humanizer sessions: owner-only, never tied to a project. Paragraph-by-paragraph
+# StealthWriter runs have no price or allowance of their own (the humanizer page is billed
+# through /api/browser/providers/stealthwriter/humanize), so advancing is off.
+_standalone_humanizer_owners = _StandaloneSessionOwners()
+
+
+def _humanizer_session_not_found():
+    return jsonify({"error": "Humanizer session not found"}), 404
+
+
 @app.post("/api/humanizer/session")
 def api_humanizer_session_create():
+    user_id = economy_auth.current_user_id()
+    if user_id is None:
+        return _auth_required_json()
     payload = request.get_json(silent=True) or {}
+    if payload.get("project_id"):
+        return _standalone_project_id_rejected()
     for key in ("draft", "requirement_json", "blueprint"):
         if not isinstance(payload.get(key), dict):
             return jsonify({"error": f"{key} object is required"}), 400
+    if not _standalone_create_allowed(user_id):
+        return _standalone_rate_limited()
     try:
         session = humanizer_engine.create_session(
             draft=payload["draft"],
             requirement_json=payload["requirement_json"],
             blueprint=payload["blueprint"],
-            project_id=payload.get("project_id"),
         )
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
+    _standalone_humanizer_owners.register(session.id, user_id)
     return jsonify(session.to_dict()), 201
 
 
 @app.get("/api/humanizer/session/<session_id>")
 def api_humanizer_session_get(session_id: str):
-    try:
-        session = humanizer_engine.get_session(session_id)
-    except KeyError:
-        return jsonify({"error": "Humanizer session not found"}), 404
+    session = _standalone_humanizer_owners.owned(session_id, humanizer_engine.get_session)
+    if session is None:
+        return _humanizer_session_not_found()
     return jsonify(session.to_dict())
 
 
 @app.post("/api/humanizer/session/<session_id>/advance")
 def api_humanizer_session_advance(session_id: str):
-    try:
-        session = humanizer_engine.advance_paragraph(session_id)
-    except KeyError:
-        return jsonify({"error": "Humanizer session not found"}), 404
-    except ValueError as exc:
-        return jsonify({"error": str(exc)}), 502
-    return jsonify(session.to_dict())
+    if _standalone_humanizer_owners.owned(session_id, humanizer_engine.get_session) is None:
+        return _humanizer_session_not_found()
+    return _standalone_disabled(
+        "HUMANIZER_SESSION_API_DISABLED",
+        "Paragraph humanizer sessions are not available. Use the Humanizer page or an assignment project.",
+    )
 
 
 @app.post("/api/humanizer/session/<session_id>/merge")
 def api_humanizer_session_merge(session_id: str):
+    if _standalone_humanizer_owners.owned(session_id, humanizer_engine.get_session) is None:
+        return _humanizer_session_not_found()
     payload = request.get_json(silent=True) or {}
     try:
         draft = humanizer_engine.merge_humanized_draft(session_id, title=payload.get("title"))
     except KeyError:
-        return jsonify({"error": "Humanizer session not found"}), 404
+        return _humanizer_session_not_found()
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     return jsonify(draft.to_dict()), 201
 
 
@@ -6298,7 +7234,7 @@ def api_assignment_humanizer_start(project_id: str):
     except KeyError:
         return jsonify({"error": "Project or draft not found"}), 404
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     return jsonify(session.to_dict()), 201
 
 
@@ -6312,6 +7248,8 @@ def api_assignment_humanizer_advance(project_id: str):
         session = project_service.advance_humanizer(project_id, humanizer_session=humanizer_session)
     except KeyError:
         return jsonify({"error": "Humanizer session not found"}), 404
+    except PaymentRequiredError as exc:
+        return jsonify({"error": _public_error(exc)}), 400
     except ValueError as exc:
         from services.humanizer_engine.client_errors import humanizer_fail_payload
 
@@ -6321,10 +7259,11 @@ def api_assignment_humanizer_advance(project_id: str):
             exc,
         )
         payload = humanizer_fail_payload(exc)
-        # Non-retryable humanizer failures (e.g. LOGIN_REQUIRED) — refund like other products.
+        # Non-retryable humanizer failures (e.g. LOGIN_REQUIRED) — refund only if the shared
+        # rules allow it (recorded failure, no generated text yet).
         if payload.get("retryable") is False:
             refund_info = _assignment_auto_refund(
-                project_id, reason=f"humanizer:{exc}"
+                project_id, reason=f"humanizer:{type(exc).__name__}"
             )
             if refund_info:
                 payload.update(refund_info)
@@ -6367,7 +7306,7 @@ def api_assignment_humanizer_merge(project_id: str):
     except KeyError:
         return jsonify({"error": "Humanizer session not found"}), 404
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     return jsonify(draft.to_dict()), 201
 
 
@@ -6397,12 +7336,29 @@ def api_assignment_humanized_draft_get(project_id: str):
     return jsonify(draft.to_dict())
 
 
+# Standalone detection sessions: owner-only, never tied to a project. Each advance is a paid
+# ZeroGPT call with no price of its own (free checks go through /api/detector/free, paid ones
+# through /api/workspace/detect), so advancing is off.
+_standalone_detection_owners = _StandaloneSessionOwners()
+
+
+def _detection_session_not_found():
+    return jsonify({"error": "Detection session not found"}), 404
+
+
 @app.post("/api/ai-detection/session")
 def api_ai_detection_session_create():
+    user_id = economy_auth.current_user_id()
+    if user_id is None:
+        return _auth_required_json()
     payload = request.get_json(silent=True) or {}
+    if payload.get("project_id"):
+        return _standalone_project_id_rejected()
     for key in ("humanized_draft", "requirement_json"):
         if not isinstance(payload.get(key), dict):
             return jsonify({"error": f"{key} object is required"}), 400
+    if not _standalone_create_allowed(user_id):
+        return _standalone_rate_limited()
     try:
         from services.ai_detection_engine.models import DetectionThresholds
 
@@ -6410,39 +7366,41 @@ def api_ai_detection_session_create():
         session = ai_detection_engine.create_session(
             humanized_draft=payload["humanized_draft"],
             requirement_json=payload["requirement_json"],
-            project_id=payload.get("project_id"),
             thresholds=thresholds,
             humanizer_paragraph_ids=payload.get("humanizer_paragraph_ids"),
         )
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
+    _standalone_detection_owners.register(session.id, user_id)
     return jsonify(session.to_dict()), 201
 
 
 @app.get("/api/ai-detection/session/<session_id>")
 def api_ai_detection_session_get(session_id: str):
-    try:
-        session = ai_detection_engine.get_session(session_id)
-    except KeyError:
-        return jsonify({"error": "Detection session not found"}), 404
+    session = _standalone_detection_owners.owned(session_id, ai_detection_engine.get_session)
+    if session is None:
+        return _detection_session_not_found()
     return jsonify(session.to_dict())
 
 
 @app.post("/api/ai-detection/session/<session_id>/advance")
 def api_ai_detection_session_advance(session_id: str):
-    try:
-        session = ai_detection_engine.advance_paragraph(session_id)
-    except KeyError:
-        return jsonify({"error": "Detection session not found"}), 404
-    return jsonify(session.to_dict())
+    if _standalone_detection_owners.owned(session_id, ai_detection_engine.get_session) is None:
+        return _detection_session_not_found()
+    return _standalone_disabled(
+        "DETECTION_SESSION_API_DISABLED",
+        "Paragraph detection sessions are not available. Use the AI detector or an assignment project.",
+    )
 
 
 @app.post("/api/ai-detection/session/<session_id>/finalize")
 def api_ai_detection_session_finalize(session_id: str):
+    if _standalone_detection_owners.owned(session_id, ai_detection_engine.get_session) is None:
+        return _detection_session_not_found()
     try:
         session = ai_detection_engine.finalize_session(session_id)
     except KeyError:
-        return jsonify({"error": "Detection session not found"}), 404
+        return _detection_session_not_found()
     report = ai_detection_engine.get_report(session.report_id)
     return jsonify({"session": session.to_dict(), "detection_report": report.to_dict()})
 
@@ -6454,7 +7412,7 @@ def api_assignment_ai_detection_start(project_id: str):
     except KeyError:
         return jsonify({"error": "Project or humanized draft not found"}), 404
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     return jsonify(session.to_dict()), 201
 
 
@@ -6466,10 +7424,12 @@ def api_assignment_ai_detection_advance(project_id: str):
         return jsonify({"error": "detection_session must be an object"}), 400
     try:
         session = project_service.advance_ai_detection(project_id, detection_session=detection_session)
-    except KeyError as exc:
-        return jsonify({"error": str(exc) or "Detection session not found"}), 404
+    except KeyError:
+        return jsonify({"error": "Detection session not found"}), 404
+    except PaymentRequiredError as exc:
+        return jsonify({"error": _public_error(exc)}), 400
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 502
+        return jsonify({"error": _public_error(exc)}), 502
     except Exception as exc:  # noqa: BLE001
         trace(
             "api.detection.advance.error",
@@ -6477,7 +7437,7 @@ def api_assignment_ai_detection_advance(project_id: str):
             error=str(exc),
             error_type=type(exc).__name__,
         )
-        return jsonify({"error": str(exc) or "Detection step failed. Please try again."}), 502
+        return jsonify({"error": "Detection step failed. Please try again."}), 502
     return jsonify(session.to_dict())
 
 
@@ -6489,10 +7449,10 @@ def api_assignment_ai_detection_finalize(project_id: str):
         return jsonify({"error": "detection_session must be an object"}), 400
     try:
         report = project_service.finalize_ai_detection(project_id, detection_session=detection_session)
-    except KeyError as exc:
-        return jsonify({"error": str(exc) or "Detection session not found"}), 404
+    except KeyError:
+        return jsonify({"error": "Detection session not found"}), 404
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
         trace(
             "api.detection.finalize.error",
@@ -6508,10 +7468,10 @@ def api_assignment_ai_detection_finalize(project_id: str):
 def api_assignment_ai_detection_prepare_retry(project_id: str):
     try:
         project_service.prepare_detection_retry(project_id)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     return jsonify({"ok": True})
 
 
@@ -6535,49 +7495,39 @@ def api_assignment_detection_report_get(project_id: str):
 
 @app.post("/api/delivery/package")
 def api_delivery_package_prepare():
-    """Standalone Delivery Engine — packages prior pipeline outputs only."""
-    payload = request.get_json(silent=True) or {}
-    final_draft = payload.get("final_draft")
-    requirement_json = payload.get("requirement_json")
-    research_plan = payload.get("research_plan")
-    blueprint = payload.get("blueprint")
-    review_report = payload.get("review_report")
-    detection_report = payload.get("detection_report")
-    if not all(
-        isinstance(item, dict)
-        for item in (
-            final_draft,
-            requirement_json,
-            research_plan,
-            blueprint,
-            review_report,
-            detection_report,
-        )
-    ):
-        return jsonify({"error": "All pipeline artifacts are required as objects"}), 400
-    package = delivery_engine.prepare_package(
-        final_draft=final_draft,
-        requirement_json=requirement_json,
-        research_plan=research_plan,
-        blueprint=blueprint,
-        review_report=review_report,
-        detection_report=detection_report,
-        project_id=payload.get("project_id"),
-        revision_attempts=int(payload.get("revision_attempts", 0)),
-        humanization_attempts=int(payload.get("humanization_attempts", 0)),
-        completion_time=payload.get("completion_time"),
+    """Packages are built only from a project's own artifacts: POST /api/assignment/projects/<id>/delivery."""
+    if economy_auth.current_user_id() is None:
+        return _auth_required_json()
+    return _standalone_disabled(
+        "DELIVERY_API_DISABLED",
+        "Standalone delivery packaging is not available. Use your assignment project to download it.",
     )
-    return jsonify(package.to_dict())
+
+
+def _stage_failed(event: str, project_id: str, exc: Exception, message: str, status: int = 500):
+    """Unexpected stage failure: details go to the trace log, the caller gets a plain message."""
+    trace(f"api.{event}.error", project_id=project_id, error=str(exc), error_type=type(exc).__name__)
+    if isinstance(exc, (ProjectUpdateConflictError, ProjectChangedError)):
+        return _project_changed_response(exc)
+    app.logger.exception("assignment %s failed project_id=%s", event, project_id)
+    return jsonify({"error": message}), status
+
+
+def _project_changed_response(exc: Exception):
+    """409 for a save refused because another request changed the project first."""
+    return jsonify({"error": exc.code, "message": _public_error(exc)}), 409
 
 
 @app.post("/api/assignment/projects/<project_id>/citations/generate")
 def api_assignment_citations_generate(project_id: str):
     try:
         pack = project_service.run_citation_generation(project_id)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
+    except PaymentRequiredError as exc:
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": str(exc)}), 502
+        return _stage_failed("citations", project_id, exc, "Citation generation failed. Please try again.", 502)
     return jsonify({"citation_pack": pack.to_dict()})
 
 
@@ -6585,9 +7535,12 @@ def api_assignment_citations_generate(project_id: str):
 def api_assignment_format(project_id: str):
     try:
         formatted = project_service.run_formatting(project_id)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
+    except PaymentRequiredError as exc:
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
+        app.logger.exception("assignment formatting failed project_id=%s", project_id)
         message = str(exc)
         return jsonify({"error": user_friendly_llm_error(message)}), llm_error_http_status(message)
     return jsonify({"formatted_document": formatted})
@@ -6597,10 +7550,12 @@ def api_assignment_format(project_id: str):
 def api_assignment_validate_requirements(project_id: str):
     try:
         report = project_service.run_requirement_validation(project_id)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
+    except PaymentRequiredError as exc:
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": str(exc)}), 500
+        return _stage_failed("validate_requirements", project_id, exc, "Requirement check failed. Please try again.")
     # Always 200: passed/failed is business data in validation_report, not HTTP conflict.
     return jsonify({"validation_report": report})
 
@@ -6612,12 +7567,16 @@ def api_assignment_stage_retry(project_id: str, stage_name: str):
         return jsonify({"error": f"Unknown stage: {stage_name}"}), 400
     try:
         result = project_service.retry_stage(project_id, stage)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
+    except PaidScopeLimitExceededError as exc:
+        return _paid_scope_exceeded(exc)
+    except (ProjectChangedError, ProjectUpdateConflictError) as exc:
+        return _project_changed_response(exc)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": str(exc)}), 500
+        return _stage_failed("stage_retry", project_id, exc, "Retry failed. Please try again.")
     if hasattr(result, "to_dict"):
         payload = result.to_dict()
     elif isinstance(result, dict):
@@ -6631,18 +7590,16 @@ def api_assignment_stage_retry(project_id: str, stage_name: str):
 def api_assignment_delivery_prepare(project_id: str):
     try:
         package = project_service.run_delivery(project_id)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
+    except PaidScopeLimitExceededError as exc:
+        return _paid_scope_exceeded(exc)
+    except (ProjectChangedError, ProjectUpdateConflictError) as exc:
+        return _project_changed_response(exc)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
-        trace(
-            "api.delivery.error",
-            project_id=project_id,
-            error=str(exc),
-            error_type=type(exc).__name__,
-        )
-        return jsonify({"error": f"Delivery packaging failed: {exc}"}), 500
+        return _stage_failed("delivery", project_id, exc, "Delivery packaging failed. Please try again.")
     return jsonify(package.to_dict())
 
 
@@ -6660,8 +7617,8 @@ def api_assignment_delivery_package_get(project_id: str):
 def api_assignment_revision_chat_get(project_id: str):
     try:
         bundle = project_service.get_project(project_id)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
     user_id = economy_auth.current_user_id()
     if bundle.project.user_id and str(bundle.project.user_id) != str(user_id):
         return jsonify({"error": "Forbidden"}), 403
@@ -6674,8 +7631,8 @@ def api_assignment_chat_transcript_put(project_id: str):
     """Persist the Assignment chat thread so history reloads on open."""
     try:
         bundle = project_service.get_project(project_id)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
     user_id = economy_auth.current_user_id()
     if bundle.project.user_id and str(bundle.project.user_id) != str(user_id):
         return jsonify({"error": "Forbidden"}), 403
@@ -6685,8 +7642,10 @@ def api_assignment_chat_transcript_put(project_id: str):
         messages = []
     try:
         saved = project_service.save_chat_transcript(project_id, messages)
+    except ProjectUpdateConflictError as exc:
+        return _project_changed_response(exc)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     return jsonify({"ok": True, "messages": saved, "count": len(saved)})
 
 
@@ -6695,8 +7654,8 @@ def api_assignment_chat_transcript_put(project_id: str):
 def api_assignment_revision_chat_post(project_id: str):
     try:
         bundle = project_service.get_project(project_id)
-    except KeyError as exc:
-        return jsonify({"error": str(exc)}), 404
+    except KeyError:
+        return jsonify({"error": "Not found"}), 404
     user_id = economy_auth.current_user_id()
     if bundle.project.user_id and str(bundle.project.user_id) != str(user_id):
         return jsonify({"error": "Forbidden"}), 403
@@ -6704,55 +7663,101 @@ def api_assignment_revision_chat_post(project_id: str):
     message = str(payload.get("message") or "").strip()
     try:
         result = project_service.apply_client_revision(project_id, message)
+    except RevisionLimitError as exc:
+        return jsonify({"error": "REVISION_LIMIT_REACHED", "message": _public_error(exc)}), 409
+    except RevisionScopeExceededError as exc:
+        return jsonify({"error": "PAID_SCOPE_LIMIT_EXCEEDED", "message": _public_error(exc)}), 409
+    except (ProjectChangedError, ProjectUpdateConflictError) as exc:
+        return _project_changed_response(exc)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return jsonify({"error": _public_error(exc)}), 400
     except Exception as exc:  # noqa: BLE001
-        trace(
-            "api.revision_chat.error",
-            project_id=project_id,
-            error=str(exc),
-            error_type=type(exc).__name__,
-        )
-        return jsonify({"error": f"Revision failed: {exc}"}), 500
+        return _stage_failed("revision_chat", project_id, exc, "Revision failed. Please try again.")
     return jsonify(result)
 
 
 @app.get("/api/assignment/projects/<project_id>/download")
 def api_assignment_project_download(project_id: str):
     """Download the client deliverable (docx or pdf only — no JSON package)."""
+    denied = _download_access_denied(project_id)
+    if denied is not None:
+        return denied
     try:
         package = project_service.get_delivery_package(project_id)
     except KeyError:
-        try:
-            package = project_service.run_delivery(project_id)
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 400
-        except KeyError as exc:
-            return jsonify({"error": str(exc)}), 404
-        except Exception as exc:  # noqa: BLE001
-            trace(
-                "api.assignment_download.error",
-                project_id=project_id,
-                error=str(exc),
-                error_type=type(exc).__name__,
-            )
-            return jsonify({"error": f"Delivery packaging failed: {exc}"}), 500
+        package = None
+    if package is not None:
+        refused = _delivery_scope_refused(project_id, package)
+        if isinstance(refused, DeliveryPackageStaleError):
+            package = None
+        elif refused is not None:
+            return refused
+    if package is None:
+        package, failed = _rebuild_delivery(project_id, "Delivery packaging failed. Please try again.", 500)
+        if failed is not None:
+            return failed
 
-    file_path, mime, download_name = _resolve_client_deliverable(package, project_id)
-    if file_path is None or not file_path.exists():
-        try:
-            package = project_service.run_delivery(project_id)
-        except Exception as exc:  # noqa: BLE001
-            return jsonify({"error": f"Deliverable is not available: {exc}"}), 404
-        file_path, mime, download_name = _resolve_client_deliverable(package, project_id)
-    if file_path is None or not file_path.exists():
+    data, mime, download_name = _client_deliverable(package, project_id)
+    if data is None:
+        package, failed = _rebuild_delivery(project_id, "Deliverable is not available", 404)
+        if failed is not None:
+            return failed
+        data, mime, download_name = _client_deliverable(package, project_id)
+    if data is None:
         return jsonify({"error": "Deliverable is not available"}), 404
-    return send_file(
-        file_path,
-        mimetype=mime or "application/octet-stream",
-        as_attachment=True,
-        download_name=download_name or file_path.name,
-    )
+    return _send_deliverable(data, mime, download_name)
+
+
+def _paid_scope_exceeded(exc: Exception):
+    return jsonify({"error": "PAID_SCOPE_LIMIT_EXCEEDED", "message": _public_error(exc)}), 409
+
+
+def _rebuild_delivery(project_id: str, failure: str, failure_status: int):
+    """(package, None) from a fresh, scope-checked ``run_delivery``, or (None, error response)."""
+    try:
+        return project_service.run_delivery(project_id), None
+    except PaidScopeLimitExceededError as exc:
+        return None, _paid_scope_exceeded(exc)
+    except ValueError as exc:
+        return None, (jsonify({"error": _public_error(exc)}), 400)
+    except KeyError:
+        return None, (jsonify({"error": "Deliverable is not available"}), 404)
+    except Exception as exc:  # noqa: BLE001
+        trace(
+            "api.assignment_download.error",
+            project_id=project_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return None, (jsonify({"error": failure}), failure_status)
+
+
+def _delivery_scope_refused(project_id: str, package):
+    """None when ``package`` may be served; the stale error itself, or an error response.
+
+    Verified admins keep their existing access to stored packages.
+    """
+    if _is_verified_admin():
+        return None
+    try:
+        project_service.verify_delivery_package(project_id, package)
+    except DeliveryPackageStaleError as exc:
+        return exc
+    except PaidScopeLimitExceededError as exc:
+        return _paid_scope_exceeded(exc)
+    except KeyError:
+        return _not_found()
+    except ValueError as exc:
+        return jsonify({"error": _public_error(exc)}), 400
+    return None
+
+
+def _stored_package_refused(package):
+    """For routes that serve a stored package as is: a stale one is refused, never rebuilt."""
+    refused = _delivery_scope_refused(str(package.project_id), package)
+    if isinstance(refused, DeliveryPackageStaleError):
+        return jsonify({"error": "DELIVERY_PACKAGE_STALE", "message": _public_error(refused)}), 409
+    return refused
 
 
 @app.get("/api/delivery/packages/<package_id>/download")
@@ -6760,66 +7765,102 @@ def api_delivery_package_download(package_id: str):
     try:
         package = project_service.find_delivery_package(package_id)
     except KeyError:
-        return jsonify({"error": "Package not found"}), 404
-    file_path, mime, download_name = _resolve_client_deliverable(
-        package, str(package.project_id or "local")
-    )
-    if file_path is None or not file_path.exists():
+        return _not_found()
+    denied = _delivery_access_denied(package)
+    if denied is not None:
+        return denied
+    refused = _stored_package_refused(package)
+    if refused is not None:
+        return refused
+    data, mime, download_name = _client_deliverable(package, str(package.project_id or "local"))
+    if data is None:
         return jsonify({"error": "Deliverable is not available"}), 404
-    return send_file(
-        file_path,
-        mimetype=mime or "application/octet-stream",
-        as_attachment=True,
-        download_name=download_name or file_path.name,
-    )
+    return _send_deliverable(data, mime, download_name)
 
 
 @app.get("/api/delivery/files/<file_id>")
 def api_delivery_file_download(file_id: str):
+    package = project_service.trusted_delivery_package(
+        project_service.delivery.store.get_package_for_file(file_id)
+    )
+    if package is None:
+        return _not_found()
+    denied = _delivery_access_denied(package)
+    if denied is not None:
+        return denied
+    refused = _stored_package_refused(package)
+    if refused is not None:
+        return refused
+    file_record = next((item for item in package.files if item.id == file_id), None)
+    if file_record is None:
+        return _not_found()
     try:
-        file_record = delivery_engine.get_file(file_id)
-    except KeyError:
-        return jsonify({"error": "File not found"}), 404
-    file_path = Path(file_record.storage_path)
-    if not file_path.exists():
+        data = project_files.read_project_output(
+            str(package.project_id), project_files.DELIVERY_AREA, file_record.storage_path, root=PROJECT_STORAGE_ROOT
+        )
+    except project_files.ProjectFileDenied:
         return jsonify({"error": "Delivery file is not available"}), 404
+    download_name = str(file_record.filename or "") or PurePosixPath(str(file_record.storage_path)).name
+    return _send_deliverable(data, file_record.mime_type, download_name)
+
+
+_DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_DELIVERABLE_SUFFIXES = (".docx", ".pdf")
+
+
+def _deliverable_mime(name: str) -> str:
+    return "application/pdf" if name.lower().endswith(".pdf") else _DOCX_MIME
+
+
+def _send_deliverable(data: bytes, mime: str | None, download_name: str | None):
     return send_file(
-        file_path,
-        mimetype=file_record.mime_type or "application/octet-stream",
+        io.BytesIO(data),
+        mimetype=mime or "application/octet-stream",
         as_attachment=True,
-        download_name=file_record.filename,
+        download_name=download_name or "Assignment.docx",
     )
 
 
-def _resolve_client_deliverable(package, project_id: str):
-    """Return (path, mime, download_name) for the single client-facing file."""
-    project_dir = PROJECT_STORAGE_ROOT / str(getattr(package, "project_id", None) or project_id) / "delivery"
-    client_name = getattr(package, "client_filename", None)
-    if client_name:
-        candidate = project_dir / str(client_name)
-        if candidate.is_file():
-            mime = "application/pdf" if candidate.suffix.lower() == ".pdf" else (
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-            return candidate, mime, candidate.name
+def _client_deliverable(package, project_id: str):
+    """(bytes, mime, download_name) of the single client-facing file, or (None, None, None).
+
+    Names and paths come from persisted package JSON, so each is read only as a regular file
+    directly inside this project's delivery directory under the configured storage root.
+    """
+    project_id = str(getattr(package, "project_id", None) or project_id)
+    area = project_files.DELIVERY_AREA
+    client_name = str(getattr(package, "client_filename", None) or "")
+    if client_name.lower().endswith(_DELIVERABLE_SUFFIXES):
+        try:
+            data = project_files.read_project_output_name(project_id, area, client_name, root=PROJECT_STORAGE_ROOT)
+        except project_files.ProjectFileDenied:
+            pass
+        else:
+            return data, _deliverable_mime(client_name), client_name
 
     for entry in getattr(package, "files", None) or []:
         ftype = str(getattr(entry, "file_type", "") or "")
         if ftype not in {"final_assignment_docx", "final_assignment_pdf"}:
             continue
-        path = Path(getattr(entry, "storage_path", "") or "")
-        if path.is_file():
-            return path, getattr(entry, "mime_type", None), getattr(entry, "filename", None) or path.name
+        storage_path = getattr(entry, "storage_path", None)
+        try:
+            data = project_files.read_project_output(project_id, area, storage_path, root=PROJECT_STORAGE_ROOT)
+        except project_files.ProjectFileDenied:
+            continue
+        name = str(getattr(entry, "filename", None) or "") or PurePosixPath(str(storage_path)).name
+        return data, getattr(entry, "mime_type", None), name
 
-    # Fallbacks for older packages (prefer docx over zip/json).
-    for pattern in ("*.docx", "*.pdf"):
-        matches = sorted(p for p in project_dir.glob(pattern) if p.is_file())
-        if matches:
-            path = matches[0]
-            mime = "application/pdf" if path.suffix.lower() == ".pdf" else (
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            )
-            return path, mime, path.name
+    # Fallbacks for older packages (prefer docx over pdf).
+    names = project_files.project_output_names(project_id, area, root=PROJECT_STORAGE_ROOT)
+    for suffix in _DELIVERABLE_SUFFIXES:
+        for name in names:
+            if not name.endswith(suffix):
+                continue
+            try:
+                data = project_files.read_project_output_name(project_id, area, name, root=PROJECT_STORAGE_ROOT)
+            except project_files.ProjectFileDenied:
+                continue
+            return data, _deliverable_mime(name), name
     return None, None, None
 
 
@@ -6834,21 +7875,8 @@ def _safe_download_name(package) -> str:
 
 @app.post("/api/research/plan")
 def api_research_plan_build():
-    """Standalone Research Engine entrypoint — no raw files, only parsed inputs."""
-    payload = request.get_json(silent=True) or {}
-    requirement_json = payload.get("requirement_json")
-    if not isinstance(requirement_json, dict):
-        return jsonify({"error": "requirement_json object is required"}), 400
-    parsed_raw = payload.get("parsed_documents") or []
-    if not isinstance(parsed_raw, list):
-        return jsonify({"error": "parsed_documents must be an array"}), 400
-    documents = [ParsedDocument.from_dict(item) for item in parsed_raw]
-    plan = research_engine.build_plan(
-        requirement_json=requirement_json,
-        parsed_documents=documents,
-        project_id=payload.get("project_id"),
-    )
-    return jsonify(plan.to_dict()), 201
+    """Standalone Research Engine: paid LLM call with no price of its own, so it is off."""
+    return _standalone_disabled("RESEARCH_API_DISABLED", _STANDALONE_ENGINE_DISABLED_MESSAGE)
 
 
 @app.get("/api/assignment/projects/<project_id>/pipeline")
@@ -6860,21 +7888,53 @@ def api_assignment_project_pipeline(project_id: str):
     return jsonify(pipeline_project.to_dict())
 
 
+_TIMELINE_STAGE_FAILED = "This step failed. Please try again."
+
+
+def _project_metadata_access_denied(project_id: str):
+    """Owner or verified admin; everyone else gets the same 404 as a missing project."""
+    user_id = economy_auth.current_user_id()
+    if user_id is None:
+        return _auth_required_json()
+    try:
+        owner = str(project_service.store.require_project(project_id).user_id or "").strip()
+    except KeyError:
+        return _not_found()
+    if _is_verified_admin() or (owner and owner == str(user_id)):
+        return None
+    return _not_found()
+
+
 @app.get("/api/project/<project_id>/timeline")
 def api_project_timeline(project_id: str):
+    denied = _project_metadata_access_denied(project_id)
+    if denied is not None:
+        return denied
     try:
         timeline = project_service.get_project_timeline(project_id)
     except KeyError:
-        return jsonify({"error": "Project timeline not found"}), 404
+        return _not_found()
+    # Stage errors hold raw provider/exception text; engine versions are internal.
+    hidden = set() if _is_verified_admin() else {"model_used"}
+    timeline = [
+        {
+            **{key: value for key, value in entry.items() if key not in hidden},
+            "error": _TIMELINE_STAGE_FAILED if entry.get("error") else None,
+        }
+        for entry in timeline
+    ]
     return jsonify({"project_id": project_id, "timeline": timeline})
 
 
 @app.get("/api/project/<project_id>/status")
 def api_project_status(project_id: str):
+    denied = _project_metadata_access_denied(project_id)
+    if denied is not None:
+        return denied
     try:
         status = project_service.get_project_lifecycle_status(project_id)
     except KeyError:
-        return jsonify({"error": "Project status not found"}), 404
+        return _not_found()
     return jsonify({"project_id": project_id, **status})
 
 
@@ -6955,9 +8015,91 @@ def turnitin():
     )
 
 
-def _turnitin_row_api(row: dict[str, Any]) -> dict[str, Any]:
+def _turnitin_row_api(row: dict[str, Any], *, refunded: bool = False) -> dict[str, Any]:
+    if refunded:
+        return _turnitin_refunded_row_api(row)
     row = turnitin_service.maybe_repair_highlights_percent(row)
     return turnitin_service.to_api_row(row)
+
+
+_TURNITIN_REFUNDED_MESSAGE = "This check was refunded, so its results are no longer available."
+
+
+def _turnitin_refunded_row_api(row: dict[str, Any]) -> dict[str, Any]:
+    """A refunded check shows that it existed, never its scores, reports or provider ids."""
+    return {
+        "id": row["id"],
+        "filename": row["filename"],
+        "similarity": None,
+        "similarityDisplay": None,
+        "aiScore": None,
+        "aiScoreDisplay": None,
+        "aiHighlights": None,
+        "aiHighlightsDisplay": None,
+        "status": "refunded",
+        "createdAt": row.get("created_at"),
+        "hasReport": False,
+        "hasSimilarityReport": False,
+        "hasAiReport": False,
+        "hasHighlightsReport": False,
+        "highlightsStatus": None,
+        "errorMessage": _TURNITIN_REFUNDED_MESSAGE,
+        "externalId": None,
+        "aiUnavailable": None,
+        "provider": (row.get("meta") or {}).get("provider") or "plagdetect",
+        "refunded": True,
+    }
+
+
+def _turnitin_refunded_ids(user_id: int) -> set[str]:
+    """Submission ids whose check charge the wallet ledger refunded (raises if unreadable)."""
+    from services.economy.db import connect as economy_connect
+
+    with economy_connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT ref_id FROM transactions "
+            "WHERE user_id = ? AND kind = 'refund' AND feature = 'turnitin' AND ref_id IS NOT NULL",
+            (int(user_id),),
+        ).fetchall()
+    return {str(r["ref_id"]) for r in rows}
+
+
+def _turnitin_unavailable(code: str = "TURNITIN_UNAVAILABLE"):
+    return jsonify({"success": False, "error": code,
+                    "message": "Reports are temporarily unavailable. Please try again shortly."}), 503
+
+
+def _turnitin_owned(submission_id: str):
+    """(user_id, row, refunded, None) for the caller's own check, else (..., error response).
+
+    Ownership comes from the session; the refund state from the wallet ledger. If the ledger
+    cannot be read the request fails closed instead of trusting the submission row.
+    """
+    user_id = int(economy_auth.current_user_id())
+    row = turnitin_service.store.get_for_user(submission_id, user_id)
+    if row is None:
+        return user_id, None, False, (jsonify({"success": False, "error": "Not found"}), 404)
+    try:
+        refunded = str(row["id"]) in _turnitin_refunded_ids(user_id)
+    except Exception:  # noqa: BLE001
+        app.logger.exception("turnitin ledger check failed submission=%s", submission_id)
+        return user_id, None, False, _turnitin_unavailable()
+    return user_id, row, refunded, None
+
+
+def _turnitin_not_entitled():
+    return jsonify({"success": False, "error": "NOT_ENTITLED", "message": _TURNITIN_REFUNDED_MESSAGE}), 403
+
+
+def _turnitin_provider_failed(code: str, message: str):
+    return jsonify({"success": False, "error": code, "message": message}), 502
+
+
+def _turnitin_bool_flag(body: dict, key: str, default: bool):
+    value = body.get(key, default)
+    if isinstance(value, bool):
+        return value
+    raise ValueError(key)
 
 
 @app.get("/api/turnitin/reports")
@@ -6965,17 +8107,23 @@ def _turnitin_row_api(row: dict[str, Any]) -> dict[str, Any]:
 def api_turnitin_reports():
     user_id = economy_auth.current_user_id()
     rows = turnitin_service.store.list_for_user(user_id)
-    return jsonify({"success": True, "reports": [_turnitin_row_api(r) for r in rows]})
+    try:
+        refunded = _turnitin_refunded_ids(int(user_id))
+    except Exception:  # noqa: BLE001
+        app.logger.exception("turnitin ledger check failed user=%s", user_id)
+        return _turnitin_unavailable()
+    return jsonify({"success": True, "reports": [
+        _turnitin_row_api(r, refunded=str(r["id"]) in refunded) for r in rows
+    ]})
 
 
 @app.get("/api/turnitin/submissions/<submission_id>")
 @economy_auth.email_verified_required
 def api_turnitin_submission(submission_id: str):
-    user_id = economy_auth.current_user_id()
-    row = turnitin_service.store.get_for_user(submission_id, user_id)
-    if row is None:
-        return jsonify({"success": False, "error": "Not found"}), 404
-    return jsonify({"success": True, "report": _turnitin_row_api(row)})
+    _user_id, row, refunded, denied = _turnitin_owned(submission_id)
+    if denied is not None:
+        return denied
+    return jsonify({"success": True, "report": _turnitin_row_api(row, refunded=refunded)})
 
 
 @app.delete("/api/turnitin/submissions/<submission_id>")
@@ -6987,14 +8135,19 @@ def api_turnitin_delete(submission_id: str):
     return jsonify({"success": True})
 
 
+_HIGHLIGHTS_BUSY = "AI Highlights already in progress."
+_HIGHLIGHTS_START_FAILED = "Could not start AI Highlights. Please try again later."
+
+
 @app.post("/api/turnitin/submissions/<submission_id>/highlights")
 @economy_auth.email_verified_required
 def api_turnitin_request_highlights(submission_id: str):
     """Queue a PlagDetect AI Highlights job (optional, user-initiated)."""
-    user_id = economy_auth.current_user_id()
-    row = turnitin_service.store.get_for_user(submission_id, user_id)
-    if row is None:
-        return jsonify({"success": False, "error": "Not found"}), 404
+    user_id, row, refunded, denied = _turnitin_owned(submission_id)
+    if denied is not None:
+        return denied
+    if refunded:
+        return _turnitin_not_entitled()
     provider = (row.get("meta") or {}).get("provider") or "plagdetect"
     if provider == "turnitin":
         if row.get("status") != "completed":
@@ -7003,18 +8156,20 @@ def api_turnitin_request_highlights(submission_id: str):
             return jsonify({"success": False, "error": "Turnitin submission id missing."}), 400
         hl_status = (row.get("highlights_status") or "").strip().lower()
         if hl_status in ("queued", "running"):
-            return jsonify({"success": False, "error": "AI Highlights already in progress."}), 409
+            return jsonify({"success": False, "error": _HIGHLIGHTS_BUSY}), 409
         if row.get("has_highlights_report"):
             return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
+        if not turnitin_service.store.claim_highlights(submission_id, user_id):
+            return jsonify({"success": False, "error": _HIGHLIGHTS_BUSY}), 409
         try:
             started = turnitin_service.start_tca_highlights(
                 submission_id=submission_id,
                 user_id=user_id,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             turnitin_service.store.update(submission_id, highlights_status="failed")
             app.logger.exception("turnitin/highlights TCA failed")
-            return jsonify({"success": False, "error": f"Could not start highlights: {exc}"}), 500
+            return _turnitin_provider_failed("HIGHLIGHTS_START_FAILED", _HIGHLIGHTS_START_FAILED)
         updated = turnitin_service.store.get_for_user(submission_id, user_id)
         return jsonify(
             {
@@ -7032,7 +8187,7 @@ def api_turnitin_request_highlights(submission_id: str):
 
     hl_status = (row.get("highlights_status") or "").strip().lower()
     if hl_status in ("queued", "running"):
-        return jsonify({"success": False, "error": "AI Highlights already in progress."}), 409
+        return jsonify({"success": False, "error": _HIGHLIGHTS_BUSY}), 409
     if row.get("has_highlights_report"):
         return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
 
@@ -7055,12 +8210,14 @@ def api_turnitin_request_highlights(submission_id: str):
                     "error": "AI Highlights need a non-zero AI score (or *%).",
                 }
             ), 400
+        if not turnitin_service.store.claim_highlights(submission_id, user_id):
+            return jsonify({"success": False, "error": _HIGHLIGHTS_BUSY}), 409
         try:
             turnitin_service.start_plagdetect_api_highlights(submission_id=submission_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             turnitin_service.store.update(submission_id, highlights_status="failed")
             app.logger.exception("turnitin/highlights PlagDetect API failed")
-            return jsonify({"success": False, "error": f"Could not start highlights: {exc}"}), 500
+            return _turnitin_provider_failed("HIGHLIGHTS_START_FAILED", _HIGHLIGHTS_START_FAILED)
         updated = turnitin_service.store.get_for_user(submission_id, user_id)
         return jsonify(
             {
@@ -7082,6 +8239,8 @@ def api_turnitin_request_highlights(submission_id: str):
             }
         ), 400
 
+    if not turnitin_service.store.claim_highlights(submission_id, user_id):
+        return jsonify({"success": False, "error": _HIGHLIGHTS_BUSY}), 409
     try:
         from services.browser.providers import plagdetect as pd
 
@@ -7108,10 +8267,10 @@ def api_turnitin_request_highlights(submission_id: str):
             job_id=job.id,
             job_manager=job_manager,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         turnitin_service.store.update(submission_id, highlights_status="failed")
         app.logger.exception("turnitin/highlights failed")
-        return jsonify({"success": False, "error": f"Could not queue highlights: {exc}"}), 500
+        return _turnitin_provider_failed("HIGHLIGHTS_START_FAILED", _HIGHLIGHTS_START_FAILED)
 
     updated = turnitin_service.store.get_for_user(submission_id, user_id)
     return jsonify(
@@ -7125,43 +8284,60 @@ def api_turnitin_request_highlights(submission_id: str):
     )
 
 
+_FETCH_BUSY = "Report download already in progress."
+_FETCH_FAILED = "Could not download the report. Please try again later."
+
+
 @app.post("/api/turnitin/submissions/<submission_id>/fetch-reports")
 @economy_auth.email_verified_required
 def api_turnitin_fetch_reports(submission_id: str):
     """Re-download missing Similarity / AI / Highlights PDFs from PlagDetect."""
-    user_id = economy_auth.current_user_id()
-    row = turnitin_service.store.get_for_user(submission_id, user_id)
-    if row is None:
-        return jsonify({"success": False, "error": "Not found"}), 404
+    user_id, row, refunded, denied = _turnitin_owned(submission_id)
+    if denied is not None:
+        return denied
+    if refunded:
+        return _turnitin_not_entitled()
     if row.get("status") != "completed":
         return jsonify({"success": False, "error": "Wait for the check to finish first."}), 400
     if not row.get("external_id"):
         return jsonify({"success": False, "error": "Submission id missing."}), 400
+    body = request.get_json(silent=True)
+    if body is None:
+        body = {}
+    if not isinstance(body, dict):
+        return jsonify({"success": False, "error": "INVALID_REQUEST", "message": "Expected a JSON object."}), 400
+    try:
+        want_sim = _turnitin_bool_flag(body, "similarity", True)
+        want_ai = _turnitin_bool_flag(body, "ai", True)
+        want_hl = _turnitin_bool_flag(body, "highlights", False)
+    except ValueError:
+        return jsonify({"success": False, "error": "INVALID_REQUEST",
+                        "message": "similarity, ai and highlights must be true or false."}), 400
     provider = (row.get("meta") or {}).get("provider") or "plagdetect"
     if provider == "turnitin":
         if row.get("has_similarity_report"):
             return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
+        if not turnitin_service.store.claim_fetch(submission_id, user_id):
+            return jsonify({"success": False, "error": _FETCH_BUSY}), 409
         try:
             turnitin_service.fetch_tca_similarity_pdf(submission_id)
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             app.logger.exception("turnitin/fetch-reports TCA failed")
-            return jsonify(
-                {"success": False, "error": f"Could not download Turnitin PDF: {exc}"}
-            ), 500
+            return _turnitin_provider_failed("REPORT_DOWNLOAD_FAILED", _FETCH_FAILED)
+        finally:
+            turnitin_service.store.release_fetch(submission_id)
         updated = turnitin_service.store.get_for_user(submission_id, user_id)
         return jsonify({"success": True, "report": _turnitin_row_api(updated or row)})
 
-    body = request.get_json(silent=True) or {}
-    want_sim = body.get("similarity", True)
-    want_ai = body.get("ai", True)
-    want_hl = body.get("highlights", False)
-
-    fetch_similarity = bool(want_sim) and not row.get("has_similarity_report")
-    fetch_ai = bool(want_ai) and not row.get("has_ai_report")
-    fetch_highlights = bool(want_hl) and not row.get("has_highlights_report")
+    fetch_similarity = want_sim and not row.get("has_similarity_report")
+    fetch_ai = want_ai and not row.get("has_ai_report")
+    fetch_highlights = want_hl and not row.get("has_highlights_report")
 
     if not fetch_similarity and not fetch_ai and not fetch_highlights:
         return jsonify({"success": True, "report": _turnitin_row_api(row), "already": True})
+
+    if not turnitin_service.store.claim_fetch(submission_id, user_id):
+        return jsonify({"success": False, "error": _FETCH_BUSY}), 409
 
     if turnitin_service.uses_plagdetect_http(row):
         try:
@@ -7171,11 +8347,11 @@ def api_turnitin_fetch_reports(submission_id: str):
                 fetch_ai=fetch_ai,
                 fetch_highlights=fetch_highlights,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             app.logger.exception("turnitin/fetch-reports PlagDetect API failed")
-            return jsonify(
-                {"success": False, "error": f"Could not download PlagDetect PDF: {exc}"}
-            ), 500
+            return _turnitin_provider_failed("REPORT_DOWNLOAD_FAILED", _FETCH_FAILED)
+        finally:
+            turnitin_service.store.release_fetch(submission_id)
         updated = turnitin_service.store.get_for_user(submission_id, user_id)
         return jsonify({"success": True, "report": _turnitin_row_api(updated or row)})
 
@@ -7203,9 +8379,10 @@ def api_turnitin_fetch_reports(submission_id: str):
             job_id=job.id,
             job_manager=job_manager,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
+        turnitin_service.store.release_fetch(submission_id)
         app.logger.exception("turnitin/fetch-reports failed")
-        return jsonify({"success": False, "error": f"Could not queue report download: {exc}"}), 500
+        return _turnitin_provider_failed("REPORT_DOWNLOAD_FAILED", _FETCH_FAILED)
 
     return jsonify(
         {
@@ -7225,11 +8402,10 @@ def api_turnitin_fetch_reports(submission_id: str):
 @app.get("/api/turnitin/submissions/<submission_id>/report/<kind>")
 @economy_auth.email_verified_required
 def api_turnitin_report_download(submission_id: str, kind: str):
-    from services.turnitin_service.store import resolve_report_path
-
-    user_id = economy_auth.current_user_id()
-    row = turnitin_service.store.get_for_user(submission_id, user_id)
-    if row is None:
+    _user_id, row, refunded, denied = _turnitin_owned(submission_id)
+    if denied is not None:
+        return denied
+    if refunded:
         return jsonify({"success": False, "error": "Not found"}), 404
     if kind not in ("similarity", "ai", "highlights"):
         return jsonify({"success": False, "error": "Invalid report type."}), 400
@@ -7238,8 +8414,14 @@ def api_turnitin_report_download(submission_id: str, kind: str):
         "ai": "ai_report_path",
         "highlights": "ai_highlights_report_path",
     }
-    key = key_map[kind]
-    path = resolve_report_path(row.get(key))
+    path = row.get(key_map[kind])
+    if path:
+        # Only files inside this check's own report directory are ever served.
+        own_dir = turnitin_service.report_dir(str(row["id"])).resolve()
+        resolved = Path(path).resolve()
+        if not resolved.is_file() or own_dir not in resolved.parents:
+            app.logger.warning("turnitin report path outside its directory submission=%s kind=%s", submission_id, kind)
+            path = None
     if not path:
         return jsonify({"success": False, "error": "Report not ready yet."}), 404
     download_name = f"{Path(row['filename']).stem}_{kind}_report.pdf"
@@ -7340,10 +8522,11 @@ def api_turnitin_check():
                 wallet=wallet,
                 refund_fn=_refund_safe,
             )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         _refund_safe(user_id, cost, "turnitin", ref_id=submission_id)
         app.logger.exception("turnitin/check failed")
-        return jsonify({"success": False, "error": f"Could not queue check: {exc}"}), 500
+        return jsonify({"success": False, "error": "CHECK_START_FAILED",
+                        "message": "Could not start the check. Your credits were refunded."}), 502
 
     _record_usage_safe(
         user_id,
@@ -7368,6 +8551,7 @@ def api_turnitin_check():
 
 
 @app.get("/api/browser/providers/plagdetect/config")
+@admin_only
 def api_browser_plagdetect_config():
     from services.browser.providers import plagdetect as pd
 
@@ -7375,7 +8559,8 @@ def api_browser_plagdetect_config():
     return jsonify({"success": True, **cfg})
 
 
-@app.get("/api/browser/providers/plagdetect/status")
+@app.post("/api/browser/providers/plagdetect/status")
+@admin_only
 def api_browser_plagdetect_status():
     try:
         ensure_engine_started()
@@ -7385,10 +8570,11 @@ def api_browser_plagdetect_status():
         return jsonify({"success": True, **payload})
     except Exception as exc:  # noqa: BLE001
         app.logger.exception("plagdetect status failed")
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": False, **_admin_error(exc)}), 500
 
 
-@app.get("/api/browser/providers/plagdetect/login")
+@app.post("/api/browser/providers/plagdetect/login")
+@admin_only
 def api_browser_plagdetect_login():
     try:
         ensure_engine_started()
@@ -7398,7 +8584,7 @@ def api_browser_plagdetect_login():
         return jsonify(payload)
     except Exception as exc:  # noqa: BLE001
         app.logger.exception("plagdetect login failed")
-        return jsonify({"success": False, "error": str(exc)}), 500
+        return jsonify({"success": False, **_admin_error(exc)}), 500
 
 
 @app.route("/pricing")
@@ -7457,11 +8643,8 @@ def _send_telegram_text(text: str) -> tuple[dict[str, Any] | None, str | None, i
     """POST sendMessage. Returns (tg_json, error_message, http_status_on_error)."""
     token, chat_id = _telegram_credentials()
     if not token or not chat_id:
-        return (
-            None,
-            "Telegram is not configured. Set TELEGRAM_TOKEN and CHAT_ID environment variables.",
-            503,
-        )
+        app.logger.error("feedback: Telegram is not configured (TELEGRAM_TOKEN / CHAT_ID missing)")
+        return None, "Support chat is temporarily unavailable.", 503
 
     body = text if len(text) <= TELEGRAM_TEXT_MAX_LEN else text[: TELEGRAM_TEXT_MAX_LEN - 1] + "..."
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -7473,30 +8656,90 @@ def _send_telegram_text(text: str) -> tuple[dict[str, Any] | None, str | None, i
         )
     except requests.Timeout:
         return None, "Telegram did not respond in time.", 502
-    except requests.RequestException:
-        app.logger.exception("feedback: Telegram request failed")
+    except requests.RequestException as exc:
+        app.logger.warning("feedback: Telegram request failed: %s", describe_exception(exc))
         return None, "Could not reach Telegram.", 502
 
     try:
         tg_data = tg_res.json()
     except ValueError:
         return None, "Unexpected response from Telegram.", 502
-
-        if not tg_res.ok or not tg_data.get("ok"):
-            desc = tg_data.get("description") if isinstance(tg_data, dict) else None
-            app.logger.warning(
-                "feedback: Telegram API error %s — %s",
-                tg_res.status_code,
-                desc or (tg_res.text[:200] if tg_res.text else ""),
-            )
+    if not tg_res.ok or not isinstance(tg_data, dict) or not tg_data.get("ok"):
+        desc = tg_data.get("description") if isinstance(tg_data, dict) else None
+        app.logger.warning(
+            "feedback: Telegram API error %s — %s",
+            tg_res.status_code,
+            redact(str(desc or "")[:200]),
+        )
         return None, "Could not deliver message.", 502
-    return tg_data if isinstance(tg_data, dict) else {}, None, 200
+    return tg_data, None, 200
+
+
+# Support chat messages per account and per client network, shared by all workers. The same
+# text from the same account within FEEDBACK_DUPLICATE_WINDOW_SECONDS is a double submit and is
+# neither stored nor sent again.
+FEEDBACK_MAX_CHARS = 4000
+FEEDBACK_DEFAULT_PER_USER_HOUR = 20
+FEEDBACK_DEFAULT_PER_USER_DAY = 60
+FEEDBACK_DEFAULT_PER_IP_HOUR = 60
+FEEDBACK_DEFAULT_PER_IP_DAY = 200
+FEEDBACK_DEFAULT_DUPLICATE_WINDOW_SECONDS = 120
+_TELEGRAM_TEXT_MAX = 4096
+
+
+def _feedback_wait(user_id: int, message: str) -> int | str | None:
+    """None when the message may be sent (counted), seconds to wait, or ``"duplicate"``."""
+    from services import rate_limit
+
+    wait = rate_limit.hit_all(
+        [
+            (
+                f"feedback:user:{int(user_id)}",
+                [
+                    (rate_limit.env_limit("FEEDBACK_LIMIT_PER_USER_HOUR", FEEDBACK_DEFAULT_PER_USER_HOUR), 3600),
+                    (rate_limit.env_limit("FEEDBACK_LIMIT_PER_USER_DAY", FEEDBACK_DEFAULT_PER_USER_DAY), 86400),
+                ],
+            ),
+            (
+                f"feedback:ip:{_client_source()}",
+                [
+                    (rate_limit.env_limit("FEEDBACK_LIMIT_PER_IP_HOUR", FEEDBACK_DEFAULT_PER_IP_HOUR), 3600),
+                    (rate_limit.env_limit("FEEDBACK_LIMIT_PER_IP_DAY", FEEDBACK_DEFAULT_PER_IP_DAY), 86400),
+                ],
+            ),
+        ]
+    )
+    if wait is not None:
+        return wait
+    digest = hashlib.sha256(" ".join(message.split()).encode("utf-8")).hexdigest()[:40]
+    window = rate_limit.env_limit("FEEDBACK_DUPLICATE_WINDOW_SECONDS", FEEDBACK_DEFAULT_DUPLICATE_WINDOW_SECONDS)
+    if rate_limit.hit(f"feedback:dup:{int(user_id)}:{digest}", [(1, window)]) is not None:
+        return "duplicate"
+    return None
+
+
+def _feedback_outbound(format_telegram_outbound, user: dict, message: str) -> str:
+    """Telegram text for a support message, shortened to fit one Telegram message."""
+
+    def build(body: str) -> str:
+        return format_telegram_outbound(
+            message=body,
+            user_id=int(user["id"]),
+            email=str(user.get("email") or ""),
+            name=str(user.get("name") or ""),
+        )
+
+    outbound = build(message)
+    excess = len(outbound) - _TELEGRAM_TEXT_MAX
+    if excess > 0:
+        outbound = build(message[: max(0, len(message) - excess - 1)] + "…")
+    return outbound[:_TELEGRAM_TEXT_MAX]
 
 
 def _feedback_from_request():
     """
     Parse JSON {\"message\": \"...\"}, store SupportMessage, send to Telegram.
-    Requires a signed-in user so replies can be routed back via User ID.
+    Requires a signed-in user so replies can be routed back through the stored Telegram binding.
     Returns (flask Response, http_status).
     """
     try:
@@ -7526,18 +8769,25 @@ def _feedback_from_request():
             payload = {}
         if not isinstance(payload, dict):
             return jsonify({"error": "Body must be a JSON object."}), 400
-        message = (payload.get("message") or "").strip()
+        if set(payload) - {"message"}:
+            return jsonify({"error": "Only a message can be sent."}), 400
+        message = payload.get("message")
+        message = message.strip() if isinstance(message, str) else ""
         if not message:
             return jsonify({"error": "Message is required."}), 400
+        if len(message) > FEEDBACK_MAX_CHARS:
+            return jsonify({"error": f"Message is too long ({FEEDBACK_MAX_CHARS} characters max)."}), 400
 
         user_id = int(user["id"])
+        wait = _feedback_wait(user_id, message)
+        if wait == "duplicate":
+            return jsonify({"error": "You already sent this message.", "duplicate": True}), 409
+        if wait is not None:
+            limited = jsonify({"error": "Too many messages. Please try again later."})
+            limited.headers["Retry-After"] = str(wait)
+            return limited, 429
         saved = save_support_message(user_id=user_id, sender="user", message=message)
-        outbound = format_telegram_outbound(
-            message=message,
-            user_id=user_id,
-            email=str(user.get("email") or ""),
-            name=str(user.get("name") or ""),
-        )
+        outbound = _feedback_outbound(format_telegram_outbound, user, message)
         tg_data, err, err_status = _send_telegram_text(outbound)
         if err:
             # Message is already saved so the transcript is not lost if Telegram is down.
@@ -7566,6 +8816,7 @@ def _feedback_from_request():
                     telegram_message_id=int(tg_mid),
                     user_id=user_id,
                     support_message_id=int(saved.id) if saved.id else None,
+                    chat_id=_telegram_credentials()[1],
                 )
         except Exception:  # noqa: BLE001
             app.logger.exception("feedback: failed to bind telegram message_id")
@@ -7614,75 +8865,30 @@ def api_chat_messages():
 def api_telegram_webhook():
     """Telegram Bot API webhook — admin Reply → SupportMessage(sender=admin).
 
-    Set the bot webhook to this URL. Optional ``TELEGRAM_WEBHOOK_SECRET`` must
-    match ``?secret=`` or ``X-Telegram-Bot-Api-Secret-Token`` when configured.
+    Set the bot webhook to this URL with ``secret_token`` = ``TELEGRAM_WEBHOOK_SECRET``; the
+    secret is accepted only in the ``X-Telegram-Bot-Api-Secret-Token`` header. Without the
+    secret configured the webhook is closed; support replies then arrive through the getUpdates
+    poller. Sender, chat, reply binding and dedupe checks live in ``process_admin_update``.
     """
-    from services.economy.support_chat import (
-        normalize_chat_id,
-        parse_admin_reply_from_update,
-        save_support_message,
-    )
+    from services.economy.support_chat import process_admin_update
 
     expected_secret = (os.environ.get("TELEGRAM_WEBHOOK_SECRET") or "").strip()
-    if expected_secret:
-        got = (
-            (request.args.get("secret") or "").strip()
-            or (request.headers.get("X-Telegram-Bot-Api-Secret-Token") or "").strip()
-        )
-        if got != expected_secret:
-            app.logger.warning("telegram webhook: bad secret")
-            return jsonify({"ok": False, "error": "unauthorized"}), 401
+    got = (request.headers.get("X-Telegram-Bot-Api-Secret-Token") or "").strip()
+    if not expected_secret or not hmac.compare_digest(got.encode("utf-8"), expected_secret.encode("utf-8")):
+        app.logger.warning("telegram webhook: missing or bad secret")
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
 
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         app.logger.info("telegram webhook: non-json body ignored")
-        return jsonify({"ok": True, "ignored": True, "reason": "non_json"}), 200
-
-    message = payload.get("message") or payload.get("edited_message") or {}
-    _, admin_chat_id = _telegram_credentials()
-    if admin_chat_id and isinstance(message, dict):
-        chat = message.get("chat") or {}
-        incoming_chat = normalize_chat_id(chat.get("id"))
-        expected_chat = normalize_chat_id(admin_chat_id)
-        if incoming_chat and expected_chat and incoming_chat != expected_chat:
-            # Do not hard-drop: still try to route if User ID / map resolve.
-            # Mismatched CHAT_ID formatting used to silently kill all replies.
-            app.logger.warning(
-                "telegram webhook: chat_id mismatch incoming=%s expected=%s (continuing)",
-                incoming_chat,
-                expected_chat,
-            )
-
-    parsed = parse_admin_reply_from_update(payload)
-    if not parsed:
-        has_reply = isinstance(message, dict) and isinstance(message.get("reply_to_message"), dict)
-        app.logger.info(
-            "telegram webhook: ignored has_reply=%s keys=%s",
-            has_reply,
-            sorted(payload.keys()),
-        )
-        return jsonify({"ok": True, "ignored": True, "reason": "not_a_routable_reply"}), 200
+        return jsonify({"ok": True, "status": "ignored"}), 200
 
     try:
-        saved = save_support_message(
-            user_id=int(parsed["user_id"]),
-            sender="admin",
-            message=str(parsed["message"]),
-        )
-    except ValueError as exc:
-        app.logger.warning("telegram webhook: persist rejected: %s", exc)
-        return jsonify({"ok": True, "ignored": True, "reason": str(exc)}), 200
-    except Exception:  # noqa: BLE001
-        app.logger.exception("telegram webhook: persist failed")
+        result = process_admin_update(payload, source="webhook")
+    except Exception as exc:  # noqa: BLE001
+        app.logger.error("telegram webhook: persist failed: %s", describe_exception(exc))
         return jsonify({"ok": False, "error": "persist_failed"}), 500
-
-    app.logger.info(
-        "telegram webhook: admin reply saved user_id=%s msg_id=%s via=%s",
-        saved.user_id,
-        saved.id,
-        parsed.get("via"),
-    )
-    return jsonify({"ok": True, "message": saved.to_dict(), "via": parsed.get("via")}), 200
+    return jsonify({"ok": True, "status": result.status}), 200
 
 
 @app.post("/parse-requirements")
@@ -7691,21 +8897,33 @@ def parse_requirements_view():
     Extract formatting hints from free-form text (brief, OCR, etc.).
     Uses Gemini when GOOGLE_API_KEY is set; otherwise returns heuristic mock data.
     """
-    payload = request.get_json(silent=True) or {}
-    text = (payload.get("text") or "").strip()
+    payload = request.get_json(silent=True)
+    text = payload.get("text") if isinstance(payload, dict) else None
+    text = text.strip() if isinstance(text, str) else ""
     if not text:
         return jsonify({"error": "Provide non-empty text in a JSON body: {\"text\": \"...\"}"}), 400
+    if len(text) > MAX_TEXT_CHARS:
+        return jsonify({"error": f"Requirements text is too long (max {MAX_TEXT_CHARS:,} characters)."}), 400
 
     using_local_parser = not (os.environ.get("GOOGLE_API_KEY") or "").strip()
 
+    grant = _free_ai_grant("brief")
     try:
-        requirements = parse_requirements(text)
-    except Exception as e:  # noqa: BLE001
+        with free_ai_quota.scope(grant):
+            requirements = parse_requirements(text)
+    except Exception:  # noqa: BLE001
         app.logger.exception("parse-requirements failed")
-        return jsonify({"error": f"Could not parse requirements: {str(e)}"}), 502
+        return jsonify({"error": "Could not parse requirements. Please try again."}), 502
 
     form = form_autofill_from_parsed(requirements)
-    return jsonify({"requirements": requirements, "form": form, "mock": using_local_parser})
+    return jsonify(
+        {
+            "requirements": _public_ai_payload(requirements),
+            "form": form,
+            "mock": using_local_parser,
+            "ai_quota": grant.notice(),
+        }
+    )
 
 
 def _extract_requirement_text_from_upload(file_storage) -> str:
@@ -7747,10 +8965,10 @@ def api_extract_brief_text():
     try:
         text = _extract_requirement_text_from_upload(f).strip()
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": _public_error(e)}), 400
     except RuntimeError as e:
         app.logger.warning("extract-brief-text: %s", e)
-        return jsonify({"error": str(e)}), 503
+        return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
     except Exception:  # noqa: BLE001
         app.logger.exception("extract-brief-text failed")
         return jsonify({"error": "Could not read the brief file."}), 400
@@ -7775,10 +8993,10 @@ def api_extract_requirements():
         try:
             uploaded_text = _extract_requirement_text_from_upload(f).strip()
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": _public_error(e)}), 400
         except RuntimeError as e:
             app.logger.warning("extract-requirements: %s", e)
-            return jsonify({"error": str(e)}), 503
+            return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
         except Exception:  # noqa: BLE001
             app.logger.exception("extract-requirements failed")
             return jsonify({"error": "Could not read the requirements file."}), 400
@@ -7789,19 +9007,22 @@ def api_extract_requirements():
     if len(text) > MAX_TEXT_CHARS:
         return jsonify({"error": f"Requirements text is too long (max {MAX_TEXT_CHARS:,} characters)."}), 400
 
+    grant = _free_ai_grant("brief")
     try:
-        requirements = parse_requirements(text)
-    except Exception as e:  # noqa: BLE001
+        with free_ai_quota.scope(grant):
+            requirements = parse_requirements(text)
+    except Exception:  # noqa: BLE001
         app.logger.exception("extract-requirements parse failed")
-        return jsonify({"error": f"Could not parse requirements: {str(e)}"}), 502
+        return jsonify({"error": "Could not parse requirements. Please try again."}), 502
 
     return jsonify(
         {
-            "requirements": requirements,
+            "requirements": _public_ai_payload(requirements),
             "form": form_autofill_from_parsed(requirements),
             "source_text": text,
             "source_text_chars": len(text),
             "mock": not (os.environ.get("GOOGLE_API_KEY") or "").strip(),
+            "ai_quota": grant.notice(),
         }
     )
 
@@ -7826,13 +9047,13 @@ def api_requirements_ocr():
             return jsonify({"error": "Empty file."}), 400
         text = extract_text_from_image_stream(io.BytesIO(raw))
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": _public_error(e)}), 400
     except RuntimeError as e:
         app.logger.warning("requirements-ocr: %s", e)
-        return jsonify({"error": str(e)}), 503
-    except Exception as e:  # noqa: BLE001
+        return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
+    except Exception:  # noqa: BLE001
         app.logger.exception("requirements-ocr failed")
-        return jsonify({"error": f"OCR failed: {str(e)}"}), 500
+        return jsonify({"error": "OCR failed. Please try another image."}), 500
 
     if not text.strip():
         return (
@@ -7846,6 +9067,22 @@ def api_requirements_ocr():
         )
 
     return jsonify({"text": text})
+
+
+_REFERENCE_NETWORK_MODES = frozenset({"url", "doi", "isbn", "title"})
+
+
+def _reference_fetch_wait() -> int | None:
+    """Anonymous lookups make outbound requests: limit them per client network across workers."""
+    from services import rate_limit
+
+    return rate_limit.hit(
+        f"reference:ip:{_client_source()}",
+        [
+            (rate_limit.env_limit("REFERENCE_LOOKUPS_PER_MINUTE", 20), 60),
+            (rate_limit.env_limit("REFERENCE_LOOKUPS_PER_HOUR", 200), 3600),
+        ],
+    )
 
 
 @app.post("/api/reference")
@@ -7878,6 +9115,15 @@ def api_reference():
     if style.upper() not in ENGINE_CITATION_STYLES:
         style = "APA"
 
+    if mode in _REFERENCE_NETWORK_MODES:
+        wait = _reference_fetch_wait()
+        if wait:
+            return (
+                jsonify({"error": "Too many lookups. Please wait a moment and try again."}),
+                429,
+                {"Retry-After": str(wait)},
+            )
+
     try:
         result = generate_citation(
             mode=mode,
@@ -7891,10 +9137,10 @@ def api_reference():
             paste=(payload.get("paste") or payload.get("text") or "").strip() or None,
         )
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": _public_error(e)}), 400
     except requests.RequestException as e:
-        app.logger.exception("reference generation failed")
-        return jsonify({"error": f"Could not retrieve metadata: {str(e)}"}), 502
+        app.logger.warning("reference generation failed: %s", describe_exception(e))
+        return jsonify({"error": "Could not retrieve metadata for this reference."}), 502
     except Exception:  # noqa: BLE001
         app.logger.exception("reference generation failed")
         return jsonify({"error": "Could not generate citation."}), 500
@@ -7959,10 +9205,10 @@ def api_extract_document():
         raw = f.read()
         text = extract_text_from_document_bytes(raw, f.filename, f.mimetype)
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": _public_error(e)}), 400
     except RuntimeError as e:
         app.logger.warning("extract-document: %s", e)
-        return jsonify({"error": str(e)}), 503
+        return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
     except Exception:  # noqa: BLE001
         app.logger.exception("extract-document failed")
         return jsonify({"error": "Could not read the uploaded file."}), 400
@@ -8012,10 +9258,10 @@ def api_check_document():
             doc_text = extract_text_from_document_bytes(raw, f.filename, f.mimetype)
             uploaded_filename = f.filename
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": _public_error(e)}), 400
         except RuntimeError as e:
             app.logger.warning("check-document: %s", e)
-            return jsonify({"error": str(e)}), 503
+            return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
         except Exception:  # noqa: BLE001
             app.logger.exception("check-document: invalid upload")
             return jsonify({"error": "Could not read the uploaded file."}), 400
@@ -8028,15 +9274,17 @@ def api_check_document():
             {"error": "Provide non-empty text or upload a .docx or .pdf with readable content."}
         ), 400
 
-    # Academic Check is free for everyone (no login, no coins).
+    # Academic Check is free for everyone (no login, no coins); its AI parts use the free allowance.
+    grant = _free_ai_grant("document")
     try:
-        result = check_document(
-            text=text,
-            requirements=requirements,
-            doc=doc,
-            document_type=doc_type,
-            parsed_requirements=parsed_requirements,
-        )
+        with free_ai_quota.scope(grant):
+            result = check_document(
+                text=text,
+                requirements=requirements,
+                doc=doc,
+                document_type=doc_type,
+                parsed_requirements=parsed_requirements,
+            )
     except Exception:  # noqa: BLE001
         app.logger.exception("check-document failed")
         return jsonify({"error": "Document check failed. Please try again."}), 500
@@ -8044,6 +9292,8 @@ def api_check_document():
     if result.get("error"):
         return jsonify({"error": result["error"]}), 400
 
+    result = _public_ai_payload(result)
+    result["ai_quota"] = grant.notice()
     meta = result.setdefault("meta", {})
     if uploaded_filename:
         meta["document_source"] = {
@@ -8089,10 +9339,10 @@ def api_structure_recovery():
                 doc = Document(io.BytesIO(raw))
             doc_text = extract_text_from_document_bytes(raw, f.filename, f.mimetype)
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": _public_error(e)}), 400
         except RuntimeError as e:
             app.logger.warning("structure-recovery: %s", e)
-            return jsonify({"error": str(e)}), 503
+            return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
         except Exception:  # noqa: BLE001
             app.logger.exception("structure-recovery: invalid upload")
             return jsonify({"error": "Could not read the uploaded file."}), 400
@@ -8110,38 +9360,51 @@ def api_structure_recovery():
         return jsonify(
             {"error": "Provide non-empty text or upload a .docx or .pdf with readable content."}
         ), 400
+    if len(text) > MAX_TEXT_CHARS:
+        return jsonify({"error": f"Document text is too long (max {MAX_TEXT_CHARS:,} characters)."}), 400
 
+    grant = _free_ai_grant("document")
     try:
-        result = recover_structure(text=text or None, doc=doc, document_type=doc_type)
+        with free_ai_quota.scope(grant):
+            result = recover_structure(text=text or None, doc=doc, document_type=doc_type)
     except Exception:  # noqa: BLE001
         app.logger.exception("structure-recovery failed")
         return jsonify({"error": "Structure recovery failed. Please try again."}), 500
 
+    result = _public_ai_payload(result)
     if result.get("error"):
         if result.get("ai_failure"):
             return jsonify(result), 503
         return jsonify({"error": result["error"]}), 400
 
+    result["ai_quota"] = grant.notice()
     return jsonify(result)
 
 
 @app.post("/api/preview-formatted")
 def preview_formatted():
     """Server-side After preview — same formatting pipeline as /api/format."""
-    payload = request.get_json(silent=True) or {}
-    text = (payload.get("text") or "").strip()
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    text = payload.get("text")
+    text = text.strip() if isinstance(text, str) else ""
     if not text:
         return jsonify({"error": "No text to preview."}), 400
+    if len(text) > MAX_TEXT_CHARS:
+        return jsonify({"error": f"Document text is too long (max {MAX_TEXT_CHARS:,} characters)."}), 400
     settings = payload.get("settings") or {}
-    job = parse_job(settings)
-    document_type = (payload.get("document_type") or settings.get("document_type") or "").strip() or None
-    required_sections: list[str] = []
-    brief = (payload.get("requirements_text") or settings.get("requirements_text") or "").strip()
-    if brief:
-        from formatter.requirement_headings import extract_format_section_labels
-
-        required_sections = extract_format_section_labels(brief)
+    if not isinstance(settings, dict):
+        return jsonify({"error": "settings must be an object."}), 400
     try:
+        job = parse_job(settings)
+        document_type = str(payload.get("document_type") or settings.get("document_type") or "").strip() or None
+        required_sections: list[str] = []
+        brief = str(payload.get("requirements_text") or settings.get("requirements_text") or "").strip()
+        if brief:
+            from formatter.requirement_headings import extract_format_section_labels
+
+            required_sections = extract_format_section_labels(brief[:MAX_TEXT_CHARS])
         clean_spaces = (
             _truthy(settings, "clean_extra_spaces")
             if "clean_extra_spaces" in settings
@@ -8160,9 +9423,9 @@ def preview_formatted():
             cleaning_spaces=clean_spaces,
             cleaning_breaks=clean_breaks,
         )
-    except Exception as exc:
+    except Exception:
         app.logger.exception("preview-formatted failed")
-        return jsonify({"error": str(exc)}), 500
+        return jsonify({"error": "Could not build the preview."}), 500
     return jsonify({"html": html})
 
 
@@ -8198,10 +9461,10 @@ def format_document():
                     cleaning_breaks=clean_breaks,
                 )
             except ValueError as e:
-                return jsonify({"error": str(e)}), 400
+                return jsonify({"error": _public_error(e)}), 400
             except RuntimeError as e:
                 app.logger.warning("format: %s", e)
-                return jsonify({"error": str(e)}), 503
+                return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
         elif pasted_raw.strip():
             doc = build_document_from_inputs(
                 pasted_raw=pasted_raw,
@@ -8244,13 +9507,16 @@ def format_document():
 
             required_sections = extract_format_section_labels(brief)
 
+        ai_grant = None
         if job.auto_headings or job.requirement_headings:
-            recon = reconstruct_document_before_format(
-                doc,
-                document_type=doc_type,
-                required_sections=required_sections if job.requirement_headings else None,
-                prefer_ai=job.auto_headings,
-            )
+            ai_grant = _free_ai_grant("document")
+            with free_ai_quota.scope(ai_grant):
+                recon = reconstruct_document_before_format(
+                    doc,
+                    document_type=doc_type,
+                    required_sections=required_sections if job.requirement_headings else None,
+                    prefer_ai=job.auto_headings,
+                )
             paragraph_assignments = recon.assignments
             recovery_mode = recon.recovery_mode
             ai_powered = recon.ai_powered
@@ -8280,10 +9546,10 @@ def format_document():
                     cleaning_breaks=False,
                 )
             except ValueError as e:
-                return jsonify({"error": f"Cover page: {e}"}), 400
+                return jsonify({"error": "Cover page: " + _public_error(e)}), 400
             except RuntimeError as e:
                 app.logger.warning("format cover: %s", e)
-                return jsonify({"error": str(e)}), 503
+                return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
 
         cover = None if cover_doc is not None else parse_cover_page(
             request.form, fallback_paragraphs=fallback_paragraphs
@@ -8339,10 +9605,13 @@ def format_document():
         )
         if debug_report:
             response.headers["X-Structure-Recovery-Debug"] = json.dumps(debug_report.to_dict())
+        notice = ai_grant.notice() if ai_grant is not None else None
+        if notice:
+            response.headers["X-AI-Quota"] = notice["reason"]
         return response
-    except Exception as e:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         app.logger.exception("Format failed")
-        return jsonify({"error": f"Could not format document: {str(e)}"}), 500
+        return jsonify({"error": "Could not format the document. Please try again."}), 500
 
 
 def formatter_v2_enabled() -> bool:
@@ -8373,10 +9642,85 @@ def api_format_v2_profile(style: str):
 
         return jsonify(profile_payload(style))
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 404
-    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": _public_error(exc)}), 404
+    except Exception:  # noqa: BLE001
         app.logger.exception("format-v2 profile failed")
-        return jsonify({"error": f"Could not load profile: {exc}"}), 500
+        return jsonify({"error": "Could not load profile."}), 500
+
+
+def _free_ai_grant(pool_name: str) -> free_ai_quota.Grant:
+    """The caller's free AI grant. Identity comes from the server session and the trusted client IP only."""
+    from services import free_humanize
+
+    user = economy_auth.current_user()
+    verified = user is not None and economy_auth.user_email_verified(user)
+    guest_subject = guest_ip_subject = None
+    if not verified:
+        ip = free_humanize.client_ip(request)
+        salt = str(app.secret_key)
+        guest_subject = free_humanize.guest_subject(ip, free_humanize.guest_session_id(session), salt)
+        guest_ip_subject = free_humanize.guest_ip_subject(ip, salt)
+    return free_ai_quota.grant_for(
+        pool_name,
+        user_id=int(user["id"]) if user is not None else None,
+        email_verified=verified,
+        guest_subject=guest_subject,
+        guest_ip_subject=guest_ip_subject,
+    )
+
+
+_FREE_AI_LIMIT_MESSAGES = {
+    "brief": (
+        "You have used today’s brief readings. Fill the settings in by hand or come back tomorrow.",
+        "You have used today’s free brief readings. Create a free account to read more briefs.",
+    ),
+    "document": (
+        "You have used today’s free AI structure checks. Come back tomorrow.",
+        "You have used today’s free AI structure checks. Create a free account to get more.",
+    ),
+    "format_chat": ("You have used today’s chat edits. Come back tomorrow.", None),
+    "analyze": ("You have used today’s requirement analyses. Come back tomorrow.", None),
+}
+
+
+def _free_ai_refusal(grant: free_ai_quota.Grant):
+    reason = grant.reason
+    if reason == free_ai_quota.RATE_LIMITED:
+        resp, status = _detect_error("RATE_LIMITED", "Too many requests. Wait a minute and try again.", 429)
+        resp.headers["Retry-After"] = "60"
+        return resp, status
+    if reason == free_ai_quota.EMAIL_NOT_VERIFIED:
+        return _detect_error("EMAIL_NOT_VERIFIED", "Please verify your email before continuing.", 403)
+    if reason == free_ai_quota.REGISTER_REQUIRED:
+        return _detect_error("REGISTER_REQUIRED", "Create a free account to continue.", 403)
+    if reason in (free_ai_quota.QUOTA_UNAVAILABLE, free_ai_quota.NO_QUOTA_SCOPE):
+        return _detect_error("TEMPORARILY_UNAVAILABLE", "This feature is unavailable right now. Please try again later.", 503)
+    if reason == free_ai_quota.INPUT_TOO_LONG:
+        return _detect_error("INPUT_TOO_LONG", "The uploaded material is too long to analyse.", 400)
+    user_message, guest_message = _FREE_AI_LIMIT_MESSAGES[grant.pool.name]
+    if grant.guest and guest_message:
+        return _detect_error("REGISTER_REQUIRED", guest_message, 403, reason="FREE_LIMIT_REACHED")
+    return _detect_error("FREE_LIMIT_REACHED", user_message, 429)
+
+
+_PUBLIC_AI_DIAGNOSTIC_KEYS = frozenset(
+    {"enabled", "model", "api_call_success", "failure_reason", "strategy", "fallback_activated", "token_usage_estimate"}
+)
+
+
+def _public_ai_payload(value):
+    """Copy of a result with provider diagnostics cut down to fields that carry no provider error text."""
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if key == "gemini_diagnostics" and isinstance(item, dict):
+                out[key] = {k: v for k, v in item.items() if k in _PUBLIC_AI_DIAGNOSTIC_KEYS}
+            else:
+                out[key] = _public_ai_payload(item)
+        return out
+    if isinstance(value, list):
+        return [_public_ai_payload(item) for item in value]
+    return value
 
 
 @app.post("/api/extract-requirements-v2")
@@ -8392,18 +9736,14 @@ def api_extract_requirements_v2():
     brief = (request.form.get("requirements_text") or "").strip()
     if not brief:
         return jsonify({"error": "Paste requirements text first."}), 400
-    if len(brief) > MAX_TEXT_CHARS:
-        return (
-            jsonify(
-                {
-                    "error": (
-                        f"Requirements text is too long "
-                        f"(max {MAX_TEXT_CHARS:,} characters)."
-                    )
-                }
-            ),
-            400,
+    max_chars = min(MAX_TEXT_CHARS, free_ai_quota.max_chars("brief"))
+    if len(brief) > max_chars:
+        return _detect_error(
+            "BRIEF_TOO_LONG", f"Requirements text is too long (max {max_chars:,} characters).", 400
         )
+    grant = _free_ai_grant("brief")
+    if not grant.acquire():
+        return _free_ai_refusal(grant)
 
     style_raw = (
         request.form.get("format_style")
@@ -8411,6 +9751,11 @@ def api_extract_requirements_v2():
         or "harvard"
     )
 
+    with free_ai_quota.scope(grant):
+        return _extract_requirements_v2_reserved(brief, style_raw, grant)
+
+
+def _extract_requirements_v2_reserved(brief: str, style_raw: str, grant: free_ai_quota.Grant):
     try:
         from formatter_v2.pipeline import resolve_style_name
         from formatter_v2.profiles import load_profile
@@ -8434,9 +9779,10 @@ def api_extract_requirements_v2():
                 "style": (extracted.style.value if extracted.style else style.value),
             }
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         app.logger.exception("extract-requirements-v2 failed")
-        return jsonify({"error": f"Could not analyse brief: {exc}"}), 502
+        grant.release_if_unused()
+        return jsonify({"error": "Could not analyse the brief. Please try again."}), 502
 
 
 @app.post("/api/format-v2")
@@ -8485,10 +9831,10 @@ def format_document_v2_route():
                     cleaning_breaks=clean_breaks,
                 )
             except ValueError as e:
-                return jsonify({"error": str(e)}), 400
+                return jsonify({"error": _public_error(e)}), 400
             except RuntimeError as e:
                 app.logger.warning("format-v2: %s", e)
-                return jsonify({"error": str(e)}), 503
+                return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
             source = doc
         elif pasted_raw.strip():
             source = [line for line in pasted_raw.replace("\r\n", "\n").split("\n")]
@@ -8505,7 +9851,7 @@ def format_document_v2_route():
         try:
             overrides = parse_user_overrides_from_form(request.form)
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": _public_error(e)}), 400
 
         style = (
             request.form.get("format_style")
@@ -8526,9 +9872,9 @@ def format_document_v2_route():
                 notices=result.notices,
             )
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         app.logger.exception("Format V2 failed")
-        return jsonify({"error": f"Could not format document: {str(e)}"}), 500
+        return jsonify({"error": "Could not format document. Please try again."}), 500
 
 
 @app.get("/api/format-v2/download/<document_id>")
@@ -8576,6 +9922,8 @@ def format_v2_chat_route():
     message = (request.form.get("message") or "").strip()
     if not message:
         return jsonify({"error": "message is required"}), 400
+    if len(message) > free_ai_quota.max_chars("format_chat"):
+        return _detect_error("MESSAGE_TOO_LONG", "This message is too long.", 400)
 
     try:
         from formatter_v2.chat.apply import apply_chat_edit
@@ -8591,7 +9939,7 @@ def format_v2_chat_route():
         try:
             current_overrides = parse_user_overrides_from_form(request.form)
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": _public_error(e)}), 400
 
         try:
             source = load_format_v2_source_from_form(
@@ -8601,10 +9949,10 @@ def format_v2_chat_route():
                 is_supported_document_upload=is_supported_document_upload,
             )
         except ValueError as e:
-            return jsonify({"error": str(e)}), 400
+            return jsonify({"error": _public_error(e)}), 400
         except RuntimeError as e:
             app.logger.warning("format-v2 chat: %s", e)
-            return jsonify({"error": str(e)}), 503
+            return jsonify({"error": _public_error(e, "This feature is temporarily unavailable. Please try again later.")}), 503
 
         style = (
             request.form.get("format_style")
@@ -8613,12 +9961,16 @@ def format_v2_chat_route():
             or "harvard"
         )
 
-        new_overrides, summary, rejected = apply_chat_edit(
-            message,
-            current_overrides,
-            style,
-            GeminiChatClient(),
-        )
+        grant = _free_ai_grant("format_chat")
+        if not grant.acquire():
+            return _free_ai_refusal(grant)
+        with free_ai_quota.scope(grant):
+            new_overrides, summary, rejected = apply_chat_edit(
+                message,
+                current_overrides,
+                style,
+                GeminiChatClient(),
+            )
 
         result = format_document_v2(source, new_overrides, style)
         document_id = get_document_store().save(result.docx_bytes)
@@ -8633,12 +9985,13 @@ def format_v2_chat_route():
                 ],
             )
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         app.logger.exception("Format V2 chat failed")
-        return jsonify({"error": f"Could not apply edit: {str(e)}"}), 500
+        return jsonify({"error": "Could not apply the edit. Please try again."}), 500
 
 
-@app.get("/api/test/zerogpt")
+@app.post("/api/test/zerogpt")
+@internal_tool
 def api_test_zerogpt():
     """Connectivity test endpoint for raw ZeroGPT Detection API response."""
     sample_text = "This essay discusses artificial intelligence in higher education."
@@ -8647,20 +10000,26 @@ def api_test_zerogpt():
         raw = zerogpt_client.detect(sample_text)
         return jsonify(raw), 200
     except (ZeroGPTError, ZeroGPTProviderError) as exc:
-        return jsonify({"error": str(exc)}), 502
+        return jsonify(_admin_error(exc)), 502
 
 
 @app.post("/api/ai/orchestrator/review")
 def api_ai_orchestrator_review():
-    """Run AIOrchestrator-compatible review flow for Review Engine."""
-    payload = request.get_json(silent=True) or {}
-    text = str(payload.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "text is required"}), 400
-    return jsonify(orchestrator_review(text, client=zerogpt_client)), 200
+    """Disabled: detect -> humanize -> detect is three paid ZeroGPT calls with no price or allowance.
+
+    Free checks go through /api/detector/free, paid ones through /api/workspace/detect and
+    the Humanizer page; assignment reviews run inside the paid project pipeline.
+    """
+    if economy_auth.current_user_id() is None:
+        return _auth_required_json()
+    return _standalone_disabled(
+        "ORCHESTRATOR_API_DISABLED",
+        "This review flow is not available. Use the AI detector or the Humanizer page.",
+    )
 
 
-@app.get("/api/test/zerogpt-humanizer")
+@app.post("/api/test/zerogpt-humanizer")
+@internal_tool
 def api_test_zerogpt_humanizer():
     """Connectivity test endpoint for raw ZeroGPT Humanizer API response."""
     sample_text = "Artificial intelligence improves productivity in academic writing."
@@ -8669,23 +10028,17 @@ def api_test_zerogpt_humanizer():
         raw = zerogpt_client.humanize(sample_text)
         return jsonify(raw), 200
     except (ZeroGPTError, ZeroGPTProviderError) as exc:
-        return jsonify({"error": str(exc)}), 502
+        return jsonify(_admin_error(exc)), 502
 
 
 @app.get("/api/test/env")
+@internal_tool
 def api_test_env():
-    return jsonify(
-        {
-            "email_exists": os.getenv("ZEROGPT_EMAIL") is not None,
-            "password_exists": os.getenv("ZEROGPT_PASSWORD") is not None,
-            "api_key_exists": os.getenv("ZEROGPT_API_KEY") is not None,
-            "cwd": os.getcwd(),
-            "dotenv_found": os.path.exists(".env"),
-        }
-    ), 200
+    return jsonify({"success": True}), 200
 
 
-@app.get("/api/test/gemini")
+@app.post("/api/test/gemini")
+@internal_tool
 def api_test_gemini():
     """Temporary debug endpoint: raw Gemini API connectivity test."""
     api_key = (os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
@@ -8706,24 +10059,29 @@ def api_test_gemini():
     }
 
     auth_params, auth_headers = _gemini_auth(api_key)
-    res = requests.post(
-        url,
-        params=auth_params,
-        headers=auth_headers,
-        json=body,
-        timeout=30,
-    )
+    try:
+        res = requests.post(
+            url,
+            params=auth_params,
+            headers=auth_headers,
+            json=body,
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        detail = describe_exception(exc)
+        app.logger.warning("gemini connectivity test failed: %s", detail)
+        return jsonify({"http_status": None, "error": detail}), 502
     content_type = (res.headers.get("Content-Type") or "").lower()
-    if "application/json" in content_type:
-        response_body = res.json()
-    else:
-        response_body = res.text
+    try:
+        response_body = res.json() if "application/json" in content_type else res.text[:2000]
+    except ValueError:
+        response_body = res.text[:2000]
 
     return jsonify(
         {
             "http_status": res.status_code,
-            "response_body": response_body,
-            "response_headers": dict(res.headers),
+            "response_body": redact_data(response_body),
+            "response_headers": redact_data(dict(res.headers)),
         }
     ), 200
 
@@ -8812,5 +10170,9 @@ except Exception as _format_v2_store_exc:  # noqa: BLE001
 
 
 if __name__ == "__main__":
+    if (os.environ.get("DEV_INSECURE_COOKIES") or "").strip() == "1":
+        # Local dev server over plain http (e.g. Safari or a LAN address). gunicorn never runs this block.
+        app.config["SESSION_COOKIE_SECURE"] = False
+        app.logger.warning("DEV_INSECURE_COOKIES=1: session cookie sent without Secure (dev server only)")
     ensure_engine_started()
     app.run(debug=True, port=5001, use_reloader=False)

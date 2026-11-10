@@ -1244,6 +1244,17 @@ def _enrich_recovery_result(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _free_ai_structure_allowed(paragraphs: list[str]) -> bool:
+    """Size cap and free AI allowance, checked before any Gemini call; refusals fall back to local rules."""
+    from services import free_ai_quota
+    from services.ai_structure_recovery import ai_input_chars
+
+    if ai_input_chars(paragraphs) > free_ai_quota.max_chars("document"):
+        free_ai_quota.skip(free_ai_quota.INPUT_TOO_LONG)
+        return False
+    return free_ai_quota.allow("document")
+
+
 def recover_structure(
     *,
     text: str | None = None,
@@ -1280,7 +1291,7 @@ def recover_structure(
         inferred_type = doc_type_hint if doc_type_hint != "other" else _infer_document_type(paragraphs, None)[0]
         type_confidence = 0.8
     else:
-        if prefer_ai and gemini_enabled():
+        if prefer_ai and gemini_enabled() and _free_ai_structure_allowed(paragraphs):
             try:
                 from services.ai_structure_recovery import recover_structure_with_ai
 

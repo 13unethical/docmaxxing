@@ -51,7 +51,8 @@ def _zip_points_at_this_site(res):
     assert "__VEIL_API_BASE__" not in background
 
 
-def test_download_appears_only_after_a_30_day_pass(economy):
+def test_download_appears_only_after_a_30_day_pass(economy, monkeypatch):
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://docmaxxing.com")
     client = _client()
     guest = client.get("/veil/download", follow_redirects=False)
     assert guest.status_code in (301, 302)
@@ -78,9 +79,10 @@ def test_download_appears_only_after_a_30_day_pass(economy):
 
     res = client.get(
         "/veil/download",
-        headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "docmaxxing.com"},
+        headers={"X-Forwarded-Proto": "http", "X-Forwarded-Host": "evil.example"},
     )
     _zip_points_at_this_site(res)
+    assert b"evil.example" not in res.data
 
 
 def test_connect_requires_login_and_issues_a_token(economy):
@@ -97,10 +99,20 @@ def test_connect_requires_login_and_issues_a_token(economy):
     html = page.get_data(as_text=True)
     assert "Connected" in html or "Connecting" in html
     assert user["email"] in html
-    match = re.search(r'token:\s*"([^"]+)"', html)
-    assert match, html[html.lower().find("token") - 40 : html.lower().find("token") + 200]
-    token = match.group(1)
-    assert user_for_token(token)["id"] == user["id"]
+    # A GET (any link or cross-site navigation) never mints or rotates a token (F-03b).
+    assert not re.search(r'token:\s*"[^"]{20,}"', html)
+    assert "/api/veil/connect" in html
+    from services.economy.db import connect
+
+    with connect() as conn:
+        assert conn.execute("SELECT COUNT(*) AS n FROM extension_tokens").fetchone()["n"] == 0
+
+    issued = client.post("/api/veil/connect")
+    assert issued.status_code == 200
+    assert issued.headers.get("Cache-Control") == "no-store"
+    body = issued.get_json()
+    assert body["email"] == user["email"]
+    assert user_for_token(body["token"])["id"] == user["id"]
 
 
 def test_ask_needs_an_active_pass_and_does_not_charge_per_answer(economy, monkeypatch):

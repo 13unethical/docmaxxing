@@ -199,6 +199,34 @@ class WalletService:
             "ref_id": ref_id,
         }
 
+    def refund_once(
+        self,
+        user_id: int,
+        amount: int,
+        feature: str,
+        *,
+        ref_id: str,
+        meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Refund guarded by a unique ledger reference; returns None if that reference was already refunded."""
+        try:
+            return self._apply(
+                user_id, kind="refund", feature=feature, amount=amount, ref_id=ref_id, meta=meta
+            )
+        except sqlite3.IntegrityError:
+            return None
+
+    def assignment_refund_recorded(self, ref_id: str) -> int | None:
+        """Coins of the assignment refund already booked under ``ref_id``, if any."""
+        with connect() as conn:
+            row = conn.execute(
+                "SELECT amount FROM transactions "
+                "WHERE kind = 'refund' AND feature = 'assignment' AND ref_id = ? "
+                "ORDER BY id LIMIT 1",
+                (ref_id,),
+            ).fetchone()
+        return int(row["amount"]) if row else None
+
     def set_balance(
         self,
         user_id: int,

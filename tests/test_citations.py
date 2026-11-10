@@ -225,10 +225,10 @@ def test_from_url_builds_webpage_item() -> None:
       <title>Fallback</title>
     </head><body></body></html>
     """
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.text = html
-    with patch("formatter_v2.citations.sources.requests.get", return_value=mock_resp):
+    from services.safe_fetch import FetchResult
+
+    page = FetchResult(url="https://example.com/reefs", status=200, content_type="text/html", content=html.encode())
+    with patch("formatter_v2.citations.sources.safe_fetch.fetch", return_value=page):
         item, err = from_url("https://example.com/reefs")
     assert err is None
     assert item is not None

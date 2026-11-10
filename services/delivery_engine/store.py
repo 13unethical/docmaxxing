@@ -53,6 +53,13 @@ class DeliveryPackageStore:
                         return file_record
         return None
 
+    def get_package_for_file(self, file_id: str) -> DeliveryPackage | None:
+        with self._lock:
+            for package in self._packages.values():
+                if any(file_record.id == file_id for file_record in package.files):
+                    return package
+        return None
+
     def require_file(self, file_id: str):
         file_record = self.get_file(file_id)
         if file_record is None:

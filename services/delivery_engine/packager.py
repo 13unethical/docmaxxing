@@ -61,24 +61,21 @@ class RealDeliveryPackager:
         client_format = resolve_client_format(requirement)
 
         # Always materialize formatted DOCX bytes (source of truth when Format Engine ran).
-        formatted_path = (payload.formatted_document_path or "").strip()
-        docx_bytes: bytes | None = None
-        if formatted_path:
-            src = Path(formatted_path)
-            if src.is_file():
-                docx_bytes = src.read_bytes()
+        docx_bytes = _formatted_docx_bytes(project_id, payload.formatted_document_path)
+        formatted_used = docx_bytes is not None
         if docx_bytes is None:
             docx_bytes = _build_docx_bytes(
                 str(draft.get("title") or title),
                 str(draft.get("content") or ""),
                 images=payload.assignment_images,
+                project_id=project_id,
             )
         elif payload.assignment_images:
             from services.assignment_figures import embed_figures_in_docx_bytes
 
             # Re-embed in case Format Engine ran before images were synced, or
             # markers survived as plain text in the formatted file.
-            docx_bytes = embed_figures_in_docx_bytes(docx_bytes, payload.assignment_images)
+            docx_bytes = embed_figures_in_docx_bytes(docx_bytes, payload.assignment_images, project_id=project_id)
 
         docx_path = root / f"{title}.docx"
         docx_path.write_bytes(docx_bytes)
@@ -104,7 +101,7 @@ class RealDeliveryPackager:
         else:
             files.append(
                 _file(
-                    "Formatted Assignment" if formatted_path else "Final Assignment",
+                    "Formatted Assignment" if formatted_used else "Final Assignment",
                     f"{title}.docx",
                     "final_assignment_docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -165,10 +162,25 @@ def resolve_client_format(requirement: dict[str, Any] | None) -> str:
     return "docx"
 
 
+def _formatted_docx_bytes(project_id: str, formatted_path: str | None) -> bytes | None:
+    """The Format Engine DOCX, read only from this project's own ``formatted`` directory."""
+    from services import project_files
+
+    if not formatted_path:
+        return None
+    try:
+        return project_files.read_project_output(
+            project_id, project_files.FORMATTED_AREA, str(formatted_path).strip(), root=_storage_root()
+        )
+    except project_files.ProjectFileDenied:
+        return None
+
+
 def _build_docx_bytes(
     title: str,
     content: str,
     images: list[dict[str, Any]] | None = None,
+    project_id: str | None = None,
 ) -> bytes:
     doc = Document()
     doc.add_heading(title or "Assignment", level=1)
@@ -179,10 +191,10 @@ def _build_docx_bytes(
     buf = io.BytesIO()
     doc.save(buf)
     raw = buf.getvalue()
-    if images:
+    if images and project_id:
         from services.assignment_figures import embed_figures_in_docx_bytes
 
-        return embed_figures_in_docx_bytes(raw, images)
+        return embed_figures_in_docx_bytes(raw, images, project_id=project_id)
     return raw
 
 

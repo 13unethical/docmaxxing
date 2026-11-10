@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -13,6 +14,7 @@ from .paddle_purchases import PaddlePurchaseService
 from .usage import UsageService
 from .wallet import WalletError, WalletService
 
+logger = logging.getLogger(__name__)
 
 class AdminError(Exception):
     """Raised when an admin action is rejected."""
@@ -372,9 +374,37 @@ class AdminService:
 
 
 def bootstrap_admin_from_env() -> None:
-    """Promote ADMIN_EMAIL to admin on startup (if the account exists)."""
-    email = normalize_email(os.environ.get("ADMIN_EMAIL") or "")
-    if not email:
-        return
+    """``ADMIN_EMAIL`` grants nothing: startup never changes ``is_admin``.
+
+    Setting or changing the variable must not elevate whoever owns (or registers) that address.
+    The first admin is granted explicitly with ``scripts/grant_admin.py``; later ones from the
+    admin panel. Existing admins keep their database flag.
+    """
+    if (os.environ.get("ADMIN_EMAIL") or "").strip():
+        logger.info("ADMIN_EMAIL is ignored for authorization; use scripts/grant_admin.py")
+
+
+def grant_admin_to_verified_account(email: str) -> dict[str, Any]:
+    """Operator-only first-admin bootstrap: promote an existing account whose email is verified."""
+    address = normalize_email(email)
     with connect() as conn:
-        conn.execute("UPDATE users SET is_admin = 1 WHERE email = ?", (email,))
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT id, email, is_verified, is_blocked FROM users WHERE email = ?", (address,)
+        ).fetchone()
+        if row is None:
+            raise AdminError("No account with this email.")
+        if not int(row["is_verified"] or 0):
+            raise AdminError("The account's email is not verified.")
+        if int(row["is_blocked"] or 0):
+            raise AdminError("The account is blocked.")
+        conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (int(row["id"]),))
+    log_activity(
+        "admin.role_changed",
+        category="admin",
+        user_id=int(row["id"]),
+        user_email=row["email"],
+        summary=f"Granted admin for {row['email']} (operator script)",
+        details={"is_admin": True, "source": "grant_admin_script"},
+    )
+    return {"id": int(row["id"]), "email": row["email"]}

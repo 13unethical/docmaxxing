@@ -122,7 +122,8 @@ def test_block_many_removes_unspent_bonus(economy):
     assert WalletService().get_balance(a["id"]) == 0
 
 
-def test_veil_unlock_json(economy):
+def test_veil_unlock_json(economy, monkeypatch):
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://docmaxxing.com")
     user = _user("veil@example.com")
     client = _signed_in(_client(), user)
     short = client.post("/api/veil/unlock", json={})
@@ -141,6 +142,7 @@ def test_veil_email_link(economy, monkeypatch):
     from services.economy import email_verify
 
     sent = []
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://docmaxxing.com")
     monkeypatch.setattr(email_verify, "_smtp_send", lambda to, subject, text, html: sent.append((to, text)))
     client = _signed_in(_client(), _user("veil@example.com"))
 
@@ -151,4 +153,4 @@ def test_veil_email_link(economy, monkeypatch):
     monkeypatch.setattr(email_verify, "smtp_configured", lambda: True)
     res = client.post("/api/veil/email-link", json={})
     assert res.get_json() == {"success": True, "email": "veil@example.com"}
-    assert sent[0][0] == "veil@example.com" and "/app#/veil" in sent[0][1]
+    assert sent[0][0] == "veil@example.com" and "https://docmaxxing.com/app#/veil" in sent[0][1]

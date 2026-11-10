@@ -3244,12 +3244,27 @@ function briefCardHtml(a) {
       </div>
       ${a.confirmed
         ? '<span class="status-pill on">Confirmed</span>'
+        : a.priceChange ? assignNewPriceHtml(a)
         : `<div class="price-actions">
              <button class="btn btn-primary" id="assign-confirm-btn" data-act="assign-confirm" ${a.saving || a.loading ? 'disabled' : ''}>${state.signedIn ? 'Confirm and continue' : 'Sign up to continue'}</button>
              <span class="small muted">You pay only after confirming</span>
            </div>`}
     </div>
   </section>`;
+}
+
+// After the server refused the quote the student confirmed, the price on screen needs its own,
+// separate confirmation: the earlier click was consent to a different quote.
+function assignNewPriceHtml(a) {
+  const was = a.priceChange.was;
+  const now = assignPriceLabel(a);
+  const text = was && was !== now
+    ? `The price is now ${now}. The price you confirmed (${was}) is no longer valid. Nothing was charged.`
+    : `The price quote was refreshed (${now}). Nothing was charged.`;
+  return `<div class="price-actions" role="alert">
+       <p class="small" id="assign-price-change" style="margin:0">${esc(text)}</p>
+       <button class="btn btn-primary" id="assign-confirm-new-btn" data-act="assign-confirm-new-price" ${a.saving || a.loading ? 'disabled' : ''}>Confirm new price: ${esc(now)}</button>
+     </div>`;
 }
 
 const ASSIGN_STYLES = { apa: 'APA 7', harvard: 'Harvard', mla: 'MLA 9', chicago: 'Chicago' };
@@ -3290,6 +3305,8 @@ function assignPaintBrief() {
   const a = assignState(), price = $('#assign-price'), btn = $('#assign-confirm-btn');
   if (price) price.textContent = assignPriceLabel(a);
   if (btn) btn.disabled = a.saving || a.loading;
+  const notice = a.priceChange && $('#assign-price-change');
+  if (notice) notice.closest('.price-actions').outerHTML = assignNewPriceHtml(a);
   const len = $('#brief-length');
   if (len && document.activeElement !== len && a.brief) len.value = a.brief.length;
 }
@@ -3422,23 +3439,55 @@ async function assignSaveBrief() {
   }
 }
 
-async function assignConfirm() {
+const QUOTE_REFUSED = ['PRICE_CHANGED', 'QUOTE_REQUIRED', 'QUOTE_MISMATCH'];
+
+// newPrice: the click came from the separate "Confirm new price" button
+async function assignConfirm({ newPrice = false } = {}) {
   const a = assignState();
   if (!state.signedIn) return signUp();
   if (!a.projectId || a.confirmed || a.saving || a.loading) return;
+  if (a.priceChange && !newPrice) return;
+  const quoteId = a.pricing && a.pricing.quote_id;
+  a.priceChange = null;
   a.loading = true; a.loadingLabel = 'Confirming…';
   rerenderAssign();
   try {
-    const d = await API.assignment.confirm(a.projectId);
+    const d = await API.assignment.confirm(a.projectId, quoteId);
     if (typeof d.balance === 'number') state.balance = d.balance;
     a.confirmed = true;
     const mins = a.pricing && a.pricing.estimated_minutes;
-    a.messages.push({ role: 'assistant', html: `<p>${d.coins_charged ? `${d.coins_charged} credits charged. ` : ''}Writing your ${esc((a.brief.type || 'assignment').toLowerCase())} now: research, structure, writing, citations and formatting${mins ? `. This takes about ${mins} minutes` : ''}.</p>
+    a.messages.push({ role: 'assistant', html: `<p>${d.charged_now ? `${d.charged_now} credits charged. ` : ''}Writing your ${esc((a.brief.type || 'assignment').toLowerCase())} now: research, structure, writing, citations and formatting${mins ? `. This takes about ${mins} minutes` : ''}.</p>
       <p class="muted small" style="margin-bottom:0">Keep this tab open. If you close it, open Assignment again and it continues where it stopped.</p>` });
     a.messages.push({ role: 'progress' });
     renderHeader();
     assignRun(a);
   } catch (err) {
+    const data = err.data || {};
+    if (QUOTE_REFUSED.includes(err.code) && data.payment_confirmed && data.project) {
+      // Paid already (another tab): nothing to confirm and nothing is charged again.
+      a.confirmed = true;
+      assignApplyProject(a, data.project);
+      a.messages.push({ role: 'assistant', html: '<p>This assignment is already paid. Nothing was charged now.</p>' });
+      a.messages.push({ role: 'progress' });
+      assignRun(a);
+      return;
+    }
+    if (QUOTE_REFUSED.includes(err.code)) {
+      const was = quoteId ? assignPriceLabel(a) : '';
+      try {
+        assignApplyProject(a, data.project || await API.assignment.get(a.projectId));
+      } catch (_) {
+        a.pricing = null;
+      }
+      if (a.pricing && a.pricing.quote_id) {
+        a.priceChange = { was };
+        a.messages.push({ role: 'assistant', html: assignErrorHtml('The price needs a new confirmation. Review it in the brief above.') });
+      } else {
+        a.messages.push({ role: 'assistant', retryPrice: true, html: assignErrorHtml('We could not load the current price.',
+          '<button type="button" class="btn btn-sm" data-act="assign-retry-price">Try again</button>') });
+      }
+      return;
+    }
     const e = apiErrorInfo(err, { intent: 'assignment' });
     if (!e.handled) a.messages.push({ role: 'assistant', html: assignErrorHtml(assignErrMsg(err),
       e.action === 'topup' ? '<button type="button" class="btn btn-sm btn-primary" data-act="assign-topup">Buy credits</button>' : '') });
@@ -8626,6 +8675,7 @@ document.addEventListener('click', (e) => {
     }
     case 'assign-remove-file': assignState().files.splice(+el.dataset.i, 1); rerenderAssign('#assign-msg'); break;
     case 'assign-confirm': assignConfirm(); break;
+    case 'assign-confirm-new-price': assignConfirm({ newPrice: true }); break;
     case 'assign-refine': sendAssignMessage(el.textContent); break;
     case 'assign-download': assignDownload(el); break;
     case 'assign-new':

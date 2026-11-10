@@ -11,6 +11,9 @@ from typing import Any
 
 import requests
 
+from services import free_ai_quota
+from services.secret_redaction import describe_exception, redact
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "gemini-3.1-flash-lite"
@@ -74,10 +77,16 @@ def gemini_timeout_s(model: str | None = None) -> int:
 
 
 def _gemini_auth(api_key: str) -> tuple[dict[str, str], dict[str, str]]:
-    """Return (query_params, headers) for Gemini REST authentication."""
-    if api_key.startswith("AQ."):
-        return {}, {"x-goog-api-key": api_key}
-    return {"key": api_key}, {}
+    """Return (query_params, headers) for Gemini REST authentication.
+
+    The key always travels in the ``x-goog-api-key`` header: a ``?key=`` query string is
+    echoed by ``requests`` exceptions (and therefore logs and diagnostics).
+    """
+    return {}, {"x-goog-api-key": api_key}
+
+
+def _error_text(value: Any, limit: int = 500) -> str:
+    return redact(value)[:limit]
 
 
 def estimate_tokens(text: str) -> int:
@@ -183,6 +192,11 @@ def generate_json(
         diag["failure_reason"] = "validation_error"
         diag["error_message"] = "GOOGLE_API_KEY is not set"
         return None, diag
+    if not free_ai_quota.before_provider_call("gemini"):
+        diag = _base_diagnostics(model=chain[0], request_chars=request_chars, token_usage_estimate=token_est)
+        diag["failure_reason"] = "quota"
+        diag["error_message"] = "Free AI allowance used"
+        return None, diag
 
     total_retries = 0
     total_latency_ms = 0
@@ -225,9 +239,9 @@ def generate_json(
                     total_retries += 1
                     try:
                         err_body = res.json()
-                        last_error_message = str((err_body.get("error") or {}).get("message") or res.text[:500])
+                        last_error_message = _error_text((err_body.get("error") or {}).get("message") or res.text)
                     except Exception:  # noqa: BLE001
-                        last_error_message = res.text[:500]
+                        last_error_message = _error_text(res.text)
                     backoff = min(_MAX_BACKOFF_S, _INITIAL_BACKOFF_S * (2**attempt))
                     backoff += random.uniform(0, 0.35)
                     logger.warning(
@@ -243,9 +257,9 @@ def generate_json(
                 if not res.ok:
                     try:
                         err_body = res.json()
-                        last_error_message = str((err_body.get("error") or {}).get("message") or res.text[:800])
+                        last_error_message = _error_text((err_body.get("error") or {}).get("message") or res.text, 800)
                     except Exception:  # noqa: BLE001
-                        last_error_message = res.text[:800]
+                        last_error_message = _error_text(res.text, 800)
                     # Try next fallback model on non-retryable client errors (e.g. 404 model not found)
                     if res.status_code == 404 and model_idx < len(chain) - 1:
                         logger.warning("Gemini model %s not found; trying fallback", active_model)
@@ -352,7 +366,7 @@ def generate_json(
                 elapsed_ms = int((time.monotonic() - started) * 1000)
                 total_latency_ms += elapsed_ms
                 last_exc = exc
-                last_error_message = repr(exc)
+                last_error_message = describe_exception(exc)
                 if attempt < max_retries:
                     total_retries += 1
                     backoff = min(_MAX_BACKOFF_S, _INITIAL_BACKOFF_S * (2**attempt))
@@ -361,7 +375,7 @@ def generate_json(
                         "Gemini network retry model=%s attempt=%s err=%s",
                         active_model,
                         attempt + 1,
-                        exc,
+                        last_error_message,
                     )
                     time.sleep(backoff)
                     continue
@@ -370,7 +384,7 @@ def generate_json(
                 elapsed_ms = int((time.monotonic() - started) * 1000)
                 total_latency_ms += elapsed_ms
                 last_exc = exc
-                last_error_message = repr(exc)
+                last_error_message = describe_exception(exc)
                 break
 
         # try next model in fallback chain
@@ -396,7 +410,9 @@ def generate_json(
             "http_status": last_http_status,
             "retry_count": total_retries,
             "latency_ms": total_latency_ms,
-            "error_message": (last_error_message or str(last_exc) or "Unknown Gemini failure")[:500],
+            "error_message": _error_text(
+                last_error_message or (describe_exception(last_exc) if last_exc else "Unknown Gemini failure")
+            ),
         }
     )
     return None, diag
@@ -422,6 +438,9 @@ def generate_text(
     )
     if not gemini_enabled():
         diag.update({"enabled": False, "failure_reason": "validation_error", "error_message": "GOOGLE_API_KEY is not set"})
+        return None, diag
+    if not free_ai_quota.before_provider_call("gemini"):
+        diag.update({"failure_reason": "quota", "error_message": "Free AI allowance used"})
         return None, diag
 
     body = {
@@ -456,11 +475,11 @@ def generate_text(
                     return text, diag
                 error = "Empty model response text"
             else:
-                error = res.text[:500]
+                error = _error_text(res.text)
                 if res.status_code not in _RETRYABLE_HTTP_STATUS:
                     break
         except _NETWORK_EXCEPTIONS as exc:
-            error = repr(exc)
+            error = describe_exception(exc)
         if attempt < max_retries:
             time.sleep(min(_MAX_BACKOFF_S, _INITIAL_BACKOFF_S * (2**attempt)) + random.uniform(0, 0.35))
     diag.update(

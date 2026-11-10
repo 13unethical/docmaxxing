@@ -144,30 +144,47 @@ def test_guest_subject_depends_on_ip_and_session_and_hides_the_ip():
     assert a == free_humanize.guest_subject("1.2.3.4", "sid-a", "salt")
 
 
-def test_client_ip_prefers_proxy_headers():
-    from app import app
-
-    with app.test_request_context("/", headers={"X-Real-IP": "9.9.9.9", "X-Forwarded-For": "1.1.1.1"}):
-        from flask import request
-
-        assert free_humanize.client_ip(request) == "9.9.9.9"
-    with app.test_request_context("/", headers={"X-Forwarded-For": "6.6.6.6, 2.2.2.2"}):
-        from flask import request
-
-        assert free_humanize.client_ip(request) == "2.2.2.2"
+_NGINX = {"REMOTE_ADDR": "127.0.0.1"}
 
 
-def test_client_ip_trusts_cf_connecting_ip_only_from_cloudflare():
+def test_client_ip_prefers_proxy_headers(monkeypatch):
     from flask import request
 
     from app import app
 
-    with app.test_request_context("/", headers={"X-Real-IP": "172.70.1.2", "CF-Connecting-IP": "5.5.5.5"}):
-        assert free_humanize.client_ip(request) == "5.5.5.5"
-    with app.test_request_context("/", headers={"X-Real-IP": "2606:4700::1", "CF-Connecting-IP": "5.5.5.6"}):
-        assert free_humanize.client_ip(request) == "5.5.5.6"
-    with app.test_request_context("/", headers={"X-Real-IP": "9.9.9.9", "CF-Connecting-IP": "5.5.5.5"}):
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    with app.test_request_context(
+        "/", headers={"X-Real-IP": "9.9.9.9", "X-Forwarded-For": "1.1.1.1"}, environ_base=_NGINX
+    ):
         assert free_humanize.client_ip(request) == "9.9.9.9"
+    with app.test_request_context("/", headers={"X-Forwarded-For": "6.6.6.6, 2.2.2.2"}, environ_base=_NGINX):
+        assert free_humanize.client_ip(request) == "2.2.2.2"
+    with app.test_request_context(
+        "/", headers={"X-Real-IP": "9.9.9.9", "X-Forwarded-For": "1.1.1.1"}, environ_base={"REMOTE_ADDR": "8.8.4.4"}
+    ):
+        assert free_humanize.client_ip(request) == "8.8.4.4"
+
+
+def test_client_ip_trusts_cf_connecting_ip_only_from_cloudflare(monkeypatch):
+    from flask import request
+
+    from app import app
+
+    monkeypatch.delenv("TRUSTED_PROXIES", raising=False)
+    with app.test_request_context(
+        "/", headers={"X-Real-IP": "172.70.1.2", "CF-Connecting-IP": "5.5.5.5"}, environ_base=_NGINX
+    ):
+        assert free_humanize.client_ip(request) == "5.5.5.5"
+    with app.test_request_context(
+        "/", headers={"X-Real-IP": "2606:4700::1", "CF-Connecting-IP": "5.5.5.6"}, environ_base=_NGINX
+    ):
+        assert free_humanize.client_ip(request) == "5.5.5.6"
+    with app.test_request_context(
+        "/", headers={"X-Real-IP": "9.9.9.9", "CF-Connecting-IP": "5.5.5.5"}, environ_base=_NGINX
+    ):
+        assert free_humanize.client_ip(request) == "9.9.9.9"
+    with app.test_request_context("/", headers={"CF-Connecting-IP": "5.5.5.5"}, environ_base={"REMOTE_ADDR": "8.8.4.4"}):
+        assert free_humanize.client_ip(request) == "8.8.4.4"
 
 
 def test_rate_limiter_sliding_window():

@@ -44,12 +44,14 @@ class JobManager:
         payload: dict[str, Any] | None = None,
         *,
         max_retries: int = 3,
+        owner: str | None = None,
     ) -> Job:
         job = Job(
             provider=provider,
             operation=operation,
             payload=payload or {},
             max_retries=max_retries,
+            owner=owner,
         )
         with self._lock:
             self._jobs[job.id] = job

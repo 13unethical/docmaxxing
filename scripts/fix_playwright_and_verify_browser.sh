@@ -3,9 +3,22 @@
 # Run ON THE VPS (or via scripts/run_vps_playwright_fix.sh from your Mac).
 #
 #   bash scripts/fix_playwright_and_verify_browser.sh
+#
+# The /api/browser/* endpoints only answer a signed-in, email-verified admin (everyone else
+# gets 404); the ones that start Chrome or touch a provider are POST and need the session's
+# CSRF token. scripts/admin_api.py handles both. Sign in once on the VPS:
+#
+#   python3 scripts/admin_api.py login --jar ~/.docmaxxing-admin.cookies
+#   DOCMAXXING_ADMIN_COOKIE_JAR=~/.docmaxxing-admin.cookies bash scripts/fix_playwright_and_verify_browser.sh
 set -euo pipefail
 
 API_BASE="${DOCMAXXING_API:-http://127.0.0.1:8000}"
+ADMIN_COOKIE_JAR="${DOCMAXXING_ADMIN_COOKIE_JAR:-}"
+ADMIN_API="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/admin_api.py"
+if [[ -z "$ADMIN_COOKIE_JAR" ]]; then
+  echo "Set DOCMAXXING_ADMIN_COOKIE_JAR (see the header of this script)." >&2
+  exit 1
+fi
 SERVICE_NAME="${DOCMAXXING_SERVICE:-docmaxxing}"
 
 # Report flags
@@ -175,32 +188,11 @@ restart_service() {
 }
 
 api_check() {
-  local url="$1"
-  local timeout="${2:-120}"
-  "$SERVICE_PYTHON" - "$url" "$timeout" <<'PY'
-import json, sys, urllib.error, urllib.request
-url, timeout = sys.argv[1], float(sys.argv[2])
-try:
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
-        body = resp.read().decode("utf-8", errors="replace")
-except urllib.error.HTTPError as exc:
-    body = exc.read().decode("utf-8", errors="replace")
-    try:
-        data = json.loads(body) if body.strip() else {}
-    except json.JSONDecodeError:
-        data = {"error": body[:1000], "http_status": exc.code}
-    print(json.dumps(data))
-    sys.exit(1)
-except Exception as exc:
-    print(json.dumps({"error": str(exc)}))
-    sys.exit(1)
-try:
-    data = json.loads(body) if body.strip() else {}
-except json.JSONDecodeError as exc:
-    print(json.dumps({"error": f"Non-JSON response: {body[:500]}", "parse_error": str(exc)}))
-    sys.exit(1)
-print(json.dumps(data))
-PY
+  local method="$1"
+  local path="$2"
+  local timeout="${3:-120}"
+  "$SERVICE_PYTHON" "$ADMIN_API" --base "$API_BASE" call "$method" "$path" \
+    --jar "$ADMIN_COOKIE_JAR" --timeout "$timeout"
 }
 
 json_field() {
@@ -212,7 +204,7 @@ json_field() {
 verify_browser_stack() {
   info "Step 1/3 — Starting BrowserService via $API_BASE/api/browser/connect …"
   local connect_json
-  if ! connect_json="$(api_check "$API_BASE/api/browser/connect" 120)"; then
+  if ! connect_json="$(api_check POST /api/browser/connect 120)"; then
     abort "BrowserService connect failed: $connect_json"
   fi
 
@@ -229,7 +221,7 @@ verify_browser_stack() {
 
   info "Verifying browser health snapshot…"
   local health_json
-  if ! health_json="$(api_check "$API_BASE/api/browser/health" 30)"; then
+  if ! health_json="$(api_check GET /api/browser/health 30)"; then
     abort "Browser health check failed: $health_json"
   fi
   local browser_running
@@ -243,7 +235,7 @@ verify_browser_stack() {
 verify_stealthwriter_provider() {
   info "Step 2/3 — Loading StealthWriter provider via $API_BASE/api/browser/providers/stealthwriter/health …"
   local sw_json
-  if ! sw_json="$(api_check "$API_BASE/api/browser/providers/stealthwriter/health" 120)"; then
+  if ! sw_json="$(api_check POST /api/browser/providers/stealthwriter/health 120)"; then
     abort "StealthWriter provider health failed: $sw_json"
   fi
 
@@ -266,7 +258,7 @@ verify_stealthwriter_production() {
   info "Step 3/3 — Real Humanize end-to-end via $API_BASE/api/browser/providers/stealthwriter/verify-production …"
   info "(submits sample text, clicks Humanize, waits for output — may take up to 2 minutes)"
   local verify_json
-  if ! verify_json="$(api_check "$API_BASE/api/browser/providers/stealthwriter/verify-production" 200)"; then
+  if ! verify_json="$(api_check POST /api/browser/providers/stealthwriter/verify-production 200)"; then
     abort "StealthWriter production verify request failed: $verify_json"
   fi
 

@@ -13,7 +13,7 @@ from services.reviewer_engine import MockAcademicReviewer, ReviewerEngineService
 from services.reviewer_engine.models import ReviewEngineInput
 from services.writer_engine import WriterEngineService
 from services.writer_engine.models import WriterSectionStatus
-from tests.assignment_helpers import prepare_project_for_research
+from tests.assignment_helpers import mark_project_paid, prepare_project_for_research
 
 
 def _inputs() -> dict:
@@ -121,5 +121,6 @@ def test_project_academic_review_advances_pipeline():
 def test_review_requires_draft():
     projects = ProjectService(reviewer=ReviewerEngineService())
     bundle = projects.create_project(files=[{"file_type": "assignment_brief", "original_filename": "brief.pdf"}])
+    mark_project_paid(projects, bundle.project.id)
     with pytest.raises(KeyError):
         projects.run_academic_review(bundle.project.id)

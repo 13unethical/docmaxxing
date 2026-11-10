@@ -35,11 +35,12 @@ def build_formatted_preview_html(
     paragraph_assignments = None
 
     if job.auto_headings or job.requirement_headings:
+        # The page re-requests the preview on every keystroke, so it never spends AI calls.
         recon = reconstruct_document_before_format(
             doc,
             document_type=document_type,
             required_sections=required_sections,
-            prefer_ai=job.auto_headings,
+            prefer_ai=False,
         )
         paragraph_assignments = recon.assignments
 

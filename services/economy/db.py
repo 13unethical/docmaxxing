@@ -225,7 +225,8 @@ CREATE TABLE IF NOT EXISTS extension_tokens (
     token_hash   TEXT NOT NULL UNIQUE,
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     last_used_at TEXT,
-    revoked      INTEGER NOT NULL DEFAULT 0
+    revoked      INTEGER NOT NULL DEFAULT 0,
+    expires_at   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_extension_tokens_user
@@ -253,6 +254,201 @@ CREATE TABLE IF NOT EXISTS plan_usage (
     used        INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, feature, period_key)
 );
+
+-- One row per confirmed assignment payment ("payment cycle"); see assignment_payments.py.
+CREATE TABLE IF NOT EXISTS assignment_payments (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle_id         TEXT NOT NULL UNIQUE,
+    project_id       TEXT NOT NULL,
+    user_id          INTEGER NOT NULL,
+    method           TEXT NOT NULL,       -- coins | plan_allowance
+    coins            INTEGER NOT NULL DEFAULT 0,
+    debit_tx_id      INTEGER,
+    allowance_mode   TEXT,                -- quota | unlimited
+    allowance_period TEXT,                -- plan_usage.period_key the allowance was taken from
+    status           TEXT NOT NULL,       -- active | refunded | voided
+    refund_tx_id     INTEGER,
+    refunded_coins   INTEGER,
+    refund_kind      TEXT,
+    refund_reason    TEXT,
+    refund_admin_id  INTEGER,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at        TEXT,
+    output_tracking  INTEGER NOT NULL DEFAULT 0, -- 1: every paid operation of this cycle is journaled
+    quote_id         TEXT,                -- server quote the cycle paid for (NULL: legacy cycle)
+    scope_hash       TEXT,                -- billable project snapshot that quote priced
+    quoted_word_count INTEGER,
+    quoted_coins     INTEGER              -- list price of the quote, before any discount
+);
+
+CREATE INDEX IF NOT EXISTS idx_assignment_payments_project
+    ON assignment_payments(project_id);
+
+-- Proof that a project's generated text was durably stored. Append-only: once a row exists
+-- the project can never get an automatic refund again, whatever its JSON bundle says.
+CREATE TABLE IF NOT EXISTS assignment_output_evidence (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  TEXT NOT NULL,
+    cycle_id    TEXT NOT NULL DEFAULT '',
+    operation   TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    op_id       TEXT,
+    recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (project_id, cycle_id, operation)
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_assignment_output_evidence_no_update
+    BEFORE UPDATE ON assignment_output_evidence
+BEGIN
+    SELECT RAISE(ABORT, 'assignment_output_evidence is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_assignment_output_evidence_no_delete
+    BEFORE DELETE ON assignment_output_evidence
+BEGIN
+    SELECT RAISE(ABORT, 'assignment_output_evidence is append-only');
+END;
+
+-- Journal of paid assignment operations. output_phase is 'persisting' from just before the
+-- JSON write of generated text until its evidence row exists; a row left there means a
+-- worker died (or the ledger failed) in between, so the outcome is unknown.
+CREATE TABLE IF NOT EXISTS assignment_operations (
+    op_id        TEXT PRIMARY KEY,
+    project_id   TEXT NOT NULL,
+    cycle_id     TEXT NOT NULL DEFAULT '',
+    operation    TEXT NOT NULL,
+    status       TEXT NOT NULL,       -- started | completed | rejected | failed | interrupted
+    output_phase TEXT,                -- NULL | persisting | recorded
+    pid          INTEGER,
+    started_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_assignment_operations_project
+    ON assignment_operations(project_id, output_phase);
+
+-- Every Research Plan version a project had, by canonical content hash. Append-only, so a
+-- stale JSON bundle can neither relabel a student's edit as server output nor bring back
+-- an older plan as the current one.
+CREATE TABLE IF NOT EXISTS assignment_plan_versions (
+    project_id   TEXT NOT NULL,
+    version      INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    source       TEXT NOT NULL,       -- server | client
+    recorded_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (project_id, version)
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_assignment_plan_versions_no_update
+    BEFORE UPDATE ON assignment_plan_versions
+BEGIN
+    SELECT RAISE(ABORT, 'assignment_plan_versions is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_assignment_plan_versions_no_delete
+    BEFORE DELETE ON assignment_plan_versions
+BEGIN
+    SELECT RAISE(ABORT, 'assignment_plan_versions is append-only');
+END;
+
+-- A paid stage of this payment cycle ran on student-provided input. Append-only: failures
+-- of the cycle from then on are never automatic refund evidence.
+CREATE TABLE IF NOT EXISTS assignment_client_input_use (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id   TEXT NOT NULL,
+    cycle_id     TEXT NOT NULL DEFAULT '',
+    stage        TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    recorded_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (project_id, cycle_id, stage, content_hash)
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_assignment_client_input_use_no_update
+    BEFORE UPDATE ON assignment_client_input_use
+BEGIN
+    SELECT RAISE(ABORT, 'assignment_client_input_use is append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_assignment_client_input_use_no_delete
+    BEFORE DELETE ON assignment_client_input_use
+BEGIN
+    SELECT RAISE(ABORT, 'assignment_client_input_use is append-only');
+END;
+
+-- Post-delivery revision chat rounds, shared by all workers. A round is reserved before the
+-- AI call and ends consumed or released; only 'reserved' rows can change.
+CREATE TABLE IF NOT EXISTS assignment_revision_rounds (
+    reservation_id TEXT PRIMARY KEY,
+    project_id     TEXT NOT NULL,
+    status         TEXT NOT NULL,     -- reserved | consumed | released
+    reserved_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_assignment_revision_rounds_project
+    ON assignment_revision_rounds(project_id, status);
+
+CREATE TRIGGER IF NOT EXISTS trg_assignment_revision_rounds_final
+    BEFORE UPDATE ON assignment_revision_rounds
+    WHEN OLD.status != 'reserved'
+BEGIN
+    SELECT RAISE(ABORT, 'a finished revision round cannot change');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_assignment_revision_rounds_no_delete
+    BEFORE DELETE ON assignment_revision_rounds
+BEGIN
+    SELECT RAISE(ABORT, 'assignment_revision_rounds is append-only');
+END;
+
+-- Signed-in browser sessions. The session cookie is client-side, so it only authenticates
+-- while its sign-in id (stored hashed) has a row here: sign-out, a password change and
+-- account deletion delete rows, and every copy of that cookie stops working.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+    sid_hash   TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_seen  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id, last_seen);
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_last_seen ON auth_sessions(last_seen);
+
+-- Any write of a new password hash (account page, recovery, ops scripts) signs out every
+-- session of that account; the caller re-issues its own session if it should stay signed in.
+CREATE TRIGGER IF NOT EXISTS trg_auth_sessions_password_changed
+AFTER UPDATE OF password_hash ON users
+WHEN NEW.password_hash IS NOT OLD.password_hash
+BEGIN
+    DELETE FROM auth_sessions WHERE user_id = NEW.id;
+END;
+
+-- Sliding-window rate limits shared by all gunicorn workers (services/rate_limit.py).
+CREATE TABLE IF NOT EXISTS rate_limit_events (
+    key TEXT NOT NULL,
+    ts  REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limit_events_key_ts ON rate_limit_events(key, ts);
+CREATE INDEX IF NOT EXISTS idx_rate_limit_events_ts ON rate_limit_events(ts);
+
+CREATE TRIGGER IF NOT EXISTS trg_auth_sessions_user_deleted
+AFTER DELETE ON users
+BEGIN
+    DELETE FROM auth_sessions WHERE user_id = OLD.id;
+END;
+
+-- Failed password checks shared by all gunicorn workers (services/economy/login_throttle.py).
+-- A row is written before the password is checked and deleted only on success, so a worker
+-- that dies mid-check leaves a counted failure that ages out with the window.
+CREATE TABLE IF NOT EXISTS auth_failures (
+    id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL,
+    ts  REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_failures_key_ts ON auth_failures(key, ts);
+CREATE INDEX IF NOT EXISTS idx_auth_failures_ts ON auth_failures(ts);
 """
 
 
@@ -473,6 +669,11 @@ def _migrate_security_columns(conn: sqlite3.Connection) -> None:
             "verification_code_expires",
             "ALTER TABLE users ADD COLUMN verification_code_expires TEXT",
         ),
+        # wrong guesses against the current code; a new code starts again at 0
+        (
+            "verification_attempts",
+            "ALTER TABLE users ADD COLUMN verification_attempts INTEGER NOT NULL DEFAULT 0",
+        ),
         ("is_blocked", "ALTER TABLE users ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0"),
         # 'staff' | 'test': hidden from admin analytics
         ("account_flag", "ALTER TABLE users ADD COLUMN account_flag TEXT"),
@@ -584,6 +785,81 @@ def _migrate_support_messages(conn: sqlite3.Connection) -> None:
     ensure_support_messages_schema(conn)
 
 
+def _migrate_assignment_payments(conn: sqlite3.Connection) -> None:
+    """Cycles opened before operation journaling keep output_tracking = 0 (outcome unknown).
+
+    Cycles opened before quotes were bound keep NULL quote columns; the service verifies such
+    a legacy payment against its stored pricing before binding a scope (never on its own).
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(assignment_payments)").fetchall()}
+    if not cols:
+        return
+    if "output_tracking" not in cols:
+        conn.execute(
+            "ALTER TABLE assignment_payments ADD COLUMN output_tracking INTEGER NOT NULL DEFAULT 0"
+        )
+    for name, ddl in (
+        ("quote_id", "TEXT"),
+        ("scope_hash", "TEXT"),
+        ("quoted_word_count", "INTEGER"),
+        ("quoted_coins", "INTEGER"),
+    ):
+        if name not in cols:
+            conn.execute(f"ALTER TABLE assignment_payments ADD COLUMN {name} {ddl}")
+
+
+VEIL_TOKEN_DEFAULT_TTL_DAYS = 30
+
+
+def _migrate_extension_tokens(conn: sqlite3.Connection) -> None:
+    """Expiry, one live token per account, and revocation when the account changes.
+
+    Tokens issued before ``expires_at`` existed expire ``VEIL_TOKEN_DEFAULT_TTL_DAYS`` after
+    they were created. Duplicate live tokens (a pre-transaction race) keep only the newest.
+    Revoked rows are never touched, so nothing revoked comes back.
+    """
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(extension_tokens)").fetchall()}
+    if "expires_at" not in cols:
+        conn.execute("ALTER TABLE extension_tokens ADD COLUMN expires_at TEXT")
+    conn.execute(
+        "UPDATE extension_tokens SET expires_at = datetime(created_at, ?) WHERE expires_at IS NULL",
+        (f"+{VEIL_TOKEN_DEFAULT_TTL_DAYS} days",),
+    )
+    conn.execute(
+        "UPDATE extension_tokens SET revoked = 1 WHERE revoked = 0 AND id NOT IN ("
+        " SELECT MAX(id) FROM extension_tokens WHERE revoked = 0 GROUP BY user_id)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_extension_tokens_one_live "
+        "ON extension_tokens(user_id) WHERE revoked = 0"
+    )
+    # Same events that end browser sessions also end the extension's sign-in.
+    conn.executescript(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_extension_tokens_password_changed
+        AFTER UPDATE OF password_hash ON users
+        WHEN NEW.password_hash IS NOT OLD.password_hash
+        BEGIN
+            UPDATE extension_tokens SET revoked = 1 WHERE user_id = NEW.id AND revoked = 0;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_extension_tokens_user_blocked
+        AFTER UPDATE OF is_blocked ON users
+        WHEN NEW.is_blocked = 1
+        BEGIN
+            UPDATE extension_tokens SET revoked = 1 WHERE user_id = NEW.id AND revoked = 0;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_extension_tokens_user_unverified
+        AFTER UPDATE OF is_verified ON users
+        WHEN NEW.is_verified = 0 AND OLD.is_verified = 1
+        BEGIN
+            UPDATE extension_tokens SET revoked = 1 WHERE user_id = NEW.id AND revoked = 0;
+        END;
+        """
+    )
+
+
 def init_db() -> None:
     """Create tables/indexes if they do not exist. Safe to call repeatedly."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -592,6 +868,8 @@ def init_db() -> None:
     try:
         # 1) Create base tables (IF NOT EXISTS leaves old tables unchanged).
         conn.executescript(_SCHEMA)
+        # Superseded by auth_sessions: a sign-in id without a row there no longer authenticates.
+        conn.execute("DROP TABLE IF EXISTS revoked_sessions")
         try:
             conn.execute(
                 "ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0"
@@ -607,8 +885,10 @@ def init_db() -> None:
         _migrate_referral_columns(conn)
         _migrate_daily_stats_and_settings(conn)
         _migrate_security_columns(conn)
+        _migrate_extension_tokens(conn)
         _migrate_humanizer_dataset(conn)
         _migrate_support_messages(conn)
+        _migrate_assignment_payments(conn)
         # 3) Indexes that depend on migrated columns.
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tx_user_type ON transactions(user_id, type)"
@@ -630,6 +910,26 @@ def init_db() -> None:
             "ON transactions(ref_id) "
             "WHERE reference_type = 'LemonSqueezy' AND feature = 'topup' "
             "AND ref_id IS NOT NULL"
+        )
+        # One assignment refund per project payment (ref built server-side as
+        # "assignment-refund:<project>:<payment time>"); legacy rows never match.
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_assignment_refund_ref "
+            "ON transactions(ref_id) "
+            "WHERE kind = 'refund' AND feature = 'assignment' "
+            "AND ref_id LIKE 'assignment-refund:%'"
+        )
+        # At most one live payment per project, and one debit per payment cycle; legacy
+        # debits (ref_id = project id) never match.
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_assignment_payments_active "
+            "ON assignment_payments(project_id) WHERE status = 'active'"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tx_assignment_payment_ref "
+            "ON transactions(ref_id) "
+            "WHERE kind = 'debit' AND feature = 'assignment' "
+            "AND ref_id LIKE 'assignment-payment:%'"
         )
         from .activity_log import backfill_activity
 

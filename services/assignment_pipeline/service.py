@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -16,6 +17,7 @@ from services.assignment_pipeline.models import (
 from services.assignment_pipeline.stages import PIPELINE_STAGES
 from services.assignment_pipeline.store import AssignmentProjectStore
 
+_log = logging.getLogger(__name__)
 
 def _initial_stages() -> list[StageState]:
     return [StageState(stage=stage) for stage in PIPELINE_STAGES]
@@ -141,7 +143,10 @@ class AssignmentPipelineService:
         try:
             result = handler.run(StageContext(project=project))
         except Exception as exc:  # noqa: BLE001 — surface stage failure to caller
-            return self.fail_stage(project_id, target, str(exc))
+            from services.public_errors import public_text
+
+            _log.exception("pipeline stage %s failed project_id=%s", target.value, project_id)
+            return self.fail_stage(project_id, target, public_text(exc, "This step failed. Please try again."))
 
         return self.complete_stage(project_id, target, result)
 

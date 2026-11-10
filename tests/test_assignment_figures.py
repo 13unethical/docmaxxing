@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from docx import Document
 from PIL import Image
 
@@ -28,10 +29,19 @@ def _tiny_png(path: Path) -> None:
     img.save(path, format="PNG")
 
 
-def test_collect_assignment_images_skips_non_images(tmp_path):
-    png = tmp_path / "shelter.png"
+@pytest.fixture
+def files_dir(tmp_path, monkeypatch) -> Path:
+    """Stored files of project ``p``: images are only read from their own project's files."""
+    monkeypatch.setenv("PROJECT_STORAGE_DIR", str(tmp_path / "projects"))
+    path = (tmp_path / "projects").resolve() / "p" / "files"
+    path.mkdir(parents=True)
+    return path
+
+
+def test_collect_assignment_images_skips_non_images(files_dir):
+    png = files_dir / "shelter.png"
     _tiny_png(png)
-    pdf = tmp_path / "brief.pdf"
+    pdf = files_dir / "brief.pdf"
     pdf.write_bytes(b"%PDF-1.4")
     files = [
         ProjectFile(
@@ -51,7 +61,7 @@ def test_collect_assignment_images_skips_non_images(tmp_path):
             storage_path=str(pdf),
         ),
     ]
-    images = collect_assignment_images(files)
+    images = collect_assignment_images(files, project_id="p")
     assert len(images) == 1
     assert images[0]["filename"] == "shelter.png"
 
@@ -65,8 +75,8 @@ def test_protect_and_restore_figure_markers():
     assert "[[FIGURE:shelter.png|Findhorn cabin]]" in restored
 
 
-def test_embed_figures_in_docx_bytes(tmp_path):
-    png = tmp_path / "transport.png"
+def test_embed_figures_in_docx_bytes(files_dir):
+    png = files_dir / "transport.png"
     _tiny_png(png)
     doc = Document()
     doc.add_paragraph("Before.")
@@ -77,6 +87,7 @@ def test_embed_figures_in_docx_bytes(tmp_path):
     out = embed_figures_in_docx_bytes(
         buf.getvalue(),
         [{"filename": "transport.png", "storage_path": str(png)}],
+        project_id="p",
     )
     result = Document(io.BytesIO(out))
     joined = "\n".join(p.text for p in result.paragraphs)
@@ -84,9 +95,9 @@ def test_embed_figures_in_docx_bytes(tmp_path):
     assert any(p._element.xpath(".//a:blip") for p in result.paragraphs)
 
 
-def test_embed_figures_matches_underscore_stripped_names(tmp_path):
+def test_embed_figures_matches_underscore_stripped_names(files_dir):
     """Markdown italic cleanup can turn auto_Shelter_abc.jpg into autoShelterabc.jpg."""
-    png = tmp_path / "auto_Shelter_abc123.jpg"
+    png = files_dir / "auto_Shelter_abc123.jpg"
     _tiny_png(png)
     doc = Document()
     doc.add_paragraph("[[FIGURE:autoShelterabc123.jpg|cabin]]")
@@ -95,19 +106,21 @@ def test_embed_figures_matches_underscore_stripped_names(tmp_path):
     out = embed_figures_in_docx_bytes(
         buf.getvalue(),
         [{"filename": "auto_Shelter_abc123.jpg", "storage_path": str(png)}],
+        project_id="p",
     )
     result = Document(io.BytesIO(out))
     assert "[[FIGURE:" not in "\n".join(p.text for p in result.paragraphs)
     assert any(p._element.xpath(".//a:blip") for p in result.paragraphs)
 
 
-def test_build_docx_bytes_embeds_figures(tmp_path):
-    png = tmp_path / "a.png"
+def test_build_docx_bytes_embeds_figures(files_dir):
+    png = files_dir / "a.png"
     _tiny_png(png)
     raw = _build_docx_bytes(
         "Essay",
         "Intro text.\n\n[[FIGURE:a.png|Caption]]\n\nClosing.",
         images=[{"filename": "a.png", "storage_path": str(png)}],
+        project_id="p",
     )
     doc = Document(io.BytesIO(raw))
     assert any(p._element.xpath(".//a:blip") for p in doc.paragraphs)
@@ -140,8 +153,8 @@ def test_extract_figure_queries_from_sample_placeholders():
     assert len(shelter) <= 2
 
 
-def test_ensure_figure_markers_injects_into_section(tmp_path):
-    png = tmp_path / "auto_shelter.png"
+def test_ensure_figure_markers_injects_into_section(files_dir):
+    png = files_dir / "auto_shelter.png"
     _tiny_png(png)
     content = (
         "## Shelter\n\nBarrel houses are common.\n\nMore analysis here.\n\n"
@@ -155,11 +168,11 @@ def test_ensure_figure_markers_injects_into_section(tmp_path):
             "section": "Shelter",
         }
     ]
-    out = ensure_figure_markers(content, images)
+    out = ensure_figure_markers(content, images, project_id="p")
     assert "[[FIGURE:auto_shelter.png|whisky-barrel houses]]" in out
     assert out.index("## Shelter") < out.index("[[FIGURE:auto_shelter.png")
     assert out.index("[[FIGURE:auto_shelter.png") < out.index("## Transportation")
-    assert ensure_figure_markers(out, images) == out
+    assert ensure_figure_markers(out, images, project_id="p") == out
 
 
 def test_fetch_commons_figures_downloads(tmp_path):

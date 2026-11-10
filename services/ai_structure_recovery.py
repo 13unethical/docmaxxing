@@ -678,6 +678,11 @@ def ai_result_to_recovery_payload(
     }
 
 
+def ai_input_chars(paragraphs: list[str]) -> int:
+    """Characters of document text the AI recovery would send (after the paragraph cap)."""
+    return len(_numbered_block(paragraphs[:MAX_PARAGRAPHS_FOR_AI]))
+
+
 def recover_structure_with_ai(
     *,
     text: str | None = None,

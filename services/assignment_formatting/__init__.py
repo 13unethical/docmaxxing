@@ -363,7 +363,7 @@ class AssignmentFormatEngine:
         if images:
             from services.assignment_figures import embed_figures_in_docx_bytes
 
-            docx_bytes = embed_figures_in_docx_bytes(docx_bytes, images)
+            docx_bytes = embed_figures_in_docx_bytes(docx_bytes, images, project_id=project_id)
         if title_page_wanted(requirement_json):
             docx_bytes = add_title_page(docx_bytes, title=title, requirement_json=requirement_json)
 

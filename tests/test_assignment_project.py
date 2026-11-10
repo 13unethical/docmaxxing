@@ -9,6 +9,7 @@ from services.assignment_pipeline.service import AssignmentPipelineService
 from services.assignment_project import ProjectFileType, ProjectService, ProjectStatus
 from services.assignment_project.models import RequirementFormatting
 from services.assignment_project.store import ProjectStore
+from tests.assignment_helpers import current_quote_id
 
 
 class _StubRequirementAnalyzer:
@@ -164,7 +165,7 @@ def test_confirm_payment_restores_pipeline_from_disk(tmp_path):
     pipeline_b = AssignmentPipelineService()
     service_b = ProjectService(store=store, pipeline=pipeline_b, analyzer=_StubRequirementAnalyzer())
 
-    confirmed = service_b.confirm_payment(bundle.project.id)
+    confirmed = service_b.confirm_payment(bundle.project.id, quote_id=current_quote_id(service_b, bundle.project.id))
     assert confirmed.project.artifacts.get("payment_confirmed") is True
 
 
@@ -305,7 +306,7 @@ def test_run_research_restores_plan_from_disk(tmp_path):
     project_id = bundle.project.id
     service_a.analyze_requirements(project_id)
     service_a.calculate_pricing(project_id)
-    service_a.confirm_payment(project_id)
+    service_a.confirm_payment(project_id, quote_id=current_quote_id(service_a, project_id))
     plan = service_a.run_research(project_id)
 
     research_b = ResearchEngineService()
@@ -338,7 +339,7 @@ def test_seed_research_plan_from_client_snapshot(tmp_path):
     project_id = bundle.project.id
     service_a.analyze_requirements(project_id)
     service_a.calculate_pricing(project_id)
-    service_a.confirm_payment(project_id)
+    service_a.confirm_payment(project_id, quote_id=current_quote_id(service_a, project_id))
     plan = service_a.run_research(project_id)
     plan_snapshot = plan.to_dict()
 
@@ -351,8 +352,13 @@ def test_seed_research_plan_from_client_snapshot(tmp_path):
         service_b._load_research_plan(project_id)
 
     loaded = service_b._load_research_plan(project_id, seed=plan_snapshot)
-    assert loaded.id == plan.id
-    assert store.require_bundle(project_id).project.artifacts.get("research_plan")
+    # Adopted browser copies get a server-issued id so they cannot collide across projects.
+    assert loaded.id != plan.id
+    assert loaded.project_id == project_id
+    assert loaded.assignment_topic == plan.assignment_topic
+    artifacts = store.require_bundle(project_id).project.artifacts
+    assert artifacts.get("research_plan")
+    assert artifacts.get("research_plan_id") == loaded.id
 
 
 def test_start_writer_restores_session_from_disk(tmp_path):
@@ -380,7 +386,7 @@ def test_start_writer_restores_session_from_disk(tmp_path):
     project_id = bundle.project.id
     service_a.analyze_requirements(project_id)
     service_a.calculate_pricing(project_id)
-    service_a.confirm_payment(project_id)
+    service_a.confirm_payment(project_id, quote_id=current_quote_id(service_a, project_id))
     service_a.run_research(project_id)
     service_a.run_blueprint(project_id)
     session = service_a.start_writer(project_id)
@@ -421,7 +427,7 @@ def test_advance_writer_prefers_disk_over_stale_worker_memory(tmp_path):
     project_id = bundle.project.id
     service_a.analyze_requirements(project_id)
     service_a.calculate_pricing(project_id)
-    service_a.confirm_payment(project_id)
+    service_a.confirm_payment(project_id, quote_id=current_quote_id(service_a, project_id))
     service_a.run_research(project_id)
     service_a.run_blueprint(project_id)
     started = service_a.start_writer(project_id)
@@ -469,7 +475,7 @@ def test_advance_writer_restores_session_from_disk(tmp_path):
     project_id = bundle.project.id
     service_a.analyze_requirements(project_id)
     service_a.calculate_pricing(project_id)
-    service_a.confirm_payment(project_id)
+    service_a.confirm_payment(project_id, quote_id=current_quote_id(service_a, project_id))
     service_a.run_research(project_id)
     service_a.run_blueprint(project_id)
     service_a.start_writer(project_id)
@@ -515,7 +521,7 @@ def test_start_humanizer_restores_session_from_disk(tmp_path):
     project_id = bundle.project.id
     service_a.analyze_requirements(project_id)
     service_a.calculate_pricing(project_id)
-    service_a.confirm_payment(project_id)
+    service_a.confirm_payment(project_id, quote_id=current_quote_id(service_a, project_id))
     service_a.run_research(project_id)
     service_a.run_blueprint(project_id)
     session = service_a.start_writer(project_id)
@@ -623,7 +629,7 @@ def test_advance_writer_serializes_overlapping_calls(tmp_path):
     project_id = bundle.project.id
     service.analyze_requirements(project_id)
     service.calculate_pricing(project_id)
-    service.confirm_payment(project_id)
+    service.confirm_payment(project_id, quote_id=current_quote_id(service, project_id))
     service.run_research(project_id)
     service.run_blueprint(project_id)
     service.start_writer(project_id)
@@ -678,14 +684,22 @@ def test_assignment_refund_eligible_when_paid_without_delivery(tmp_path):
     project_id = bundle.project.id
     service.analyze_requirements(project_id)
     service.calculate_pricing(project_id)
-    service.confirm_payment(project_id)
+    service.confirm_payment(project_id, quote_id=current_quote_id(service, project_id))
     project = store.require_project(project_id)
     project.artifacts["coins_charged"] = 576
     store.save_project(project)
 
-    amount = service.assert_assignment_refund_eligible(project_id)
-    assert amount == 576
+    with pytest.raises(ValueError, match="No failed step was recorded"):
+        service.assert_assignment_refund_eligible(project_id)
 
+    service._record_processing_failure(project_id, "writing", RuntimeError("provider down"), client_seeded=False)
+    # No payment-cycle record: the stored coins_charged is not trusted as a refund amount.
+    with pytest.raises(ValueError) as legacy:
+        service.assert_assignment_refund_eligible(project_id)
+    assert legacy.value.code == "LEGACY_PAYMENT_REVIEW"
+    assert store.require_project(project_id).artifacts["refund_review_required"]["reason"]
+
+    amount = 576
     service.mark_assignment_refunded(project_id, amount)
     marked = store.require_project(project_id)
     assert marked.artifacts.get("payment_refunded") is True
@@ -705,7 +719,7 @@ def test_assignment_refund_blocked_after_delivery(tmp_path):
     project_id = bundle.project.id
     service.analyze_requirements(project_id)
     service.calculate_pricing(project_id)
-    service.confirm_payment(project_id)
+    service.confirm_payment(project_id, quote_id=current_quote_id(service, project_id))
     project = store.require_project(project_id)
     project.artifacts["coins_charged"] = 100
     project.artifacts["delivery_package"] = {"id": "pkg-1"}

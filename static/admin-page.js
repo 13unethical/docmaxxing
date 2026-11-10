@@ -431,7 +431,10 @@
   function loadPreflight(probeBrowser) {
     var qs = probeBrowser ? "?browser=1" : "";
     setPreflightStatus(probeBrowser ? "Checking StealthWriter tab…" : "Checking API keys…");
-    return fetch("/api/admin/pipeline-preflight" + qs, { credentials: "same-origin" })
+    return fetch("/api/admin/pipeline-preflight" + qs, {
+      method: probeBrowser ? "POST" : "GET",
+      credentials: "same-origin",
+    })
       .then(function (r) {
         return r.json().then(function (data) {
           return { ok: r.ok, data: data };

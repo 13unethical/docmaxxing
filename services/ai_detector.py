@@ -10,9 +10,16 @@ Environment:
                                           the detector serves with its weights, else 0.5)
   FREE_DETECT_GUEST_WORDS=1500            words per check without an account
   FREE_DETECT_GUEST_DAILY=10              checks per UTC day without an account (per IP + session)
+  FREE_DETECT_GUEST_IP_DAILY=<guest daily> guest checks per UTC day from one network (IPv4 address or
+                                          IPv6 /64), whatever the session: clearing cookies gives no more
+  FREE_DETECT_GUEST_RATE_PER_MIN=20       guest checks per minute from one network
   FREE_DETECT_USER_WORDS=5000             words per check for a signed-in user
   FREE_DETECT_USER_DAILY=50               checks per UTC day for a signed-in user
+  FREE_DETECT_UNVERIFIED_IP_DAILY=<user daily>  checks per UTC day by accounts with an unverified email
+                                          from one network together (such accounts cost nothing to create)
   AI_DETECTOR_EVENTS_LOG=<path>           JSONL of free checks (who, %, model, text hash; never the text)
+
+All counters live in the shared SQLite DB, so every worker and restart sees the same numbers.
 """
 
 from __future__ import annotations
@@ -28,9 +35,6 @@ from pathlib import Path
 
 import requests
 
-from services.free_humanize import RateLimiter
-
-guest_rate_limiter = RateLimiter()
 log = logging.getLogger(__name__)
 
 WINDOW_WORDS = 110
@@ -47,8 +51,11 @@ class DetectorUnavailable(RuntimeError):
 class DetectLimits:
     guest_words: int
     guest_daily: int
+    guest_ip_daily: int
+    guest_rate_per_minute: int
     user_words: int
     user_daily: int
+    unverified_ip_daily: int
 
 
 def _env_int(name: str, default: int) -> int:
@@ -60,11 +67,16 @@ def _env_int(name: str, default: int) -> int:
 
 
 def limits() -> DetectLimits:
+    guest_daily = _env_int("FREE_DETECT_GUEST_DAILY", 10)
+    user_daily = _env_int("FREE_DETECT_USER_DAILY", 50)
     return DetectLimits(
         guest_words=_env_int("FREE_DETECT_GUEST_WORDS", 1500),
-        guest_daily=_env_int("FREE_DETECT_GUEST_DAILY", 10),
+        guest_daily=guest_daily,
+        guest_ip_daily=_env_int("FREE_DETECT_GUEST_IP_DAILY", guest_daily),
+        guest_rate_per_minute=_env_int("FREE_DETECT_GUEST_RATE_PER_MIN", 20) or 20,
         user_words=_env_int("FREE_DETECT_USER_WORDS", 5000),
-        user_daily=_env_int("FREE_DETECT_USER_DAILY", 50),
+        user_daily=user_daily,
+        unverified_ip_daily=_env_int("FREE_DETECT_UNVERIFIED_IP_DAILY", user_daily),
     )
 
 

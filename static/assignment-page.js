@@ -92,6 +92,10 @@
     productionPeakPct: 0,
     productionNotice: "",
     composerMode: "brief", /* brief | revision */
+    /** quote_id the student clicked to pay; the only quote a confirmation may name. */
+    consentQuoteId: null,
+    /** Set when the server refused that quote; the new price needs its own click. */
+    priceChange: null,
   };
 
   function $(sel) { return root.querySelector(sel); }
@@ -204,6 +208,8 @@
     state.forceContinue = false;
     state.stage = "upload";
     state.productionPeakPct = 0;
+    state.consentQuoteId = null;
+    state.priceChange = null;
   }
 
   function staleSessionMessage() {
@@ -1239,7 +1245,7 @@
     if (primary) primary.disabled = on || primary.dataset.forceDisabled === "1";
     if (back) back.disabled = on;
     if (analyze) analyze.disabled = on || collectUploadFiles().length === 0;
-    if (pay) pay.disabled = on || state.autoRunning || state.price == null || state.paymentConfirmed;
+    if (pay) pay.disabled = on || state.autoRunning || state.price == null || state.paymentConfirmed || !!state.priceChange;
     syncSendEnabled();
   }
 
@@ -1395,6 +1401,55 @@
     state.paymentConfirmed = !!(data && data.project && data.project.artifacts && data.project.artifacts.payment_confirmed);
   }
 
+  var QUOTE_REFUSED = ["PRICE_CHANGED", "QUOTE_REQUIRED", "QUOTE_MISMATCH"];
+
+  function isQuoteRefusal(err) {
+    return !!(err && QUOTE_REFUSED.indexOf(err.code) >= 0);
+  }
+
+  // The quote the student agreed to was refused (or none was given): show the current price and
+  // wait for a new click. An earlier click is never consent to a different amount.
+  function offerNewPrice(err) {
+    var fresh = err && err.payload && err.payload.project;
+    var was = state.pricing && state.pricing.amount_coins;
+    if (fresh && fresh.project) {
+      state.price = fresh.project.price != null ? fresh.project.price : state.price;
+      state.pricing = (fresh.project.artifacts && fresh.project.artifacts.pricing) || state.pricing;
+    }
+    state.consentQuoteId = null;
+    state.priceChange = err && err.local ? null : { was: was };
+    state.autoRunning = false;
+    state.retryAction = null;
+    clearError();
+    hideWizardActions(false);
+    setStage("price");
+    renderSummary();
+  }
+
+  // A click on a pay button is consent to the quote on screen at that moment, and to nothing else.
+  function onPayClick() {
+    if (state.paymentConfirmed) {
+      continueAutoProduction().catch(function (err) {
+        fail(err, productionRetryAction());
+      });
+      return;
+    }
+    if (state.priceChange || state.autoRunning) return;
+    state.consentQuoteId = (state.pricing && state.pricing.quote_id) || null;
+    runAutoProduction().catch(function (err) {
+      fail(err, productionRetryAction());
+    });
+  }
+
+  function onConfirmNewPrice() {
+    if (!state.priceChange || state.autoRunning || state.paymentConfirmed) return;
+    state.priceChange = null;
+    state.consentQuoteId = (state.pricing && state.pricing.quote_id) || null;
+    runAutoProduction().catch(function (err) {
+      fail(err, productionRetryAction());
+    });
+  }
+
   function formatMinutes(m) {
     m = Math.max(1, parseInt(m, 10) || 0);
     if (m < 60) return "~" + m + " min";
@@ -1513,6 +1568,19 @@
       ? '<p class="asg-price-coins">≈ ' + p.amount_coins.toLocaleString() + " coins</p>"
       : "";
 
+    var payAction = '<button type="button" class="assignment-pay-btn" data-asg-thread-pay>Start Writing</button>';
+    if (state.priceChange) {
+      var was = state.priceChange.was;
+      var now = p.amount_coins;
+      var notice = was && now && was !== now
+        ? "The price is now " + now.toLocaleString() + " coins. The price you confirmed (" +
+          was.toLocaleString() + " coins) is no longer valid. Nothing was charged."
+        : "The price quote was refreshed. Nothing was charged.";
+      payAction =
+        '<p class="asg-price-change" role="alert">' + esc(notice) + "</p>" +
+        '<button type="button" class="assignment-pay-btn" data-asg-confirm-new-price>Confirm new price</button>';
+    }
+
     upsertBubble(
       "price",
       "assistant",
@@ -1530,24 +1598,14 @@
         fmtMoney(state.price) +
         "</strong></p>" +
         coinsLine +
-        '<button type="button" class="assignment-pay-btn" data-asg-thread-pay>Start Writing</button>' +
+        payAction +
         "</div>"
     );
 
     var payBtn = document.querySelector("[data-asg-thread-pay]");
     if (payBtn && !payBtn._bound) {
       payBtn._bound = true;
-      payBtn.addEventListener("click", function () {
-        if (!state.paymentConfirmed) {
-          runAutoProduction().catch(function (err) {
-            fail(err, productionRetryAction());
-          });
-        } else {
-          continueAutoProduction().catch(function (err) {
-            fail(err, productionRetryAction());
-          });
-        }
-      });
+      payBtn.addEventListener("click", onPayClick);
     }
   }
 
@@ -1555,7 +1613,7 @@
     var btn = $("[data-asg-continue]");
     if (!btn) return;
     var ready = state.requirement && state.price != null;
-    btn.hidden = !ready || state.autoRunning;
+    btn.hidden = !ready || state.autoRunning || (!!state.priceChange && !state.paymentConfirmed);
     if (!state.paymentConfirmed) {
       btn.textContent = "Start Writing";
     } else if (state.deliveryPackage) {
@@ -1875,11 +1933,39 @@
     }
   }
 
+  // Confirms only the quote the student clicked to pay; without that consent nothing is sent.
   async function ensurePaymentConfirmed() {
     var data = await api(projectUrl(""));
     syncPaymentFromServer(data);
     if (state.paymentConfirmed) return;
-    var confirmed = await api(projectUrl("/confirm-payment"), { method: "POST" });
+    var quoteId = state.consentQuoteId;
+    if (!quoteId) {
+      var missing = new Error("Review the price and click Start Writing to confirm it.");
+      missing.code = "QUOTE_REQUIRED";
+      missing.payload = {};
+      missing.local = true;
+      throw missing;
+    }
+    var confirmed;
+    try {
+      confirmed = await api(projectUrl("/confirm-payment"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quote_id: quoteId }),
+      });
+    } catch (err) {
+      var paid = isQuoteRefusal(err) && err.payload && err.payload.payment_confirmed && err.payload.project;
+      if (paid) {
+        // Paid already (another tab): nothing is charged again, production may continue.
+        syncPaymentFromServer(err.payload.project);
+        if (state.paymentConfirmed) {
+          saveWizard();
+          renderSummary();
+          return;
+        }
+      }
+      throw err;
+    }
     syncPaymentFromServer(confirmed);
     if (!state.paymentConfirmed) {
       throw new Error("Payment could not be confirmed. Please try again.");
@@ -2525,6 +2611,10 @@
       var result = await runProductionCore();
       if (!(await handleProductionResult(result))) return;
     } catch (err) {
+      if (isQuoteRefusal(err)) {
+        offerNewPrice(err);
+        return;
+      }
       if (String(err.message || "").toLowerCase().indexOf("payment") >= 0) {
         state.paymentConfirmed = false;
         saveWizard();
@@ -2559,6 +2649,10 @@
       var result = await runProductionCore();
       if (!(await handleProductionResult(result))) return;
     } catch (err) {
+      if (isQuoteRefusal(err)) {
+        offerNewPrice(err);
+        return;
+      }
       if (String(err.message || "").toLowerCase().indexOf("payment") >= 0) {
         state.paymentConfirmed = false;
         saveWizard();
@@ -2593,6 +2687,8 @@
     }
 
     if (state.stage === "price") {
+      if (state.priceChange || state.paymentConfirmed) return onPayClick();
+      state.consentQuoteId = (state.pricing && state.pricing.quote_id) || null;
       await runAutoProduction();
       return;
     }
@@ -2768,19 +2864,7 @@
     }
 
     var pay = $("[data-asg-continue]");
-    if (pay) {
-      pay.addEventListener("click", function () {
-        if (!state.paymentConfirmed) {
-          runAutoProduction().catch(function (err) {
-            fail(err, productionRetryAction());
-          });
-          return;
-        }
-        continueAutoProduction().catch(function (err) {
-          fail(err, productionRetryAction());
-        });
-      });
-    }
+    if (pay) pay.addEventListener("click", onPayClick);
 
     var primary = $("[data-asg-wizard-primary]");
     if (primary) primary.addEventListener("click", function () { handlePrimary(); });
@@ -2806,15 +2890,12 @@
       }
       if (e.target.closest("[data-asg-thread-pay]")) {
         e.preventDefault();
-        if (!state.paymentConfirmed) {
-          runAutoProduction().catch(function (err) {
-            fail(err, productionRetryAction());
-          });
-        } else {
-          continueAutoProduction().catch(function (err) {
-            fail(err, productionRetryAction());
-          });
-        }
+        onPayClick();
+        return;
+      }
+      if (e.target.closest("[data-asg-confirm-new-price]")) {
+        e.preventDefault();
+        onConfirmNewPrice();
       }
     });
   }

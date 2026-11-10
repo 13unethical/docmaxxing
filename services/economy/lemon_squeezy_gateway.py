@@ -24,6 +24,8 @@ from typing import Any
 
 import requests
 
+from services.secret_redaction import describe_exception, redact
+
 from .db import connect
 from .ledger import classify_transaction, signed_credits
 from .pricing import TOPUP_PACKAGES
@@ -279,10 +281,10 @@ def notify_unhandled_payment(
             logger.warning(
                 "lemon-squeezy telegram alert failed status=%s body=%s",
                 res.status_code,
-                (res.text or "")[:200],
+                redact((res.text or "")[:200]),
             )
-    except Exception:  # noqa: BLE001
-        logger.exception("lemon-squeezy telegram alert request failed")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("lemon-squeezy telegram alert request failed: %s", describe_exception(exc))
 
 
 def _credit_idempotent(

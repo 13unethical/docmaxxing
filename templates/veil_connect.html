@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  {% include "_csrf_head.html" %}
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Connect Veil — DocMaxxing</title>
   <style>
@@ -42,27 +43,46 @@
   <script>
     const state = document.getElementById("state");
     const extensionId = {{ extension_id|tojson }};
-    const message = {
-      type: "VEIL_AUTH",
-      token: {{ token|tojson }},
-      email: {{ email|tojson }},
-      balance: {{ balance|tojson }}
-    };
     function fail(text) {
       state.className = "err";
       state.textContent = text;
     }
+    function csrfToken() {
+      const meta = document.querySelector('meta[name="csrf-token"]');
+      return meta ? meta.getAttribute("content") || "" : "";
+    }
     if (!window.chrome || !chrome.runtime || !chrome.runtime.sendMessage) {
       fail("Veil is not installed in this browser. Download it, load the folder in chrome://extensions, then open this page again.");
     } else {
-      chrome.runtime.sendMessage(extensionId, message, function (response) {
-        if (chrome.runtime.lastError || !response || !response.ok) {
-          fail("Could not reach Veil. Make sure the extension is installed and enabled, then reload this page.");
-          return;
-        }
-        state.className = "ok";
-        state.textContent = "Connected. You can close this tab and use Veil on any page.";
-      });
+      fetch("/api/veil/connect", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "X-CSRF-Token": csrfToken(), Accept: "application/json" },
+      })
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (result) {
+          if (!result.ok || !result.data || !result.data.token) {
+            fail("Could not connect Veil. Reload this page and try again.");
+            return;
+          }
+          const message = {
+            type: "VEIL_AUTH",
+            token: result.data.token,
+            email: result.data.email,
+            balance: result.data.balance
+          };
+          chrome.runtime.sendMessage(extensionId, message, function (response) {
+            if (chrome.runtime.lastError || !response || !response.ok) {
+              fail("Could not reach Veil. Make sure the extension is installed and enabled, then reload this page.");
+              return;
+            }
+            state.className = "ok";
+            state.textContent = "Connected. You can close this tab and use Veil on any page.";
+          });
+        })
+        .catch(function () {
+          fail("Could not connect Veil. Reload this page and try again.");
+        });
     }
   </script>
 </body>

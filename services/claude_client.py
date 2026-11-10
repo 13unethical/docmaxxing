@@ -11,6 +11,9 @@ from typing import Any
 
 import requests
 
+from services import free_ai_quota
+from services.secret_redaction import describe_exception
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "claude-sonnet-4-6"
@@ -97,6 +100,11 @@ def generate_json(
         diag = _base_diagnostics(model=active_model, request_chars=request_chars)
         diag["failure_reason"] = "validation_error"
         diag["error_message"] = "ANTHROPIC_API_KEY is not set"
+        return None, diag
+    if not free_ai_quota.before_provider_call("claude"):
+        diag = _base_diagnostics(model=active_model, request_chars=request_chars)
+        diag["failure_reason"] = "quota"
+        diag["error_message"] = "Free AI allowance used"
         return None, diag
 
     body = {
@@ -198,7 +206,7 @@ def generate_json(
         except _NETWORK_EXCEPTIONS as exc:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             total_latency_ms += elapsed_ms
-            last_error_message = repr(exc)
+            last_error_message = describe_exception(exc)
             if attempt < max_retries:
                 total_retries += 1
                 time.sleep(min(8.0, 1.0 * (2**attempt)))
@@ -267,6 +275,10 @@ def generate_with_web_search(
         diag["failure_reason"] = "validation_error"
         diag["error_message"] = "ANTHROPIC_API_KEY is not set"
         return None, [], diag
+    if not free_ai_quota.before_provider_call("claude"):
+        diag["failure_reason"] = "quota"
+        diag["error_message"] = "Free AI allowance used"
+        return None, [], diag
 
     headers = {
         "x-api-key": claude_api_key(),
@@ -292,7 +304,7 @@ def generate_with_web_search(
                 response = requests.post(_API_URL, json=body, headers=headers, timeout=timeout_s)
             except _NETWORK_EXCEPTIONS as exc:
                 diag["latency_ms"] += int((time.monotonic() - started) * 1000)
-                error = repr(exc)
+                error = describe_exception(exc)
                 if attempt < max_retries:
                     retries += 1
                     continue
@@ -350,6 +362,11 @@ def generate_reply(
         diag = _base_diagnostics(model=active_model, request_chars=request_chars)
         diag["failure_reason"] = "validation_error"
         diag["error_message"] = "ANTHROPIC_API_KEY is not set"
+        return None, diag
+    if not free_ai_quota.before_provider_call("claude"):
+        diag = _base_diagnostics(model=active_model, request_chars=request_chars)
+        diag["failure_reason"] = "quota"
+        diag["error_message"] = "Free AI allowance used"
         return None, diag
 
     body = {
@@ -410,7 +427,7 @@ def generate_reply(
         except _NETWORK_EXCEPTIONS as exc:
             elapsed_ms = int((time.monotonic() - started) * 1000)
             total_latency_ms += elapsed_ms
-            last_error_message = repr(exc)
+            last_error_message = describe_exception(exc)
             if attempt < max_retries:
                 total_retries += 1
                 time.sleep(min(8.0, 1.0 * (2**attempt)))

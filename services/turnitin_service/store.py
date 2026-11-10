@@ -91,6 +91,8 @@ def init_db() -> None:
             "ALTER TABLE turnitin_submissions ADD COLUMN ai_highlights_report_path TEXT",
             "ALTER TABLE turnitin_submissions ADD COLUMN highlights_status TEXT",
             "ALTER TABLE turnitin_submissions ADD COLUMN highlights_job_id TEXT",
+            "ALTER TABLE turnitin_submissions ADD COLUMN fetch_status TEXT",
+            "ALTER TABLE turnitin_submissions ADD COLUMN fetch_claimed_at TEXT",
         ):
             try:
                 conn.execute(col_sql)
@@ -238,6 +240,44 @@ class TurnitinStore:
                 values,
             )
         return self.get(submission_id)
+
+    def claim_highlights(self, submission_id: str, user_id: int) -> bool:
+        """Atomically move a completed check of this user to ``highlights_status='queued'``.
+
+        Exactly one of several concurrent requests (any worker) wins; the rest see False.
+        """
+        with connect() as conn:
+            cur = conn.execute(
+                "UPDATE turnitin_submissions SET highlights_status = 'queued', updated_at = ? "
+                "WHERE id = ? AND user_id = ? AND status = 'completed' "
+                "AND COALESCE(highlights_status, '') NOT IN ('queued', 'running')",
+                (_now_iso(), submission_id, int(user_id)),
+            )
+            return cur.rowcount == 1
+
+    def claim_fetch(self, submission_id: str, user_id: int, *, stale_seconds: int = 900) -> bool:
+        """Atomically take the report re-download slot (one download per check at a time).
+
+        A claim older than ``stale_seconds`` (crashed worker) can be taken over.
+        """
+        now = datetime.now(timezone.utc)
+        cutoff = datetime.fromtimestamp(now.timestamp() - stale_seconds, timezone.utc).isoformat()
+        with connect() as conn:
+            cur = conn.execute(
+                "UPDATE turnitin_submissions SET fetch_status = 'running', fetch_claimed_at = ? "
+                "WHERE id = ? AND user_id = ? AND status = 'completed' "
+                "AND (COALESCE(fetch_status, '') != 'running' OR fetch_claimed_at IS NULL "
+                "     OR fetch_claimed_at < ?)",
+                (now.isoformat(), submission_id, int(user_id), cutoff),
+            )
+            return cur.rowcount == 1
+
+    def release_fetch(self, submission_id: str) -> None:
+        with connect() as conn:
+            conn.execute(
+                "UPDATE turnitin_submissions SET fetch_status = 'idle', fetch_claimed_at = NULL WHERE id = ?",
+                (submission_id,),
+            )
 
     def delete_for_user(self, submission_id: str, user_id: int) -> bool:
         with connect() as conn:

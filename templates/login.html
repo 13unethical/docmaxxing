@@ -10,7 +10,8 @@
           <p class="auth-error" role="alert">{{ error }}</p>
           {% endif %}
 
-          <form method="post" action="{{ url_for('login') }}{% if next_url %}?next={{ next_url }}{% endif %}" class="auth-form">
+          <form method="post" action="{{ url_for('login') }}{% if next_url %}?next={{ next_url|urlencode }}{% endif %}" class="auth-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
             <label class="auth-field">
               <span class="auth-label">Email</span>
               <input type="email" name="email" required autocomplete="email"

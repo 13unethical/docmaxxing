@@ -1,6 +1,15 @@
-"""Map LLM provider failures to HTTP status codes and user-facing messages."""
+"""Map LLM provider failures to HTTP status codes and user-facing messages.
+
+The raw provider text (keys, account state, endpoints, request ids) stays in the server log;
+users only see one of the fixed messages below.
+"""
 
 from __future__ import annotations
+
+_UNAVAILABLE = "The AI service is temporarily unavailable. Please try again later."
+_RATE_LIMITED = "AI provider rate limit reached. Wait a minute and press Retry."
+_TIMEOUT = "AI took too long on this step. Press Retry — progress is kept."
+_FAILED = "AI generation failed. Please try again."
 
 
 def llm_error_http_status(message: str) -> int:
@@ -22,29 +31,16 @@ def llm_error_http_status(message: str) -> int:
 
 
 def user_friendly_llm_error(message: str) -> str:
-    msg = (message or "").strip()
-    lower = msg.lower()
+    lower = (message or "").strip().lower()
     if "credits are depleted" in lower or "credit balance" in lower or "insufficient" in lower:
-        if "claude" in lower or "anthropic" in lower:
-            return (
-                "Claude API credits are depleted. Top up at https://console.anthropic.com "
-                "or set ASSIGNMENT_LLM=gemini to use Gemini for writing."
-            )
-        return (
-            "Gemini API credits are depleted. Top up at https://ai.studio/projects "
-            "or ensure ANTHROPIC_API_KEY is valid so Claude can write sections."
-        )
+        return _UNAVAILABLE
     if "quota" in lower or "rate limit" in lower or "429" in lower:
-        return "AI provider rate limit reached. Wait a minute and press Retry."
+        return _RATE_LIMITED
     if (
         "timed out" in lower
         or "timeout" in lower
         or "read timeout" in lower
         or "httpsconnectionpool" in lower
     ):
-        return "AI took too long on this step. Press Retry — progress is kept."
-    if "claude:" in lower and "gemini:" in lower:
-        return msg
-    if msg:
-        return msg
-    return "AI generation failed. Check API keys and try again."
+        return _TIMEOUT
+    return _FAILED

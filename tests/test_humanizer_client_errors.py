@@ -85,6 +85,9 @@ def test_pipeline_preflight_admin_skips_browser(tmp_path, monkeypatch):
 
     with client.session_transaction() as sess:
         sess[economy_auth.SESSION_KEY] = user["id"]
+    assert client.get("/api/admin/pipeline-preflight").status_code == 403  # admin flag, email unverified
+
+    economy_auth.mark_email_verified(user["id"], user["email"])
     res = client.get("/api/admin/pipeline-preflight")
     assert res.status_code == 200
     data = res.get_json()

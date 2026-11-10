@@ -12,6 +12,8 @@ from typing import Any
 
 import requests
 
+from services import safe_fetch
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _UA = "DocmaxxingSlides/1.0 (presentation builder; https://docmaxxing.com)"
 _COMMONS_API = "https://commons.wikimedia.org/w/api.php"
@@ -167,6 +169,7 @@ def _store(url: str, http: requests.Session) -> str | None:
     image_id = hashlib.sha1(url.encode("utf-8")).hexdigest()[:20]
     if image_path(image_id):
         return image_id
+    safe_fetch.parse_target(url)
     response = http.get(url, headers={"User-Agent": _UA}, timeout=_DOWNLOAD_TIMEOUT_S)
     response.raise_for_status()
     with Image.open(io.BytesIO(response.content)) as im:

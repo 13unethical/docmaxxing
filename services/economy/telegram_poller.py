@@ -18,6 +18,8 @@ from typing import Any
 
 import requests
 
+from services.secret_redaction import describe_exception, redact
+
 logger = logging.getLogger(__name__)
 
 _LOCK_PATH = "/tmp/docmaxxing-telegram-poller.lock"
@@ -41,37 +43,15 @@ def _delete_webhook(token: str) -> None:
             timeout=20,
         )
         data = res.json() if res.content else {}
-        logger.info("telegram poller: deleteWebhook -> %s", data)
-    except Exception:  # noqa: BLE001
-        logger.exception("telegram poller: deleteWebhook failed")
+        logger.info("telegram poller: deleteWebhook -> %s", redact(data))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("telegram poller: deleteWebhook failed: %s", describe_exception(exc))
 
 
 def _process_update(update: dict[str, Any]) -> None:
-    from services.economy.support_chat import (
-        parse_admin_reply_from_update,
-        save_support_message,
-    )
+    from services.economy.support_chat import process_admin_update
 
-    parsed = parse_admin_reply_from_update(update)
-    if not parsed:
-        msg = update.get("message") or update.get("edited_message") or {}
-        if isinstance(msg, dict) and msg.get("reply_to_message"):
-            logger.info(
-                "telegram poller: reply ignored (no user id) update_id=%s",
-                update.get("update_id"),
-            )
-        return
-    saved = save_support_message(
-        user_id=int(parsed["user_id"]),
-        sender="admin",
-        message=str(parsed["message"]),
-    )
-    logger.info(
-        "telegram poller: admin reply saved user_id=%s msg_id=%s via=%s",
-        saved.user_id,
-        saved.id,
-        parsed.get("via"),
-    )
+    process_admin_update(update, source="poller")
 
 
 def _poll_loop(token: str) -> None:
@@ -85,16 +65,16 @@ def _poll_loop(token: str) -> None:
                 params={
                     "timeout": 50,
                     "offset": offset,
-                    "allowed_updates": ["message", "edited_message"],
+                    "allowed_updates": '["message"]',
                 },
                 timeout=60,
             )
             data = res.json() if res.content else {}
             if not data.get("ok"):
-                desc = data.get("description") or res.text[:200]
+                desc = redact(str(data.get("description") or res.text[:200]))
                 # Webhook still set → conflict; keep retrying after deleteWebhook.
                 logger.warning("telegram poller: getUpdates not ok: %s", desc)
-                if "webhook" in str(desc).lower():
+                if "webhook" in desc.lower():
                     _delete_webhook(token)
                 time.sleep(3)
                 continue
@@ -103,17 +83,19 @@ def _poll_loop(token: str) -> None:
                     continue
                 try:
                     _process_update(update)
-                except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "telegram poller: failed update_id=%s", update.get("update_id")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "telegram poller: failed update_id=%s: %s",
+                        update.get("update_id"),
+                        describe_exception(exc),
                     )
                 uid = update.get("update_id")
-                if isinstance(uid, int):
+                if isinstance(uid, int) and not isinstance(uid, bool):
                     offset = max(offset, uid + 1)
         except requests.Timeout:
             continue
-        except Exception:  # noqa: BLE001
-            logger.exception("telegram poller: loop error")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("telegram poller: loop error: %s", describe_exception(exc))
             time.sleep(5)
 
 

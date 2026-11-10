@@ -93,16 +93,19 @@ def test_validator_matches_numbered_references_and_ignores_optional_appendices()
 # --- brief materials for the writer ----------------------------------------
 
 
-def test_writer_material_puts_brief_first_and_keeps_line_breaks(tmp_path):
-    brief = tmp_path / "brief.txt"
+def test_writer_material_puts_brief_first_and_keeps_line_breaks(tmp_path, monkeypatch):
+    monkeypatch.setenv("PROJECT_STORAGE_DIR", str(tmp_path / "projects"))
+    files_dir = (tmp_path / "projects").resolve() / "p" / "files"
+    files_dir.mkdir(parents=True)
+    brief = files_dir / "brief.txt"
     brief.write_text("EcoNova Solutions\nFounded 2016 in Winchester\n\nRevenue £4.2m", encoding="utf-8")
-    notes = tmp_path / "notes.txt"
+    notes = files_dir / "notes.txt"
     notes.write_text("Lecture notes on PESTLE", encoding="utf-8")
     files = [
         SimpleNamespace(file_type="lecture_notes", storage_path=str(notes), original_filename="notes.txt"),
         SimpleNamespace(file_type="assignment_brief", storage_path=str(brief), original_filename="brief.txt"),
     ]
-    text = writer_source_material(files, note="Use UK spelling")
+    text = writer_source_material(files, project_id="p", note="Use UK spelling")
     assert text.startswith("[student_note]\nUse UK spelling")
     assert text.index("brief.txt") < text.index("notes.txt")
     assert "Founded 2016 in Winchester\n\nRevenue £4.2m" in text

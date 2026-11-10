@@ -115,7 +115,8 @@ def _save_and_report(svc: BrowserService) -> bool:
         f"  bash scripts/push_stealthwriter_session_to_vps.sh root@76.13.248.62\n"
         "Then on VPS:\n"
         "  sudo systemctl restart docmaxxing\n"
-        "  curl -sS http://127.0.0.1:8000/api/browser/providers/stealthwriter/status\n",
+        "  python3 scripts/admin_api.py call POST /api/browser/providers/stealthwriter/status --jar ~/.docmaxxing-admin.cookies\n"
+        "  (admin-only POST; sign in first: python3 scripts/admin_api.py login --jar ~/.docmaxxing-admin.cookies)\n",
         flush=True,
     )
     return True

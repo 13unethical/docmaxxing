@@ -11,7 +11,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from services.gemini_client import generate_json
+from services import free_ai_quota
+from services.gemini_client import gemini_enabled, generate_json
 
 # Must stay in sync with the formatter UI / app.py validation
 ALLOWED_FONTS = (
@@ -199,11 +200,19 @@ Rules:
         f"{text.strip()}\n---"
     )
 
-    data, diag = generate_json(
-        system_prompt=system_prompt,
-        user_prompt=user_content,
-        temperature=0.2,
-    )
+    if not gemini_enabled():
+        data, diag = None, {"enabled": False, "api_call_success": False, "failure_reason": "validation_error"}
+    elif len(text) > free_ai_quota.max_chars("brief"):
+        free_ai_quota.skip(free_ai_quota.INPUT_TOO_LONG)
+        data, diag = None, {"enabled": True, "api_call_success": False, "failure_reason": "input_too_long"}
+    elif not free_ai_quota.allow("brief"):
+        data, diag = None, {"enabled": True, "api_call_success": False, "failure_reason": "quota"}
+    else:
+        data, diag = generate_json(
+            system_prompt=system_prompt,
+            user_prompt=user_content,
+            temperature=0.2,
+        )
     if not data:
         payload = _normalize_requirements_payload(_strict_requirements_from_text(text))
         payload["gemini_diagnostics"] = diag

@@ -225,7 +225,11 @@
         analyze: (id) => request('POST', `${base(id)}/analyze-requirements`, { json: {}, timeoutMs: LONG }),
         price: (id) => request('POST', `${base(id)}/pricing`, { json: { priority: 'standard' } }),
         brief: (id, fields) => request('POST', `${base(id)}/brief`, { json: fields }),
-        confirm: (id) => request('POST', `${base(id)}/confirm-payment`, { json: {} }),
+        // A confirmation always names the quote the student accepted; without one nothing is sent.
+        confirm: (id, quoteId) => (quoteId
+          ? request('POST', `${base(id)}/confirm-payment`, { json: { quote_id: quoteId } })
+          : Promise.reject(new ApiError('Review the current price and confirm it to continue.',
+            { code: 'QUOTE_REQUIRED', status: 0, data: null }))),
         step: (id, path, body) => request('POST', base(id) + path, { json: body || {}, timeoutMs: LONG }),
         revise: (id, message) => request('POST', `${base(id)}/revision-chat`, { json: { message }, timeoutMs: LONG }),
         revisions: (id) => request('GET', `${base(id)}/revision-chat`),
@@ -301,7 +305,7 @@
         deleteUser: (id) => request('POST', `/api/admin/users/${id}/delete`, { json: {} }),
         dailyStats: () => request('GET', '/api/admin/daily-stats'),
         siteSettings: (patch) => request('PATCH', '/api/admin/site-settings', { json: patch }),
-        preflight: (browser) => request('GET', '/api/admin/pipeline-preflight' + (browser ? '?browser=1' : ''),
+        preflight: (browser) => request(browser ? 'POST' : 'GET', '/api/admin/pipeline-preflight' + (browser ? '?browser=1' : ''),
           { timeoutMs: browser ? 45000 : 15000 }),
         datasetStats: () => request('GET', '/api/admin/dataset-stats'),
       };

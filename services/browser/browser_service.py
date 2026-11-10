@@ -16,6 +16,7 @@ Responsibilities:
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -210,6 +211,23 @@ class BrowserService:
             return False
 
     # ------------------------------------------------------------------ diagnostics
+    def passive_health(self) -> dict[str, Any]:
+        """Snapshot that never launches Chrome, connects, or opens a provider tab."""
+        pool_health = self._pool.health()
+        connections = pool_health.get("connections", [])
+        return {
+            "browser_running": self._launcher.is_running(),
+            "chrome_pid": self._launcher.pid,
+            "connected": self._pool.is_healthy(),
+            "contexts": sum(c.get("contexts", 0) for c in connections),
+            "pages": sum(c.get("pages", 0) for c in connections),
+            "providers": sorted(self._providers),
+            "memory_usage": self._launcher.memory_usage(),
+            "uptime": round(time.time() - self._started_at, 1) if self._started_at else 0,
+            "cdp_url": self.cdp_url,
+            "pool": pool_health,
+        }
+
     def health(self) -> dict[str, Any]:
         running = self._launcher.is_running()
         connected = self._pool.is_healthy()
@@ -222,7 +240,10 @@ class BrowserService:
             try:
                 providers[name] = provider.health()
             except Exception as exc:  # noqa: BLE001
-                providers[name] = {"provider": name, "error": str(exc)}
+                from services.public_errors import admin_detail
+
+                logging.getLogger(__name__).exception("provider health failed provider=%s", name)
+                providers[name] = {"provider": name, "error": admin_detail(exc)["error"]}
 
         uptime = round(time.time() - self._started_at, 1) if self._started_at else 0
 

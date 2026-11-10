@@ -23,6 +23,20 @@ from services.writer_engine.models import (
 from services.writer_engine.store import DraftStore, WriterSessionStore
 
 
+def writer_queue_ids(blueprint: dict[str, Any]) -> list[str]:
+    """Section ids a writer session built from ``blueprint`` contains, in writing order."""
+    queue_ids = list(blueprint.get("writing_order") or [])
+    if not queue_ids:
+        queue_ids = [
+            str(item.get("id"))
+            for item in (blueprint.get("sections") or [])
+            if int(item.get("estimated_words") or 0) > 0
+            and "reference" not in str(item.get("title", "")).lower()
+            and "cover" not in str(item.get("title", "")).lower()
+        ]
+    return queue_ids
+
+
 class WriterEngineService:
     def __init__(
         self,
@@ -47,18 +61,10 @@ class WriterEngineService:
         if not requirement_json or not research_plan or not blueprint:
             raise ValueError("requirement_json, research_plan, and blueprint are required")
 
-        queue_ids = list(blueprint.get("writing_order") or [])
+        queue_ids = writer_queue_ids(blueprint)
         blueprint_sections = {
             str(item.get("id")): item for item in (blueprint.get("sections") or []) if item.get("id")
         }
-        if not queue_ids:
-            queue_ids = [
-                str(item.get("id"))
-                for item in (blueprint.get("sections") or [])
-                if int(item.get("estimated_words") or 0) > 0
-                and "reference" not in str(item.get("title", "")).lower()
-                and "cover" not in str(item.get("title", "")).lower()
-            ]
 
         sections: list[WriterSection] = []
         # Prefer AssignmentSpec word targets when present in requirement_json artifact-compatible form.
@@ -379,6 +385,9 @@ def _refresh_session_metrics(session: WriterSession) -> None:
     session.total_words_written = sum(count_words(section.generated_text) for section in session.sections)
     remaining = [section for section in session.sections if section.status != WriterSectionStatus.COMPLETED]
     session.estimated_remaining_time = _estimate_remaining(remaining)
+
+
+refresh_session_metrics = _refresh_session_metrics
 
 
 def _estimate_remaining(sections: list[WriterSection]) -> str:

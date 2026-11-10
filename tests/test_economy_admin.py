@@ -161,22 +161,44 @@ def test_cannot_delete_last_admin(fresh_db):
         fresh_db.delete_user(admin["id"], actor_id=other["id"])
 
 
-def test_bootstrap_admin_from_env(tmp_path, monkeypatch):
+def test_bootstrap_admin_from_env_never_elevates(tmp_path, monkeypatch):
+    """ADMIN_EMAIL is not an authorization source (F-04): startup leaves is_admin alone."""
     monkeypatch.setattr(economy_db, "DB_PATH", tmp_path / "economy.db")
     economy_db.init_db()
-    auth.create_user("owner@example.com", "secret123")
+    owner = auth.create_user("owner@example.com", "secret123")
+    auth.mark_email_verified(owner["id"], owner["email"])
     monkeypatch.setenv("ADMIN_EMAIL", "owner@example.com")
     bootstrap_admin_from_env()
-    user = auth.get_user(1)
+    user = auth.get_user(owner["id"])
     assert user is not None
-    assert user["is_admin"] is True
+    assert user["is_admin"] is False
+    assert auth.is_admin(user) is False
 
 
-def test_create_user_with_admin_email_becomes_admin(tmp_path, monkeypatch):
+def test_create_user_with_admin_email_is_ordinary_and_unverified(tmp_path, monkeypatch):
     monkeypatch.setattr(economy_db, "DB_PATH", tmp_path / "economy.db")
     economy_db.init_db()
     monkeypatch.setenv("ADMIN_EMAIL", "newadmin@example.com")
     user = auth.create_user("newadmin@example.com", "secret123")
     refreshed = auth.get_user(user["id"])
     assert refreshed is not None
-    assert refreshed["is_admin"] is True
+    assert refreshed["is_admin"] is False
+    assert refreshed["is_verified"] is False
+    assert auth.is_admin(refreshed) is False
+
+
+def test_grant_admin_script_requires_a_verified_account(tmp_path, monkeypatch):
+    from services.economy.admin import grant_admin_to_verified_account
+
+    monkeypatch.setattr(economy_db, "DB_PATH", tmp_path / "economy.db")
+    economy_db.init_db()
+    pending = auth.create_user("pending@example.com", "secret123")
+    with pytest.raises(AdminError):
+        grant_admin_to_verified_account("pending@example.com")
+    assert auth.get_user(pending["id"])["is_admin"] is False
+    with pytest.raises(AdminError):
+        grant_admin_to_verified_account("nobody@example.com")
+
+    auth.mark_email_verified(pending["id"], pending["email"])
+    grant_admin_to_verified_account(" Pending@Example.com ")
+    assert auth.is_admin(auth.get_user(pending["id"])) is True

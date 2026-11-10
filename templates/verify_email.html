@@ -18,6 +18,7 @@
     {% endif %}
 
     <form method="post" action="/verify-email/code" class="auth-form" data-dm-otp-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <input type="hidden" name="action" value="verify" />
       <label class="auth-field">
         <span class="auth-label">Verification code</span>
@@ -39,6 +40,7 @@
     </form>
 
     <form method="post" action="/verify-email/code" class="auth-form auth-form--resend">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <input type="hidden" name="action" value="resend" />
       <button type="submit" class="auth-resend-btn">Resend code</button>
     </form>
@@ -46,6 +48,7 @@
     <p class="auth-alt">
       Wrong account?
       <form method="post" action="{{ url_for('logout') }}" class="auth-inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <button type="submit" class="auth-text-link">Log out</button>
       </form>
     </p>

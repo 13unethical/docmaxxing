@@ -2,6 +2,7 @@
 <html lang="{{ seo.lang }}" data-theme="dark">
 <head>
 <meta charset="utf-8">
+{% include "_csrf_head.html" %}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ seo.title }}</title>
 {% include "_seo_head.html" %}
@@ -93,7 +94,7 @@
 
 <script>window.DMX_BOOT = {{ boot|tojson }};</script>
 <script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
-<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261107-1"></script>
-<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261107-1"></script>
+<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261110-p4b1"></script>
+<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261110-p4b1"></script>
 </body>
 </html>
