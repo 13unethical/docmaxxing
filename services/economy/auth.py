@@ -208,6 +208,20 @@ def create_user(
         },
         source_ref=f"users:{user_id}",
     )
+    try:
+        from flask import has_request_context, session as flask_session
+
+        from services.product_analytics import record as record_product_event
+
+        record_product_event(
+            "registration_completed",
+            user_id=user_id,
+            tool="auth",
+            session=flask_session if has_request_context() else None,
+            dedupe_key=f"registration_completed:u:{user_id}",
+        )
+    except Exception:
+        pass
     _wallet.ensure_wallet(user_id)
     if grant_welcome and WELCOME_BONUS > 0:
         _wallet.credit(
@@ -419,6 +433,20 @@ def verify_email_otp(user_id: int, code: str) -> dict[str, Any]:
         actor_id=int(user_id),
         summary=f"Verified email {user.get('email')}",
     )
+    try:
+        from flask import has_request_context, session as flask_session
+
+        from services.product_analytics import record as record_product_event
+
+        record_product_event(
+            "email_verified",
+            user_id=int(user_id),
+            tool="auth",
+            session=flask_session if has_request_context() else None,
+            dedupe_key=f"email_verified:u:{int(user_id)}",
+        )
+    except Exception:
+        pass
     return user
 
 

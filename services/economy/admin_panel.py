@@ -675,6 +675,16 @@ def overview() -> dict[str, Any]:
     test = sum(1 for u in users if u.get("account_flag") == "test" and not u.get("is_admin"))
     share = round((used_all - used_real) / used_all * 100) if used_all else 0
     latest = [e for e in activity_feed(hide_bots=True, hide_staff=True, limit=5)["events"]]
+    growth = {}
+    try:
+        from services.product_analytics import growth_snapshot
+
+        # Match the admin period selector; overview already builds all periods.
+        growth = {
+            p: growth_snapshot(period=p, exclude_staff=True) for p in PERIODS
+        }
+    except Exception:  # noqa: BLE001
+        growth = {}
     return {
         "periods": periods,
         "alerts": alerts,
@@ -687,6 +697,7 @@ def overview() -> dict[str, Any]:
         "latest": [[e["time"] if e["day"].startswith("Today") else e["day"].split(" · ")[-1],
                     e["text"] + (f" · {e['amt']} credits" if e["amt"] and e["amt"] not in ("free",) else ""),
                     e["user"]] for e in latest],
+        "growth": growth,
     }
 
 

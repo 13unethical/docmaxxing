@@ -937,6 +937,12 @@ def init_db() -> None:
             backfill_activity(conn)
         except sqlite3.Error:
             pass
+        try:
+            from services.product_analytics import ensure_schema as ensure_product_analytics
+
+            ensure_product_analytics(conn)
+        except Exception:
+            pass
         conn.commit()
     finally:
         conn.close()

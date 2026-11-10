@@ -296,6 +296,38 @@ def _csrf_template_helpers():
     return {"csrf_token": csrf.page_token}
 
 
+
+@app.post("/api/product-analytics/event")
+def api_product_analytics_event():
+    """Allowlisted client beacon for page views that never hit a server render (SPA pricing).
+
+    Only ``pricing_viewed`` is accepted. Important tool/payment events are recorded
+    server-side on success paths and must not be forged from the browser.
+    """
+    from services import product_analytics
+    from services.rate_limit import hit, source_id
+
+    payload = request.get_json(silent=True) or {}
+    event = str(payload.get("event") or "").strip()
+    if event not in product_analytics.CLIENT_EVENTS:
+        return jsonify({"ok": False, "error": "EVENT_NOT_ALLOWED"}), 400
+    wait = hit(
+        f"pa:beacon:{source_id(economy_auth.client_ip_from_request())}",
+        [(30, 60)],
+    )
+    if wait is not None:
+        return jsonify({"ok": False, "error": "RATE_LIMITED"}), 429
+    user = economy_auth.current_user()
+    product_analytics.capture_acquisition(request, session)
+    product_analytics.record(
+        event,
+        user_id=int(user["id"]) if user else None,
+        tool="pricing" if event == "pricing_viewed" else None,
+        session=session,
+    )
+    return jsonify({"ok": True})
+
+
 @app.get("/api/csrf-token")
 def api_csrf_token():
     """Same-origin pages re-read the token here after it rotated in another tab."""
@@ -905,6 +937,17 @@ _NEW_APP_SCREENS = {
 
 
 @app.before_request
+def _capture_product_acquisition():
+    """First-touch UTM params for growth analytics (no fingerprinting)."""
+    try:
+        from services.product_analytics import capture_acquisition
+
+        capture_acquisition(request, session)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@app.before_request
 def _redirect_old_pages_to_new_app():
     if request.method != "GET":
         return None
@@ -1003,19 +1046,65 @@ def _record_usage_safe(
     except Exception:  # noqa: BLE001
         app.logger.exception("usage record failed for user=%s feature=%s", user_id, feature)
 
-assignment_pipeline = AssignmentPipelineService()
-research_engine = ResearchEngineService()
-blueprint_engine = BlueprintEngineService()
-writer_engine = WriterEngineService()
-reviewer_engine = ReviewerEngineService(reviewer=GeminiAcademicReviewer())
-revision_engine = RevisionEngineService(
-    draft_store=writer_engine.drafts,
-    reviser=GeminiSectionReviser(),
-)
-zerogpt_client = ZeroGPTClient()
-ai_detection_engine = AIDetectionEngineService(detector=ZeroGPTAIDetector(client=zerogpt_client))
-delivery_engine = DeliveryEngineService()
-citation_service = CitationService(CrossrefProvider())
+
+def _product_event_safe(event: str, **kwargs: Any) -> None:
+    """Best-effort growth event; never breaks the request path or stores document text."""
+    try:
+        from services.product_analytics import record as record_product_event
+
+        if "session" not in kwargs:
+            try:
+                kwargs["session"] = session
+            except RuntimeError:
+                pass
+        record_product_event(event, **kwargs)
+    except Exception:  # noqa: BLE001
+        app.logger.exception("product_analytics event failed: %s", event)
+
+
+def _product_tool_success_safe(tool: str, *, user_id: int | None, words: int | None = None) -> None:
+    try:
+        from services.product_analytics import record_tool_success
+
+        record_tool_success(tool, user_id=user_id, words=words, session=session)
+    except Exception:  # noqa: BLE001
+        app.logger.exception("product_analytics tool success failed: %s", tool)
+
+
+def _track_payment_completed(result: Any, *, provider: str) -> None:
+    """Record payment_completed once per provider order when fulfillment succeeds."""
+    if not isinstance(result, dict):
+        return
+    purchase = result.get("purchase") if isinstance(result.get("purchase"), dict) else {}
+    payment = result.get("payment") if isinstance(result.get("payment"), dict) else {}
+    user_raw = result.get("user_id")
+    if user_raw is None:
+        user_raw = purchase.get("user_id") or payment.get("user_id")
+    try:
+        user_id = int(user_raw) if user_raw is not None else None
+    except (TypeError, ValueError):
+        user_id = None
+    order_id = (
+        result.get("order_id")
+        or result.get("orderId")
+        or result.get("payment_id")
+        or purchase.get("paddle_transaction_id")
+        or purchase.get("id")
+        or payment.get("order_id")
+        or payment.get("id")
+    )
+    if user_id is None or not order_id:
+        return
+    # Ignore non-fulfillment webhook noise (unhandled event types).
+    if result.get("handled") is False:
+        return
+    _product_event_safe(
+        "payment_completed",
+        user_id=user_id,
+        tool="checkout",
+        dedupe_key=f"payment_completed:{provider}:{order_id}",
+    )
+
 
 
 def _zerogpt_configured() -> bool:
@@ -2547,6 +2636,7 @@ def api_paddle_webhook():
         # 500 so Paddle retries; idempotency protects double-credit on success path.
         return jsonify({"error": "fulfillment_failed"}), 500
 
+    _track_payment_completed(result, provider="paddle")
     return jsonify({"ok": True, **result}), 200
 
 
@@ -2632,6 +2722,7 @@ def api_lemon_squeezy_webhook():
 
     # Spec: successful credit path returns {"status": "success"}.
     if result.get("status") == "success":
+        _track_payment_completed(result, provider="lemon_squeezy")
         return jsonify({"status": "success", **{k: v for k, v in result.items() if k != "status"}}), 200
     return jsonify(result), 200
 
@@ -2672,6 +2763,7 @@ def api_payments_create():
                                 "payment_url": subscription["portal_url"], "manage": True})
             lemon_url = lemon_plans.plan_checkout(plan_key, user_id=int(user["id"]), email=user.get("email"))
             if lemon_url:
+                _product_event_safe("checkout_started", user_id=int(user["id"]), tool="checkout")
                 return jsonify({"success": True, "provider": "lemon_squeezy", "payment_url": lemon_url})
         elif lemon_plans.payg_configured():
             try:
@@ -2682,6 +2774,7 @@ def api_payments_create():
                 app.logger.warning("lemon payg checkout failed: %s", exc)
                 return jsonify({"error": "CHECKOUT_FAILED",
                                 "message": "Checkout is not available right now. Please try again."}), 502
+            _product_event_safe("checkout_started", user_id=int(user["id"]), tool="checkout")
             return jsonify({"success": True, "provider": "lemon_squeezy", "payment_url": lemon_url})
     elif not package_id:
         return jsonify({"error": "package is required"}), 400
@@ -2717,6 +2810,7 @@ def api_payments_create():
         app.logger.warning("cryptomus create invoice failed: %s", exc)
         return jsonify({"error": "PAYMENT_PROVIDER_ERROR",
                         "message": "Payment could not be started. Please try again later."}), 400
+    _product_event_safe("checkout_started", user_id=int(user["id"]), tool="checkout")
     return jsonify({"success": True, **invoice})
 
 
@@ -2749,6 +2843,7 @@ def api_cryptomus_webhook():
         return jsonify({"error": "fulfillment_failed"}), 500
 
     # Cryptomus expects HTTP 200 on successful receipt.
+    _track_payment_completed(result, provider="cryptomus")
     return jsonify({"ok": True, **result}), 200
 
 
@@ -3660,6 +3755,11 @@ def api_free_ai_detector():
             "TOO_SHORT", f"Paste at least {ai_detector.MIN_SCORED_WORDS} words of prose to get a reliable result.", 400
         )
     checks_left = min(free_humanize.remaining_today(pool, limit) for pool, limit in pools)
+    _product_tool_success_safe(
+        "detector",
+        user_id=int(user["id"]) if user else None,
+        words=words,
+    )
     return jsonify({"success": True, **result, "checks_left": checks_left})
 
 
@@ -3909,6 +4009,14 @@ def api_extension_humanize():
             record_humanizer_success()
         except Exception:
             app.logger.exception("daily_stats humanizer increment failed")
+        try:
+            _product_tool_success_safe(
+                "humanizer",
+                user_id=int(user_id),
+                words=free_humanize.count_words(text) if isinstance(text, str) else None,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         # Training pairs must come from the teacher, never from the student itself.
         if not _is_student_result(res):
             try:
@@ -4715,6 +4823,11 @@ def api_assignment_project_create():
     except ValueError as exc:
         return jsonify({"error": _public_error(exc)}), 400
 
+    _product_event_safe(
+        "assignment_project_created",
+        user_id=int(session_uid) if session_uid is not None else None,
+        tool="assignment",
+    )
     return jsonify(_project_api_payload(bundle)), 201
 
 
@@ -4882,6 +4995,11 @@ def api_assignment_project_analyze_requirements(project_id: str):
         project_id=project_id,
         price=bundle.project.price,
         assignment_type=bundle.requirement.assignment_type,
+    )
+    _product_event_safe(
+        "assignment_analysis_completed",
+        user_id=economy_auth.current_user_id(),
+        tool="assignment",
     )
     return jsonify(_project_api_payload(bundle))
 
@@ -5710,6 +5828,14 @@ def api_browser_stealthwriter_humanize():
             record_humanizer_success()
         except Exception:
             app.logger.exception("daily_stats humanizer increment failed")
+        try:
+            _product_tool_success_safe(
+                "humanizer",
+                user_id=int(user_id) if user_id else None,
+                words=free_humanize.count_words(text) if isinstance(text, str) else None,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         # Training pairs must come from the teacher, never from the student itself.
         if not guest_trial and user_id and not _is_student_result(res):
             try:
@@ -7027,6 +7153,11 @@ def api_workspace_detect():
         provider="ZeroGPT",
         latency=latency_ms,
         request_id=None,
+    )
+    _product_tool_success_safe(
+        "detector",
+        user_id=int(user_id),
+        words=int(text_words or word_count or 0) or None,
     )
 
     # Passive detector corpus: AI > 20% with sentence-level highlights.
@@ -8594,6 +8725,12 @@ def pricing():
 
     user = economy_auth.current_user()
     user_id = int(user["id"]) if user else None
+    _product_event_safe(
+        "pricing_viewed",
+        user_id=user_id,
+        tool="pricing",
+        dedupe_key=None,
+    )
     return render_template(
         "pricing.html",
         nav_active="pricing",

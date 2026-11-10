@@ -281,6 +281,8 @@
       emailLink: () => request('POST', '/api/veil/email-link', { json: {} }),
     },
 
+    productEvent: (event) => request('POST', '/api/product-analytics/event', { json: { event } }).catch(() => null),
+
     admin: (() => {
       const P = '/api/admin/panel';
       const qs = (params) => {

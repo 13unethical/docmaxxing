@@ -1,12 +1,14 @@
 {% extends "info/base.html" %}
 {% set info_active = "privacy" %}
 {% set page_title = "Privacy Policy" %}
-{% set page_lede = "How DocMaxxing collects, uses, and protects your data. Last updated: 3 August 2026." %}
+{% set page_lede = "How DocMaxxing collects, uses, and protects your data. Last updated: 10 November 2026." %}
 {% block info_body %}
 <h2>1. What we collect</h2>
 <ul>
   <li><strong>Account data</strong> — email, display name, password hash, account identifiers, and referral fields (referral code, referrer link, referral balance, milestone flags).</li>
   <li><strong>Usage data</strong> — feature actions, credit balance changes, project metadata, job logs needed to run the product.</li>
+  <li><strong>Product analytics events</strong> — event name, time, internal account id when signed in, a hashed anonymous session id when not, tool name, coarse word-count bucket, success/failure category, and first-touch UTM parameters when present. We do <strong>not</strong> store document text, Humanizer input/output, AI prompts, passwords, one-time codes, API keys, cookies, or bearer tokens in analytics.</li>
+  <li><strong>Page analytics</strong> — aggregate page views via Umami (self-hosted style script on public pages; disabled on the admin UI).</li>
   <li><strong>Content you submit</strong> — briefs, drafts, uploads (PDF/DOCX/TXT/images), and generated outputs stored for your projects.</li>
   <li><strong>Payment metadata</strong> — processed by Lemon Squeezy (we do not store full card numbers on DocMaxxing servers).</li>
   {# Previously: Cryptomus and/or Paddle #}
@@ -19,6 +21,7 @@
   <li>Deliver Format, Humanizer, Turnitin, Assignment, and Earn &amp; Share features (and future tools when they leave Soon).</li>
   <li>Authenticate you, protect accounts, prevent abuse, and refund failed paid actions.</li>
   <li>Attribute referrals, calculate cashback, and process withdrawal requests.</li>
+  <li>Understand activation, retention, and conversion so we can improve the product (product analytics events above).</li>
   <li>Improve reliability (for example diagnosing failed packaging or humanizer sessions).</li>
   <li>Communicate about account, billing, and support requests.</li>
 </ul>
@@ -34,6 +37,7 @@
 <h2>4. Retention</h2>
 <p>
   We keep operational records as needed for security, fraud prevention, support, and legal compliance.
+  Product analytics events are kept for up to 365 days (configurable) and then deleted.
   You may request access or deletion of account data; some records may be retained where law or payment
   rules require it.
 </p>

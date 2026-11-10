@@ -2231,6 +2231,49 @@ function renderAdminOverview() {
       </section>
     </div>
 
+    ${(() => {
+      const G = (O.growth && O.growth[s.period]) || null;
+      if (!G) return '';
+      const pctKeys = new Set(['verified_rate','first_use_activation','checkout_conversion','paid_conversion','d1_retention','d7_retention']);
+      const fmt = (m) => {
+        if (!m || !m.available) return `<span class="muted" title="${esc((m && m.reason) || 'Unavailable')}">—</span>`;
+        if (typeof m.value === 'number' && pctKeys.has(m.key)) return `${Math.round(m.value * 1000) / 10}%`;
+        if (m.key === 'revenue') return `$${Number(m.value).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:2})}`;
+        return admFmt(m.value);
+      };
+      const pick = (k) => (G.metrics || []).find(x => x.key === k);
+      const cards = [
+        ['DAU', 'dau'], ['WAU', 'wau'], ['Sign-ups', 'registrations'], ['Verified', 'verified_rate'],
+        ['First-use', 'first_use_activation'], ['Returning', 'returning_users'], ['D1', 'd1_retention'], ['D7', 'd7_retention'],
+        ['Humanizer', 'humanizer_usage'], ['Detector', 'detector_usage'], ['Assignment', 'assignment_usage'],
+        ['Pricing views', 'pricing_views'], ['Checkout→pay', 'checkout_conversion'], ['Paid conv.', 'paid_conversion'], ['Revenue', 'revenue'],
+      ];
+      const maxF = Math.max(1, ...(G.funnel || []).map(x => x[1]));
+      const maxT = Math.max(1, ...(G.tools || []).map(x => x[1]));
+      const maxS = Math.max(1, ...(G.sources || []).map(x => x[1]));
+      return `<section aria-labelledby="adm-growth-h" class="adm-block">
+        <h2 id="adm-growth-h" class="adm-label">Growth · ${esc(d.label)}</h2>
+        <p class="small muted">Product events only. Incomplete rates show as — (not zero). Staff &amp; test excluded.</p>
+        <div class="adm-kpis">${cards.map(([label, key]) => {
+          const m = pick(key);
+          return `<div class="card adm-kpi" title="${esc(m && m.definition || '')}"><p class="small muted">${esc(label)}</p><p class="adm-kpi-v">${fmt(m)}</p>
+            <p class="small muted">${m && !m.available ? esc(m.reason || 'Unavailable') : (m && m.numerator != null ? `${m.numerator}/${m.denominator}` : '')}</p></div>`;
+        }).join('')}</div>
+        <div class="adm-two">
+          <section class="card adm-card" aria-labelledby="adm-funnel-h">
+            <div class="adm-card-head"><h2 id="adm-funnel-h">Conversion funnel</h2></div>
+            <ul class="adm-bars">${(G.funnel || []).map(([n,v]) => `<li><span>${esc(n)}</span><span class="adm-barline" aria-hidden="true"><span style="width:${v ? Math.max(3, Math.round(v / maxF * 100)) : 0}%"></span></span><b>${admFmt(v)}</b></li>`).join('')}</ul>
+          </section>
+          <section class="card adm-card" aria-labelledby="adm-tools-h">
+            <div class="adm-card-head"><h2 id="adm-tools-h">Tool usage</h2></div>
+            <ul class="adm-bars">${(G.tools || []).map(([n,v]) => `<li><span>${esc(n)}</span><span class="adm-barline" aria-hidden="true"><span style="width:${v ? Math.max(3, Math.round(v / maxT * 100)) : 0}%"></span></span><b>${admFmt(v)}</b></li>`).join('')}</ul>
+            <div class="adm-card-head" style="margin-top:1rem"><h2>Acquisition sources</h2><span class="small muted">UTM source</span></div>
+            ${(G.sources || []).length ? `<ul class="adm-bars">${G.sources.map(([n,v]) => `<li><span>${esc(n)}</span><span class="adm-barline" aria-hidden="true"><span style="width:${v ? Math.max(3, Math.round(v / maxS * 100)) : 0}%"></span></span><b>${admFmt(v)}</b></li>`).join('')}</ul>` : '<p class="small muted">No UTM-tagged events yet.</p>'}
+          </section>
+        </div>
+      </section>`;
+    })()}
+
     <section class="card adm-card" aria-labelledby="adm-latest-h">
       <div class="adm-card-head"><h2 id="adm-latest-h">Latest from real users</h2><a href="#/admin-activity">All activity</a></div>
       ${O.latest.length ? `<div class="table-wrap adm-flat"><table class="adm-table"><tbody>${O.latest.map(a => `<tr><td class="muted adm-time">${esc(a[0])}</td><td>${esc(a[1])}</td><td class="muted adm-right">${esc(a[2])}</td></tr>`).join('')}</tbody></table></div>`
@@ -7036,6 +7079,10 @@ function paygValues(cr) {
 
 function renderPricing() {
   const P = CONFIG.pricing, G = P.payg, cr = state.paygCredits || G.start, v = paygValues(cr);
+  if (!state._pricingTracked) {
+    state._pricingTracked = true;
+    try { API.productEvent && API.productEvent('pricing_viewed'); } catch (_) {}
+  }
   return `<div class="page pricing">
     <header class="pricing-head">
       <h1>${esc(P.title)}</h1>
