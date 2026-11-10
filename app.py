@@ -1106,6 +1106,20 @@ def _track_payment_completed(result: Any, *, provider: str) -> None:
     )
 
 
+assignment_pipeline = AssignmentPipelineService()
+research_engine = ResearchEngineService()
+blueprint_engine = BlueprintEngineService()
+writer_engine = WriterEngineService()
+reviewer_engine = ReviewerEngineService(reviewer=GeminiAcademicReviewer())
+revision_engine = RevisionEngineService(
+    draft_store=writer_engine.drafts,
+    reviser=GeminiSectionReviser(),
+)
+zerogpt_client = ZeroGPTClient()
+ai_detection_engine = AIDetectionEngineService(detector=ZeroGPTAIDetector(client=zerogpt_client))
+delivery_engine = DeliveryEngineService()
+citation_service = CitationService(CrossrefProvider())
+
 
 def _zerogpt_configured() -> bool:
     api_key = (os.environ.get("ZEROGPT_API_KEY") or "").strip()
