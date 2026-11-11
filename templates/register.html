@@ -12,6 +12,8 @@
           <p class="auth-error" role="alert">{{ error }}</p>
           {% endif %}
 
+          {% include "_oauth_buttons.html" %}
+
           <form method="post" action="{{ url_for('register') }}" class="auth-form" data-dm-register-form>
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
             <input type="hidden" name="referral_code" value="{{ referral_code or '' }}" />

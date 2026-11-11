@@ -33,6 +33,8 @@ EXEMPT_ENDPOINTS: dict[str, str] = {
     "api_veil_ask": "Veil extension bearer token only; the session cookie is never read",
     "api_veil_revoke": "revokes the bearer token it is given; the session cookie is never read",
     "api_extension_humanize": "Veil extension bearer token (or JSON key) only; the session cookie is never read",
+    # Apple Sign In posts here from appleid.apple.com (form_post). Auth is OAuth state + id_token.
+    "auth_oauth_callback": "OAuth state in session + provider-signed id_token (Google/Apple/Microsoft)",
 }
 
 

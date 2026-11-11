@@ -75,6 +75,7 @@ def _row_to_user(row: sqlite3.Row | None) -> dict[str, Any] | None:
         "free_turnitin_reports": int(row["free_turnitin_reports"] or 0) if "free_turnitin_reports" in keys else 0,
         "is_blocked": bool(row["is_blocked"]) if "is_blocked" in keys else False,
         "account_flag": row["account_flag"] if "account_flag" in keys else None,
+        "password_set": bool(row["password_set"]) if "password_set" in keys else True,
     }
 
 
@@ -694,26 +695,44 @@ def change_password(
     *,
     current_password: str,
     new_password: str,
+    allow_set_without_current: bool = False,
 ) -> None:
     """Change password after verifying the current one.
 
     Every session of the account ends (database trigger on ``password_hash``); the route
     signs the caller back in with a fresh session.
+
+    OAuth-only accounts (``password_set = 0``) may set a first password without the
+    unusable current hash when ``allow_set_without_current`` is true.
     """
     if not new_password or len(new_password) < 6:
         raise AuthError("New password must be at least 6 characters.")
     with connect() as conn:
         row = conn.execute(
-            "SELECT password_hash FROM users WHERE id = ?", (user_id,)
+            "SELECT password_hash, password_set FROM users WHERE id = ?", (user_id,)
         ).fetchone()
         if row is None:
             raise AuthError("User not found.")
-        if not check_password_hash(row["password_hash"], current_password or ""):
-            raise WrongPassword("Current password is incorrect.")
+        keys = row.keys()
+        has_password = bool(row["password_set"]) if "password_set" in keys else True
+        if has_password or not allow_set_without_current:
+            if not check_password_hash(row["password_hash"], current_password or ""):
+                raise WrongPassword("Current password is incorrect.")
         conn.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
+            "UPDATE users SET password_hash = ?, password_set = 1 WHERE id = ?",
             (generate_password_hash(new_password), user_id),
         )
+
+
+def auth_meta(user_id: int) -> dict[str, Any]:
+    """Providers linked to the account and whether a usable password exists."""
+    from .oauth_login import linked_providers
+
+    user = get_user(user_id)
+    return {
+        "hasPassword": bool(user.get("password_set", True)) if user else True,
+        "linkedProviders": linked_providers(int(user_id)),
+    }
 
 
 def is_admin(user: dict[str, Any] | None = None) -> bool:

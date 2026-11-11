@@ -5603,6 +5603,81 @@ body.support-chat-open {
   color: var(--accent-text);
   font-weight: 600;
 }
+.auth-forgot {
+  margin: -0.35rem 0 0;
+  text-align: right;
+  font-size: 0.85rem;
+}
+.auth-forgot a {
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.auth-forgot a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.auth-oauth {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0 0 1rem;
+}
+.auth-oauth-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  width: 100%;
+  min-height: 2.6rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.auth-oauth-btn:hover {
+  border-color: var(--accent);
+  background: var(--surface-inset);
+}
+.auth-oauth-btn--apple {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+.auth-oauth-btn--apple:hover {
+  background: #000;
+  border-color: #000;
+}
+[data-theme="dark"] .auth-oauth-btn--apple {
+  background: #f5f5f5;
+  color: #111;
+  border-color: #f5f5f5;
+}
+.auth-oauth-or {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.auth-oauth-or::before,
+.auth-oauth-or::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.auth-oauth-or span {
+  flex: 0 0 auto;
+}
 
 /* --------------------------------------------------------- registration wall */
 .dm-auth-layer {

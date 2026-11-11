@@ -77,6 +77,11 @@
       return request('POST', '/api/auth/register', { json: body });
     },
     logout: () => request('POST', '/api/auth/logout', { json: {} }),
+    forgotPassword: (email) => request('POST', '/api/auth/forgot-password', { json: { email } }),
+    resetPassword: ({ email, code, password, passwordConfirm }) =>
+      request('POST', '/api/auth/reset-password', {
+        json: { email, code, password, password_confirm: passwordConfirm },
+      }),
 
     balance: () => request('GET', '/api/economy/balance'),
     transactions: (limit = 50) => request('GET', `/api/economy/transactions?limit=${limit}`),
@@ -269,6 +274,10 @@
         form.append('avatar', file);
         return request('POST', '/api/upload_avatar', { form });
       },
+    },
+    reviews: {
+      list: () => request('GET', '/api/reviews'),
+      submit: (body) => request('POST', '/api/reviews', { json: body }),
     },
     feedback: (message) => request('POST', '/api/feedback', { json: { message } }),
     contact: (body) => request('POST', '/api/contact', { json: body }),

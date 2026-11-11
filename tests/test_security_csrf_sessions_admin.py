@@ -269,6 +269,7 @@ def test_exemptions_are_exactly_the_independently_authenticated_endpoints():
         "api_veil_ask",
         "api_veil_revoke",
         "api_extension_humanize",
+        "auth_oauth_callback",
     }
     app = _app()
     for endpoint in csrf.EXEMPT_ENDPOINTS:

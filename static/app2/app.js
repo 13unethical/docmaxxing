@@ -78,9 +78,13 @@ const CONFIG = {
           description: 'Study help in any tab — a Chrome extension' },
         { id: 'earn', label: 'Earn & Share', route: 'earn', icon: 'gift', info: true, free: true,
           description: 'Invite friends, earn 40% cashback, and unlock premium tools' },
-        { id: 'tutorials', label: 'Tutorials', dialog: 'tutorials', icon: 'video', info: true, free: true,
+        { id: 'blog', label: 'Blog', route: 'blog', icon: 'file', info: true, helpMenu: true, free: true,
+          description: 'Guides on formatting, writing and AI checks' },
+        { id: 'tutorials', label: 'Tutorials', dialog: 'tutorials', icon: 'video', info: true, helpMenu: true, free: true,
           description: 'Short guided tours of every tool' },
-        { id: 'help', label: 'Help', route: 'help', icon: 'info', info: true, free: true,
+        { id: 'feedback', label: 'Leave a review', dialog: 'review', icon: 'star', info: true, helpMenu: true, free: true,
+          description: 'Tell other students how DocMaxxing helps you' },
+        { id: 'help', label: 'Help', route: 'help', icon: 'info', info: true, helpMenu: true, free: true,
           description: 'Questions about your account, credits or payments' },
       ],
     },
@@ -1263,7 +1267,7 @@ const CONFIG = {
     tryIt: { title: 'Check your text for AI',
       demoTitle: 'See everything DocMaxxing does', demoText: 'Check for AI, humanize, format and write. All in one place.',
       freeRuns: 3, maxWords: 1000, placeholder: 'Paste your essay or any text here (at least 40 words)…' },
-    nav: [['how', 'How it works'], ['tools', 'Tools'], ['veil-land', 'Veil'], ['pricing-land', 'Pricing'], ['faq', 'FAQ']],
+    nav: [['how', 'How it works'], ['tools', 'Tools'], ['veil-land', 'Veil'], ['pricing-land', 'Pricing'], ['faq', 'FAQ'], ['blog', 'Blog']],
     title: 'Pass the AI check. Sound like you.',
     subtitle: 'AI and plagiarism check before you submit, humanizing for flagged parts and free reference formatting. All in one place.',
     cta: 'Start free with 50 credits',
@@ -1284,28 +1288,15 @@ const CONFIG = {
     pricingTitle: 'Simple pricing',
     pricingSub: 'Pick a plan or buy credits once. Credits come back if a run fails.',
     reviewsTitle: 'What students say',
-    reviewsSub: 'Real messages from our Telegram channel.',
-    // Real Telegram chats, retyped as bubbles: names, avatars and file names that carry names are left out
-    reviews: [
-      { tag: 'Case study', quote: 'Thanks a lot, bro, for the work and for your patience!', msgs: [
-        { me: true, file: 'Case_part_2.docx', size: '20.6 KB', time: '20:54' },
-        { me: true, text: 'работа готова 2 части кейса', time: '20:54' },
-        { text: 'спасибо большое брат, за работу и за терпение!', time: '23:18' },
-        { me: true, text: 'Обращайтесь брат 🤝', time: '13:04', react: '🤝' } ] },
-      { tag: 'Midterm report', quote: 'Thank you so much!', msgs: [
-        { me: true, file: 'Midterm_Workbook.xlsx', size: '29.9 KB', time: '19:36' },
-        { me: true, file: 'Midterm_Report.docx', size: '360.1 KB', time: '19:52' },
-        { text: 'Спасибо большое вам', time: '23:11' },
-        { me: true, text: 'всегда пожалуйста!', time: '23:11' } ] },
-      { tag: 'Economics task', quote: 'Thank you very much', msgs: [
-        { me: true, text: 'Three people are also below 2.5 (1, 1, 2), so the poverty rate is 3/5 = 60%. Thus on a headcount measure, the countries are equal in terms of poverty.', time: '12:06' },
-        { text: 'спасибо большое', time: '12:52', react: '🤝' } ] },
-      { tag: 'Assignment', quote: 'All spot on, bro. Thanks', msgs: [
-        { text: 'Все четко брат', time: '19:41' },
-        { text: 'Спасибо', time: '19:41' },
-        { me: true, text: 'всегда пожалуйста 🙏', time: '20:08', react: '❤️' } ] },
-    ],
-    reviewsUrl: 'https://t.me/docmaxxing',
+    reviewsSub: 'Reviews students leave right here on DocMaxxing. Names and emails stay hidden.',
+    site: {
+      rating: 4.9, count: 46, users: '300+',
+      note: 'Every review is checked before it goes live. Verified student means it came from a DocMaxxing account. Names and emails stay hidden.',
+      tools: ['AI Detector', 'Humanizer', 'Formatting', 'Work Review', 'Assignment', 'Veil'],
+      appTool: 'AI Detector',
+      faces: [['#3b7bff', '#9cc0ff'], ['#ff8a4d', '#ffd0a8'], ['#7a5cff', '#c9b8ff'], ['#19a974', '#9de3c4']],
+      items: [],
+    },
     faqTitle: 'Questions',
     faq: [
       ['Are my documents private?', 'Your files are used only to run the tool you picked. We don’t publish them or share them with your university.'],
@@ -1440,7 +1431,7 @@ const CONFIG = {
     refinements: ['Shorten', 'Add sources', 'Make it more formal', 'Explain the structure'],
   },
 
-  support: { label: 'Help & support', description: 'Questions about your account, credits or payments' },
+  support: { label: 'Message us', description: 'Account, credits, payments or a quick question', topics: ['Account', 'Credits', 'Payments', 'Bug', 'Idea'] },
 
   mockDocuments: [
     { id: 'd1', title: 'Climate policy essay — final',      tool: 'humanizer',  date: '2026-10-19' },
@@ -1490,6 +1481,7 @@ const ICONS = {
   user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
   coins: '<circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/>',
   check: '<path d="M20 6 9 17l-5-5"/>',
+  star: '<path d="M11.1 2.9a1 1 0 0 1 1.8 0l2.3 4.7 5.1.7a1 1 0 0 1 .6 1.7l-3.7 3.6.9 5.1a1 1 0 0 1-1.5 1.1L12 17.4l-4.6 2.4a1 1 0 0 1-1.5-1.1l.9-5.1-3.7-3.6a1 1 0 0 1 .6-1.7l5.1-.7z"/>',
   arrow: '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
   plus: '<path d="M5 12h14"/><path d="M12 5v14"/>',
   xmark: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
@@ -1581,6 +1573,30 @@ const SERVER_TITLE = document.title;
   const cr = (n) => `${n} credits`;
   const item = (id) => CONFIG.groups.flatMap(g => g.items).find(i => i.id === id);
   CONFIG.signupCredits = BOOT.signupCredits ?? CONFIG.signupCredits;
+  if (BOOT.blog && Array.isArray(BOOT.blog.posts)) {
+    CONFIG.blog = Object.assign({}, CONFIG.blog || {}, BOOT.blog);
+  } else {
+    CONFIG.blog = CONFIG.blog || { title: 'Guides for better papers', landTitle: 'Practical guides for your next paper',
+      bannerTitle: 'Check your paper before you submit', bannerText: 'See which parts look AI-written, then humanize and format — free to start.',
+      subtitle: 'Formatting, writing and AI checks, explained for students. Short, practical, up to date.',
+      author: 'DocMaxxing team', cats: [['all','All'],['formatting','Formatting'],['writing','Writing'],['ai','AI detection']], posts: [] };
+  }
+  if (BOOT.reviews) {
+    Object.assign(CONFIG.landing.site, {
+      rating: BOOT.reviews.rating, count: BOOT.reviews.count, users: BOOT.reviews.users,
+      note: BOOT.reviews.note || CONFIG.landing.site.note,
+      tools: BOOT.reviews.tools || CONFIG.landing.site.tools,
+      faces: BOOT.reviews.faces || CONFIG.landing.site.faces,
+      items: BOOT.reviews.items || [],
+      appTool: BOOT.reviewAppTool || BOOT.reviews.appTool || CONFIG.landing.site.appTool,
+    });
+    if (BOOT.reviews.mine) store.set('my-review', BOOT.reviews.mine);
+  }
+  if (BOOT.user) {
+    CONFIG.user.hasPassword = BOOT.user.hasPassword !== false;
+    CONFIG.user.linkedProviders = BOOT.user.linkedProviders || [];
+  }
+
   CONFIG.pricePlaceholder = 'Price shown before you pay';
   Object.assign(item('turnitin'), { price: cr(c.turnitin) });
   Object.assign(item('humanizer'), { price: cr(c.humanizer), badge: c.humanizerDiscount ? `-${c.humanizerDiscount}%` : '' });
@@ -1942,7 +1958,7 @@ function renderSidebar() {
       ${CONFIG.groups.map(g => `
         <div class="nav-group" role="group" aria-labelledby="grp-${g.id}">
           <div class="nav-group-label" id="grp-${g.id}">${esc(g.label)}</div>
-          <ul>${g.items.map(navItemHtml).join('')}</ul>
+          <ul>${g.items.filter(i => !i.helpMenu).map(navItemHtml).join('')}${navMoreHtml(g.items.filter(i => i.helpMenu))}</ul>
         </div>`).join('')}
     </nav>
     <div class="sidebar-foot">${foot}</div>`;
@@ -1976,6 +1992,7 @@ function markActive() {
     if (a.dataset.route === route) a.setAttribute('aria-current', 'page');
     else a.removeAttribute('aria-current');
   });
+  $('[data-act="nav-more"]')?.classList.toggle('has-current', moreItems().some(i => i.route && (i.route === route || (i.route === 'blog' && route.startsWith('blog')))));
 }
 
 function setDrawer(open) {
@@ -2783,11 +2800,18 @@ function render() {
   syncProto();
   if (isPublic) {
     document.body.classList.remove('on-editor', 'on-format', 'on-assign');
-    main.innerHTML = renderLanding({ tryIt: true });
-    document.title = BOOT.landing ? SERVER_TITLE : CONFIG.brand;
+    const post = (CONFIG.blog?.posts || []).find(p => route === 'blog/' + p.slug);
+    // Landing matches the prototype's #/landing-try: detector/humanizer hero, not the marketing hero.
+    main.innerHTML = route === 'blog' ? renderBlog()
+      : post ? renderBlogPost(post)
+      : renderLanding({ tryIt: true });
+    document.title = route === 'blog' ? `${CONFIG.blog.title} — ${CONFIG.brand}`
+      : post ? `${post.title} — ${CONFIG.brand}`
+      : (BOOT.landing ? SERVER_TITLE : CONFIG.brand);
     window.scrollTo(0, 0);
-    bindLanding();
-    bindLandTry();
+    if (route === 'blog') { /* list */ }
+    else if (post) { bindLandTry(); }
+    else { bindLanding(); bindLandTry(); }
     return;
   }
   // The landing is also served at /, /ai-detector and /humanizer; the app itself lives at /app
@@ -7462,14 +7486,25 @@ function renderAccount() {
         </form>
       </section>
 
+      <section class="card acc-card" aria-labelledby="acc-signin-h">
+        <h2 id="acc-signin-h">Sign-in</h2>
+        <dl class="acc-rows">
+          ${(u.linkedProviders || []).length
+            ? (u.linkedProviders || []).map(p => `<div><dt>${esc(p[0].toUpperCase()+p.slice(1))}</dt><dd>Connected</dd></div>`).join('')
+            : '<div><dt>Email</dt><dd>Password sign-in</dd></div>'}
+        </dl>
+        ${(BOOT.oauthProviders || []).includes('google') && !(u.linkedProviders || []).includes('google')
+          ? `<div class="acc-actions"><a class="btn btn-sm" href="/auth/oauth/google/start?next=${encodeURIComponent('/app#/settings')}">Connect Google</a></div>` : ''}
+      </section>
+
       <section class="card acc-card" aria-labelledby="acc-pw-h">
-        <h2 id="acc-pw-h">Change password</h2>
+        <h2 id="acc-pw-h">${u.hasPassword === false ? 'Set password' : 'Change password'}</h2>
         <form id="acc-pw-form" novalidate>
-          ${pw('acc-pw-cur', 'Current password', 'current-password')}
+          ${u.hasPassword === false ? '' : pw('acc-pw-cur', 'Current password', 'current-password')}
           ${pw('acc-pw-new', 'New password', 'new-password', `At least ${u.minPassword} characters`)}
           ${pw('acc-pw-confirm', 'Confirm new password', 'new-password')}
           <p class="field-err" id="acc-pw-err" role="alert" hidden></p>
-          <div class="acc-actions"><button type="submit" class="btn">Update password</button></div>
+          <div class="acc-actions"><button type="submit" class="btn">${u.hasPassword === false ? 'Set password' : 'Update password'}</button></div>
         </form>
       </section>
     </div>
@@ -7633,17 +7668,21 @@ function bindAccount() {
   $('#acc-pw-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const cur = $('#acc-pw-cur'), nw = $('#acc-pw-new'), cf = $('#acc-pw-confirm'), err = $('#acc-pw-err');
-    [cur, nw, cf].forEach(x => x.removeAttribute('aria-invalid'));
-    const fail = (el, msg) => { err.textContent = msg; err.hidden = false; el.setAttribute('aria-invalid', 'true'); el.focus(); };
-    if (!cur.value) return fail(cur, 'Enter your current password');
+    [nw, cf].forEach(x => x && x.removeAttribute('aria-invalid'));
+    if (cur) cur.removeAttribute('aria-invalid');
+    const fail = (el, msg) => { err.textContent = msg; err.hidden = false; if (el) { el.setAttribute('aria-invalid', 'true'); el.focus(); } };
+    const needsCurrent = CONFIG.user.hasPassword !== false;
+    if (needsCurrent && (!cur || !cur.value)) return fail(cur, 'Enter your current password');
     if (nw.value.length < CONFIG.user.minPassword) return fail(nw, `The new password needs at least ${CONFIG.user.minPassword} characters`);
     if (nw.value !== cf.value) return fail(cf, 'The passwords do not match');
     err.hidden = true;
     const btn = $('#acc-pw-form [type=submit]');
     btn.disabled = true;
-    API.account.password(cur.value, nw.value, cf.value).then(() => {
-      e.target.reset(); toast('Password updated');
-    }).catch(ex => fail(cur, ex.message || 'Could not update the password'))
+    API.account.password(cur ? cur.value : '', nw.value, cf.value).then(() => {
+      CONFIG.user.hasPassword = true;
+      if (BOOT.user) BOOT.user.hasPassword = true;
+      e.target.reset(); toast('Password updated'); render();
+    }).catch(ex => fail(cur || nw, ex.message || 'Could not update the password'))
       .finally(() => { btn.disabled = false; });
   });
 }
@@ -8006,7 +8045,7 @@ dlg.addEventListener('close', () => { if (confirmOpener && document.contains(con
 /* =========================================================
    Public flow: Landing → Sign up (dialog) → Home (dashboard)
    ========================================================= */
-const PUBLIC_ROUTES = ['landing', 'landing-try'];   // landing-try: the same landing with a free detector / humanizer in the hero
+const PUBLIC_ROUTES = ['landing', 'landing-try', 'blog', ...(CONFIG.blog?.posts || []).map(p => 'blog/' + p.slug)];
 const TASK_ITEMS = () => ALL_ITEMS.filter(i => i.id !== 'home' && !i.info && !i.hidden);
 
 function navigate(route) {
@@ -8069,19 +8108,132 @@ function bindHeroVideo() {
   }, { threshold: .35 }).observe(v);
 }
 
-// Scroll reveal, as on Framer sites: blocks fade up out of a soft blur when they enter the view; siblings stagger
-// One review: a Telegram-style chat (all cards the same height, newest at the bottom) and the student's words in English
-function reviewHtml(r) {
-  const bubble = (m) => `<div class="tg-msg ${m.me ? 'me' : ''}">${m.file
-    ? `<span class="tg-file"><i>${icon('file')}</i><span><b>${esc(m.file)}</b><small>${esc(m.size)}</small></span></span>`
-    : esc(m.text)}<span class="tg-time">${esc(m.time)}${m.me ? ' ✓✓' : ''}</span>${m.react ? `<span class="tg-react">${m.react}</span>` : ''}</div>`;
-  return `<figure class="land-review">
-    <div class="tg-chat" aria-hidden="true"><div class="tg-msgs">${r.msgs.map(bubble).join('')}</div></div>
-    <figcaption><q>${esc(r.quote)}</q><span>${esc(r.tag)}</span></figcaption>
-  </figure>`;
+// Site reviews (stars + moderated text). Telegram chats removed.
+let rvShown = 4;
+const RV_STAR = '<path d="M11.1 2.9a1 1 0 0 1 1.8 0l2.3 4.7 5.1.7a1 1 0 0 1 .6 1.7l-3.7 3.6.9 5.1a1 1 0 0 1-1.5 1.1L12 17.4l-4.6 2.4a1 1 0 0 1-1.5-1.1l.9-5.1-3.7-3.6a1 1 0 0 1 .6-1.7l5.1-.7z"/>';
+const rvStarsHtml = (n, cls = '') => `<span class="ur-stars ${cls}" role="img" aria-label="${n} out of 5 stars">${[1, 2, 3, 4, 5].map(i =>
+  `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" class="${i <= n ? 'on' : ''}">${RV_STAR}</svg>`).join('')}</span>`;
+const rvMine = () => store.get('my-review', null);
+// Facts from the account, not from the text: how long they have used DocMaxxing and how many documents
+const rvUsage = (r) => `${r.docs} document${r.docs === 1 ? '' : 's'} checked`;
+function rvCardHtml(r, mine = false) {
+  return `<article class="ur-card${mine ? ' is-mine' : ''}">
+      <div class="ur-top">${rvStarsHtml(r.stars)}${mine ? '<span class="badge ur-pending">Your review · in moderation</span>' : r.tool ? `<span class="ur-tool">${esc(r.tool)}</span>` : ''}</div>
+      <p>${esc(r.text)}</p>
+      ${mine ? `<span class="ur-meta">${r.tool ? `${esc(r.tool)} · ` : ''}Only you can see it until it is approved</span>`
+        : `<span class="ur-meta">${r.verified === false ? '<span>Guest review</span>'
+            : `<span class="ur-verified" title="Left from a DocMaxxing account">${icon('check')} Verified student</span><span>${rvUsage(r)}</span>`}<time datetime="${esc(r.date)}">${esc(fmtDate(r.date))}</time></span>`}
+      ${mine ? '<button type="button" class="btn btn-sm ur-edit" data-act="open-review">Edit</button>' : ''}
+    </article>`;
 }
+function rvSiteHtml() {
+  const S = CONFIG.landing.site, mine = rvMine(), rest = S.items.length - rvShown;
+  return `<div class="ur">
+      <div class="ur-list">
+        ${mine ? rvCardHtml(mine, true) : ''}
+        ${S.items.slice(0, rvShown).map(r => rvCardHtml(r)).join('')}
+        ${rest > 0 ? `<button type="button" class="btn ur-more" data-act="ur-more">Show ${rest} more</button>` : ''}
+      </div>
+      <aside class="ur-side" aria-label="Rating">
+        <div class="ur-join">
+          <span class="ur-faces" aria-hidden="true">${S.faces.map(([a, b]) => `<i style="--a:${a};--b:${b}"></i>`).join('')}</span>
+          <span><b>Join ${esc(S.users)} students</b><small>who check and format with ${esc(CONFIG.brand)}</small></span>
+        </div>
+        <div class="ur-tiles">
+          <div class="ur-tile ur-tile-score"><b>${S.rating.toFixed(1)}</b>${rvStarsHtml(Math.round(S.rating))}<span>${S.count} reviews</span></div>
+          <div class="ur-tile ur-tile-users"><b>${esc(S.users)}</b><span>Students</span></div>
+        </div>
+        <p class="ur-note">${esc(S.note)}</p>
+        <button type="button" class="btn btn-primary btn-lg ur-btn" data-act="open-review">${mine ? 'Edit your review' : 'Leave a review'}</button>
+      </aside>
+    </div>`;
+}
+function rvRerender() {   // the section keeps its heading; swap only the reviews
+  const box = $('#reviews .ur');
+  if (box) box.outerHTML = rvSiteHtml();
+}
+
+const rvDlg = $('#review-dialog');
+function openReview(pre = {}) {
+  const mine = rvMine(), S = CONFIG.landing.site;
+  const tool = pre.tool !== undefined ? pre.tool : mine ? mine.tool : state.signedIn ? S.appTool : null;
+  const stars = pre.stars || mine?.stars;
+  rvDlg.innerHTML = `<form class="ur-form" id="ur-form" novalidate>
+    <div class="dlg-head"><h2 id="ur-title">${mine ? 'Edit your review' : 'Leave a review'}</h2>
+      <button class="icon-btn" type="button" data-act="ur-close" aria-label="Close">${icon('close')}</button></div>
+    <p class="muted">Your review goes live after a quick check. We never show your name or email.</p>
+    <fieldset class="ur-rate" id="ur-rate" aria-describedby="ur-err">
+      <legend class="visually-hidden">Your rating</legend>
+      ${[1, 2, 3, 4, 5].map(n => `<input class="visually-hidden" type="radio" name="ur-stars" id="ur-s${n}" value="${n}" ${stars === n ? 'checked' : ''}>
+        <label for="ur-s${n}" data-n="${n}"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${RV_STAR}</svg><span class="visually-hidden">${n} out of 5</span></label>`).join('')}
+      <span class="ur-rate-hint" id="ur-hint" aria-hidden="true"></span>
+    </fieldset>
+    <fieldset class="ur-tools">
+      <legend>What did you use? <span class="muted">Optional</span></legend>
+      <div class="ur-chips">${S.tools.map(t => `<button type="button" class="ur-chip" data-act="ur-chip" aria-pressed="${t === tool}">${esc(t)}</button>`).join('')}</div>
+      ${state.signedIn && !mine ? `<p class="ur-tools-hint">${pre.tool ? 'The tool you just used.' : 'Picked from your activity.'} Change it if you like.</p>` : ''}
+    </fieldset>
+    <div class="ur-sorry" id="ur-sorry" hidden>
+      <p><b>Sorry it didn't go well.</b> Tell us what happened and we'll help fix it. Your review is still welcome either way.</p>
+      <button type="button" class="btn btn-sm" data-act="ur-help">${icon('mail')} Message us</button>
+    </div>
+    <label class="visually-hidden" for="ur-text">Your review</label>
+    <textarea class="input ur-text" id="ur-text" maxlength="1000" placeholder="Tell us how ${esc(CONFIG.brand)} helped you">${esc(mine?.text || '')}</textarea>
+    ${state.signedIn ? '' : `<label class="field" for="ur-email"><span>Your email</span>
+      <input class="field-input" id="ur-email" type="email" autocomplete="email" placeholder="you@university.edu" required aria-describedby="ur-email-hint"></label>
+      <p class="ur-tools-hint" id="ur-email-hint">We send a link to confirm it. If it matches your account, the review gets a Verified student badge.</p>`}
+    <p class="field-err" id="ur-err" role="alert" hidden></p>
+    <button class="btn btn-primary btn-lg ur-send" type="submit">${mine ? 'Save review' : 'Send review'}</button>
+  </form>`;
+  rvDlg.showModal();
+  const rate = $('#ur-rate'), hints = ['', 'Bad', 'Not great', 'Okay', 'Good', 'Great'];
+  const paint = (n) => { $$('label', rate).forEach(l => l.classList.toggle('on', +l.dataset.n <= n)); $('#ur-hint').textContent = hints[n] || ''; };
+  const picked = () => +($('input:checked', rate)?.value || 0);
+  paint(picked());
+  rate.addEventListener('mouseover', (e) => { const l = e.target.closest('label'); if (l) paint(+l.dataset.n); });
+  rate.addEventListener('mouseleave', () => paint(picked()));
+  // 1–3 stars: offer help as well; the review can still be posted (no hiding of low ratings)
+  const sorry = () => {
+    const n = picked(), low = !!(n && n <= 3);
+    $('#ur-sorry').hidden = !low;
+    $('#ur-text').placeholder = low ? 'What went wrong? What should we do better?' : `Tell us how ${CONFIG.brand} helped you`;
+  };
+  sorry();
+  rate.addEventListener('change', () => { paint(picked()); sorry(); $('#ur-err').hidden = true; });
+  $('#ur-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const err = (msg, el) => { const p = $('#ur-err'); p.textContent = msg; p.hidden = false; if (el) { el.setAttribute('aria-invalid', 'true'); el.focus(); } };
+    $$('[aria-invalid]', rvDlg).forEach(el => el.removeAttribute('aria-invalid'));
+    const stars = picked(), text = $('#ur-text').value.trim(), email = $('#ur-email');
+    if (!stars) return err('Pick a rating from 1 to 5 stars.', $('#ur-s1'));
+    if (text.length < 10) return err('Write a few words, at least 10 characters.', $('#ur-text'));
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) return err('Enter the email you use for your account.', email);
+    const tool = $('.ur-chip[aria-pressed="true"]', rvDlg)?.textContent || null;
+    const btn = $('.ur-send', rvDlg); btn.disabled = true; btn.textContent = 'Sending…';
+    const payload = { stars, text, tool };
+    if (email) payload.email = email.value.trim();
+    API.reviews.submit(payload).then((res) => {
+      store.set('my-review', { stars, text, tool, date: new Date().toISOString().slice(0, 10), status: res.status || 'pending_moderation' });
+      rvDlg.innerHTML = `<div class="ur-done">
+        <span class="ur-done-ic" aria-hidden="true">${icon('check')}</span>
+        <h2 id="ur-title">Thanks for your review</h2>
+        <p class="muted">${state.signedIn ? 'We check new reviews within a day. Until then only you can see it, and you can still edit it.'
+          : 'Open the link we sent to your email to confirm it. Then we check it within a day.'}</p>
+        <button class="btn btn-lg" type="button" data-act="ur-close">Done</button>
+      </div>`;
+      $('[data-act="ur-close"]', rvDlg).focus();
+      rvRerender();
+    }).catch((ex) => {
+      btn.disabled = false; btn.textContent = mine ? 'Save review' : 'Send review';
+      err(ex.message || 'Could not send your review.');
+    });
+  });
+}
+rvDlg.addEventListener('click', (e) => { if (e.target === rvDlg) rvDlg.close(); });
+
+
 const REVEAL = ['.land-stats li', '.pub-sec > h2', '.pub-sec > h2 + .muted', '.land-about > .card', '.land-steps > li', '.bento-tile', '.land-video', '.land-veil-text > *', '.land-veil > .veil-demo',
-  '.land-plans .plan', '.land-review', '.pub-sec-center > .btn', '.land-faq details', '.land-final-text > *', '.land-final-shot', '.lf-top > *', '.lf-word'];
+  '.land-plans .plan', '.ur-card', '.ur-side', '.land-blog-sec', '.pub-sec-center > .btn', '.land-faq details', '.land-final-text > *', '.land-final-shot', '.lf-top > *', '.lf-word'];
 function revealLanding() {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches || !('IntersectionObserver' in window)) return;
   const io = new IntersectionObserver((entries) => entries.forEach(e => {
@@ -8101,10 +8253,14 @@ function revealLanding() {
 }
 function landNavHtml() {
   return publicNav(`<nav class="pub-links" aria-label="Landing sections">
-      ${CONFIG.landing.nav.map(([id, label]) => `<a href="#/landing" data-act="scroll-to" data-target="${id}">${esc(label)}</a>`).join('')}
+      ${CONFIG.landing.nav.map(([id, label]) => id === 'blog'
+        ? `<a href="#/blog"${currentRoute().startsWith('blog') ? ' aria-current="page"' : ''}>${esc(label)}</a>`
+        : `<a href="#/landing" data-act="scroll-to" data-target="${id}">${esc(label)}</a>`).join('')}
     </nav>
-    <button class="btn btn-ghost" data-act="open-login">Log in</button>
-    <button class="btn btn-primary" data-act="signup">Start free</button>`);
+    ${state.signedIn
+      ? `<a class="btn btn-primary" href="${esc(itemHref(ITEMS.home))}">Go to dashboard</a>`
+      : `<button class="btn btn-ghost" data-act="open-login">Log in</button>
+    <button class="btn btn-primary" data-act="signup">Start free</button>`}`);
 }
 
 // Policies, About, FAQ… for visitors without an account: the landing header and footer around the document
@@ -8434,6 +8590,8 @@ function renderLanding({ tryIt = false } = {}) {
     ${sec('video', L.videoTitle, L.videoText, `<button class="land-video" type="button" data-act="intro-play" aria-label="Play the overview video">
         <span class="tut-play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span><span class="intro-len">2:00</span></button>`, 'pub-sec-center')}
 
+    ${blogLandHtml()}
+
     <section class="land-veil" id="veil-land" aria-labelledby="veil-land-h">
       <div class="land-veil-text">
         <span class="land-eyebrow">${icon('chrome')} Browser extension</span>
@@ -8447,8 +8605,7 @@ function renderLanding({ tryIt = false } = {}) {
 
     ${sec('pricing-land', L.pricingTitle, L.pricingSub, `<div class="plans land-plans">${P.plans.map(p => planHtml(p, { compact: true })).join('')}</div>`)}
 
-    ${sec('reviews', L.reviewsTitle, L.reviewsSub, `<div class="land-reviews">${L.reviews.map(reviewHtml).join('')}</div>
-      <a class="btn" href="${esc(L.reviewsUrl)}" target="_blank" rel="noopener">${icon('telegram')} See all in Telegram</a>`, 'pub-sec-center')}
+    ${sec('reviews', L.reviewsTitle, L.reviewsSub, rvSiteHtml(), 'pub-sec-center')}
 
     ${sec('faq', L.faqTitle, '', `<div class="land-faq">${faq.map(([q, a]) => `<details class="card"><summary><span>${q}</span><span class="faq-sign" aria-hidden="true"></span></summary><p class="muted">${a}</p></details>`).join('')}</div>`, 'pub-sec-center')}
 
@@ -8481,8 +8638,8 @@ function landFooterHtml({ inApp = false } = {}) {
   };
   const toolLink = (i) => inApp || i.url ? `<a ${appLinkAttrs(i)}>${esc(i.label)}</a>` : `<a href="/${i.route === 'format' ? 'formatter' : i.route}">${esc(i.label)}</a>`;
   const extra = inApp
-    ? `<a href="${esc(C.site)}/blog" target="_blank" rel="noopener">Blog</a><a href="#/pricing">Pricing</a>`
-    : '<a href="/blog">Blog</a><a href="/pricing">Pricing</a>';
+    ? `<a href="#/blog">Blog</a><a href="#/pricing">Pricing</a>`
+    : '<a href="#/blog">Blog</a><a href="/pricing">Pricing</a>';
   const legal = ['/privacy', '/terms', '/disclaimer', '/payment-policy', '/delivery-policy', '/refund-policy'];
   const col = (title, html) => `<nav class="lf-col" aria-label="${esc(title)}"><h3>${esc(title)}</h3>${html}</nav>`;
   return `<footer class="land-foot${inApp ? ' in-app' : ''}">
@@ -8501,11 +8658,235 @@ function landFooterHtml({ inApp = false } = {}) {
   </footer>`;
 }
 
+
+/* ---------- More menu + Message us + Reviews + Blog ---------- */
+const moreItems = () => ALL_ITEMS.filter(i => i.helpMenu);
+function navMoreHtml(items) {
+  if (!items.length) return '';
+  return `<li class="nav-more">
+    <button type="button" class="nav-item" data-act="nav-more" aria-haspopup="menu" aria-expanded="false" aria-controls="nav-more-menu"
+      data-tip-title="More" data-tip-desc="${esc(items.map(i => i.label).join(', '))}">
+      ${icon('more')}<span class="nav-label">More</span><span class="nav-more-chev collapsed-hide" aria-hidden="true">${icon('chevR')}</span>
+    </button>
+  </li>`;
+}
+function toggleNavMore(open) {
+  const menu = $('#nav-more-menu'), btn = $('[data-act="nav-more"]');
+  if (!menu) return;
+  open = open ?? menu.hidden;
+  if (open && btn) {
+    const route = currentRoute();
+    menu.innerHTML = `<p class="more-menu-h" aria-hidden="true">More</p>` + moreItems().map(i => {
+      const inner = `<span class="more-menu-ic" aria-hidden="true">${icon(i.icon)}</span><span><b>${esc(i.label)}</b><small>${esc(i.description)}</small></span>`;
+      return i.dialog
+        ? `<button type="button" role="menuitem" tabindex="-1" data-act="open-${i.dialog}">${inner}</button>`
+        : `<a role="menuitem" tabindex="-1" href="${esc(i.route === 'blog' ? '#/blog' : itemHref(i))}" data-act="more-go"${(i.route === route || (i.route === 'blog' && route.startsWith('blog'))) ? ' aria-current="page"' : ''}>${inner}</a>`;
+    }).join('');
+    menu.hidden = false;
+    const r = btn.getBoundingClientRect(), w = menu.offsetWidth || 280, h = menu.offsetHeight || 200;
+    const side = r.right + 8 + w <= innerWidth;
+    menu.style.left = `${side ? r.right + 8 : Math.max(8, Math.min(r.left, innerWidth - w - 8))}px`;
+    menu.style.top = `${Math.max(8, Math.min(side ? r.top - 6 : r.bottom + 4, innerHeight - h - 8))}px`;
+    hideTip();
+  } else menu.hidden = true;
+  btn?.setAttribute('aria-expanded', String(!menu.hidden));
+  if (!menu.hidden) $('[role="menuitem"]', menu)?.focus();
+}
+
+const HP_DRAFT = 'hp-draft';
+function helpPanelFormHtml() {
+  const S = CONFIG.support;
+  const draft = JSON.parse(sessionStorage.getItem(HP_DRAFT) || '{}');
+  return `<form class="hp" id="hp-form" novalidate>
+    <div class="hp-head">
+      <span class="hp-ic" aria-hidden="true">${icon('mail')}</span>
+      <div><h2 id="hp-title">${esc(S.label)}</h2><p>We reply by email, usually within a few hours.</p></div>
+      <button type="button" class="icon-btn" data-act="hp-close" aria-label="Close">${icon('close')}</button>
+    </div>
+    <fieldset class="hp-topics"><legend class="visually-hidden">Topic</legend>
+      <div class="ur-chips">${(S.topics || []).map(t => `<button type="button" class="ur-chip" data-act="hp-topic" aria-pressed="${draft.topic === t}">${esc(t)}</button>`).join('')}</div>
+    </fieldset>
+    <label class="visually-hidden" for="hp-text">Your message</label>
+    <textarea class="input hp-text" id="hp-text" maxlength="2000" placeholder="How can we help?">${esc(draft.text || '')}</textarea>
+    ${state.signedIn ? '' : `<label class="visually-hidden" for="hp-email">Your email</label>
+      <input class="field-input" id="hp-email" type="email" autocomplete="email" placeholder="Your email, so we can reply" value="${esc(draft.email || '')}">`}
+    <p class="field-err" id="hp-err" role="alert" hidden></p>
+    <button class="btn btn-primary hp-send" type="submit">Send</button>
+    ${state.signedIn ? `<a class="hp-link" href="#/help" data-act="hp-go">Open Help center ${icon('arrow')}</a>`
+      : `<button type="button" class="hp-link" data-act="help-faq">Common questions ${icon('arrow')}</button>`}
+  </form>`;
+}
+function bindHelpPanel() {
+  $('#hp-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = (msg, el) => { const p = $('#hp-err'); p.textContent = msg; p.hidden = false; el.setAttribute('aria-invalid', 'true'); el.focus(); };
+    $$('#help-panel [aria-invalid]').forEach(el => el.removeAttribute('aria-invalid'));
+    const text = $('#hp-text'), email = $('#hp-email');
+    const topic = $('#help-panel .ur-chip[aria-pressed="true"]')?.textContent || '';
+    if (text.value.trim().length < 5) return err('Write a few words about what you need.', text);
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value.trim())) return err('Enter your email so we can reply.', email);
+    const btn = $('.hp-send'); btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const body = (topic ? `[${topic}]\\n\\n` : '') + text.value.trim();
+      if (state.signedIn) await API.feedback(body);
+      else await API.contact({ email: email.value.trim(), topic, message: text.value.trim() });
+      sessionStorage.removeItem(HP_DRAFT);
+      $('#help-panel').innerHTML = `<div class="hp-done">
+        <span class="ur-done-ic" aria-hidden="true">${icon('check')}</span>
+        <h2 id="hp-title">Thanks, we'll reply by email</h2>
+        <p>Usually within a few hours.</p>
+        <button type="button" class="btn" data-act="hp-close">Done</button>
+      </div>`;
+      $('#help-panel [data-act="hp-close"]').focus();
+    } catch (ex) {
+      btn.disabled = false; btn.textContent = 'Send';
+      err(ex.message || 'Could not send your message.', text);
+    }
+  });
+}
+function toggleHelpPanel(open) {
+  const panel = $('#help-panel');
+  if (!panel) return;
+  open = open ?? panel.hidden;
+  if (open) {
+    if (!$('#hp-form') || panel.dataset.signed !== String(state.signedIn)) {
+      panel.innerHTML = helpPanelFormHtml(); panel.dataset.signed = String(state.signedIn); bindHelpPanel();
+    }
+    panel.style.bottom = `${Math.max(72, innerHeight - supportBtn.getBoundingClientRect().top + 8)}px`;
+    hideTip();
+  } else if ($('#hp-form')) {
+    const topic = $('#help-panel .ur-chip[aria-pressed="true"]')?.textContent || '';
+    sessionStorage.setItem(HP_DRAFT, JSON.stringify({
+      topic, text: $('#hp-text')?.value || '', email: $('#hp-email')?.value || '',
+    }));
+  }
+  panel.hidden = !open;
+  supportBtn.setAttribute('aria-expanded', String(open));
+  if (open) $('#hp-text')?.focus();
+  else if (!$('#hp-form')) panel.innerHTML = '';
+}
+
+let blogCat = 'all';
+const blogCatLabel = (id) => (CONFIG.blog.cats || []).find(c => c[0] === id)?.[1] || id;
+const blogCoverStyle = (p) => `--cb:${p.cover.bg};--c1:${p.cover.a};--c2:${p.cover.b};--c3:${p.cover.c};--r:${p.cover.r}deg`;
+function blogCardHtml(p, featured = false) {
+  const tag = `<span class="blog-tag">${esc(blogCatLabel(p.cat))}</span>`;
+  return featured
+    ? `<a class="blog-card is-featured" href="#/blog/${esc(p.slug)}">
+      <span class="blog-cover" style="${blogCoverStyle(p)}" aria-hidden="true"></span>
+      <span class="blog-card-body">${tag}<h3>${esc(p.title)}</h3><span class="blog-dek-sm">${esc(p.dek)}</span>
+        <span class="blog-card-foot"><span class="blog-meta">${p.min} min read</span><span class="blog-by">by ${esc(CONFIG.brand)}</span></span>
+      </span></a>`
+    : `<a class="blog-card" href="#/blog/${esc(p.slug)}">
+      <span class="blog-cover" style="${blogCoverStyle(p)}">${tag}</span>
+      <span class="blog-card-body"><h3>${esc(p.title)}</h3><span class="blog-dek-sm">${esc(p.dek)}</span></span></a>`;
+}
+function blogListHtml() {
+  const posts = CONFIG.blog.posts.filter(p => blogCat === 'all' || p.cat === blogCat);
+  return posts.map((p, i) => blogCardHtml(p, blogCat === 'all' && i === 0)).join('');
+}
+function blogSetCat(v) {
+  blogCat = v;
+  $$('.blog-cats button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v));
+  $('#blog-list').innerHTML = blogListHtml();
+}
+function blogLandHtml() {
+  const B = CONFIG.blog, posts = B.posts || [];
+  if (!posts.length) return '';
+  const [first, ...rest] = posts;
+  return `<section class="pub-sec pub-sec-center land-blog-sec" id="blog-land" aria-labelledby="blog-land-h">
+      <span class="blog-pill">${icon('file')} Blog</span>
+      <h2 id="blog-land-h">${esc(B.landTitle)}</h2>
+      <div class="blog-grid">${blogCardHtml(first, true)}${rest.slice(0, 3).map(p => blogCardHtml(p)).join('')}</div>
+      <a class="btn" href="#/blog">See all guides ${icon('arrow')}</a>
+    </section>`;
+}
+function blogBannerHtml() {
+  const p = (CONFIG.blog.posts || [])[0];
+  if (!p) return '';
+  return `<section class="blog-banner blog-cover" style="${blogCoverStyle(p)}" aria-labelledby="blog-banner-h">
+      <h2 id="blog-banner-h">${esc(CONFIG.blog.bannerTitle)}</h2>
+      <p>${esc(CONFIG.blog.bannerText)}</p>
+      ${state.signedIn ? `<a class="btn" href="${esc(itemHref(ITEMS.home))}">Go to dashboard</a>`
+        : `<a class="btn" href="#/landing-try">Try it free</a><small>No sign-up. ${CONFIG.landing.tryIt.freeRuns} free checks a day.</small>`}
+    </section>`;
+}
+function renderBlog() {
+  const B = CONFIG.blog;
+  return `<div class="pub land land-blog">
+    ${landNavHtml()}
+    <div class="blog-page">
+      <header class="blog-hero">
+        <span class="blog-pill">${icon('file')} Blog</span>
+        <h1>${esc(B.title)}</h1>
+        <p>${esc(B.subtitle)}</p>
+      </header>
+      <div class="blog-cats" role="group" aria-label="Topics">
+        ${(B.cats || []).map(([id, label]) => `<button type="button" data-act="blog-cat" data-v="${id}" aria-pressed="${blogCat === id}">${esc(label)}</button>`).join('')}
+      </div>
+      <div class="blog-grid" id="blog-list">${blogListHtml()}</div>
+      ${blogBannerHtml()}
+    </div>
+    ${landFooterHtml()}
+  </div>`;
+}
+function renderBlogPost(p) {
+  const B = CONFIG.blog;
+  const related = [...B.posts.filter(x => x !== p && x.cat === p.cat), ...B.posts.filter(x => x !== p && x.cat !== p.cat)].slice(0, 3);
+  const facts = [['Author', B.author], ['Updated', fmtDate(p.date)], ['Reading time', `${p.min} min`], ['Topic', blogCatLabel(p.cat)]];
+  const ld = [
+    { '@context': 'https://schema.org', '@type': 'Article', headline: p.title, description: p.dek, datePublished: p.date, dateModified: p.date,
+      author: { '@type': 'Organization', name: CONFIG.brand }, publisher: { '@type': 'Organization', name: CONFIG.brand } },
+    { '@context': 'https://schema.org', '@type': 'BreadcrumbList', itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Blog', item: (CONFIG.help.site || '') + '/blog' },
+      { '@type': 'ListItem', position: 2, name: p.title, item: `${CONFIG.help.site || ''}/blog/${p.slug}` }] },
+  ];
+  return `<div class="pub land land-blog">
+    ${landNavHtml()}
+    <div class="blog-page blog-post">
+      <a class="btn btn-sm bp-back" href="#/blog">${icon('arrow')} Back to blog</a>
+      <div class="blog-cover bp-cover" style="${blogCoverStyle(p)}" role="img" aria-label="Cover: ${esc(blogCatLabel(p.cat))}">
+        <span class="bp-tags"><span>${esc(blogCatLabel(p.cat))}</span><span>${p.min} min read</span></span>
+      </div>
+      <article class="blog-article" aria-labelledby="blog-h">
+        <h1 id="blog-h">${esc(p.title)}</h1>
+        <p class="bp-dek">${esc(p.dek)}</p>
+        <dl class="bp-facts">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
+        <div class="blog-sec bp-intro">${p.html || ''}</div>
+        <aside class="blog-tool" aria-label="Free AI check">
+          <h2 class="blog-tool-h">Check your own text</h2>
+          ${landTryHtml()}
+        </aside>
+      </article>
+      <section class="blog-related" aria-labelledby="blog-rel-h">
+        <h2 id="blog-rel-h">Keep reading</h2>
+        <div class="blog-grid">${related.map(x => blogCardHtml(x)).join('')}</div>
+      </section>
+      ${blogBannerHtml()}
+      <script type="application/ld+json">${JSON.stringify(ld).replace(/</g, '\\\\u003c')}<\\/script>
+    </div>
+    ${landFooterHtml()}
+  </div>`;
+}
+
+
 /* ---------- Sign up / Log in dialog ---------- */
 
 
 const signupDlg = $('#signup-dialog');
 let signupOpener = null;
+
+function oauthButtonsHtml() {
+  const providers = Array.isArray(BOOT.oauthProviders) ? BOOT.oauthProviders : [];
+  if (!providers.length) return '';
+  const labels = { google: 'Continue with Google', apple: 'Continue with Apple', microsoft: 'Continue with Microsoft' };
+  const next = encodeURIComponent('/app');
+  const buttons = providers.map((p) => {
+    const key = String(p || '').toLowerCase();
+    return `<a class="btn btn-block oauth-btn oauth-btn--${esc(key)}" href="/auth/oauth/${encodeURIComponent(key)}/start?next=${next}">${esc(labels[key] || ('Continue with ' + key))}</a>`;
+  }).join('');
+  return `<div class="oauth-stack" role="group" aria-label="Sign in with">${buttons}<p class="or"><span>or</span></p></div>`;
+}
 
 function openSignup({ intent, mode = 'signup', title, lead } = {}) {
   if (intent) state.intent = intent;
@@ -8522,6 +8903,7 @@ function openSignup({ intent, mode = 'signup', title, lead } = {}) {
       : item ? `You picked <b>${esc(item.label)}</b>. We’ll take you there after three quick questions.`
       : 'Three quick questions after this, then you’re in.'}</p>
     ${isLogin ? '' : `<ul class="perks">${CONFIG.signup.perks.map(p => `<li>${icon('check')}${esc(p)}</li>`).join('')}</ul>`}
+    ${oauthButtonsHtml()}
     <label class="field" for="signup-email"><span>Email</span>
       <input class="input field-input" id="signup-email" type="email" autocomplete="email" placeholder="you@university.edu" aria-describedby="signup-error"></label>
     <label class="field" for="signup-password" style="margin-top:12px"><span>Password</span>
@@ -8532,7 +8914,7 @@ function openSignup({ intent, mode = 'signup', title, lead } = {}) {
     <p class="small" id="signup-error" role="alert" hidden></p>
     <button type="submit" class="btn btn-primary btn-block" style="margin-top:12px" data-mode="${mode}">${isLogin ? 'Log in' : 'Create account'}</button>
     <p class="small muted" style="text-align:center;margin:12px 0 0">${isLogin
-      ? 'New here? <button type="button" class="link-btn" data-act="signup">Create an account</button>'
+      ? 'Forgot password? <a href="/forgot-password">Reset it</a> · New here? <button type="button" class="link-btn" data-act="signup">Create an account</button>'
       : 'Already have an account? <button type="button" class="link-btn" data-act="open-login">Log in</button>'}</p>
   </form>`;
   $('#signup-form').addEventListener('submit', async (e) => {
@@ -8684,9 +9066,34 @@ document.addEventListener('click', (e) => {
       if (currentRoute() === route) startTour(name); else { state.pendingTour = name; go(route); }
       break;
     }
-    case 'support':   // the Help page holds the contact form
-      if (currentRoute() === 'help') $('#help-topic')?.focus(); else { go('help'); setTimeout(() => $('#help-topic')?.focus(), 60); }
+    case 'support': case 'help-panel': toggleHelpPanel(); break;
+    case 'hp-close': toggleHelpPanel(false); break;
+    case 'hp-go': toggleHelpPanel(false); break;
+    case 'hp-topic': {
+      $$('#help-panel .ur-chip').forEach(c => c.setAttribute('aria-pressed', String(c === el)));
       break;
+    }
+    case 'help-faq':
+      toggleHelpPanel(false);
+      go('landing'); setTimeout(() => $('#faq')?.scrollIntoView({ behavior: 'smooth' }), 60);
+      break;
+    case 'nav-more': toggleNavMore(); break;
+    case 'more-go': toggleNavMore(false); if (state.drawerOpen) setDrawer(false); break;
+    case 'open-review': openReview(); break;
+    case 'ur-close': rvDlg.close(); break;
+    case 'ur-chip': {
+      $$('#review-dialog .ur-chip').forEach(c => c.setAttribute('aria-pressed', String(c === el)));
+      break;
+    }
+    case 'ur-more': rvShown = CONFIG.landing.site.items.length; rvRerender(); break;
+    case 'ur-help': rvDlg.close(); toggleHelpPanel(true); break;
+    case 'blog-cat': blogSetCat(el.dataset.v); break;
+    case 'blog-try': {
+      lt.tab = el.dataset.v === 'humanize' ? 'humanize' : 'detect';
+      const box = $('.blog-tool') || $('#lt-work');
+      box?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      break;
+    }
     case 'signup': e.preventDefault(); openSignup({ intent: el.dataset.intent }); break;
     case 'open-login': e.preventDefault(); openSignup({ mode: 'login' }); break;
     case 'close-signup': signupDlg.close(); break;
@@ -8775,10 +9182,25 @@ document.addEventListener('click', (e) => {
 
 $('#menu-btn').addEventListener('click', () => setDrawer(true));
 $('#backdrop').addEventListener('click', () => setDrawer(false));
+document.addEventListener('click', (e) => {
+  const menu = $('#nav-more-menu');
+  if (!menu || menu.hidden) return;
+  if (e.target.closest('#nav-more-menu') || e.target.closest('[data-act="nav-more"]')) return;
+  toggleNavMore(false);
+});
+document.addEventListener('keydown', (e) => {
+  const menu = $('#nav-more-menu');
+  if (!menu || menu.hidden) return;
+  const items = $$('[role="menuitem"]', menu), i = items.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+});
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!tip.hidden || tipTarget) { hideTip(); return; }
+  if (!$('#nav-more-menu')?.hidden) { toggleNavMore(false); return; }
+  if (!$('#help-panel')?.hidden) { toggleHelpPanel(false); return; }
   if (formatState?.previewOpen && currentRoute() === 'format') { fmtSetPreviewOpen(false); return; }
   if (state.scanMenu) { closeScanMenu(true); return; }
   if (edCloseMenu(true)) return;
@@ -8808,7 +9230,7 @@ supportBtn.innerHTML = icon('help');
 supportBtn.setAttribute('aria-label', CONFIG.support.label);
 supportBtn.dataset.tipTitle = CONFIG.support.label;
 supportBtn.dataset.tipDesc = CONFIG.support.description;
-supportBtn.dataset.act = 'support';
+supportBtn.dataset.act = 'help-panel';
 $('#topbar-logo').innerHTML = `<span class="logo-mark">${LOGO_SVG}</span><span>${esc(CONFIG.brand)}</span>`;
 renderSidebar();
 applyLayout();

@@ -679,6 +679,8 @@ def _migrate_security_columns(conn: sqlite3.Connection) -> None:
         ("account_flag", "ALTER TABLE users ADD COLUMN account_flag TEXT"),
         # an admin reviewed the suspicious-account heuristics and cleared them
         ("flag_cleared", "ALTER TABLE users ADD COLUMN flag_cleared INTEGER NOT NULL DEFAULT 0"),
+        # 0 = OAuth-only placeholder password; 1 = user-chosen password
+        ("password_set", "ALTER TABLE users ADD COLUMN password_set INTEGER NOT NULL DEFAULT 1"),
     ]
     for name, sql in alters:
         if name not in cols:
@@ -941,6 +943,16 @@ def init_db() -> None:
             from services.product_analytics import ensure_schema as ensure_product_analytics
 
             ensure_product_analytics(conn)
+        except Exception:
+            pass
+        try:
+            from .oauth_login import ensure_schema as ensure_oauth_schema
+            from .password_reset import ensure_schema as ensure_password_reset_schema
+            from .site_reviews import ensure_schema as ensure_site_reviews_schema
+
+            ensure_oauth_schema(conn)
+            ensure_password_reset_schema(conn)
+            ensure_site_reviews_schema(conn)
         except Exception:
             pass
         conn.commit()

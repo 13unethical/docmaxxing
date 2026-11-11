@@ -1,0 +1,21 @@
+{# Renders configured OAuth providers. Expects `oauth_providers` list. #}
+{% if oauth_providers %}
+<div class="auth-oauth" role="group" aria-label="Sign in with">
+  {% for provider in oauth_providers %}
+  <a class="auth-oauth-btn auth-oauth-btn--{{ provider }}"
+     href="{{ url_for('auth_oauth_start', provider=provider, next=next_url or '') }}">
+    {% if provider == 'google' %}
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.3-1.6 3.9-5.5 3.9-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.1.8 3.8 1.5l2.6-2.5C16.7 3.3 14.6 2.3 12 2.3 6.8 2.3 2.5 6.6 2.5 11.8S6.8 21.3 12 21.3c5.5 0 9.1-3.9 9.1-9.3 0-.6-.1-1.1-.2-1.6H12z"/><path fill="#34A853" d="M3.9 14.4l3.2-2.5c.9 2.3 2.8 3.2 4.9 3.2 1.2 0 2.3-.3 3.1-.9l3.1 2.4C16.7 18.4 14.6 19.5 12 19.5c-3.6 0-6.7-2.4-8.1-5.1z" opacity=".01"/><path fill="#4285F4" d="M21.1 12c0-.6-.1-1.1-.2-1.6H12v3.9h5.5c-.3 1.2-1.1 2.2-2.2 2.9l3.1 2.4C20 17.8 21.1 15.2 21.1 12z"/><path fill="#FBBC05" d="M7.1 11.9c0-.7.1-1.3.3-1.9L4.2 7.5C3.5 8.9 3.1 10.4 3.1 12s.4 3.1 1.1 4.5l3.2-2.5c-.2-.6-.3-1.2-.3-2.1z"/></svg>
+    Continue with Google
+    {% elif provider == 'apple' %}
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M16.4 12.6c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.7 0-1.7-.7-2.8-.7-1.4 0-2.8.9-3.5 2.2-1.5 2.6-.4 6.5 1.1 8.6.7 1 1.6 2.2 2.7 2.1 1.1 0 1.5-.7 2.8-.7s1.6.7 2.8.7c1.2 0 1.9-1 2.6-2 .8-1.2 1.1-2.3 1.1-2.4-.1 0-2.2-.8-2.2-3.3zm-2-6.2c.6-.7 1-1.7.9-2.7-0.9.1-2 .6-2.6 1.3-.6.6-1.1 1.6-1 2.6 1 .1 2-.5 2.7-1.2z"/></svg>
+    Continue with Apple
+    {% else %}
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="#F25022" d="M11.4 11.4H2V2h9.4v9.4z"/><path fill="#7FBA00" d="M22 11.4h-9.4V2H22v9.4z"/><path fill="#00A4EF" d="M11.4 22H2v-9.4h9.4V22z"/><path fill="#FFB900" d="M22 22h-9.4v-9.4H22V22z"/></svg>
+    Continue with Microsoft
+    {% endif %}
+  </a>
+  {% endfor %}
+  <p class="auth-oauth-or"><span>or</span></p>
+</div>
+{% endif %}

@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ seo.title }}</title>
 {% include "_seo_head.html" %}
-<link rel="stylesheet" href="{{ url_for('static', filename='app2/app.css') }}?v=20261107-1">
+<link rel="stylesheet" href="{{ url_for('static', filename='app2/app.css') }}?v=20261111-blog-css2">
 <script defer src="https://cloud.umami.is/script.js" data-website-id="177e569c-f873-485d-9ba7-cb75a43be7b6"></script>
 </head>
 <body>
@@ -80,7 +80,9 @@
   </div>
 </div>
 
-<button class="support-btn" id="support-btn" type="button"></button>
+<button class="support-btn" id="support-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="help-panel"></button>
+<div class="help-panel" id="help-panel" role="dialog" aria-labelledby="hp-title" hidden></div>
+<div class="more-menu" id="nav-more-menu" role="menu" aria-label="More" hidden></div>
 
 <dialog id="signup-dialog" aria-labelledby="signup-title"></dialog>
 
@@ -90,11 +92,13 @@
 
 <dialog id="veil-dialog" class="veil-dialog" aria-labelledby="veil-dlg-title"></dialog>
 
+<dialog id="review-dialog" aria-labelledby="ur-title"></dialog>
+
 <noscript><p style="padding:24px">DocMaxxing needs JavaScript.</p></noscript>
 
 <script>window.DMX_BOOT = {{ boot|tojson }};</script>
 <script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
-<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261110-p4b1"></script>
-<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261110-p4b1"></script>
+<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261111-landing-try"></script>
+<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261111-landing-try"></script>
 </body>
 </html>

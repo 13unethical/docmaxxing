@@ -634,7 +634,13 @@ def _password_sign_in(email: str, password: str):
     return user, None
 
 
-def _change_password_checked(user_id: int, *, current_password: str, new_password: str) -> int | None:
+def _change_password_checked(
+    user_id: int,
+    *,
+    current_password: str,
+    new_password: str,
+    allow_set_without_current: bool = False,
+) -> int | None:
     """``change_password`` under the same failure limits as sign-in (per account and IP).
 
     Returns seconds to wait when limited; raises ``AuthError`` for a wrong current password.
@@ -648,7 +654,10 @@ def _change_password_checked(user_id: int, *, current_password: str, new_passwor
         return gate
     try:
         economy_auth.change_password(
-            int(user_id), current_password=current_password, new_password=new_password
+            int(user_id),
+            current_password=current_password,
+            new_password=new_password,
+            allow_set_without_current=allow_set_without_current,
         )
     except economy_auth.WrongPassword:
         gate.failed()
@@ -1359,6 +1368,7 @@ def inject_account():
             "source": "none",
         }
     from services.seo import page_seo_for_path
+    from services.economy.oauth_login import configured_providers
 
     return {
         "current_user": user,
@@ -1368,6 +1378,7 @@ def inject_account():
         "is_humanizer_discount_active": bool(discount.get("active"))
         and int(discount.get("percent") or 0) > 0,
         "humanizer_discount_percent": int(discount.get("percent") or 0),
+        "oauth_providers": configured_providers(),
         "seo": page_seo_for_path(request.path, args=request.args),
     }
 
@@ -1627,6 +1638,202 @@ def login():
 @app.post("/logout")
 def logout():
     economy_auth.logout_user()
+    return redirect(url_for("index"))
+
+
+def _forgot_password_wait() -> int | None:
+    """Seconds until this network/email may request another reset code, else None."""
+    from services import rate_limit
+
+    return rate_limit.hit(
+        f"password_reset_request:ip:{_client_source()}",
+        [
+            (rate_limit.env_limit("PASSWORD_RESET_LIMIT_PER_IP_HOUR", 10), 3600),
+            (rate_limit.env_limit("PASSWORD_RESET_LIMIT_PER_IP_DAY", 30), 86400),
+        ],
+    )
+
+
+def _forgot_password_email_wait(email: str) -> int | None:
+    from services import rate_limit
+
+    address = hashlib.sha256(economy_auth.normalize_email(email).encode("utf-8")).hexdigest()[:40]
+    return rate_limit.hit(
+        f"password_reset_request:addr:{address}",
+        [
+            (rate_limit.env_limit("PASSWORD_RESET_LIMIT_PER_ADDRESS_HOUR", 3), 3600),
+            (rate_limit.env_limit("PASSWORD_RESET_LIMIT_PER_ADDRESS_DAY", 8), 86400),
+        ],
+    )
+
+
+_PASSWORD_RESET_WAIT_MESSAGE = "Too many reset attempts. Please wait a few minutes and try again."
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    from services.economy.password_reset import request_reset
+
+    if economy_auth.current_user():
+        return redirect(url_for("account"))
+    if request.method == "GET":
+        return render_template("forgot_password.html", nav_active=None)
+
+    email = (request.form.get("email") or "").strip()
+    wait = _forgot_password_wait()
+    if wait is None:
+        wait = _forgot_password_email_wait(email)
+    if wait is not None:
+        return render_template(
+            "forgot_password.html",
+            nav_active=None,
+            error=_PASSWORD_RESET_WAIT_MESSAGE,
+            form={"email": email},
+        ), 429, {"Retry-After": str(wait)}
+    result = request_reset(email)
+    return render_template(
+        "reset_password.html",
+        nav_active=None,
+        message=result.get("message") or "If an account exists for that email, we sent a reset code.",
+        otp_minutes=OTP_TTL_MINUTES,
+        form={"email": email},
+    )
+
+
+@app.route("/reset-password", methods=["GET", "POST"])
+def reset_password():
+    from services.economy import login_throttle
+    from services.economy.password_reset import PasswordResetError, reset_password as do_reset
+
+    if economy_auth.current_user():
+        return redirect(url_for("account"))
+    email_prefill = (request.values.get("email") or "").strip()
+    if request.method == "GET":
+        return render_template(
+            "reset_password.html",
+            nav_active=None,
+            otp_minutes=OTP_TTL_MINUTES,
+            form={"email": email_prefill},
+        )
+
+    email = (request.form.get("email") or "").strip()
+    code = (request.form.get("code") or "").strip()
+    password = request.form.get("password") or ""
+    password_confirm = (
+        request.form.get("password_confirm") or request.form.get("confirm_password") or ""
+    )
+    form = {"email": email, "code": code}
+    if password != password_confirm:
+        return render_template(
+            "reset_password.html",
+            nav_active=None,
+            error="Passwords do not match.",
+            otp_minutes=OTP_TTL_MINUTES,
+            form=form,
+        ), 400
+
+    gate = login_throttle.begin(
+        "password_reset", economy_auth.normalize_email(email), economy_auth.client_ip_from_request()
+    )
+    if isinstance(gate, int):
+        return render_template(
+            "reset_password.html",
+            nav_active=None,
+            error=_PASSWORD_RESET_WAIT_MESSAGE,
+            otp_minutes=OTP_TTL_MINUTES,
+            form=form,
+        ), 429, {"Retry-After": str(gate)}
+    try:
+        result = do_reset(email=email, code=code, new_password=password)
+    except PasswordResetError as exc:
+        gate.failed()
+        return render_template(
+            "reset_password.html",
+            nav_active=None,
+            error=_public_error(exc),
+            otp_minutes=OTP_TTL_MINUTES,
+            form=form,
+        ), 400
+    gate.succeeded()
+    economy_auth.login_user(int(result["user_id"]))
+    user = economy_auth.current_user()
+    if user and not economy_auth.user_email_verified(user):
+        return redirect(url_for("verify_email_code"))
+    return redirect(url_for("index"))
+
+
+@app.get("/auth/oauth/<provider>/start")
+def auth_oauth_start(provider: str):
+    from services.economy.oauth_login import OAuthError, begin_login
+    from services.public_origin import PublicOriginError
+
+    next_url = _safe_local_path(request.values.get("next")) or ""
+    try:
+        url = begin_login(provider, next_url=next_url, session=session)
+    except PublicOriginError:
+        return render_template(
+            "login.html",
+            nav_active=None,
+            error="Sign-in with a provider is temporarily unavailable.",
+            next_url=next_url,
+        ), 503
+    except OAuthError as exc:
+        return render_template(
+            "login.html",
+            nav_active=None,
+            error=_public_error(exc),
+            next_url=next_url,
+        ), 400
+    return redirect(url)
+
+
+@app.route("/auth/oauth/<provider>/callback", methods=["GET", "POST"])
+def auth_oauth_callback(provider: str):
+    """Provider redirect / Apple form_post. CSRF-exempt; auth is state + id_token."""
+    from services.economy.oauth_login import OAuthError, complete_login
+
+    values = request.values
+    error = (values.get("error") or values.get("error_description") or "").strip()
+    if error:
+        return render_template(
+            "login.html",
+            nav_active=None,
+            error="Sign-in was cancelled or denied. Try again.",
+            next_url="",
+        ), 401
+    try:
+        result = complete_login(
+            provider,
+            code=values.get("code"),
+            id_token=values.get("id_token"),
+            state=values.get("state"),
+            session=session,
+            form_user=values.get("user"),
+        )
+    except OAuthError as exc:
+        return render_template(
+            "login.html",
+            nav_active=None,
+            error=_public_error(exc),
+            next_url="",
+        ), 400
+
+    user = economy_auth.get_user(int(result["user_id"]))
+    if user is None or user.get("is_blocked"):
+        return render_template(
+            "login.html",
+            nav_active=None,
+            error=ACCOUNT_BLOCKED_MESSAGE if user and user.get("is_blocked") else "Sign-in failed.",
+            next_url="",
+        ), 403
+    economy_auth.login_user(int(user["id"]))
+    next_url = _safe_local_path(result.get("next")) or ""
+    if not economy_auth.user_email_verified(user):
+        if next_url:
+            session["post_verify_next"] = next_url
+        return redirect(url_for("verify_email_code"))
+    if next_url:
+        return redirect(next_url)
     return redirect(url_for("index"))
 
 
@@ -2411,6 +2618,64 @@ def api_auth_logout():
     return jsonify({"success": True})
 
 
+@app.post("/api/auth/forgot-password")
+def api_auth_forgot_password():
+    from services.economy.password_reset import request_reset
+
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email") or "").strip()
+    wait = _forgot_password_wait()
+    if wait is None:
+        wait = _forgot_password_email_wait(email)
+    if wait is not None:
+        return jsonify(
+            {"success": False, "error": _PASSWORD_RESET_WAIT_MESSAGE, "code": "TOO_MANY_ATTEMPTS"}
+        ), 429, {"Retry-After": str(wait)}
+    result = request_reset(email)
+    return jsonify(
+        {
+            "success": True,
+            "message": result.get("message")
+            or "If an account exists for that email, we sent a reset code.",
+        }
+    )
+
+
+@app.post("/api/auth/reset-password")
+def api_auth_reset_password():
+    from services.economy import login_throttle
+    from services.economy.password_reset import PasswordResetError, reset_password as do_reset
+
+    payload = request.get_json(silent=True) or {}
+    email = str(payload.get("email") or "").strip()
+    code = str(payload.get("code") or "").strip()
+    password = str(payload.get("password") or payload.get("new_password") or "")
+    password_confirm = str(
+        payload.get("password_confirm") or payload.get("confirm_password") or password
+    )
+    if password != password_confirm:
+        return jsonify({"success": False, "error": "Passwords do not match."}), 400
+    gate = login_throttle.begin(
+        "password_reset", economy_auth.normalize_email(email), economy_auth.client_ip_from_request()
+    )
+    if isinstance(gate, int):
+        return jsonify(
+            {"success": False, "error": _PASSWORD_RESET_WAIT_MESSAGE, "code": "TOO_MANY_ATTEMPTS"}
+        ), 429, {"Retry-After": str(gate)}
+    try:
+        result = do_reset(email=email, code=code, new_password=password)
+    except PasswordResetError as exc:
+        gate.failed()
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
+    gate.succeeded()
+    economy_auth.login_user(int(result["user_id"]))
+    user = economy_auth.get_user(int(result["user_id"]))
+    assert user is not None
+    payload_out = _auth_success_payload(user)
+    payload_out["email_verification_required"] = not economy_auth.user_email_verified(user)
+    return jsonify(payload_out)
+
+
 @app.post("/api/upload_avatar")
 @economy_auth.login_required
 def api_upload_avatar():
@@ -2462,11 +2727,14 @@ def api_account_password():
     if new_password != str(payload.get("confirm_password") or ""):
         return jsonify({"success": False, "error": "New password and confirmation do not match."}), 400
     user_id = int(economy_auth.current_user_id())
+    meta = economy_auth.auth_meta(user_id)
+    allow_set = not meta.get("hasPassword")
     try:
         wait = _change_password_checked(
             user_id,
             current_password=str(payload.get("current_password") or ""),
             new_password=new_password,
+            allow_set_without_current=allow_set,
         )
     except economy_auth.AuthError as exc:
         return jsonify({"success": False, "error": _public_error(exc)}), 400
@@ -2477,7 +2745,86 @@ def api_account_password():
     # Every session of the account ended with the password change; this browser proved the
     # old password just now, so it continues on a fresh session (new id and CSRF token).
     economy_auth.login_user(user_id)
-    return jsonify({"success": True, "other_sessions_signed_out": True})
+    return jsonify({"success": True, "other_sessions_signed_out": True, "hasPassword": True})
+
+
+@app.get("/api/reviews")
+def api_reviews_list():
+    from services.economy import site_reviews
+
+    user = economy_auth.current_user()
+    feed = site_reviews.public_feed(mine_user_id=int(user["id"]) if user else None)
+    return jsonify({"success": True, **feed})
+
+
+@app.post("/api/reviews")
+def api_reviews_submit():
+    from services.economy import site_reviews
+    from services.economy.email_verify import EmailVerifyError
+    from services.public_origin import PublicOriginError, canonical_origin
+
+    payload = request.get_json(silent=True) or {}
+    user = economy_auth.current_user()
+    try:
+        result = site_reviews.submit_review(
+            stars=payload.get("stars"),
+            body=str(payload.get("text") or payload.get("body") or ""),
+            tool=payload.get("tool"),
+            user_id=int(user["id"]) if user else None,
+            email=None if user else str(payload.get("email") or ""),
+        )
+    except site_reviews.ReviewError as exc:
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
+    if result.get("needs_email_confirm") and result.get("confirm_token"):
+        try:
+            origin = canonical_origin().rstrip("/")
+            confirm_url = f"{origin}/reviews/confirm/{result['confirm_token']}"
+            site_reviews.send_confirm_email(
+                to_email=str(payload.get("email") or "").strip(),
+                confirm_url=confirm_url,
+            )
+        except (EmailVerifyError, PublicOriginError, OSError) as exc:
+            app.logger.warning("review confirm email failed: %s", type(exc).__name__)
+        result.pop("confirm_token", None)
+    return jsonify({"success": True, **result})
+
+
+@app.get("/reviews/confirm/<token>")
+def reviews_confirm(token: str):
+    from services.economy import site_reviews
+
+    try:
+        site_reviews.confirm_email(token)
+    except site_reviews.ReviewError as exc:
+        return render_template(
+            "login.html",
+            nav_active=None,
+            error=_public_error(exc),
+            next_url="",
+        ), 400
+    return redirect("/app#/landing")
+
+
+@app.get("/api/admin/reviews")
+@economy_auth.admin_required
+def api_admin_reviews_pending():
+    from services.economy import site_reviews
+
+    return jsonify({"success": True, "items": site_reviews.list_pending()})
+
+
+@app.post("/api/admin/reviews/<int:review_id>/moderate")
+@economy_auth.admin_required
+def api_admin_reviews_moderate(review_id: int):
+    from services.economy import site_reviews
+
+    payload = request.get_json(silent=True) or {}
+    approve = bool(payload.get("approve", True))
+    try:
+        result = site_reviews.moderate(review_id, approve=approve)
+    except site_reviews.ReviewError as exc:
+        return jsonify({"success": False, "error": _public_error(exc)}), 400
+    return jsonify({"success": True, **result})
 
 
 _CONTACT_LIMIT_PER_HOUR = 5
@@ -4533,10 +4880,13 @@ def _app_v2_boot() -> dict[str, Any]:
 
     user = economy_auth.current_user()
     humanize = humanize_credit_cost(FEATURE_COSTS["humanize"])
+    from services.economy.oauth_login import configured_providers
+
     boot: dict[str, Any] = {
         "user": None,
         "balance": 0,
         "signupCredits": int(WELCOME_BONUS),
+        "oauthProviders": configured_providers(),
         "costs": {
             "humanizer": int(humanize["charged"]),
             "humanizerOriginal": int(humanize["original_price"]),
@@ -4559,6 +4909,7 @@ def _app_v2_boot() -> dict[str, Any]:
     boot["guestHumanizeUsed"] = user is None and boot["freeHumanize"]["runsLeft"] <= 0
     if user:
         avatar = user.get("avatar_file")
+        meta = economy_auth.auth_meta(int(user["id"]))
         boot["user"] = {
             "id": user["id"],
             "email": user["email"],
@@ -4566,14 +4917,76 @@ def _app_v2_boot() -> dict[str, Any]:
             "isVerified": bool(economy_auth.user_email_verified(user)),
             "avatarUrl": url_for("static", filename=avatar) if avatar else None,
             "isAdmin": bool(economy_auth.is_admin(user)),
+            "hasPassword": bool(meta.get("hasPassword", True)),
+            "linkedProviders": list(meta.get("linkedProviders") or []),
         }
         boot["balance"] = wallet.get_balance(user["id"])
         boot["plan"] = plans_service.plan_summary(int(user["id"]))
         boot["renewsAt"] = _credits_renew_at(int(user["id"]))
         boot["veil"] = _veil_client_status(int(user["id"]))
+        try:
+            from services.economy import site_reviews
+
+            boot["reviewAppTool"] = site_reviews.preferred_tool_for_user(int(user["id"]))
+        except Exception:
+            boot["reviewAppTool"] = "AI Detector"
     boot["catalog"] = plans_service.catalog()
     boot["formatProfiles"] = _app_v2_format_profiles()
+    try:
+        from services.economy import site_reviews
+
+        boot["reviews"] = site_reviews.public_feed(
+            mine_user_id=int(user["id"]) if user else None
+        )
+    except Exception:
+        boot["reviews"] = None
+    try:
+        boot["blog"] = _spa_blog_boot()
+    except Exception:
+        boot["blog"] = {"posts": []}
     return boot
+
+
+def _spa_blog_boot() -> dict[str, Any]:
+    """SPA #/blog data — same posts/covers as the DocMaxxing prototype (#/blog)."""
+    import json
+
+    path = Path(app.root_path) / "static" / "app2" / "blog_posts.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    posts = []
+    for post in raw.get("posts") or []:
+        posts.append(
+            {
+                "slug": post["slug"],
+                "title": post["title"],
+                "dek": post["dek"],
+                "date": post["date"],
+                "min": int(post.get("min") or 5),
+                "cat": post.get("cat") or "ai",
+                "cover": post.get("cover") or {},
+                "html": post.get("html") or "",
+                "path": f"/blog/{post['slug']}",
+                "cta": post.get("cta") or "try",
+            }
+        )
+    return {
+        "title": raw.get("title") or "Guides for better papers",
+        "landTitle": raw.get("landTitle") or "Practical guides for your next paper",
+        "bannerTitle": raw.get("bannerTitle") or "Check your paper before you submit",
+        "bannerText": raw.get("bannerText")
+        or "See which parts look AI-written, then humanize and format — free to start.",
+        "subtitle": raw.get("subtitle")
+        or "Formatting, writing and AI checks, explained for students. Short, practical, up to date.",
+        "author": raw.get("author") or "DocMaxxing team",
+        "cats": raw.get("cats")
+        or [
+            ["all", "All"],
+            ["formatting", "Formatting"],
+            ["writing", "Writing"],
+            ["ai", "AI detection"],
+        ],
+        "posts": posts,
+    }
 
 
 def _credits_renew_at(user_id: int) -> str | None:

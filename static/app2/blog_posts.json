@@ -1,0 +1,147 @@
+{
+  "title": "Guides for better papers",
+  "subtitle": "Formatting, writing and AI checks, explained for students. Short, practical, up to date.",
+  "landTitle": "Practical guides for your next paper",
+  "author": "DocMaxxing team",
+  "bannerTitle": "Check your paper before you submit",
+  "bannerText": "See which parts look AI-written, then humanize and format — free to start.",
+  "cats": [
+    [
+      "all",
+      "All"
+    ],
+    [
+      "formatting",
+      "Formatting"
+    ],
+    [
+      "writing",
+      "Writing"
+    ],
+    [
+      "ai",
+      "AI detection"
+    ]
+  ],
+  "posts": [
+    {
+      "slug": "what-is-a-good-turnitin-ai-score",
+      "title": "What is a good Turnitin AI score?",
+      "dek": "Turnitin shows *%, 20%, 50% or higher. What teachers treat as a problem, what the asterisk means, and how to check a draft before you submit.",
+      "cat": "ai",
+      "date": "2026-11-08",
+      "min": 4,
+      "cover": {
+        "bg": "#0a1226",
+        "a": "#3b7bff",
+        "b": "#ff6a4d",
+        "c": "#1b2f7a",
+        "r": -20
+      },
+      "html": "<p>A good Turnitin AI score is the one your instructor is willing to accept. Turnitin does not publish a pass mark. In practice, *<strong>%</strong> (the asterisk that replaces a low number) rarely starts a conversation, a score around <strong>20%</strong> sometimes does, and <strong>50% or higher</strong> is what gets a draft sent back.</p>\n<p>The percentage is an estimate of how much of your qualifying prose looks machine-written. It is not proof that you used AI, and it is not a grade.</p>\n<h2>How to read the number</h2>\n<ul><li><strong>No AI score.</strong> The submission was too short, or the institution has the indicator turned off.</li><li><em><strong>%.</strong> Turnitin found only a small amount of AI-like text, roughly the band under 20%, and chose not to print an exact figure. Details: <a href=\"#/blog/turnitin-ai-score-asterisk\">what </em>% means</a>.</li><li><strong>About 20–40%.</strong> A real share of the prose looks AI-like or AI-then-paraphrased. Some teachers ask about it, many don’t.</li><li><strong>50% and up.</strong> Most of the qualifying sentences were scored as AI-like. Expect a question, and sometimes a resubmit.</li><li><strong>80–100%.</strong> The draft reads like an unedited chatbot answer from start to finish.</li></ul>\n<p>Only long-form sentences count. Headings, the reference list, tables and very short lines are usually skipped, so a 15-page document full of bullet points can show a lower score than a tight 1,000-word essay.</p>\n<h2>What teachers actually do with it</h2>\n<p>Turnitin tells instructors not to treat the score as the only evidence. Many still use a personal cutoff: anything with an asterisk is fine, anything over a third gets a look, anything over a half gets a meeting. You will not see that cutoff in the student view. If you can see a number at all, a teacher or a separate check shared it with you.</p>\n<p>A low score does not make AI use allowed. A high score does not prove it. Course rules decide the first question; the report only starts the second.</p>\n<h2>How to see the score before they do</h2>\n<p>Students usually cannot open their own Turnitin AI report. Preview the draft anyway:</p>\n<ul><li>Paste it into the <a href=\"try:detect\">free AI detector</a>. It highlights the sentences that look AI-written, which is the part a high percentage is made of. The model is tuned on real Turnitin reports, so treat the highlights as a preview, not as Turnitin’s official number.</li><li>Rewrite those sentences. Vary the length, put in a detail from the reading or the lecture, and cut the stock transitions (“Furthermore,” “It is important to note”). A long flagged passage can go through the <a href=\"try:humanize\">AI humanizer</a>; read the result and fix anything that changed your point.</li><li>Run the detector again. Stop when the highlights are down to a line or two.</li></ul>\n<p>The same steps are how people <a href=\"#/blog/how-to-bypass-turnitin-ai-detection\">bring a Turnitin AI score down</a> before the deadline, instead of arguing about it after.</p>\n<h2>If the number is already high</h2>\n<p>Don’t resubmit the same file with a few synonyms swapped. Turnitin can mark text as AI-generated and then paraphrased, so a surface rewrite often stays in the same band. Rewrite the highlighted paragraphs, keep your sources, and be ready to show the version history. If you wrote it yourself and it was still flagged, that happens — <a href=\"#/blog/essay-flagged-as-ai-but-i-wrote-it\">what to do when human writing is flagged</a>.</p>\n<h2>Key takeaways</h2>\n<ul><li>*<strong>%</strong> is the result teachers rarely chase. <strong>50%+</strong> is the result they do.</li><li>There is no official pass mark. The number covers qualifying prose only.</li><li>Check the draft with the <a href=\"try:detect\">free AI detector</a>, rewrite what it highlights, and check again before you submit.</li></ul>",
+      "cta": "try"
+    },
+    {
+      "slug": "apa-7-format-guide",
+      "title": "APA 7 format: a step-by-step guide for student papers",
+      "dek": "Page setup, title page, headings, in-text citations and the reference list, with the rules most students miss.",
+      "cat": "formatting",
+      "date": "2026-11-03",
+      "min": 8,
+      "cover": {
+        "bg": "#0b1430",
+        "a": "#2f6bff",
+        "b": "#8fc3ff",
+        "c": "#1f3fa8",
+        "r": 20
+      },
+      "html": "<h2>Page setup</h2>\n<p>APA 7 is flexible about fonts. Use one that is easy to read and keep it the same across the paper: Times New Roman 12 pt, Calibri 11 pt, Arial 11 pt and Georgia 11 pt all work.</p>\n<ul><li>1-inch (2.54 cm) margins on every side</li><li>Double spacing everywhere, including the reference list</li><li>Indent the first line of each paragraph by 0.5 inch</li><li>Page number in the top right corner of every page</li></ul>\n<h2>Title page</h2>\n<p>Student papers do not need a running head. Put the title in bold in the upper half of the page, then your name, department and university, course number and name, instructor and due date, each on its own line.</p>\n<h2>Headings</h2>\n<p>APA has five heading levels. Most essays only need the first two: Level 1 is centered and bold, Level 2 is flush left and bold. Do not label the introduction “Introduction”; the paper title above it does that job.</p>\n<h2>In-text citations</h2>\n<p>Cite the author’s surname and the year: (Smith, 2021) or Smith (2021). Add a page number for direct quotes: (Smith, 2021, p. 14). For three or more authors, write the first author and “et al.” from the first citation.</p>\n<h2>Reference list</h2>\n<p>Start the list on a new page with the bold, centered heading “References”. Sort entries alphabetically by the first author’s surname and use a 0.5-inch hanging indent.</p>\n<ul><li>Journal article: Author, A. A. (Year). Title of article. Journal Name, Volume(Issue), pages. https://doi.org/…</li><li>Book: Author, A. A. (Year). Title of book (Edition). Publisher.</li></ul>",
+      "cta": "try"
+    },
+    {
+      "slug": "how-ai-detectors-work",
+      "title": "How AI detectors work, and how to read your score",
+      "dek": "What a detector actually measures, why a percentage is a probability and not a verdict, and what to do with flagged sentences.",
+      "cat": "ai",
+      "date": "2026-10-29",
+      "min": 7,
+      "cover": {
+        "bg": "#1a0d0a",
+        "a": "#ff4d2e",
+        "b": "#ffa27a",
+        "c": "#5a1830",
+        "r": -15
+      },
+      "html": "<h2>What a detector measures</h2>\n<p>AI detectors look for patterns that language models tend to produce: very predictable word choices, even sentence length and few personal details. They do not find copied text; that is what a plagiarism check is for.</p>\n<h2>Why the score is a probability</h2>\n<p>A score of 30% does not mean that 30% of the text was written by AI. It means the detector sees patterns that are typical for AI in parts of your text. Short texts and very formal writing are harder to judge, so the result is less reliable.</p>\n<h2>Reading sentence highlights</h2>\n<p>Highlights show which sentences pushed the score up. Read them first: often it is a generic opening, a list of balanced pros and cons or a summary that repeats the question.</p>\n<h2>What to do with a high score</h2>\n<ul><li>Rewrite flagged sentences in your own words and add your own examples</li><li>Keep your drafts and version history: they show how the text was written</li><li>If you are wrongly flagged, talk to your instructor and bring your drafts</li></ul>",
+      "cta": "try"
+    },
+    {
+      "slug": "harvard-referencing-guide",
+      "title": "Harvard referencing: in-text citations and reference list",
+      "dek": "The author-date system most UK and Australian universities use, with examples you can copy.",
+      "cat": "formatting",
+      "date": "2026-10-24",
+      "min": 6,
+      "cover": {
+        "bg": "#0b1f1c",
+        "a": "#22a88f",
+        "b": "#b7f0d8",
+        "c": "#0f4a5a",
+        "r": 35
+      },
+      "html": "<h2>How Harvard works</h2>\n<p>Harvard is an author-date style. In the text you name the author and year; at the end you list every source in full. Universities use slightly different versions, so check your module handbook for the exact punctuation.</p>\n<h2>In-text citations</h2>\n<p>Write the surname and year in brackets: (Jones, 2020). For a direct quote add the page: (Jones, 2020, p. 45). Two authors: (Jones and Patel, 2020). Four or more: (Jones et al., 2020).</p>\n<h2>Reference list</h2>\n<p>List sources alphabetically by surname under the heading “Reference list”. Book: Jones, A. (2020) Title in italics. 2nd edn. City: Publisher. Website: Organisation (Year) Title. Available at: URL (Accessed: date).</p>",
+      "cta": "try"
+    },
+    {
+      "slug": "essay-flagged-as-ai-but-i-wrote-it",
+      "title": "My essay was flagged as AI but I wrote it",
+      "dek": "Detectors make mistakes. Here is how to show your work is yours and avoid the same flag next time.",
+      "cat": "ai",
+      "date": "2026-10-20",
+      "min": 5,
+      "cover": {
+        "bg": "#140f24",
+        "a": "#7a5cff",
+        "b": "#ff8cc0",
+        "c": "#2a1660",
+        "r": -30
+      },
+      "html": "<h2>Why false flags happen</h2>\n<p>Detectors judge style, not authorship. Formal academic writing, simple sentences and writing in a second language can all look “predictable” to a model, so honest work sometimes gets a high score.</p>\n<h2>Collect your evidence</h2>\n<ul><li>Version history from Google Docs or Word</li><li>Notes, outlines and earlier drafts</li><li>The sources you read and when you read them</li></ul>\n<h2>Talk to your instructor</h2>\n<p>Ask which tool flagged the text and which parts. Explain how you wrote it and show your drafts. Most universities treat a detector score as a reason to talk, not as proof.</p>\n<h2>Check before you submit</h2>\n<p>Run your final draft through a detector before you hand it in. If parts are flagged, rewrite them with your own examples and voice, then check again.</p>",
+      "cta": "try"
+    },
+    {
+      "slug": "essay-structure",
+      "title": "Essay structure: introduction, body and conclusion that work",
+      "dek": "A simple plan for any academic essay, and how to check that it answers the question before you submit.",
+      "cat": "writing",
+      "date": "2026-10-15",
+      "min": 6,
+      "cover": {
+        "bg": "#1d1608",
+        "a": "#f2a93d",
+        "b": "#ffe3a8",
+        "c": "#6a3a12",
+        "r": 10
+      },
+      "html": "<h2>Introduction</h2>\n<p>Give context in two or three sentences, then state your argument clearly. End with a short map of the essay so the reader knows what comes next.</p>\n<h2>Body paragraphs</h2>\n<p>One idea per paragraph. Start with a topic sentence, support it with evidence and explain how it backs your argument. Link each paragraph to the next.</p>\n<h2>Conclusion</h2>\n<p>Sum up the argument in new words and say why it matters. Do not add new evidence here.</p>\n<h2>Check it against the brief</h2>\n<p>Before you submit, compare the essay with the assignment brief: word count, required sections, number of sources and referencing style.</p>",
+      "cta": "try"
+    },
+    {
+      "slug": "mla-9-works-cited",
+      "title": "MLA 9 works cited: format and examples",
+      "dek": "How to set up the works cited page and cite books, articles and websites in MLA 9.",
+      "cat": "formatting",
+      "date": "2026-10-09",
+      "min": 5,
+      "cover": {
+        "bg": "#0e1722",
+        "a": "#4aa3ff",
+        "b": "#e3f1ff",
+        "c": "#ff6a3d",
+        "r": 50
+      },
+      "html": "<h2>Page setup</h2>\n<p>Start works cited on a new page with the centered title “Works Cited”. Double-space everything, sort entries alphabetically and use a 0.5-inch hanging indent.</p>\n<h2>Core elements</h2>\n<p>MLA builds every entry from the same elements in order: author, title of source, title of container, other contributors, version, number, publisher, publication date and location.</p>\n<h2>In-text citations</h2>\n<p>Use the author’s surname and the page number without a comma: (Smith 23). If you name the author in the sentence, put only the page in brackets.</p>",
+      "cta": "try"
+    }
+  ]
+}
