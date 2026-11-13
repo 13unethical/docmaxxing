@@ -1,4 +1,9 @@
-"""Plain text -> .docx / .pdf downloads (humanizer results)."""
+"""Plain text -> .docx / .pdf downloads (humanizer results).
+
+Humanizer output is plain text, but models (and pastes) often wrap headings in ``**bold**``
+or ``##`` markdown. ``text_to_docx`` turns those into real Word bold/heading runs so
+downloads are not littered with asterisks.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,10 @@ import re
 from services.editor_export import html_to_docx
 
 MAX_TEXT_CHARS = 200_000
+_MD_HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+_MD_BOLD_LINE = re.compile(r"^(\*\*|__)(.+?)\1$")
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__")
+_MD_ITALIC = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")
 
 # Helvetica advance widths (Adobe AFM, 1/1000 em) for ASCII 32..126
 _HELVETICA = [
@@ -41,11 +50,46 @@ def _check(text: str) -> None:
         raise TextExportError("This text is too long to download.")
 
 
+def _inline_markdown_html(text: str) -> str:
+    """Escape plain text, then turn **bold** / *italic* into HTML tags for html_to_docx."""
+    parts: list[str] = []
+    i = 0
+    # Walk with bold first, then italic on the leftover plain segments.
+    for m in _MD_BOLD.finditer(text):
+        parts.append(html.escape(text[i:m.start()]))
+        inner = m.group(1) if m.group(1) is not None else m.group(2)
+        parts.append("<strong>" + html.escape(inner) + "</strong>")
+        i = m.end()
+    parts.append(html.escape(text[i:]))
+    with_bold = "".join(parts)
+
+    def _ital(m: re.Match[str]) -> str:
+        inner = m.group(1) if m.group(1) is not None else m.group(2)
+        return "<em>" + inner + "</em>"
+
+    # Italic pattern runs on already-escaped text; only match * / _ around escaped content.
+    return _MD_ITALIC.sub(_ital, with_bold)
+
+
+def paragraph_to_html(paragraph: str) -> str:
+    """One blank-line block -> HTML paragraph or heading (markdown headings / whole-line bold)."""
+    lines = paragraph.split("\n")
+    if len(lines) == 1:
+        stripped = lines[0].strip()
+        md = _MD_HEADING.match(stripped)
+        if md:
+            level = min(3, len(md.group(1)))
+            return f"<h{level}>{_inline_markdown_html(md.group(2))}</h{level}>"
+        bold_line = _MD_BOLD_LINE.match(stripped)
+        if bold_line and len(bold_line.group(2).split()) <= 12:
+            # Whole-line **Stakeholder Identification** → real bold heading-like paragraph.
+            return f"<p><strong>{html.escape(bold_line.group(2))}</strong></p>"
+    return "<p>" + "<br>".join(_inline_markdown_html(line) for line in lines) + "</p>"
+
+
 def text_to_docx(title: str, text: str) -> bytes:
     _check(text)
-    body = "".join(
-        "<p>" + "<br>".join(html.escape(line) for line in p.split("\n")) + "</p>" for p in paragraphs(text)
-    )
+    body = "".join(paragraph_to_html(p) for p in paragraphs(text))
     return html_to_docx(title, body)
 
 

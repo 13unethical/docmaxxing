@@ -46,6 +46,104 @@ def extract_text_from_docx_bytes(raw: bytes) -> str:
     return "\n\n".join(parts).strip()
 
 
+def _run_to_html(run) -> str:
+    """One python-docx run → inline HTML (bold/italic/underline/color/font)."""
+    import html as html_lib
+
+    text = run.text or ""
+    if not text:
+        return ""
+    esc = html_lib.escape(text)
+    styles: list[str] = []
+    if run.font and run.font.color and run.font.color.rgb:
+        styles.append(f"color: #{run.font.color.rgb}")
+    if run.font and run.font.name:
+        styles.append(f"font-family: {run.font.name}")
+    if run.font and run.font.size:
+        try:
+            styles.append(f"font-size: {int(run.font.size.pt)}pt")
+        except Exception:  # noqa: BLE001
+            pass
+    inner = esc
+    if styles:
+        inner = f'<span style="{html_lib.escape("; ".join(styles), quote=True)}">{inner}</span>'
+    if run.underline:
+        inner = f"<u>{inner}</u>"
+    if run.italic:
+        inner = f"<i>{inner}</i>"
+    if run.bold:
+        inner = f"<b>{inner}</b>"
+    return inner
+
+
+def _paragraph_to_html(paragraph) -> str:
+    import html as html_lib
+
+    text = (paragraph.text or "").strip()
+    if not text:
+        return ""
+    style_name = (paragraph.style.name or "") if paragraph.style else ""
+    inner = "".join(_run_to_html(run) for run in paragraph.runs) or html_lib.escape(text)
+    if style_name.startswith("Heading"):
+        level = "".join(ch for ch in style_name if ch.isdigit()) or "2"
+        level = str(min(6, max(1, int(level))))
+        return f"<h{level}>{inner}</h{level}>"
+    if style_name.startswith("List Number"):
+        return f"<ol><li>{inner}</li></ol>"
+    if style_name.startswith("List Bullet"):
+        return f"<ul><li>{inner}</li></ul>"
+    return f"<p>{inner}</p>"
+
+
+def _table_to_html(table) -> str:
+    import html as html_lib
+
+    rows = []
+    for row in table.rows:
+        cells = "".join(f"<td>{html_lib.escape((cell.text or '').strip())}</td>" for cell in row.cells)
+        rows.append(f"<tr>{cells}</tr>")
+    return "<table>" + "".join(rows) + "</table>"
+
+
+def extract_html_from_docx_bytes(raw: bytes) -> str:
+    """DOCX → HTML preserving bold/italic/underline/color/font and tables."""
+    doc = Document(io.BytesIO(raw))
+    parts: list[str] = []
+    # Walk body elements in order (paragraphs and tables interleaved).
+    body = doc.element.body
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    for child in body.iterchildren():
+        if child.tag == qn("w:p"):
+            html = _paragraph_to_html(Paragraph(child, doc))
+            if html:
+                parts.append(html)
+        elif child.tag == qn("w:tbl"):
+            parts.append(_table_to_html(Table(child, doc)))
+    return "\n".join(parts).strip()
+
+
+def extract_html_from_document_bytes(raw: bytes, filename: str, mimetype: str | None = None) -> str:
+    """HTML when possible (.docx); PDF falls back to escaped paragraphs."""
+    import html as html_lib
+
+    if not raw:
+        raise ValueError("The uploaded file is empty.")
+    ext = upload_extension(filename, mimetype)
+    if ext == ".docx":
+        html = extract_html_from_docx_bytes(raw)
+    elif ext == ".pdf":
+        text = extract_text_from_pdf_bytes(raw)
+        html = "\n".join(f"<p>{html_lib.escape(p)}</p>" for p in re.split(r"\n\s*\n", text) if p.strip())
+    else:
+        raise ValueError("Unsupported file type. Upload a .docx or .pdf file.")
+    if not html.strip():
+        raise ValueError("No readable text found in the uploaded file.")
+    return html
+
+
 def extract_text_from_pdf_bytes(raw: bytes) -> str:
     from services.requirements_ocr import extract_text_from_pdf_bytes as _pdf_extract
 

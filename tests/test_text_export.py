@@ -29,6 +29,27 @@ def test_docx_keeps_paragraphs():
     assert texts[-1] == "Last part\nwith a line break."
 
 
+def test_docx_turns_markdown_bold_headings_into_real_bold():
+    text = "**2. Stakeholder Identification**\n\nBody with **important** word and plain end."
+    doc = Document(io.BytesIO(text_to_docx("Essay", text)))
+    assert [p.text for p in doc.paragraphs] == [
+        "2. Stakeholder Identification",
+        "Body with important word and plain end.",
+    ]
+    heading_runs = list(doc.paragraphs[0].runs)
+    assert heading_runs and all(r.bold for r in heading_runs if r.text.strip())
+    body_runs = doc.paragraphs[1].runs
+    bold_bits = [r.text for r in body_runs if r.bold]
+    assert bold_bits == ["important"]
+    assert "**" not in "".join(p.text for p in doc.paragraphs)
+
+
+def test_docx_turns_hash_markdown_headings_into_heading_style():
+    doc = Document(io.BytesIO(text_to_docx("Essay", "## Power Analysis\n\nStakeholders exert power.")))
+    assert doc.paragraphs[0].text == "Power Analysis"
+    assert "Heading" in (doc.paragraphs[0].style.name or "")
+
+
 @pytest.mark.parametrize("fn", [text_to_pdf, text_to_docx])
 def test_empty_text_is_rejected(fn):
     with pytest.raises(TextExportError):

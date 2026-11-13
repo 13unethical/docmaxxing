@@ -87,18 +87,28 @@
     transactions: (limit = 50) => request('GET', `/api/economy/transactions?limit=${limit}`),
 
     async extractText(file) {
-      if (/\.txt$/i.test(file.name) || (file.type || '').startsWith('text/')) return file.text();
+      const doc = await this.extractDocument(file);
+      return doc.text;
+    },
+    async extractDocument(file) {
+      if (/\.txt$/i.test(file.name) || (file.type || '').startsWith('text/')) {
+        const text = await file.text();
+        return { text, html: text.split(/\n\s*\n/).map(p => `<p>${p.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>')}</p>`).join('') };
+      }
       const form = new FormData();
       form.append('file', file);
       const data = await request('POST', '/api/extract-document', { form });
-      return String(data.text || '');
+      return { text: String(data.text || ''), html: data.html ? String(data.html) : '' };
     },
 
-    async humanize(text, source = 'standalone') {
-      if (isCyrillic(text)) {
+    async humanize(text, source = 'standalone', html = null) {
+      const plain = String(text || '');
+      if (isCyrillic(plain)) {
         throw new ApiError("Russian text isn't supported yet. Paste English text to humanize it.", { code: 'RU_NOT_SUPPORTED' });
       }
-      return request('POST', '/api/browser/providers/stealthwriter/humanize', { json: { text, source } });
+      const body = { text: plain, source };
+      if (html && String(html).trim()) body.html = String(html);
+      return request('POST', '/api/browser/providers/stealthwriter/humanize', { json: body });
     },
     editor: {
       detect: (text) => request('POST', '/api/workspace/detect', { json: { text }, timeoutMs: 180000 }),
@@ -122,10 +132,12 @@
 
     detectFree: (text) => request('POST', '/api/detector/free', { json: { text }, timeoutMs: 120000 }),
 
-    async exportText(text, title, format) {
+    async exportText(text, title, format, html = null) {
+      const payload = { text, title, format };
+      if (html && String(html).trim()) payload.html = String(html);
       const res = await fetch('/api/text/export', {
         method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ text, title, format }),
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));

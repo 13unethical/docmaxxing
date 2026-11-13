@@ -32,17 +32,19 @@ def _rewrite(text: str) -> str:
     """Deterministic stand-in for the model: swaps words, keeps paragraph breaks."""
     swaps = {"study": "paper", "examines": "explores", "changed": "shifted", "found": "showed",
              "rose": "grew", "while": "whereas", "declined": "fell", "sharply": "steeply",
-             "Researchers": "Authors", "how": "the way", "across": "in", "output": "production"}
+             "Researchers": "Authors", "how": "the way", "across": "in", "output": "production",
+             "keep": "retain", "list": "set", "item": "entry", "first": "primary",
+             "second": "other", "point": "note", "here": "below"}
     return "\n\n".join(" ".join(swaps.get(w, w) for w in p.split()) for p in text.split("\n\n"))
 
 
-def test_plan_chunks_groups_prose_and_keeps_structure_verbatim():
+def test_plan_chunks_groups_prose_and_rewrites_list_items():
     body = "\n\n".join(["## Introduction", PARA, PARA, "- a list item", "[[FIGURE: map | Map]]", PARA])
     pieces = plan_chunks(body, "\n\n")
     assert pieces == [
         ("## Introduction", False),
         (f"{PARA}\n\n{PARA}", True),
-        ("- a list item", False),
+        ("- a list item", True),
         ("[[FIGURE: map | Map]]", False),
         (PARA, True),
     ]
@@ -53,6 +55,7 @@ def test_titles_and_headings_of_any_level_stay_verbatim():
         "# Artificial Intelligence: Its Impact on Modern Society",
         "### Ethical Concerns",
         "Artificial Intelligence and the Future of Work",
+        "**Stakeholder Identification**",
         PARA,
         "AI is changing how people work.",
     ]
@@ -60,8 +63,9 @@ def test_titles_and_headings_of_any_level_stay_verbatim():
         (blocks[0], False),
         (blocks[1], False),
         (blocks[2], False),
+        (blocks[3], False),
         (PARA, True),
-        (blocks[4], True),
+        (blocks[5], True),
     ]
 
 
@@ -88,7 +92,8 @@ def test_paragraphs_hard_wrapped_by_a_pdf_are_joined_and_rewritten():
         ("Methodology", False),
         (" ".join(lines[4:] + page_two.split("\n")), True),
         (address, False),
-        (bullets, False),
+        ("- first point of the list here", True),
+        ("- second point of the list here", True),
         (table, False),
     ]
 
@@ -161,15 +166,51 @@ def test_chunk_problem_rejects_broken_rewrites():
     assert chunk_problem(two, two) == "UNCHANGED"
 
 
-def test_humanize_rewrites_prose_and_keeps_headings_lists_and_references():
+def test_humanize_rewrites_prose_and_list_items_keeps_headings_and_references():
     text = "\n\n".join(["## Introduction", PARA, "- keep this bullet", "## Discussion", PARA,
                         "## References", "Smith, J. (2020). Remote work. Journal, 1(2), 3-4."])
     out = StudentTextHumanizer(_config(), complete_fn=_rewrite).humanize(text)
     assert "## Introduction" in out and "## Discussion" in out
-    assert "- keep this bullet" in out
+    assert "- retain this bullet" in out
+    assert "- keep this bullet" not in out
     assert "Smith, J. (2020). Remote work. Journal, 1(2), 3-4." in out
     assert "The paper explores" in out
     assert "The study examines" not in out
+
+
+def test_plan_chunks_rewrites_short_bullets_and_long_numbered_list_items():
+    long_item = (
+        "1. Ministry of Employment and Poverty Reduction: This is the main government institution "
+        "responsible for employment policies, labour relations, and workers' rights. It is particularly "
+        "important because it can introduce and coordinate employment programmes and promote decent "
+        "working conditions."
+    )
+    short = "- keep this bullet"
+    intro = "The eight stakeholders listed are linked in various ways to our advocacy goal."
+    pieces = plan_chunks("\n\n".join([intro, long_item, short, PARA]), "\n\n", chunk_words=1)
+    assert pieces == [
+        (intro, True),
+        (long_item, True),
+        (short, True),
+        (PARA, True),
+    ]
+
+
+def test_humanize_rewrites_numbered_stakeholder_list_items():
+    item = (
+        "1. Ministry of Employment and Poverty Reduction: This is the main government institution "
+        "responsible for employment policies. The study examines how remote work changed productivity "
+        "across agencies. Researchers found that output rose while meetings declined sharply."
+    )
+    short = "2. Youth Affairs Agency: supports young people."
+    text = "\n\n".join(["## Stakeholder Identification", item, short])
+    out = StudentTextHumanizer(_config(chunk_words=1), complete_fn=_rewrite).humanize(text)
+    assert "## Stakeholder Identification" in out
+    assert "The paper explores" in out
+    assert "The study examines" not in out
+    assert out.strip().startswith("## Stakeholder Identification")
+    assert "1." in out.split("\n\n")[1]
+    assert "2." in out.split("\n\n")[2]
 
 
 def test_humanize_keeps_single_newline_paragraphs():

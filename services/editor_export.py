@@ -155,7 +155,7 @@ def _inline(p: Any, nodes: Iterable[Any], fmt: dict[str, bool]) -> None:
         _inline(p, node.children, _format(node, fmt))
 
 
-def _format(el: Tag, fmt: dict[str, bool]) -> dict[str, bool]:
+def _format(el: Tag, fmt: dict[str, Any]) -> dict[str, Any]:
     out = dict(fmt)
     name = el.name
     css = (el.get("style") or "").lower()
@@ -171,10 +171,22 @@ def _format(el: Tag, fmt: dict[str, bool]) -> dict[str, bool]:
         out["superscript"] = True
     if name == "sub":
         out["subscript"] = True
+    color = re.search(r"(?:^|;)\s*color\s*:\s*([^;]+)", css, re.I)
+    if color:
+        out["color"] = color.group(1).strip()
+    font = re.search(r"font-family\s*:\s*([^;]+)", css, re.I)
+    if font:
+        out["font_name"] = font.group(1).strip().strip("'\"")
+    size = re.search(r"font-size\s*:\s*([\d.]+)\s*pt", css, re.I)
+    if size:
+        try:
+            out["font_size_pt"] = float(size.group(1))
+        except ValueError:
+            pass
     return out
 
 
-def _run(p: Any, text: str, fmt: dict[str, bool]) -> None:
+def _run(p: Any, text: str, fmt: dict[str, Any]) -> None:
     run = p.add_run(text)
     run.bold = fmt.get("bold") or None
     run.italic = fmt.get("italic") or None
@@ -185,6 +197,31 @@ def _run(p: Any, text: str, fmt: dict[str, bool]) -> None:
         run.font.superscript = True
     elif fmt.get("subscript"):
         run.font.subscript = True
+    if fmt.get("font_name"):
+        run.font.name = str(fmt["font_name"])
+    if fmt.get("font_size_pt"):
+        run.font.size = Pt(float(fmt["font_size_pt"]))
+    color = fmt.get("color")
+    if color:
+        rgb = _parse_css_color(str(color))
+        if rgb is not None:
+            run.font.color.rgb = rgb
+
+
+def _parse_css_color(value: str) -> RGBColor | None:
+    value = value.strip().lower()
+    m = re.fullmatch(r"#([0-9a-f]{6})", value)
+    if m:
+        h = m.group(1)
+        return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
+    m = re.fullmatch(r"#([0-9a-f]{3})", value)
+    if m:
+        h = m.group(1)
+        return RGBColor(int(h[0] * 2, 16), int(h[1] * 2, 16), int(h[2] * 2, 16))
+    m = re.fullmatch(r"rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", value)
+    if m:
+        return RGBColor(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    return None
 
 
 def _has_text(node: Any) -> bool:

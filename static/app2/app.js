@@ -1712,7 +1712,7 @@ const state = {
   veil: { ...(BOOT.veil || {}) },   // { active, expiresAt } of the Veil pass
   tools: {},              // per-tool input/result state, kept while navigating
 };
-const toolState = (id) => state.tools[id] || (state.tools[id] = { mode: 'paste', text: '', fileName: '', status: 'idle', result: null, note: '' });
+const toolState = (id) => state.tools[id] || (state.tools[id] = { mode: 'paste', text: '', html: '', fileName: '', status: 'idle', result: null, note: '' });
 
 /* =========================================================
    Helpers
@@ -3118,7 +3118,8 @@ function renderTextTool(id) {
       ${t.note ? `<p class="note">${esc(t.note)}</p>` : ''}
       <div id="panel-paste" role="tabpanel" aria-labelledby="tab-paste" ${t.mode !== 'paste' ? 'hidden' : ''}>
         <label class="visually-hidden" for="tool-text">Your text</label>
-        <textarea class="input" id="tool-text" placeholder="Paste your text here…">${esc(t.text)}</textarea>
+        <div class="input rich-input" id="tool-text" contenteditable="true" role="textbox" aria-multiline="true"
+          data-placeholder="Paste your text here…">${t.html ? sanitizePasteHtml(t.html) : esc(t.text).replace(/\n/g, '<br>')}</div>
       </div>
       <div id="panel-file" role="tabpanel" aria-labelledby="tab-file" ${t.mode !== 'file' ? 'hidden' : ''}>
         <button type="button" class="dropzone" id="dropzone">
@@ -3183,8 +3184,53 @@ function resultHtml(id) {
       </div>`}
       <button class="btn btn-sm btn-primary" data-act="next">${esc(flow.next.label)}</button>
     </div>
-    <pre class="result-text" id="result-text">${esc(t.result.text)}</pre>
+    <div class="result-text" id="result-text">${t.result.html ? sanitizePasteHtml(t.result.html) : formatResultText(t.result.text)}</div>
   </div>`;
+}
+
+/** Show **bold** / ## headings as real bold in the humanizer result (copy still gets plain words). */
+function formatResultText(text) {
+  return esc(text)
+    .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>')
+    .replace(/^__(.+?)__$/gm, '<strong>$1</strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+const RICH_PASTE_TAGS = new Set(['P','BR','DIV','SPAN','B','STRONG','I','EM','U','S','STRIKE','DEL','SUP','SUB',
+  'H1','H2','H3','H4','H5','H6','UL','OL','LI','TABLE','THEAD','TBODY','TR','TH','TD','BLOCKQUOTE']);
+
+/** Whitelist paste HTML from Word/Google Docs so bold/tables survive. */
+function sanitizePasteHtml(raw) {
+  const doc = new DOMParser().parseFromString(`<div id="r">${raw || ''}</div>`, 'text/html');
+  const root = doc.getElementById('r');
+  if (!root) return '';
+  const walk = (node) => {
+    [...node.childNodes].forEach((child) => {
+      if (child.nodeType === 1) {
+        if (!RICH_PASTE_TAGS.has(child.tagName)) { child.replaceWith(...child.childNodes); return; }
+        [...child.attributes].forEach((a) => {
+          if (a.name === 'style') {
+            const kept = String(a.value).split(';').map(s => s.trim()).filter(s =>
+              /^(color|font-family|font-size|font-weight|font-style|text-decoration)\s*:/i.test(s));
+            if (kept.length) child.setAttribute('style', kept.join('; '));
+            else child.removeAttribute('style');
+          } else if (!(child.tagName === 'TD' || child.tagName === 'TH') || !/^(col|row)span$/i.test(a.name)) {
+            child.removeAttribute(a.name);
+          }
+        });
+        walk(child);
+      }
+    });
+  };
+  walk(root);
+  return root.innerHTML.trim();
+}
+
+function richInputPlain(el) {
+  return (el?.innerText || '').replace(/\u00a0/g, ' ').trim();
+}
+function richInputHtml(el) {
+  return sanitizePasteHtml(el?.innerHTML || '');
 }
 
 /* ---------- Veil ---------- */
@@ -5049,14 +5095,23 @@ function edUnpack(output, count) {
   return chunks.length === count ? chunks.map(c => c.text) : null;   // markers renumbered: fall back to order
 }
 
-function edMakeSugg(oldText, newText) {
+function edMakeSugg(oldText, newText, newHtml) {
   const span = document.createElement('span');
   span.className = 'sugg';
   span.contentEditable = 'false';
-  span.innerHTML = `<del>${esc(oldText)}</del><ins>${esc(newText)}</ins><span class="sugg-actions">` +
+  const ins = newHtml && String(newHtml).trim()
+    ? `<ins class="sugg-rich">${newHtml}</ins>`
+    : `<ins>${esc(newText)}</ins>`;
+  span.innerHTML = `<del>${esc(oldText)}</del>${ins}<span class="sugg-actions">` +
     `<button type="button" class="sugg-btn" data-act="ed-accept" aria-label="Accept change" data-tip-title="Accept" data-tip-desc="Keep the new text" data-tip-pos="bottom">${icon('check')}</button>` +
     `<button type="button" class="sugg-btn" data-act="ed-reject" aria-label="Reject change" data-tip-title="Reject" data-tip-desc="Keep the original text" data-tip-pos="bottom">${icon('close')}</button></span>`;
   return span;
+}
+
+function edRangeHtml(range) {
+  const div = document.createElement('div');
+  div.append(range.cloneContents());
+  return sanitizePasteHtml(div.innerHTML);
 }
 
 async function edHumanize(kind) {
@@ -5066,6 +5121,7 @@ async function edHumanize(kind) {
   const ranges = kind === 'sel' ? (edHasSel() ? edSplitByBlocks(edRange) : []) : edFlags().map(f => edPartRange(f));
   if (!ranges.length) return;
   const texts = ranges.map(r => r.toString().replace(/\s+/g, ' ').trim());
+  const htmls = ranges.map(r => edRangeHtml(r));
   const words = texts.reduce((n, t) => n + countWords(t), 0);
   if (words > ED_MAX_HUMANIZE_WORDS) {
     toast(`Humanize up to ${fmtNum(ED_MAX_HUMANIZE_WORDS)} words at a time. This is ${fmtNum(words)} words.`);
@@ -5088,11 +5144,16 @@ async function edHumanize(kind) {
   e.error = null;
   edSave(); refreshEdPanel();
 
-  let parts = null, failure = null;
+  let parts = null, htmlParts = null, failure = null;
   try {
-    const data = await API.humanize(texts.length === 1 ? texts[0] : edPack(texts), 'workspace_partial');
+    const packed = texts.length === 1 ? texts[0] : edPack(texts);
+    const packedHtml = htmls.length === 1 ? htmls[0] : null;
+    const data = await API.humanize(packed, 'workspace_partial', packedHtml);
     if (typeof data.balance === 'number') state.balance = data.balance;
     parts = texts.length === 1 ? [String(data.humanized_text || '')] : edUnpack(data.humanized_text, texts.length);
+    htmlParts = texts.length === 1 && data.humanized_html
+      ? [String(data.humanized_html)]
+      : null;
     if (!parts) failure = { message: 'The rewritten text came back in a different shape, so nothing was changed. Try a smaller selection.' };
   } catch (err) {
     const info = apiErrorInfo(err, { intent: 'workspace' });
@@ -5106,8 +5167,9 @@ async function edHumanize(kind) {
   root.querySelectorAll('.ed-pending').forEach(span => {
     const i = Number(span.dataset.i), old = span.textContent;
     const neu = parts ? String(parts[i] || '').replace(/\s+/g, ' ').trim() : '';
+    const neuHtml = htmlParts ? htmlParts[i] : '';
     if (!neu || neu === old.replace(/\s+/g, ' ').trim()) { edUnwrap(span); return; }
-    span.replaceWith(old.match(/^\s*/)[0], edMakeSugg(old.trim(), neu), old.match(/\s*$/)[0]);
+    span.replaceWith(old.match(/^\s*/)[0], edMakeSugg(old.trim(), neu, neuHtml), old.match(/\s*$/)[0]);
     changed++;
   });
   edTidyFlags(root);
@@ -5126,9 +5188,14 @@ async function edHumanize(kind) {
 }
 
 function edResolve(sugg, accept) {
-  const text = sugg.querySelector(accept ? 'ins' : 'del').textContent;
-  const next = sugg.nextElementSibling;
-  sugg.replaceWith(document.createTextNode(text));
+  const node = sugg.querySelector(accept ? 'ins' : 'del');
+  if (accept && node?.classList.contains('sugg-rich')) {
+    const frag = document.createDocumentFragment();
+    [...node.childNodes].forEach(c => frag.append(c.cloneNode(true)));
+    sugg.replaceWith(frag);
+  } else {
+    sugg.replaceWith(document.createTextNode(node?.textContent || ''));
+  }
   $('#doc').normalize();
   edSave(); refreshEdPanel();
   // Keep keyboard users moving through the changes
@@ -7849,6 +7916,12 @@ function bindTextTool(id) {
   const t = toolState(id), item = ITEMS[id];
   const ta = $('#tool-text'), runBtn = $('#run-btn'), counter = $('#counter');
 
+  function syncFromInput() {
+    t.text = richInputPlain(ta);
+    t.html = richInputHtml(ta);
+    if (!t.text.trim()) { t.fileName = ''; t.html = ''; }
+  }
+
   function refresh() {
     const words = countWords(t.text), over = words > CONFIG.wordLimit;
     counter.textContent = `${fmtNum(words)} / ${fmtNum(CONFIG.wordLimit)} words${over ? ' — too long' : ''}`;
@@ -7860,7 +7933,15 @@ function bindTextTool(id) {
   refresh();
 
   // Emptying the field drops the uploaded file, so newly pasted text gets plain Copy, not the file download menu
-  ta.addEventListener('input', () => { t.text = ta.value; if (!t.text.trim()) t.fileName = ''; refresh(); });
+  ta.addEventListener('input', () => { syncFromInput(); refresh(); });
+  ta.addEventListener('paste', (e) => {
+    const html = e.clipboardData?.getData('text/html');
+    if (!html) return;
+    e.preventDefault();
+    const clean = sanitizePasteHtml(html);
+    document.execCommand('insertHTML', false, clean || esc(e.clipboardData.getData('text/plain') || '').replace(/\n/g, '<br>'));
+    syncFromInput(); refresh();
+  });
 
   // Tabs: click + arrow keys
   const tabs = $$('[role="tab"]');
@@ -7879,10 +7960,10 @@ function bindTextTool(id) {
     if (!/\.(docx|pdf|txt)$/i.test(file.name)) { toast('Please choose a .docx, .pdf or .txt file'); return; }
     t.fileName = file.name; t.note = 'Reading your file…';
     render();
-    API.extractText(file).then((text) => {
-      text = text.trim();
+    API.extractDocument(file).then(({ text, html }) => {
+      text = String(text || '').trim();
       if (!text) throw new Error('No readable text found in that file.');
-      Object.assign(t, { text, mode: 'paste', note: '' });
+      Object.assign(t, { text, html: html || '', mode: 'paste', note: '' });
       toast(`File “${file.name}” added`);
     }).catch((err) => {
       Object.assign(t, { fileName: '', note: err.message || 'Could not read the uploaded file.' });
@@ -7900,14 +7981,18 @@ async function runTool(id) {
   if (!state.signedIn && item.guestPrice && state.guestRunsUsed >= 1) return signUp();
   if (t.status === 'loading') return;
   const onPage = () => currentRoute() === item.route;
+  // Sync from the live editor before the run (render may have stale state).
+  const live = $('#tool-text');
+  if (live) { t.text = richInputPlain(live); t.html = richInputHtml(live); }
   t.status = 'loading'; t.result = null; t.error = null;
   if (onPage()) { $('#result').innerHTML = resultHtml(id); $('#run-btn').disabled = true; }
-  const source = t.text;
+  const source = t.text, sourceHtml = t.html || '';
   try {
-    const data = await API.humanize(source);
+    const data = await API.humanize(source, 'standalone', sourceHtml || null);
     const out = String(data.humanized_text || data.text || '').trim();
     if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
-    t.status = 'done'; t.result = { text: out, file: t.fileName || '' };
+    t.status = 'done';
+    t.result = { text: out, html: data.humanized_html || '', file: t.fileName || '' };
     if (!state.signedIn) state.guestRunsUsed = data.free_runs_left === 0 ? 1 : 0;
     if (state.signedIn) { addDoc(source, id, { text: out }); loadCredits(); }
   } catch (err) {
@@ -7952,7 +8037,7 @@ function apiErrorInfo(err, { intent } = {}) {
 }
 
 function clearTool(id) {
-  state.tools[id] = { mode: toolState(id).mode, text: '', fileName: '', status: 'idle', result: null, note: '' };
+  state.tools[id] = { mode: toolState(id).mode, text: '', html: '', fileName: '', status: 'idle', result: null, note: '' };
   render();
   $('#tool-text')?.focus();
 }
@@ -7965,7 +8050,9 @@ async function downloadResult(id, ext) {
   const base = (r.file || 'text').replace(/\.[^.]+$/, '') + '-humanized', name = `${base}.${ext}`;
   let blob;
   try {
-    blob = ext === 'txt' ? new Blob([r.text], { type: 'text/plain;charset=utf-8' }) : await API.exportText(r.text, base, ext);
+    blob = ext === 'txt'
+      ? new Blob([r.text], { type: 'text/plain;charset=utf-8' })
+      : await API.exportText(r.text, base, ext, r.html || null);
   } catch (err) {
     toast(err.message || 'Could not download. Try again.');
     return;

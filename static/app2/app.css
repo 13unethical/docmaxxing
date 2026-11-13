@@ -842,6 +842,11 @@ button.earn-chip:hover { background: var(--default-hover); }
 .dl-menu hr { width: 94%; margin: 0 0 0 3%; border: 0; border-top: 1px solid var(--border); }
 @media (prefers-reduced-motion: reduce) { .dl-menu, .dl-menu button { transition: none; } }
 .result-text { white-space: pre-wrap; background: var(--surface-2); border-radius: var(--radius); padding: var(--space-4); margin: 0; line-height: 1.7; font-family: var(--font); font-size: 15px; }
+.rich-input { min-height: 180px; overflow: auto; white-space: pre-wrap; }
+.rich-input:empty::before { content: attr(data-placeholder); color: var(--muted, #888); pointer-events: none; }
+.rich-input table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
+.rich-input td, .rich-input th, .result-text td, .result-text th { border: 1px solid var(--border, #ccc); padding: 4px 8px; }
+.result-text table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
 .result-head .btn svg.icon { width: 18px; height: 18px; }
 .next-step { margin-top: var(--space-4); display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; padding-top: var(--space-4); border-top: 1px solid var(--border); }
 .loading { display: flex; align-items: center; gap: var(--space-3); color: var(--text-muted); }

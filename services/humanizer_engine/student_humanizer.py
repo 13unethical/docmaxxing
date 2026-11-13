@@ -1,9 +1,10 @@
 """Our own humanizer: the fine-tuned student model served behind an OpenAI-compatible endpoint.
 
 Prose paragraphs are grouped into ~600-word chunks (the size the model was trained on) and
-rewritten in parallel; headings, lists, tables, figure markers and references stay verbatim.
-Any chunk that fails the quality checks is retried, and if it still fails the whole call
-raises so the caller can fall back to StealthWriter.
+rewritten in parallel. List items (short bullets and long numbered prose) are rewritten too.
+Only true document structure stays verbatim: headings, tables, figure markers, bare titles,
+addresses, and the references block. Any chunk that fails the quality checks is retried, and
+if it still fails the whole call raises so the caller can fall back to StealthWriter.
 
 pick="document": each chunk is written once, then the AI detector scores the whole text in its
 ~110-word windows and only the chunks holding flagged sentences are rewritten, judged in context.
@@ -35,6 +36,7 @@ from services.humanizer_engine.heading_utils import (
     split_off_references,
 )
 from services.humanizer_engine.mock_humanizer import MockTextHumanizer
+from services.humanizer_engine.rich_html import list_marker_ok, restore_list_marker, split_list_marker
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +64,10 @@ DOC_BUDGET_SECONDS = 45.0
 _WORD = re.compile(r"[a-z0-9']+")
 _CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
 _LETTER = re.compile(r"[^\W\d_]")
+# Headings / fences / table rows — never rewritten. Every list item is rewritten (Turnitin flags
+# both short bullets and long "1. Name: prose…" lines when left as AI paste).
+_STRUCTURAL_LINE = re.compile(r"^\s*(#{1,6}\s|\||```)")
+_LIST_ITEM_LINE = re.compile(r"^\s*(?:[-*•+]\s|\d+[.)]\s)")
 _VERBATIM_LINE = re.compile(r"^\s*(#{1,6}\s|\||```|[-*•+]\s|\d+[.)]\s)")
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*\s*$")
 # Given a bare title, the model writes a whole paragraph after it.
@@ -179,24 +185,48 @@ def _jaccard(a: str, b: str) -> float:
     return len(left & right) / len(left | right) if left | right else 1.0
 
 
+def _is_list_item_line(line: str) -> bool:
+    return bool(_LIST_ITEM_LINE.match(line))
+
+
+def _is_list_item_block(block: str) -> bool:
+    lines = [ln for ln in block.split("\n") if ln.strip()]
+    return len(lines) == 1 and _is_list_item_line(lines[0])
+
+
 def _is_verbatim(block: str) -> bool:
     lines = [ln for ln in block.split("\n") if ln.strip()]
-    return (
-        len(lines) != 1
-        or bool(_VERBATIM_LINE.match(lines[0]))
-        or "[[" in block
-        or _wc(block) < 3
-        or (_wc(block) <= TITLE_MAX_WORDS and not _SENTENCE_END.search(block))
-    )
+    if not lines:
+        return True
+    stripped = block.strip()
+    # Rich-HTML opaque tokens (tables / references) must survive a full-document rewrite.
+    if stripped.startswith("⟦TABLE") or stripped.startswith("⟦OPAQUE"):
+        return True
+    if len(lines) != 1:
+        return True
+    line = lines[0]
+    if "[[" in block:
+        return True
+    if _STRUCTURAL_LINE.match(line) or " | " in line:
+        return True
+    if _is_list_item_line(line):
+        return False
+    if _wc(block) < 3:
+        return True
+    # Bare titles and markdown/bold-wrapped headings stay put (export turns **…** into real bold).
+    return _is_title(block)
 
 
 def _split_block(block: str) -> tuple[list[str], bool]:
     """Paragraphs of a multi-line block, and whether its last paragraph runs on into the next block.
 
     Hard-wrapped lines are joined back into paragraphs; lines that are whole paragraphs already
-    (a heading above its text, an address) become blocks of their own. Lists and tables stay intact.
+    (a heading above its text, an address) become blocks of their own. Tables stay intact; a run
+    of list items is split so each bullet/number line can be rewritten.
     """
     lines = [ln.strip() for ln in block.split("\n") if ln.strip()]
+    if len(lines) >= 2 and all(_is_list_item_line(ln) for ln in lines):
+        return lines, False
     if len(lines) < 2 or any(_VERBATIM_LINE.match(ln) or " | " in ln for ln in lines):
         return [block], False
     width = max(len(ln) for ln in lines)
@@ -295,6 +325,7 @@ def split_plain_references(body: str, separator: str) -> tuple[str, str, str]:
 def plan_chunks(body: str, separator: str, chunk_words: int = CHUNK_WORDS) -> list[tuple[str, bool]]:
     """Body as ordered (text, rewrite?) pieces: prose grouped up to ``chunk_words``, the rest verbatim.
 
+    Long list items are rewritten alone (keeps numbering/markers stabler than mixing with paragraphs).
     Chunks run in parallel, so smaller chunks answer faster; ``chunk_words=1`` sends each paragraph alone.
     """
     pieces: list[tuple[str, bool]] = []
@@ -309,6 +340,10 @@ def plan_chunks(body: str, separator: str, chunk_words: int = CHUNK_WORDS) -> li
         if _is_verbatim(block):
             _flush()
             pieces.append((block, False))
+            continue
+        if _is_list_item_block(block):
+            _flush()
+            pieces.append((block, True))
             continue
         if prose and _wc("\n\n".join(prose + [block])) > chunk_words:
             _flush()
@@ -325,8 +360,26 @@ _CONCLUSION_OPENER = re.compile(
 _CONCLUSION_TITLE = re.compile(r"\b(conclusions?|concluding|summary|final thoughts|closing remarks)\b", re.IGNORECASE)
 
 
+_MD_WRAP_TITLE = re.compile(r"^(?:\*\*|__)(.+?)(?:\*\*|__)$|^#{1,6}\s+(.+?)$")
+
+
+def _title_core(text: str) -> str:
+    """Bare title text: strip ``**…**`` / ``## …`` wrappers used for bold/markdown headings."""
+    stripped = text.strip()
+    m = _MD_WRAP_TITLE.match(stripped)
+    if m:
+        return (m.group(1) or m.group(2) or "").strip()
+    return stripped
+
+
 def _is_title(text: str) -> bool:
-    return "\n" not in text.strip() and _wc(text) <= TITLE_MAX_WORDS and not _SENTENCE_END.search(text)
+    core = _title_core(text)
+    return (
+        "\n" not in text.strip()
+        and bool(core)
+        and _wc(core) <= TITLE_MAX_WORDS
+        and not _SENTENCE_END.search(core)
+    )
 
 
 def conclusion_pieces(pieces: list[tuple[str, bool]]) -> set[int]:
@@ -359,6 +412,9 @@ def chunk_problem(source: str, output: str) -> str | None:
         return "LENGTH_RATIO"
     if _jaccard(source, output) > MAX_JACCARD:
         return "UNCHANGED"
+    marker, _ = split_list_marker(source)
+    if marker and not list_marker_ok(source, restore_list_marker(source, output)):
+        return "LIST_MARKER"
     return None
 
 
@@ -443,26 +499,33 @@ class StudentTextHumanizer:
 
     def _rewrite_chunk(self, chunk: str, conclusion: bool = False) -> str:
         problem = "NOT_RUN"
+        # List markers stay outside the model: rewrite the body only, then put 1. / - back.
+        marker, body = split_list_marker(chunk)
+        source = body if marker else chunk
         # A paragraph the model only lightly edits should not sink the whole text.
         lightest: tuple[float, str] | None = None
+
+        def _with_marker(text: str) -> str:
+            return restore_list_marker(chunk, text) if marker else text
+
         for attempt in range(1, ATTEMPTS + 1):
             try:
-                variants = self._candidates(chunk)
+                variants = self._candidates(source)
             except (requests.RequestException, StudentHumanizerError, KeyError, ValueError, IndexError) as exc:
                 problem = f"REQUEST_FAILED: {exc}"
                 log.info("student humanizer attempt %s failed: %s", attempt, problem)
                 continue
-            usable, problem, light = self._usable(chunk, variants)
+            usable, problem, light = self._usable(source, variants)
             if light is not None and (lightest is None or light[0] < lightest[0]):
-                lightest = light
+                lightest = (light[0], _with_marker(light[1]))
             if usable:
                 if self.config.pick == "detector":
-                    return self._pick_by_detector(chunk, usable, conclusion)
-                return pick_candidate(chunk, usable, self.config.pick).text
+                    return _with_marker(self._pick_by_detector(source, usable, conclusion))
+                return _with_marker(pick_candidate(source, usable, self.config.pick).text)
             log.info("student humanizer attempt %s failed: %s", attempt, problem)
         if lightest is not None:
             return lightest[1]
-        if problem == "UNCHANGED" and _wc(chunk) <= KEEP_UNCHANGED_MAX_WORDS:
+        if problem == "UNCHANGED" and _wc(source) <= KEEP_UNCHANGED_MAX_WORDS:
             return chunk
         raise StudentHumanizerError(f"Chunk rejected after {ATTEMPTS} attempts: {problem}")
 

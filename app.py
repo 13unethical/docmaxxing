@@ -3874,6 +3874,53 @@ def _student_humanize(text: str, *, rescue: bool = False) -> dict[str, Any] | No
         return None
 
 
+def _attach_rich_html(result: dict[str, Any] | None, html_in: str | None) -> dict[str, Any] | None:
+    """If the client sent HTML, reassemble formatting around ``humanized_text``."""
+    if result is None or not html_in or not str(html_in).strip():
+        return result
+    try:
+        from services.humanizer_engine.rich_html import (
+            html_to_plaintext,
+            prepare_rich,
+            reassemble_rich,
+            sanitize_html,
+        )
+
+        plain, stash = prepare_rich(str(html_in))
+        out_plain = result.get("humanized_text")
+        if not isinstance(out_plain, str):
+            return result
+        # When prepare collapsed to empty, keep sanitized input structure.
+        if not plain.strip():
+            result = dict(result)
+            result["humanized_html"] = sanitize_html(str(html_in))
+            return result
+        # If the model was run on the prepared plain (caller responsibility), reassemble.
+        # If lengths wildly diverge, still try block alignment via reassemble_rich.
+        result = dict(result)
+        rich = reassemble_rich(out_plain, stash)
+        result["humanized_html"] = rich
+        result["humanized_text"] = html_to_plaintext(rich)
+        return result
+    except Exception:  # noqa: BLE001
+        app.logger.exception("rich html reassembly failed")
+        return result
+
+
+def _humanize_plain_for_rich(html_in: str | None, text: str) -> str:
+    """Plain string sent to the model: rich-prepared when HTML is present."""
+    if not html_in or not str(html_in).strip():
+        return text
+    try:
+        from services.humanizer_engine.rich_html import prepare_rich
+
+        plain, _stash = prepare_rich(str(html_in))
+        return plain if plain.strip() else text
+    except Exception:  # noqa: BLE001
+        app.logger.exception("rich html prepare failed")
+        return text
+
+
 def _student_rescue_after(job: Any, text: str) -> dict[str, Any] | None:
     """Our model's answer when a StealthWriter job failed, else None."""
     if job is None or job.status.value in ("COMPLETED", "CANCELLED") or not job.is_terminal:
@@ -6178,11 +6225,22 @@ def api_browser_stealthwriter_humanize():
 
     payload = request.get_json(silent=True) or {}
     text = payload.get("text")
+    html_in = payload.get("html") if isinstance(payload.get("html"), str) else None
+    if not isinstance(text, str) or not text.strip():
+        # Allow HTML-only clients: derive plaintext for caps/billing.
+        if html_in and html_in.strip():
+            from services.humanizer_engine.rich_html import html_to_plaintext
+
+            text = html_to_plaintext(html_in)
+        else:
+            return jsonify({"success": False, "error": "text is required"}), 400
     if not isinstance(text, str) or not text.strip():
         return jsonify({"success": False, "error": "text is required"}), 400
     too_long = _humanize_word_cap_error(text)
     if too_long is not None:
         return too_long
+
+    model_text = _humanize_plain_for_rich(html_in, text)
 
     user = economy_auth.current_user()
     guest_trial = user is None
@@ -6239,7 +6297,9 @@ def api_browser_stealthwriter_humanize():
     def _humanize_success(res: dict[str, Any], request_id: str):
         elapsed = res.get("elapsed_seconds")
         latency_ms = int(float(elapsed) * 1000) if elapsed is not None else None
+        res = _attach_rich_html(res, html_in) or res
         humanized_out = res.get("humanized_text")
+        humanized_html = res.get("humanized_html")
         if not guest_trial and user_id:
             _record_usage_safe(
                 int(user_id),
@@ -6276,38 +6336,39 @@ def api_browser_stealthwriter_humanize():
                 )
             except Exception:
                 app.logger.exception("dataset_logger stealthwriter hook failed")
-        return jsonify(
-            {
-                "success": True,
-                "humanized_text": humanized_out,
-                "elapsed_seconds": elapsed,
-                "job_id": request_id,
-                "coins_charged": cost,
-                "guest_trial": guest_trial,
-                "free_run": free_run,
-                "free_runs_left": _free_runs_left(free_subject, user),
-                "original_price": pricing["original_price"],
-                "discount_active": pricing["discount_active"],
-                "discount_percent": pricing["discount_percent"],
-                "balance": wallet.get_balance(int(user_id)) if user_id else 0,
-            }
-        )
+        payload_out = {
+            "success": True,
+            "humanized_text": humanized_out,
+            "elapsed_seconds": elapsed,
+            "job_id": request_id,
+            "coins_charged": cost,
+            "guest_trial": guest_trial,
+            "free_run": free_run,
+            "free_runs_left": _free_runs_left(free_subject, user),
+            "original_price": pricing["original_price"],
+            "discount_active": pricing["discount_active"],
+            "discount_percent": pricing["discount_percent"],
+            "balance": wallet.get_balance(int(user_id)) if user_id else 0,
+        }
+        if isinstance(humanized_html, str) and humanized_html.strip():
+            payload_out["humanized_html"] = humanized_html
+        return jsonify(payload_out)
 
     if free_run and free_humanize.limits().engine == "student":
-        student = _student_humanize(text, rescue=True)
+        student = _student_humanize(model_text, rescue=True)
         if student is None:
             _release_guest_trial()
             return _free_engine_unavailable()
         return _humanize_success(student, student["request_id"])
 
     try:
-        student = _student_humanize(text, rescue=_stealthwriter_down())
+        student = _student_humanize(model_text, rescue=_stealthwriter_down())
         if student is not None:
             return _humanize_success(student, student["request_id"])
 
         ensure_engine_started()
         job = job_manager.create(
-            "stealthwriter", "humanize", {"text": text}, max_retries=MAX_RETRIES, owner=_job_owner()
+            "stealthwriter", "humanize", {"text": model_text}, max_retries=MAX_RETRIES, owner=_job_owner()
         )
         max_wait = (browser_worker.job_timeout + 30) * (job.max_retries + 1) + 30
         job_manager.wait(job.id, timeout=max_wait)
@@ -6320,7 +6381,7 @@ def api_browser_stealthwriter_humanize():
         status = job.status.value
         if status == "COMPLETED":
             return _humanize_success(job.result or {}, job.id)
-        student = _student_rescue_after(job, text)
+        student = _student_rescue_after(job, model_text)
         if student is not None:
             return _humanize_success(student, student["request_id"])
 
@@ -7697,7 +7758,8 @@ def api_workspace_export():
 
 @app.post("/api/text/export")
 def api_text_export():
-    """Humanized text -> .docx or .pdf. Free, guests included (the text comes from the client)."""
+    """Humanized text/HTML -> .docx or .pdf. Free, guests included (the text comes from the client)."""
+    from services.editor_export import EditorExportError, html_to_docx
     from services.text_export import TextExportError, text_to_docx, text_to_pdf
 
     payload = request.get_json(silent=True) or {}
@@ -7705,9 +7767,20 @@ def api_text_export():
     if fmt not in {"docx", "pdf"}:
         return jsonify({"success": False, "error": "FORMAT_INVALID", "message": "Choose PDF or Word."}), 400
     title = str(payload.get("title") or "").strip()[:200]
+    html_body = payload.get("html") if isinstance(payload.get("html"), str) else ""
+    text_body = str(payload.get("text") or "")
     try:
-        data = (text_to_pdf if fmt == "pdf" else text_to_docx)(title, str(payload.get("text") or ""))
-    except TextExportError as exc:
+        if fmt == "pdf":
+            if not text_body.strip() and html_body.strip():
+                from services.humanizer_engine.rich_html import html_to_plaintext
+
+                text_body = html_to_plaintext(html_body)
+            data = text_to_pdf(title, text_body)
+        elif html_body.strip():
+            data = html_to_docx(title, html_body)
+        else:
+            data = text_to_docx(title, text_body)
+    except (TextExportError, EditorExportError) as exc:
         return jsonify({"success": False, "error": "EXPORT_FAILED", "message": _public_error(exc)}), 400
     name = re.sub(r"[^\w\s.-]", "", title, flags=re.UNICODE).strip() or "humanized"
     mimetype = (
@@ -9756,9 +9829,11 @@ def api_format_references():
 @app.post("/api/extract-document")
 def api_extract_document():
     """
-    Extract plain text from an uploaded .docx or .pdf for the formatting workflow.
+    Extract plain text (and HTML with formatting for .docx) from an uploaded file.
     Multipart field name: file
     """
+    from formatter.document_io import extract_html_from_document_bytes
+
     f = request.files.get("file")
     if not f or not f.filename:
         return jsonify({"error": 'Upload a .docx or .pdf file as form field "file".'}), 400
@@ -9768,6 +9843,11 @@ def api_extract_document():
     try:
         raw = f.read()
         text = extract_text_from_document_bytes(raw, f.filename, f.mimetype)
+        html_out = None
+        try:
+            html_out = extract_html_from_document_bytes(raw, f.filename, f.mimetype)
+        except Exception:  # noqa: BLE001
+            app.logger.exception("extract-document html failed")
     except ValueError as e:
         return jsonify({"error": _public_error(e)}), 400
     except RuntimeError as e:
@@ -9780,7 +9860,10 @@ def api_extract_document():
     if len(text) > MAX_TEXT_CHARS:
         return jsonify({"error": f"Document text is too long (max {MAX_TEXT_CHARS:,} characters)."}), 400
 
-    return jsonify({"text": text, "filename": f.filename})
+    payload = {"text": text, "filename": f.filename}
+    if html_out:
+        payload["html"] = html_out
+    return jsonify(payload)
 
 
 @app.post("/api/check-document")
