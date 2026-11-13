@@ -500,6 +500,14 @@ textarea.input:focus-visible, .field-input:focus-visible, .select:focus-visible,
 :root:not([data-theme="light"]) .qd-backdrop mark { background: color-mix(in oklab, var(--danger) 32%, transparent); }   /* stronger on the dark field */
 .qd-legend i.lv-ai { background: var(--danger); }
 .qd-field .qd-text { min-height: 0; resize: none; background: transparent; }
+.qd-field .qd-text.rich-input { overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.qd-field .qd-text.rich-input:empty::before { content: attr(data-placeholder); color: var(--muted, #888); pointer-events: none; }
+.lt-out-text.result-text strong, .lt-out-text.result-text b, .result-text strong, .result-text b { font-weight: 700; }
+.lt-out-text.result-text h1, .lt-out-text.result-text h2, .lt-out-text.result-text h3,
+.lt-out-text.result-text h4, .lt-out-text.result-text h5, .lt-out-text.result-text h6,
+.result-text h1, .result-text h2, .result-text h3, .result-text h4, .result-text h5, .result-text h6 {
+  font-size: 1.05em; font-weight: 700; margin: 0.6em 0 0.35em;
+}
 /* keep the textarea see-through so the AI marks behind it stay visible; the field shows the hover/focus state instead */
 .qd-field textarea.qd-text:is(:hover, :focus-visible) { background-color: transparent; }
 .qd-field { transition: box-shadow 150ms var(--ease-out); }

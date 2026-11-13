@@ -3190,10 +3190,7 @@ function resultHtml(id) {
 
 /** Show **bold** / ## headings as real bold in the humanizer result (copy still gets plain words). */
 function formatResultText(text) {
-  return esc(text)
-    .replace(/^#{1,6}\s+(.+)$/gm, '<strong>$1</strong>')
-    .replace(/^__(.+?)__$/gm, '<strong>$1</strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  return markdownLiteToHtml(text) || esc(text || '').replace(/\n/g, '<br>');
 }
 
 const RICH_PASTE_TAGS = new Set(['P','BR','DIV','SPAN','B','STRONG','I','EM','U','S','STRIKE','DEL','SUP','SUB',
@@ -3224,6 +3221,73 @@ function sanitizePasteHtml(raw) {
   };
   walk(root);
   return root.innerHTML.trim();
+}
+
+/** ChatGPT / markdown paste: turn ## / ** / lists / tables into real HTML for the rich input. */
+function markdownLiteToHtml(raw) {
+  const src = String(raw || '').replace(/\r\n/g, '\n').replace(/^\uFEFF/, '').trim();
+  if (!src) return '';
+  // Already structured HTML (Word / Docs / ChatGPT rich copy) — keep tags, don't treat as markdown.
+  if (/<(h[1-6]|table|ul|ol|li|strong|b|em|i)\b/i.test(src) && !/^#{1,6}\s/m.test(src.replace(/<[^>]+>/g, ''))) {
+    return sanitizePasteHtml(src);
+  }
+  const inline = (s) => esc(s)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.+?)__/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\n]+?)\*(?!\*)/g, '$1<em>$2</em>')
+    .replace(/(^|[^_])_([^_\n]+?)_(?!_)/g, '$1<em>$2</em>');
+
+  const blocks = src.split(/\n{2,}/);
+  const out = [];
+  for (const block of blocks) {
+    const lines = block.split('\n').map(l => l.replace(/\s+$/g, ''));
+    if (lines.length >= 2 && lines[0].includes('|') && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[1])) {
+      const cells = (line) => line.replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const head = cells(lines[0]);
+      const rows = lines.slice(2).filter(l => l.includes('|')).map(cells);
+      out.push('<table><thead><tr>' + head.map(c => `<th>${inline(c)}</th>`).join('') + '</tr></thead><tbody>'
+        + rows.map(r => '<tr>' + r.map(c => `<td>${inline(c)}</td>`).join('') + '</tr>').join('') + '</tbody></table>');
+      continue;
+    }
+    if (lines.every(l => /^\s*[-*•+]\s+/.test(l))) {
+      out.push('<ul>' + lines.map(l => `<li>${inline(l.replace(/^\s*[-*•+]\s+/, ''))}</li>`).join('') + '</ul>');
+      continue;
+    }
+    if (lines.every(l => /^\s*\d+[.)]\s+/.test(l))) {
+      out.push('<ol>' + lines.map(l => `<li>${inline(l.replace(/^\s*\d+[.)]\s+/, ''))}</li>`).join('') + '</ol>');
+      continue;
+    }
+    if (lines.length === 1) {
+      const hm = lines[0].match(/^(#{1,6})\s+(.+)$/);
+      if (hm) {
+        const n = Math.min(6, hm[1].length);
+        out.push(`<h${n}>${inline(hm[2])}</h${n}>`);
+        continue;
+      }
+    }
+    out.push(`<p>${lines.map(inline).join('<br>')}</p>`);
+  }
+  return out.join('');
+}
+
+/** Prefer HTML clipboard; if only plain markdown (ChatGPT), convert it. */
+function clipboardToRichHtml(e) {
+  const html = e.clipboardData?.getData('text/html') || '';
+  const plain = e.clipboardData?.getData('text/plain') || '';
+  const cleaned = html ? sanitizePasteHtml(html) : '';
+  const plainFromHtml = cleaned ? richHtmlToPlain(cleaned) : '';
+  // ChatGPT often puts ##/** in text/plain while HTML is empty or a bare wrapper of the same markdown.
+  if (/^\s*#{1,6}\s|\*\*|^\s*[-*]\s|\|/m.test(plain) && (!cleaned || plainFromHtml.replace(/\s+/g, ' ') === plain.replace(/\s+/g, ' '))) {
+    return markdownLiteToHtml(plain);
+  }
+  if (cleaned) return cleaned;
+  return markdownLiteToHtml(plain);
+}
+
+function richHtmlToPlain(html) {
+  const d = document.createElement('div');
+  d.innerHTML = html || '';
+  return (d.innerText || '').replace(/\u00a0/g, ' ').trim();
 }
 
 function richInputPlain(el) {
@@ -7935,11 +7999,9 @@ function bindTextTool(id) {
   // Emptying the field drops the uploaded file, so newly pasted text gets plain Copy, not the file download menu
   ta.addEventListener('input', () => { syncFromInput(); refresh(); });
   ta.addEventListener('paste', (e) => {
-    const html = e.clipboardData?.getData('text/html');
-    if (!html) return;
     e.preventDefault();
-    const clean = sanitizePasteHtml(html);
-    document.execCommand('insertHTML', false, clean || esc(e.clipboardData.getData('text/plain') || '').replace(/\n/g, '<br>'));
+    const clean = clipboardToRichHtml(e);
+    document.execCommand('insertHTML', false, clean || esc(e.clipboardData?.getData('text/plain') || '').replace(/\n/g, '<br>'));
     syncFromInput(); refresh();
   });
 
@@ -8356,7 +8418,7 @@ function landNavHtml() {
 const appLinkAttrs = (item) => `href="${esc(itemHref(item))}" ${itemLinkAttrs(item)}`;
 
 /* ---------- Detector / humanizer box: landing-try hero (3 free tries per tool) and the dashboard's Start here (credits) ---------- */
-const lt = { tab: BOOT.landing?.tab || 'detect', text: '', status: 'idle', result: null, error: null, animate: false };
+const lt = { tab: BOOT.landing?.tab || 'detect', text: '', html: '', status: 'idle', result: null, error: null, animate: false };
 const ltApp = () => state.signedIn && !PUBLIC_ROUTES.includes(currentRoute());
 const ltMax = () => !ltApp() ? CONFIG.landing.tryIt.maxWords : lt.tab === 'detect' ? CONFIG.detector.maxWords : CONFIG.wordLimit;
 // Free tries are counted per tool on this device: 3 for the detector and 3 for the humanizer (the server keeps its own daily limits).
@@ -8429,7 +8491,10 @@ function landTryHtml({ intro = false } = {}) {
           ${ltMarked() ? '<span class="qd-legend" id="lt-legend"><span><i class="lv-ai"></i>Looks AI</span><span><i></i>Looks human</span></span>' : ''}</div>
         <div class="qd-field">
           <div class="qd-backdrop" id="lt-backdrop" aria-hidden="true">${ltMarked() ? sentMarksHtml(lt.result) : ''}</div>
-          <textarea class="input qd-text" id="lt-text" placeholder="${esc(T.placeholder)}" spellcheck="false">${esc(lt.text)}</textarea>
+          ${det
+            ? `<textarea class="input qd-text" id="lt-text" placeholder="${esc(T.placeholder)}" spellcheck="false">${esc(lt.text)}</textarea>`
+            : `<div class="input qd-text rich-input" id="lt-text" contenteditable="true" role="textbox" aria-multiline="true"
+                data-placeholder="${esc(T.placeholder)}" spellcheck="false">${lt.html ? sanitizePasteHtml(lt.html) : (lt.text ? markdownLiteToHtml(lt.text) : '')}</div>`}
         </div>
         <div class="tool-bar">
           <span class="lt-meta"><span class="muted small" id="lt-count">${ltCountText()}</span>
@@ -8468,7 +8533,7 @@ function ltResultHtml() {
   const r = lt.result;
   if (r.kind === 'humanize') return `<div class="lt-out">
       <div class="lt-out-head"><b id="lt-result-h" tabindex="-1">Humanized text</b><button class="btn btn-sm" data-act="lt-copy">${icon('copy')} Copy</button></div>
-      <pre class="lt-out-text" id="lt-out-text">${esc(r.out)}</pre>
+      <div class="lt-out-text result-text" id="lt-out-text">${r.html ? sanitizePasteHtml(r.html) : formatResultText(r.out)}</div>
       <div class="qd-actions"><button class="btn btn-primary" data-act="lt-check-out">${icon('scan')} Check it for AI</button></div>
     </div>`;
   const lv = scanLevel('ai', r.ai).toLowerCase();
@@ -8492,18 +8557,39 @@ function rerenderLandTry(focusSel) {
   if (focusSel) $(focusSel)?.focus({ preventScroll: true });
 }
 
+function ltSyncFromInput() {
+  const ta = $('#lt-text');
+  if (!ta) return;
+  if (ta.isContentEditable) {
+    lt.text = richInputPlain(ta);
+    lt.html = richInputHtml(ta);
+  } else {
+    lt.text = ta.value;
+    lt.html = '';
+  }
+  ltSyncWorkDoc();
+}
+
 function bindLandTry() {
   const ta = $('#lt-text');
   if (!ta) return;
   const back = $('#lt-backdrop');
-  ta.addEventListener('input', () => {
-    lt.text = ta.value; ltSyncWorkDoc();
+  const refreshMeta = () => {
     $('#lt-count').textContent = ltCountText();
     $('#lt-run').disabled = !ltReady();
     $('#lt-clear').hidden = !lt.text;
-    if (back.firstChild && !ltMarked()) { back.textContent = ''; $('#lt-legend')?.remove(); }   // edited: the marks no longer match
-  });
+    if (back.firstChild && !ltMarked()) { back.textContent = ''; $('#lt-legend')?.remove(); }
+  };
+  ta.addEventListener('input', () => { ltSyncFromInput(); refreshMeta(); });
   ta.addEventListener('scroll', () => { back.scrollTop = ta.scrollTop; });
+  if (ta.isContentEditable) {
+    ta.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const clean = clipboardToRichHtml(e);
+      document.execCommand('insertHTML', false, clean || esc(e.clipboardData?.getData('text/plain') || '').replace(/\n/g, '<br>'));
+      ltSyncFromInput(); refreshMeta();
+    });
+  }
   $('#lt-file').addEventListener('change', (e) => { ltTakeFile(e.target.files[0]); e.target.value = ''; });
   const g = $('#lt-result .qd-gauge[data-v]');
   if (g && lt.animate) { lt.animate = false; requestAnimationFrame(() => requestAnimationFrame(() => { g.style.setProperty('--v', g.dataset.v); g.style.setProperty('--vi', g.dataset.v); })); }
@@ -8515,10 +8601,11 @@ function ltTakeFile(file) {
   if (!file) return;
   if (!/\.(docx|pdf|txt)$/i.test(file.name)) { toast('Please choose a .docx, .pdf or .txt file'); return; }
   toast(`Reading “${file.name}”…`);
-  API.extractText(file).then((text) => {
-    text = String(text || '').trim();
+  API.extractDocument(file).then((doc) => {
+    const text = String(doc.text || '').trim();
     if (!text) throw new Error('No readable text found in that file.');
-    Object.assign(lt, { text, status: 'idle', result: null, error: null });
+    const html = String(doc.html || '').trim();
+    Object.assign(lt, { text, html: html || markdownLiteToHtml(text), status: 'idle', result: null, error: null });
     ltSyncWorkDoc();
     rerenderLandTry('#lt-text');
     toast(`File “${file.name}” added`);
@@ -8535,7 +8622,9 @@ function ltLimit() {
 
 async function runLandTry() {
   if (!ltReady()) return;
+  ltSyncFromInput();
   const app = ltApp(), tab = lt.tab, det = tab === 'detect', text = lt.text;
+  const htmlIn = !det && lt.html ? lt.html : '';
   // Out of free tries: the sign-up dialog opens right away; the card behind it keeps a Sign up button for later
   if (!app && !ltLeft(tab)) return ltLimit();
   Object.assign(lt, { status: 'loading', result: null, error: null });
@@ -8546,10 +8635,10 @@ async function runLandTry() {
       lt.result = { kind: 'detect', ai: Math.round(data.ai_percent), sents: data.sentences || [], text };
       if (app) addDoc(text, 'turnitin', { title: 'Pasted text', ai: lt.result.ai, text });
     } else {
-      const data = await API.humanize(text);
+      const data = await API.humanize(text, 'standalone', htmlIn || null);
       const out = String(data.humanized_text || data.text || '').trim();
       if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
-      lt.result = { kind: 'humanize', out, text };
+      lt.result = { kind: 'humanize', out, html: data.humanized_html || '', text };
       if (app) { addDoc(text, 'humanizer', { title: 'Pasted text', text: out }); loadCredits(); }
       else if (data.free_runs_left === 0) state.guestRunsUsed = 1;
     }
@@ -8578,7 +8667,7 @@ function landTryAction(act, el) {
       if (lt.tab === el.dataset.v || lt.status === 'loading') return;
       Object.assign(lt, { tab: el.dataset.v, status: 'idle', result: null, error: null });
       rerenderLandTry(`#lt-tab-${lt.tab}`); break;
-    case 'lt-clear': Object.assign(lt, { text: '', status: 'idle', result: null, error: null }); ltSyncWorkDoc(); rerenderLandTry('#lt-text'); break;
+    case 'lt-clear': Object.assign(lt, { text: '', html: '', status: 'idle', result: null, error: null }); ltSyncWorkDoc(); rerenderLandTry('#lt-text'); break;
     // Dashboard: the text goes to the AI Detector page as a file for the official Turnitin report
     case 'lt-turnitin': {
       const blob = new File([lt.text], 'Your text.txt', { type: 'text/plain' });
@@ -8590,10 +8679,22 @@ function landTryAction(act, el) {
     case 'lt-run': runLandTry(); break;
     // Detector → Humanizer with the same text; Humanizer → Detector with the rewritten text
     case 'lt-humanize': Object.assign(lt, { tab: 'humanize', status: 'idle', result: null, error: null }); rerenderLandTry('#lt-tab-humanize'); runLandTry(); break;
-    case 'lt-check-out': Object.assign(lt, { tab: 'detect', text: lt.result.out, status: 'idle', result: null, error: null }); ltSyncWorkDoc(); rerenderLandTry('#lt-tab-detect'); runLandTry(); break;
+    case 'lt-check-out': Object.assign(lt, { tab: 'detect', text: lt.result.out, html: '', status: 'idle', result: null, error: null }); ltSyncWorkDoc(); rerenderLandTry('#lt-tab-detect'); runLandTry(); break;
     case 'lt-copy': {
       const text = lt.result?.out || '';
-      navigator.clipboard?.writeText(text).then(() => toast('Copied to clipboard'), () => toast('Copy failed'));
+      const html = lt.result?.html || '';
+      const done = () => toast('Copied to clipboard');
+      const fail = () => toast('Copy failed');
+      if (html && navigator.clipboard?.write) {
+        navigator.clipboard.write([
+          new ClipboardItem({
+            'text/plain': new Blob([text], { type: 'text/plain' }),
+            'text/html': new Blob([html], { type: 'text/html' }),
+          }),
+        ]).then(done, () => navigator.clipboard.writeText(text).then(done, fail));
+      } else {
+        navigator.clipboard?.writeText(text).then(done, fail);
+      }
       break;
     }
   }
