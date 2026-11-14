@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 
 from services.humanizer_engine.heading_utils import is_references_section_title
 
@@ -35,6 +35,10 @@ _ALLOWED_TAGS = frozenset(
         "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td",
         "blockquote", "pre",
     }
+)
+# Word paste puts Mso CSS in <style>; unwrap() would leak it into the essay text.
+_DROP_TAGS = frozenset(
+    {"style", "script", "head", "meta", "link", "title", "xml", "noscript", "iframe", "object", "embed", "svg"}
 )
 
 
@@ -66,9 +70,16 @@ class RichStash:
 
 def sanitize_html(raw: str) -> str:
     soup = BeautifulSoup(raw or "", "html.parser")
+    # Drop first (Word <style>/<head>); unwrap second — order matters so we don't
+    # touch nodes already removed with a decomposed parent.
+    for tag in list(soup.find_all(_DROP_TAGS)):
+        tag.decompose()
+    for comment in soup.find_all(string=lambda s: isinstance(s, Comment)):
+        comment.extract()
     for tag in list(soup.find_all(True)):
         if tag.name not in _ALLOWED_TAGS:
-            tag.unwrap()
+            if tag.parent is not None:
+                tag.unwrap()
             continue
         allowed: dict[str, str] = {}
         if tag.name == "span" or tag.name in _BLOCK_TAGS:

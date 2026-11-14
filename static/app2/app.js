@@ -917,54 +917,32 @@ const CONFIG = {
   // Credit equivalents follow the plans: 25 credits per Humanize run, 300 credits per Turnitin scan.
   pricing: {
     title: 'Choose your plan',
-    subtitle: 'Credits for checks and humanizing, free generations every month and unlimited writing tools.',
+    subtitle: 'Start free. Higher plans give higher daily limits, Turnitin reports and Veil.',
+    // Feature rows: [label, small line]. `no` rows show crossed out.
     plans: [
-      { id: 'basic', name: 'Basic', price: 9, tagline: 'For quick checks & formatting', cta: 'Get Basic',
-        credits: 300, perks: ['= 12 Humanize runs', '= 1 Official Turnitin scan'],
-        freeStyle: 'plain', unlimitedStyle: 'outline',
-        free: [
-          { label: 'Assignment Writer', value: '1 free paper' },
-          { label: 'AI Presentation', value: '1 free presentation' },
-          { label: 'Academic Check', value: '3 free checks' },
-          { label: 'Official Turnitin Report', ok: false },
-        ],
-        unlimited: [
-          { label: 'Veil Fast', ok: false, value: 'No unlimited' },
-          { label: 'Veil Pro', ok: false, value: 'No unlimited' },
-          { label: 'Workspace, Format & Citations', value: 'Unlimited' },
-        ] },
-      { id: 'pro', name: 'Pro', price: 19, tagline: 'For regular essays, checks and slides', cta: 'Get Pro',
+      { id: 'basic', name: 'Basic', month: 9, year: 69, yearFull: 108, yearMo: '5.75', price: 9, cta: 'Get Basic',
+        credits: 300, hum: { runs: 10, words: 1000 },
+        yes: [['10 Humanizer Pro / day', 'up to 1,000 words'], ['10 AI Detector / day', 'up to 1,000 words'],
+          ['1 Official Turnitin report', 'per month'], ['1 AI Presentation', 'per month'],
+          ['Unlimited Workspace'], ['Unlimited Formatting']],
+        no: ['Veil'] },
+      { id: 'pro', name: 'Pro', month: 19, year: 149, yearFull: 228, yearMo: '12.42', price: 19, cta: 'Get Pro',
         highlight: true, badges: [{ text: 'Most popular', kind: 'accent' }],
-        credits: 1000, perks: ['= 40 Humanize runs', '= 3 Official Turnitin scans'],
-        free: [
-          { label: 'Humanizer (EN/RU)', value: '15 free / day' },
-          { label: 'Assignment Writer', value: '3 free papers' },
-          { label: 'AI Presentations', value: '5 free decks' },
-          { label: 'Official Turnitin Report', ok: false },
-        ],
-        unlimited: [
-          { label: 'Veil Fast', value: '30-day unlimited' },
-          { label: 'Veil Pro', value: '7-day unlimited' },
-          { label: '+ 4 unlimited tools', hint: 'Format, Academic Check, Citations, Workspace' },
-        ] },
-      { id: 'max', name: 'Max', sub: 'Exam pass', price: 39, tagline: 'Everything for exam season', cta: 'Get Max',
-        badges: [{ text: '35% OFF', kind: 'green' }],
-        credits: 2500, perks: ['= 100 extra Humanize runs', '= 8 Official Turnitin scans'],
-        free: [
-          { label: 'Humanizer (EN/RU)', value: '40 free / day' },
-          { label: 'Assignment Writer', value: '8 free papers' },
-          { label: 'AI Presentations', value: '15 free decks' },
-          { label: 'Official Turnitin Report', value: '1 free scan' },
-        ],
-        unlimited: [
-          { label: 'Veil Stealth', value: '30-day unlimited' },
-          { label: 'Veil Deep', value: '30-day unlimited' },
-          { label: '+ 4 unlimited tools', hint: 'Format, Academic Check, Citations, Workspace' },
-          { label: 'Lowest cost per credit', value: '40% cheaper' },
-        ] },
+        credits: 1000, hum: { runs: 20, words: 1000 },
+        yes: [['20 Humanizer Pro / day', 'up to 1,000 words'], ['20 AI Detector / day', 'up to 1,000 words'],
+          ['3 Official Turnitin reports', 'per month'], ['2 AI Presentations', 'per month'],
+          ['Veil', '30 days'], ['Unlimited Workspace'], ['Unlimited Formatting']] },
+      { id: 'max', name: 'Max', month: 39, year: 299, yearFull: 468, yearMo: '24.92', price: 39, cta: 'Get Max',
+        badges: [{ text: 'Best for finals', kind: 'green' }],
+        credits: 2500, hum: { runs: 20, words: 2000 },
+        yes: [['20 Humanizer Pro / day', 'up to 2,000 words'], ['20 AI Detector / day', 'up to 2,000 words'],
+          ['5 Official Turnitin reports', 'per month'], ['5 AI Presentations', 'per month'],
+          ['Veil', '30 days'], ['Unlimited Academic Check'], ['Unlimited Citations'],
+          ['Unlimited Workspace'], ['Unlimited Formatting']] },
     ],
-    // One-time credits: $2 base + $5 per 500-credit pack; equivalents use the same rates as the plans.
+    // One-time credits for extras after the daily limit.
     payg: { title: 'Pay as you go', lead: 'No subscription. Buy credits once and use them whenever you need.',
+      extras: 'extra Humanizer Pro runs, AI Detector checks, Turnitin reports and presentations after the daily limit',
       min: 500, max: 10000, step: 500, start: 2000, baseUsd: 2, usdPerStep: 5, creditsPerScan: 300, creditsPerRun: 25,
       badge: 'Credits never expire', cta: 'Buy credits' },
   },
@@ -1264,15 +1242,15 @@ const CONFIG = {
   // Landing page (draft structure). Sections top to bottom; numbers are real (Oct 2026).
   landing: {
     // landing-try hero: a free detector / humanizer without an account (like ZeroGPT)
-    tryIt: { title: 'Check your text for AI',
+    tryIt: { title: 'Humanize your AI text', detectTitle: 'Check your text for AI',
       demoTitle: 'See everything DocMaxxing does', demoText: 'Check for AI, humanize, format and write. All in one place.',
       freeRuns: 3, maxWords: 1000, placeholder: 'Paste your essay or any text here (at least 40 words)…' },
     nav: [['how', 'How it works'], ['tools', 'Tools'], ['veil-land', 'Veil'], ['pricing-land', 'Pricing'], ['faq', 'FAQ'], ['blog', 'Blog']],
     title: 'Pass the AI check. Sound like you.',
     subtitle: 'AI and plagiarism check before you submit, humanizing for flagged parts and free reference formatting. All in one place.',
-    cta: 'Start free with 50 credits',
+    cta: 'Start free',
     secondaryCta: 'Try without an account',
-    stats: [['500+', 'documents checked', 'fileCheck'], ['300', 'students', 'users'], ['50', 'free credits to start', 'gift']],
+    stats: [['500+', 'documents checked', 'fileCheck'], ['300', 'students', 'users'], ['5', 'free Humanizer runs a day', 'gift']],
     howTitle: 'How it works',
     steps: [
       { icon: 'scan', shot: 'check', title: 'Check', text: 'Upload your essay. Get AI and plagiarism scores and see which parts look AI-written.' },
@@ -1286,7 +1264,7 @@ const CONFIG = {
     veilTitle: 'Veil: DocMaxxing in your browser',
     veilText: 'Check and humanize text right where you write: Google Docs, Canvas, Moodle. No copy-paste.',
     pricingTitle: 'Simple pricing',
-    pricingSub: 'Pick a plan or buy credits once. Credits come back if a run fails.',
+    pricingSub: 'Start free. Higher plans give higher daily limits.',
     reviewsTitle: 'What students say',
     reviewsSub: 'Reviews students leave right here on DocMaxxing. Names and emails stay hidden.',
     site: {
@@ -1302,15 +1280,15 @@ const CONFIG = {
       ['Are my documents private?', 'Your files are used only to run the tool you picked. We don’t publish them or share them with your university.'],
       ['How is your AI check different from my university’s?', 'We run the same kind of AI and similarity check, so you see the result before you submit, not after.'],
       ['What if a check fails?', 'Credits for a failed run come back to your balance automatically.'],
-      ['How do credits work?', 'Each paid run costs credits, shown before you start. Formatting and Work Review are free. You get 50 credits when you sign up.'],
+      ['How do credits work?', 'Plans give daily limits for each tool. Credits are for extras after the limit: buy them once, they never expire. Formatting and Work Review are free.'],
       ['Can I get a refund?', 'Yes, see our Refund Policy. Write to support and we’ll sort it out.'],
     ],
     finalTitle: 'Ready to check your essay?',
-    finalText: '50 free credits. No card needed.',
+    finalText: '5 free Humanizer runs a day. No card needed.',
   },
 
   signup: {
-    perks: ['50 free credits to start', 'Formatting and Work Review are free', 'Cost shown before every run'],
+    perks: ['5 free Humanizer runs a day', 'Formatting and Work Review are free', 'Plans unlock higher daily limits'],
   },
 
   // Guided tours, one per tool. Shown once on the first visit, then via "Take the tour".
@@ -1599,7 +1577,14 @@ const SERVER_TITLE = document.title;
 
   CONFIG.pricePlaceholder = 'Price shown before you pay';
   Object.assign(item('turnitin'), { price: cr(c.turnitin) });
-  Object.assign(item('humanizer'), { price: cr(c.humanizer), badge: c.humanizerDiscount ? `-${c.humanizerDiscount}%` : '' });
+  Object.assign(item('humanizer'), { price: cr(c.humanizer), badge: '' });
+  // Keep month/price in sync if the server catalog only sends usd.
+  if (BOOT.catalog) {
+    BOOT.catalog.plans?.forEach?.(sp => {
+      const p = CONFIG.pricing.plans.find(x => x.id === sp.id);
+      if (p && sp.usd != null) { p.month = sp.usd; p.price = sp.usd; }
+    });
+  }
   const fh = BOOT.freeHumanize;
   if (fh) {
     CONFIG.freeHumanize = fh;
@@ -1840,7 +1825,7 @@ function navItemHtml(item) {
        aria-describedby="${descId}">
       ${icon(item.icon)}
       <span class="nav-label">${esc(item.label)}${newTabNote(item)}</span>
-      ${item.free && !item.info ? '<span class="nav-meta"><span class="badge">Free</span></span>' : ''}
+      ${item.free && !item.info ? `<span class="nav-meta"><span class="badge pl-badge-green"><span class="pl-mark" aria-hidden="true">${icon('check')}</span>Free</span></span>` : ''}
       <span id="${descId}" hidden>${esc(item.description)}</span>
     </a>
   </li>`;
@@ -2921,8 +2906,10 @@ function promoHtml() {
 /* Start here: the same detector / humanizer box as on the landing (no free-try limit, costs credits) */
 function quickStartHtml() {
   if (!lt.text && workDoc.text) lt.text = workDoc.text;
+  const title = lt.tab === 'detect' ? (CONFIG.landing.tryIt.detectTitle || 'Check your text for AI')
+    : (CONFIG.landing.tryIt.title || H().startTitle);
   return `<section class="qs" id="qs" aria-labelledby="qs-h">
-    <h1 id="qs-h" class="qs-title" tabindex="-1">${esc(H().startTitle)}</h1>
+    <h1 id="qs-h" class="qs-title" tabindex="-1">${esc(title)}</h1>
     ${landTryHtml()}
   </section>`;
 }
@@ -3107,6 +3094,7 @@ function homeAction(act, el) {
 function renderTextTool(id) {
   const item = ITEMS[id], t = toolState(id), flow = CONFIG.flows[id];
   const tourName = Object.keys(CONFIG.tours).find(k => CONFIG.tours[k].route === item.route);
+  if (id === 'humanizer') return renderHumanizerPage(item, t, flow, tourName);
   return `<div class="page page-hum">
     ${pageHead(item, '', tourName ? `<button class="btn btn-sm" data-act="start-tour" data-tour-name="${tourName}">${icon('help')} Take the tour</button>` : '')}
     <section class="card hum-card" aria-label="Input">
@@ -3134,7 +3122,6 @@ function renderTextTool(id) {
         <span class="tool-meta" id="hum-meta">
           <span class="counter" id="counter" aria-live="polite"></span>
           <span class="cost" id="cost">Cost: ${state.signedIn && !item.free && estCredits(id) != null ? estLabel(id) : costHtml(item)}</span>
-          ${state.signedIn && id === 'humanizer' && CONFIG.freeHumanize ? `<span class="free">${esc(freeHumanizeNote(true))}</span>` : ''}
         </span>
         <span class="spacer"></span>
         <button class="btn" data-act="clear-tool">Clear</button>
@@ -3142,6 +3129,67 @@ function renderTextTool(id) {
       </div>
     </section>
     <section class="result" id="result" aria-live="polite">${resultHtml(id)}</section>
+  </div>`;
+}
+
+function humHasPlan() {
+  return !!(state.signedIn && CONFIG.billing.plan && ['basic', 'pro', 'max'].includes(CONFIG.billing.plan));
+}
+function humMode(t) {
+  if (t.humMode) return t.humMode;
+  return humHasPlan() ? 'pro' : 'free';
+}
+function humQuotaHtml(t) {
+  const mode = humMode(t);
+  const fh = CONFIG.freeHumanize || {};
+  if (mode === 'free') {
+    const left = fh.remaining ?? fh.dailyLimit ?? 5;
+    const lim = fh.dailyLimit ?? 5;
+    return `<span class="hum-quota" title="Free runs left today"><b>${left}</b> / ${lim} free</span>`;
+  }
+  const plan = CONFIG.pricing.plans.find(p => p.id === CONFIG.billing.plan);
+  const lim = plan?.hum?.runs ?? 20;
+  return `<span class="hum-quota" title="Humanizer Pro daily limit"><b>${lim}</b> Pro / day</span>`;
+}
+
+function renderHumanizerPage(item, t, flow, tourName) {
+  if (!t.humMode) t.humMode = humMode(t);
+  const mode = t.humMode;
+  const needPro = mode === 'pro' && !humHasPlan();
+  return `<div class="page page-hum">
+    ${pageHead(item, '', tourName ? `<button class="btn btn-sm" data-act="start-tour" data-tour-name="${tourName}">${icon('help')} Take the tour</button>` : '')}
+    <section class="card hum-card" aria-label="Input">
+      <div class="tool-head">
+        <fieldset class="seg-radios hum-mode"><legend class="visually-hidden">Humanizer version</legend>
+          <label class="seg-radio"><input type="radio" name="hum-mode" value="free" ${mode === 'free' ? 'checked' : ''}>Free</label>
+          <label class="seg-radio"><input type="radio" name="hum-mode" value="pro" ${mode === 'pro' ? 'checked' : ''}>${icon('sparkles')} Pro</label>
+        </fieldset>
+        <span class="hum-quota-wrap">${humQuotaHtml(t)}</span>
+      </div>
+      ${t.note ? `<p class="note">${esc(t.note)}</p>` : ''}
+      <div class="hum-field" id="hum-field">
+        <button type="button" class="hum-add" id="hum-add" aria-label="Add a file" title="Paste your text here, or add a file">${icon('plus')}</button>
+        <div class="hum-main">
+          <label class="visually-hidden" for="tool-text">Your text</label>
+          <div class="input rich-input" id="tool-text" contenteditable="true" role="textbox" aria-multiline="true"
+            data-placeholder="Paste your text here, or add a file">${t.html ? sanitizePasteHtml(t.html) : esc(t.text).replace(/\n/g, '<br>')}</div>
+          ${t.fileName ? `<span class="hum-file">${icon('file')}<span>${esc(t.fileName)}</span></span>` : ''}
+        </div>
+        <input type="file" id="file-input" accept=".txt,.doc,.docx,.pdf" hidden>
+      </div>
+      <div class="tool-bar">
+        <span class="tool-meta" id="hum-meta">
+          <span class="counter" id="counter" aria-live="polite"></span>
+          <span class="cost" id="cost">${needPro ? 'Included in Basic, Pro and Max' : (mode === 'free' ? 'Free daily runs' : `Cost after limit: ${estLabel('humanizer')}`)}</span>
+        </span>
+        <span class="spacer"></span>
+        <button class="btn" data-act="clear-tool">Clear</button>
+        ${needPro
+          ? `<button class="btn btn-primary" data-act="pricing">${icon('sparkles')} Get Pro</button>`
+          : `<button class="btn btn-primary" data-act="run" id="run-btn">${icon('sparkles')} ${esc(flow.runLabel)}</button>`}
+      </div>
+    </section>
+    <section class="result" id="result" aria-live="polite">${resultHtml('humanizer')}</section>
   </div>`;
 }
 
@@ -3195,15 +3243,23 @@ function formatResultText(text) {
 
 const RICH_PASTE_TAGS = new Set(['P','BR','DIV','SPAN','B','STRONG','I','EM','U','S','STRIKE','DEL','SUP','SUB',
   'H1','H2','H3','H4','H5','H6','UL','OL','LI','TABLE','THEAD','TBODY','TR','TH','TD','BLOCKQUOTE']);
+/** Word/Outlook paste: unwrap would dump CSS into the text — drop these entirely. */
+const RICH_DROP_TAGS = new Set(['STYLE','SCRIPT','HEAD','META','LINK','TITLE','XML','NOSCRIPT','IFRAME','OBJECT','EMBED','SVG']);
 
 /** Whitelist paste HTML from Word/Google Docs so bold/tables survive. */
 function sanitizePasteHtml(raw) {
-  const doc = new DOMParser().parseFromString(`<div id="r">${raw || ''}</div>`, 'text/html');
+  let src = String(raw || '');
+  // Full Word HTML document: keep body only (style lives in <head>).
+  const bodyMatch = src.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (bodyMatch) src = bodyMatch[1];
+  const doc = new DOMParser().parseFromString(`<div id="r">${src}</div>`, 'text/html');
   const root = doc.getElementById('r');
   if (!root) return '';
   const walk = (node) => {
     [...node.childNodes].forEach((child) => {
+      if (child.nodeType === 8) { child.remove(); return; } // HTML comments (Word <!-- styles -->)
       if (child.nodeType === 1) {
+        if (RICH_DROP_TAGS.has(child.tagName)) { child.remove(); return; }
         if (!RICH_PASTE_TAGS.has(child.tagName)) { child.replaceWith(...child.childNodes); return; }
         [...child.attributes].forEach((a) => {
           if (a.name === 'style') {
@@ -7184,41 +7240,53 @@ function veilAction(act, el) {
 
 /* ---------- Pricing: 3 plans + one-time credits ---------- */
 const fmtCr = (n) => n.toLocaleString('en-US');
+const pricePeriod = () => state.pricePeriod || store.get('price-period', 'month') || 'month';
+const currentPlan = (p) => state.signedIn && CONFIG.billing.plan === p.id;
 
-// One line: ✓/✕ · name · amount on the right
-function planRowHtml(r) {
-  const ok = r.ok !== false;
-  return `<li class="pl-row ${ok ? '' : 'off'}" ${r.hint ? `data-tip-title="${esc(r.label)}" data-tip-desc="${esc(r.hint)}" tabindex="0"` : ''}>
+// Feature row: [label] or [label, small]; ok=false for not-included
+function planRowHtml(row, ok = true) {
+  const label = Array.isArray(row) ? row[0] : (row.label || row);
+  const sub = Array.isArray(row) ? row[1] : row.hint;
+  return `<li class="pl-row ${ok ? '' : 'off'}">
     <span class="pl-mark" aria-hidden="true">${icon(ok ? 'check' : 'xmark')}</span>
-    <span class="pl-label">${esc(r.label)}${ok ? '' : '<span class="visually-hidden"> (not included)</span>'}${r.hint ? `<span class="visually-hidden">: ${esc(r.hint)}</span>` : ''}</span>
-    ${r.value ? `<span class="pl-val">${esc(r.value)}</span>` : ''}
+    <span class="pl-label">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ''}${ok ? '' : '<span class="visually-hidden"> (not included)</span>'}</span>
   </li>`;
 }
 
-function planHtml(p, { compact = false } = {}) {
-  const badges = (p.badges || []).map(b => `<span class="pl-badge pl-badge-${b.kind}">${esc(b.text)}</span>`).join('');
+function planHtml(p) {
+  const year = pricePeriod() === 'year';
+  const badges = (p.badges || []).map(b => `<span class="pl-badge pl-badge-${b.kind}">${b.kind === 'green' ? `<span class="pl-mark" aria-hidden="true">${icon('check')}</span>` : ''}${esc(b.text)}</span>`).join('');
+  const price = year
+    ? `<p class="plan-price"><b>$${p.year}</b><span><s><span class="visually-hidden">was </span>$${p.yearFull}</s> / year</span></p>`
+    : `<p class="plan-price"><b>$${p.month ?? p.price}</b><span>/ month</span></p>`;
+  const subline = year ? `$${p.yearMo}/mo · billed once` : 'Billed monthly · cancel anytime';
+  const current = currentPlan(p);
+  const cta = current
+    ? `<button class="btn btn-block" disabled>Your current plan</button>`
+    : `<button class="btn btn-block ${p.highlight ? 'btn-primary' : 'btn-dark'}" data-act="plan-pick" data-plan="${p.id}">${esc(planCta(p))}${year ? ' · Annual' : ''}</button>`;
   return `<article class="plan ${p.highlight ? 'plan-hl' : ''}" aria-labelledby="plan-${p.id}">
     <div class="plan-top">
-      <div class="plan-name-row"><h2 id="plan-${p.id}">${esc(p.name)}${p.sub ? ` <span class="plan-sub">${esc(p.sub)}</span>` : ''}</h2>${badges}</div>
-      <p class="plan-price"><b>$${p.price}</b><span>/ month</span></p>
-      <p class="plan-tagline">${esc(p.tagline)}</p>
-      <button class="btn btn-block ${p.highlight ? 'btn-primary' : 'btn-dark'}" data-act="plan-pick" data-plan="${p.id}">${esc(planCta(p))}</button>
+      <div class="plan-name-row"><h2 id="plan-${p.id}">${esc(p.name)}</h2>${badges}</div>
+      ${price}
+      <p class="plan-tagline">${subline}</p>
+      ${cta}
     </div>
     <div class="plan-body">
-      <div class="plan-credits">
-        <p><b>${fmtCr(p.credits)} credits</b> <span>/ mo</span></p>
-        <ul>${p.perks.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
-      </div>
-      <section class="pl-sec pl-sec-free ${p.freeStyle === 'plain' ? '' : 'pl-sec-green'}" aria-labelledby="plan-${p.id}-free">
-        <h3 id="plan-${p.id}-free">Free generations</h3>
-        <ul>${p.free.map(planRowHtml).join('')}</ul>
-      </section>
-      ${compact ? '' : `<section class="pl-sec pl-sec-unl ${p.unlimitedStyle === 'outline' ? 'pl-sec-outline' : ''}" aria-labelledby="plan-${p.id}-unl">
-        <h3 id="plan-${p.id}-unl">Unlimited & stealth</h3>
-        <ul>${p.unlimited.map(planRowHtml).join('')}</ul>
-      </section>`}
+      <ul class="pl-list" aria-label="What you get">${(p.yes || []).map(r => planRowHtml(r)).join('')}</ul>
+      ${p.no ? `<ul class="pl-list pl-list-off" aria-label="Not included">${p.no.map(x => planRowHtml([x], false)).join('')}</ul>` : ''}
     </div>
   </article>`;
+}
+
+function plansBlockHtml() {
+  const P = CONFIG.pricing, per = pricePeriod();
+  const opt = (v, label, extra = '') => `<label class="seg-radio"><input type="radio" name="price-period" value="${v}" ${per === v ? 'checked' : ''}>${label}${extra}</label>`;
+  return `<div class="plans-block" id="plans-block">
+    <fieldset class="seg-radios price-switch"><legend class="visually-hidden">Billing period</legend>
+      ${opt('month', 'Monthly')}${opt('year', 'Annual', '<span class="price-switch-tag"> · 4 months free</span>')}
+    </fieldset>
+    <div class="plans">${P.plans.map(planHtml).join('')}</div>
+  </div>`;
 }
 
 function paygValues(cr) {
@@ -7243,10 +7311,11 @@ function renderPricing() {
       <h1>${esc(P.title)}</h1>
       <p class="lead">${esc(P.subtitle)}</p>
     </header>
-    <div class="plans">${P.plans.map(p => planHtml(p)).join('')}</div>
+    ${plansBlockHtml()}
     <section class="payg" id="payg" aria-labelledby="payg-h">
       <div class="payg-head">
-        <div><h2 id="payg-h">${esc(G.title)}</h2><p class="muted">${esc(G.lead)}</p></div>
+        <div><h2 id="payg-h">${esc(G.title)}</h2><p class="muted">${esc(G.lead)}</p>
+          ${G.extras ? `<p class="payg-extras">Use them for ${esc(G.extras)}.</p>` : ''}</div>
         <span class="pl-badge pl-badge-green"><span class="pl-mark" aria-hidden="true">${icon('check')}</span>${esc(G.badge)}</span>
       </div>
       <div class="payg-main">
@@ -7322,7 +7391,7 @@ async function startCheckout(what, btn) {
 function bindPricing() {
   const P = CONFIG.pricing, G = P.payg;
   const pr = $('#payg-range');
-  pr.addEventListener('input', () => {
+  pr?.addEventListener('input', () => {
     const cr = state.paygCredits = +pr.value, v = paygValues(cr);
     $('#payg-credits').textContent = fmtCr(cr);
     $('#payg-price').textContent = '$' + v.price;
@@ -7331,6 +7400,15 @@ function bindPricing() {
     pr.setAttribute('aria-valuetext', `${fmtCr(cr)} credits for $${v.price}`);
   });
 }
+
+// Monthly / Annual switch redraws the cards in place (pricing page + landing).
+document.addEventListener('change', (e) => {
+  if (e.target.name !== 'price-period' || !$('#plans-block')) return;
+  state.pricePeriod = e.target.value;
+  store.set('price-period', e.target.value);
+  $('#plans-block').outerHTML = plansBlockHtml();
+  $(`#plans-block input[value="${e.target.value}"]`)?.focus();
+});
 
 /* ---------- Earn & Share (referral program) ---------- */
 const money = (n) => '$' + n.toFixed(2);
@@ -7979,6 +8057,7 @@ function rerenderDocs() {
 function bindTextTool(id) {
   const t = toolState(id), item = ITEMS[id];
   const ta = $('#tool-text'), runBtn = $('#run-btn'), counter = $('#counter');
+  if (!ta) return;
 
   function syncFromInput() {
     t.text = richInputPlain(ta);
@@ -7987,9 +8066,11 @@ function bindTextTool(id) {
   }
 
   function refresh() {
+    if (!counter) return;
     const words = countWords(t.text), over = words > CONFIG.wordLimit;
     counter.textContent = `${fmtNum(words)} / ${fmtNum(CONFIG.wordLimit)} words${over ? ' — too long' : ''}`;
     counter.classList.toggle('over', over);
+    if (!runBtn) return;
     const guestOut = !state.signedIn && item.guestPrice && state.guestRunsUsed >= 1;
     runBtn.innerHTML = guestOut ? 'Sign up to continue' : `${icon('sparkles')} ${esc(CONFIG.flows[id].runLabel)}`;
     runBtn.disabled = !guestOut && (!words || over || t.status === 'loading');
@@ -8005,8 +8086,15 @@ function bindTextTool(id) {
     syncFromInput(); refresh();
   });
 
-  // Tabs: click + arrow keys
-  const tabs = $$('[role="tab"]');
+  $$('input[name="hum-mode"]').forEach((inp) => inp.addEventListener('change', () => {
+    t.humMode = inp.value;
+    render();
+  }));
+  const humAdd = $('#hum-add'), fileInput = $('#file-input');
+  humAdd?.addEventListener('click', () => fileInput?.click());
+
+  // Tabs: click + arrow keys (legacy Paste/File layout on other tools)
+  const tabs = $$('[role="tab"][data-mode]');
   const setMode = (mode) => { t.mode = mode; render(); $(`[data-mode="${mode}"]`).focus(); };
   tabs.forEach(tab => {
     tab.addEventListener('click', () => setMode(tab.dataset.mode));
@@ -8418,34 +8506,23 @@ function landNavHtml() {
 const appLinkAttrs = (item) => `href="${esc(itemHref(item))}" ${itemLinkAttrs(item)}`;
 
 /* ---------- Detector / humanizer box: landing-try hero (3 free tries per tool) and the dashboard's Start here (credits) ---------- */
-const lt = { tab: BOOT.landing?.tab || 'detect', text: '', html: '', status: 'idle', result: null, error: null, animate: false };
+const lt = { tab: BOOT.landing?.tab || 'humanize', pro: false, text: '', html: '', status: 'idle', result: null, error: null, animate: false };
 const ltApp = () => state.signedIn && !PUBLIC_ROUTES.includes(currentRoute());
 const ltMax = () => !ltApp() ? CONFIG.landing.tryIt.maxWords : lt.tab === 'detect' ? CONFIG.detector.maxWords : CONFIG.wordLimit;
-// Free tries are counted per tool on this device: 3 for the detector and 3 for the humanizer (the server keeps its own daily limits).
-// The 24 hours run from the first try spent in that tool; after that the tool starts again with all its tries.
-const LT_RESET_MS = 24 * 60 * 60 * 1000;
+// Free tries are one-time per tool on this device (3 humanizer + 3 detector). No 24h reset.
 function ltTries(tab = lt.tab) {
-  const t = store.get(`lt-tries-${tab}`, null);
-  return t && Date.now() - t.since < LT_RESET_MS ? t : { used: 0, since: null };
+  return store.get(`lt-tries-${tab}`, null) || { used: 0 };
 }
-const ltUsed = (tab = lt.tab) => ltTries(tab).used;
+const ltUsed = (tab = lt.tab) => Number(ltTries(tab).used || 0);
 const ltLeft = (tab = lt.tab) => Math.max(0, CONFIG.landing.tryIt.freeRuns - ltUsed(tab));
 function ltSpendTry(tab, used = ltUsed(tab) + 1) {
-  store.set(`lt-tries-${tab}`, { used, since: ltTries(tab).since || Date.now() });
-}
-// Time until the reset: minutes only while someone is actually waiting
-function ltResetIn(tab = lt.tab, exact = false) {
-  const { since } = ltTries(tab);
-  const mins = since ? Math.max(1, Math.ceil((since + LT_RESET_MS - Date.now()) / 60000)) : 0;
-  const h = Math.floor(mins / 60), m = mins % 60;
-  if (!h) return `${m}m`;
-  return exact ? `${h}h ${m}m` : `${h}h`;
+  store.set(`lt-tries-${tab}`, { used });
 }
 function ltTriesLabel() {
   const total = CONFIG.landing.tryIt.freeRuns, left = ltLeft();
-  if (left === total) return `${total} free tries · reset every 24h`;
-  if (left) return `${left} of ${total} tries left · resets in ${ltResetIn()}`;
-  return `Free tries reset in ${ltResetIn(lt.tab, true)}`;
+  if (left === total) return `${total} free tries`;
+  if (left) return `${left} of ${total} tries left`;
+  return 'No free tries left';
 }
 // Signed in: the pill shows when a running subscription renews the plan's credits; hidden when nothing renews
 function ltRenewLabel() {
@@ -8453,18 +8530,13 @@ function ltRenewLabel() {
   const days = Math.ceil((new Date(BOOT.renewsAt) - Date.now()) / 864e5);
   return days > 0 ? `Credits renew in ${days} day${days === 1 ? '' : 's'}` : '';
 }
-// Keeps the countdown current and gives the tries back when the 24 hours are up
-let ltTimer = null;
-function ltStartTimer() {
-  clearInterval(ltTimer);
-  ltTimer = setInterval(() => {
-    const pill = $('#lt-free');
-    if (!pill) { clearInterval(ltTimer); return; }
-    if (lt.status === 'limit' && ltLeft()) { lt.status = 'idle'; rerenderLandTry(); return; }
-    pill.lastChild.textContent = ' ' + ltTriesLabel();
-    const wait = $('#lt-wait');
-    if (wait) wait.textContent = ltResetIn(lt.tab, true);
-  }, 30000);
+function ltHeroTitle() {
+  const T = CONFIG.landing.tryIt;
+  return lt.tab === 'detect' ? (T.detectTitle || 'Check your text for AI') : (T.title || 'Humanize your AI text');
+}
+function ltSyncHeroTitle() {
+  const h = $('#hero-h') || $('#qs-h');
+  if (h) h.textContent = ltHeroTitle();
 }
 const ltWords = () => countWords(lt.text);
 const ltReady = () => { const w = ltWords(); return w >= CONFIG.detector.minWords && w <= ltMax() && lt.status !== 'loading'; };
@@ -8482,12 +8554,16 @@ function landTryHtml({ intro = false } = {}) {
   const tab = (v, label, ic) => `<button role="tab" id="lt-tab-${v}" aria-selected="${lt.tab === v}" aria-controls="lt-panel" tabindex="${lt.tab === v ? 0 : -1}" data-act="lt-tab" data-v="${v}">${icon(ic)} ${label}</button>`;
   return `<div class="land-try${intro ? ' lt-intro' : ''}" id="land-try">
     <div class="lt-top">
-      <div class="seg lt-seg" role="tablist" aria-label="Free tool">${tab('detect', 'AI Detector', 'scan')}${tab('humanize', 'Humanizer', 'sparkles')}</div>
+      <div class="seg lt-seg" role="tablist" aria-label="Free tool">${tab('humanize', 'Humanizer', 'sparkles')}${tab('detect', 'AI Detector', 'scan')}</div>
       ${app ? (ltRenewLabel() ? `<span class="lt-free">${icon('history')} ${esc(ltRenewLabel())}</span>` : '') : `<span class="lt-free" id="lt-free">${icon('gift')} ${esc(ltTriesLabel())}</span>`}
     </div>
-    <section class="card qd lt-card" id="lt-panel" role="tabpanel" aria-labelledby="lt-tab-${lt.tab}">
+    <section class="card qd lt-card${det ? '' : ' lt-hum'}" id="lt-panel" role="tabpanel" aria-labelledby="lt-tab-${lt.tab}">
       <div class="qd-input">
         <div class="qd-label-row"><label class="qd-label" for="lt-text">${det ? 'Text to check' : 'Text to humanize'}</label>
+          ${!det && !app ? `<fieldset class="seg-radios lt-ver"><legend class="visually-hidden">Humanizer version</legend>
+            <label class="seg-radio"><input type="radio" name="lt-ver" value="free" ${lt.pro ? '' : 'checked'}>Free</label>
+            <label class="seg-radio"><input type="radio" name="lt-ver" value="pro" ${lt.pro ? 'checked' : ''}>${icon('lock')} Pro</label>
+          </fieldset>` : ''}
           ${ltMarked() ? '<span class="qd-legend" id="lt-legend"><span><i class="lv-ai"></i>Looks AI</span><span><i></i>Looks human</span></span>' : ''}</div>
         <div class="qd-field">
           <div class="qd-backdrop" id="lt-backdrop" aria-hidden="true">${ltMarked() ? sentMarksHtml(lt.result) : ''}</div>
@@ -8501,9 +8577,13 @@ function landTryHtml({ intro = false } = {}) {
           ${app ? `<span class="muted small">Cost: ${det ? 'Free' : esc(estLabel('humanizer'))}</span>` : ''}</span>
           <span class="spacer"></span>
           <input type="file" id="lt-file" accept=".txt,.docx,.pdf" hidden>
-          <button class="btn btn-ghost" data-act="lt-upload">${icon('upload')} Upload file</button>
+          ${app
+            ? `<button class="btn btn-ghost" data-act="lt-upload">${icon('upload')} Upload file</button>`
+            : `<button class="btn btn-ghost lt-up-ic" data-act="lt-upload" aria-label="Upload file" title="Upload file (.txt, .docx, .pdf)">${icon('upload')}</button>`}
           <button class="btn" data-act="lt-clear" ${lt.text ? '' : 'hidden'} id="lt-clear">Clear</button>
-          <button class="btn btn-primary" data-act="lt-run" id="lt-run" ${ltReady() ? '' : 'disabled'}>${det ? `${icon('scan')} Detect AI` : `${icon('sparkles')} Humanize`}</button>
+          ${!det && !app && lt.pro
+            ? `<button class="btn btn-primary" data-act="lt-pro">${icon('lock')} Get Pro</button>`
+            : `<button class="btn btn-primary" data-act="lt-run" id="lt-run" ${ltReady() ? '' : 'disabled'}>${det ? `${icon('scan')} Detect AI` : `${icon('sparkles')} Humanize`}</button>`}
         </div>
       </div>
       <div class="qd-result" id="lt-result" aria-live="polite">${ltResultHtml()}</div>
@@ -8517,7 +8597,7 @@ function ltResultHtml() {
     <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">${det ? 'Analyzing your text…' : 'Humanizing your text…'}</h2><p class="muted">${det ? 'This takes a few seconds.' : 'This can take up to a minute.'}</p>`;
   if (lt.status === 'limit') return `<span class="lt-lock" aria-hidden="true">${icon('lock')}</span>
     <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">You’ve used your free tries</h2>
-    <p class="muted qd-sub">Sign up now for ${CONFIG.signupCredits} free credits, or come back in <span id="lt-wait">${ltResetIn(lt.tab, true)}</span>.</p>
+    <p class="muted qd-sub">Sign up free to keep going.</p>
     <div class="qd-actions"><button class="btn btn-primary" data-act="signup">Sign up free</button></div>`;
   if (lt.status === 'error') return `<div class="qd-gauge is-empty" aria-hidden="true"><b>—%</b></div>
     <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">${det ? 'Couldn’t check the text' : 'Couldn’t humanize the text'}</h2>
@@ -8527,9 +8607,14 @@ function ltResultHtml() {
     ? `<div class="qd-gauge is-empty" aria-hidden="true"><b>—%</b></div>
       <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">Your AI score appears here</h2>
       <ul class="qd-scale"><li><i class="lv-low"></i>Under ${S.levels.ai.low}% · looks human</li><li><i class="lv-medium"></i>${S.levels.ai.low}–${S.levels.ai.high - 1}% · some AI</li><li><i class="lv-high"></i>${S.levels.ai.high}%+ · likely AI</li></ul>`
-    : `<span class="lt-lock lt-hum-ic" aria-hidden="true">${icon('sparkles')}</span>
+    : `<span class="lt-hum-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M10 4.5c.75 5.1 3.4 7.75 8.5 8.5-5.1.75-7.75 3.4-8.5 8.5-.75-5.1-3.4-7.75-8.5-8.5 5.1-.75 7.75-3.4 8.5-8.5z"/>
+        <path class="hum-tw" opacity=".6" d="M18.5 2.5c.3 2.1.9 2.7 3 3-2.1.3-2.7.9-3 3-.3-2.1-.9-2.7-3-3 2.1-.3 2.7-.9 3-3z"/>
+        <circle class="hum-tw hum-tw2" opacity=".6" cx="19" cy="18.5" r="1.5"/></svg></span>
       <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">Your humanized text appears here</h2>
-      <p class="muted qd-sub">We rewrite stiff, AI-sounding phrases so the text reads like you wrote it.</p>`;
+      <p class="muted qd-sub">${lt.pro && !ltApp()
+        ? 'Pro rewrites much better and gets regular upgrades. It comes with the Basic, Pro and Max plans.'
+        : 'We rewrite stiff, AI-sounding phrases so the text reads like you wrote it.'}</p>`;
   const r = lt.result;
   if (r.kind === 'humanize') return `<div class="lt-out">
       <div class="lt-out-head"><b id="lt-result-h" tabindex="-1">Humanized text</b><button class="btn btn-sm" data-act="lt-copy">${icon('copy')} Copy</button></div>
@@ -8591,9 +8676,13 @@ function bindLandTry() {
     });
   }
   $('#lt-file').addEventListener('change', (e) => { ltTakeFile(e.target.files[0]); e.target.value = ''; });
+  $$('input[name="lt-ver"]').forEach((inp) => inp.addEventListener('change', () => {
+    lt.pro = inp.value === 'pro';
+    rerenderLandTry('#lt-text');
+  }));
   const g = $('#lt-result .qd-gauge[data-v]');
   if (g && lt.animate) { lt.animate = false; requestAnimationFrame(() => requestAnimationFrame(() => { g.style.setProperty('--v', g.dataset.v); g.style.setProperty('--vi', g.dataset.v); })); }
-  if ($('#lt-free')) ltStartTimer();
+  ltSyncHeroTitle();
 }
 
 // Upload: the file's text goes into the box (.txt is read here, .docx/.pdf on the server)
@@ -8617,7 +8706,7 @@ function ltSyncWorkDoc() { if (ltApp()) { workDoc.text = lt.text; workDoc.file =
 function ltLimit() {
   lt.status = 'limit'; rerenderLandTry();
   openSignup({ intent: lt.tab === 'detect' ? 'turnitin' : 'humanizer', title: 'You’ve used your free tries',
-    lead: `Sign up now for ${CONFIG.signupCredits} free credits, or come back in ${ltResetIn(lt.tab, true)}.` });
+    lead: 'Sign up free to keep going.' });
 }
 
 async function runLandTry() {
@@ -8663,10 +8752,17 @@ async function runLandTry() {
 
 function landTryAction(act, el) {
   switch (act) {
+    case 'lt-pro':
+      openSignup({ intent: 'humanizer', title: 'Get Humanizer Pro',
+        lead: 'Pro rewrites much better and gets regular upgrades. Sign up, then pick Basic, Pro or Max.' });
+      break;
     case 'lt-tab':
       if (lt.tab === el.dataset.v || lt.status === 'loading') return;
       Object.assign(lt, { tab: el.dataset.v, status: 'idle', result: null, error: null });
-      rerenderLandTry(`#lt-tab-${lt.tab}`); break;
+      rerenderLandTry(`#lt-tab-${lt.tab}`);
+      ltSyncHeroTitle();
+      if (ltApp() && currentRoute() === 'home') { const h = $('#qs-h'); if (h) h.textContent = ltHeroTitle(); }
+      break;
     case 'lt-clear': Object.assign(lt, { text: '', html: '', status: 'idle', result: null, error: null }); ltSyncWorkDoc(); rerenderLandTry('#lt-text'); break;
     // Dashboard: the text goes to the AI Detector page as a file for the official Turnitin report
     case 'lt-turnitin': {
@@ -8745,7 +8841,8 @@ function renderLanding({ tryIt = false } = {}) {
 
     ${tryIt ? `<section class="land-hero land-hero-try" aria-labelledby="hero-h">
       <div class="land-hero-text">
-        <h1 class="hero-title" id="hero-h">${esc(page?.hero || L.tryIt.title)}</h1>      </div>
+        <h1 class="hero-title" id="hero-h" data-try-title>${esc(ltHeroTitle())}</h1>
+      </div>
       ${landTryHtml({ intro: true })}
     </section>` : `<section class="land-hero" aria-labelledby="hero-h">
       <div class="land-hero-text">
@@ -8791,7 +8888,7 @@ function renderLanding({ tryIt = false } = {}) {
       ${veilDemoHtml()}
     </section>
 
-    ${sec('pricing-land', L.pricingTitle, L.pricingSub, `<div class="plans land-plans">${P.plans.map(p => planHtml(p, { compact: true })).join('')}</div>`)}
+    ${sec('pricing-land', L.pricingTitle, L.pricingSub || 'Start free. Higher plans give higher daily limits.', plansBlockHtml())}
 
     ${sec('reviews', L.reviewsTitle, L.reviewsSub, rvSiteHtml(), 'pub-sec-center')}
 
@@ -9299,7 +9396,7 @@ document.addEventListener('click', (e) => {
       $(`${PUBLIC_ROUTES.includes(currentRoute()) ? '.pub-nav' : '#app-header'} [data-act="theme"]`)?.focus();
       break;
     case 'delete-doc': askDelete(el.dataset.id, el); break;
-    case 'lt-tab': case 'lt-clear': case 'lt-upload': case 'lt-run': case 'lt-turnitin': case 'lt-humanize': case 'lt-check-out': case 'lt-copy':
+    case 'lt-tab': case 'lt-clear': case 'lt-upload': case 'lt-run': case 'lt-turnitin': case 'lt-humanize': case 'lt-check-out': case 'lt-copy': case 'lt-pro':
       landTryAction(act, el); break;
     case 'history-all': case 'history-less': case 'topup': case 'credits-more': case 'continue':
       homeAction(act, el); break;

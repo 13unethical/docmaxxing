@@ -14,6 +14,22 @@ def test_sanitize_keeps_formatting_drops_scripts():
     assert "position" not in out
 
 
+def test_sanitize_drops_word_style_block_not_into_text():
+    raw = (
+        "<html><head><style><!--\n"
+        "@font-face{font-family:Cambria Math}\n"
+        "p.MsoNormal{margin:0cm;font-size:12.0pt}\n"
+        "--></style></head>"
+        "<body><p class='MsoNormal'>Hello <b>world</b> from Word.</p></body></html>"
+    )
+    out = rh.sanitize_html(raw)
+    assert "Cambria" not in out
+    assert "MsoNormal" not in out
+    assert "@font-face" not in out
+    assert "Hello" in out and "world" in out
+    assert "<b>" in out or "<strong>" in out
+
+
 def test_prepare_protects_bold_and_leaves_table_opaque():
     html = (
         "<p>Hello <b>world</b> and <i>more</i>.</p>"
