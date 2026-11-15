@@ -8,12 +8,17 @@ from __future__ import annotations
 
 import html
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Callable
 
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 
-from services.humanizer_engine.heading_utils import is_references_section_title
+from services.humanizer_engine.heading_utils import (
+    is_explicit_heading_text,
+    is_references_section_title,
+    is_sentence_start_fragment,
+)
 
 _LIST_MARKER = re.compile(r"^(\s*(?:[-*•+]\s|\d+[.)]\s|[a-zA-Z][.)]\s))")
 _ORDINAL_WORD = re.compile(
@@ -21,10 +26,25 @@ _ORDINAL_WORD = re.compile(
     r"one|two|three|four|five|six|seven|eight|nine|ten)\b[.,:\s]*",
     re.I,
 )
+# Soft wraps from Word/PDF must not become <br> / fake paragraphs.
+_SENTENCE_END_PROSE = re.compile(r"[.!?…][\"'”’)\]]*\s*$")
 _PH_OPEN = "⟦F{i}⟧"
 _PH_CLOSE = "⟦/F{i}⟧"
 _TABLE_TOKEN = "⟦TABLE{i}⟧"
 _OPAQUE_TOKEN = "⟦OPAQUE{i}⟧"
+# Structural tokens must never appear in rewritten prose (before reassembly).
+_LEAKED_OPAQUE_TABLE = re.compile(r"⟦(?:TABLE\d+|OPAQUE\d+)⟧")
+# Format placeholders are stripped only AFTER span restore (or as a final safety net).
+_LEAKED_FORMAT_TOKEN = re.compile(
+    r"⟦/?F\d+⟧"
+    r"|\[/?F\d+\]"
+    r"|F\d+:\s*"  # rare: open marker mangled to "F0: " before a heading
+)
+_LEAKED_RICH_TOKEN = re.compile(
+    r"⟦(?:/?F\d+|TABLE\d+|OPAQUE\d+)⟧"
+    r"|\[/?F\d+\]"
+    r"|F\d+:\s*"
+)
 
 _BLOCK_TAGS = frozenset({"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "div", "blockquote", "pre"})
 _INLINE_FORMAT = frozenset({"b", "strong", "i", "em", "u", "s", "strike", "del", "span", "sup", "sub"})
@@ -118,6 +138,51 @@ def split_list_marker(text: str) -> tuple[str, str]:
     return m.group(1), text[m.end() :]
 
 
+def strip_opaque_table_tokens(text: str) -> str:
+    """Remove TABLE/OPAQUE markers from prose without touching bold/italic ``⟦F⟧`` placeholders."""
+    if not text:
+        return text or ""
+    cleaned = _LEAKED_OPAQUE_TABLE.sub("", text)
+    cleaned = re.sub(r"[^\S\n]{2,}", " ", cleaned)
+    return cleaned
+
+
+def strip_rich_tokens(text: str) -> str:
+    """Remove all protect markers that leaked into visible prose (final safety net)."""
+    if not text:
+        return text or ""
+    cleaned = _LEAKED_RICH_TOKEN.sub("", text)
+    # Collapse spaces left by token removal, keep newlines.
+    cleaned = re.sub(r"[^\S\n]{2,}", " ", cleaned)
+    return cleaned
+
+
+def unwrap_prose_newlines(text: str) -> str:
+    """Join Word/PDF soft wraps inside one prose block into a single line."""
+    if not text or "\n" not in text:
+        return text or ""
+    parts = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not parts:
+        return ""
+    out = parts[0]
+    for nxt in parts[1:]:
+        # "polari-\nization" → "polarization"
+        if out.endswith("-") and nxt[:1].islower():
+            out = out[:-1] + nxt
+            continue
+        glue = "" if out[-1:].isspace() or nxt[:1].isspace() else " "
+        out = out + glue + nxt
+    return out
+
+
+def _prose_runs_on(text: str) -> bool:
+    """True when the block looks mid-sentence (soft-wrap / split ``<p>``)."""
+    flat = unwrap_prose_newlines(text or "").rstrip()
+    if not flat:
+        return False
+    return not _SENTENCE_END_PROSE.search(flat)
+
+
 def restore_list_marker(source: str, output: str) -> str:
     """Put the source list marker back; drop a leading ordinal word the model invented."""
     marker, _ = split_list_marker(source)
@@ -152,6 +217,7 @@ def prepare_rich(html_doc: str) -> tuple[str, RichStash]:
     _collect_blocks(soup.body or soup, stash)
     if not stash.blocks:
         stash.blocks.append(_prose_from_fragment(cleaned, tag="p", attrs={}))
+    _coalesce_prose_fragments(stash)
     lines: list[str] = []
     for i, job in enumerate(stash.blocks):
         if job.kind == "table":
@@ -161,6 +227,68 @@ def prepare_rich(html_doc: str) -> tuple[str, RichStash]:
         else:
             lines.append(job.plain)
     return stash.separator.join(lines), stash
+
+
+def _merge_prose_jobs(cur: BlockJob, nxt: BlockJob) -> BlockJob:
+    shift = len(cur.spans)
+    nxt_plain = nxt.plain
+    nxt_spans: list[FormatSpan] = []
+    for sp in sorted(nxt.spans, key=lambda s: -s.index):
+        new_i = sp.index + shift
+        nxt_plain = nxt_plain.replace(_PH_OPEN.format(i=sp.index), _PH_OPEN.format(i=new_i))
+        nxt_plain = nxt_plain.replace(_PH_CLOSE.format(i=sp.index), _PH_CLOSE.format(i=new_i))
+    for sp in nxt.spans:
+        nxt_spans.append(
+            FormatSpan(
+                index=sp.index + shift,
+                tag=sp.tag,
+                attrs=sp.attrs,
+                inner_text=sp.inner_text,
+            )
+        )
+    glue = " " if nxt_plain and not nxt_plain[:1].isspace() else ""
+    return BlockJob(
+        kind="prose",
+        tag=nxt.tag if nxt.tag in _BLOCK_TAGS else cur.tag,
+        attrs=dict(nxt.attrs or cur.attrs),
+        plain=unwrap_prose_newlines(cur.plain.rstrip() + glue + nxt_plain.lstrip()),
+        html="",
+        spans=list(cur.spans) + nxt_spans,
+        ordered_list=nxt.ordered_list,
+    )
+
+
+def _should_merge_prose(cur: BlockJob, nxt: BlockJob) -> bool:
+    if cur.kind != "prose" or nxt.kind != "prose":
+        return False
+    if cur.tag == "li" or nxt.tag == "li" or cur.marker or nxt.marker:
+        return False
+    if is_sentence_start_fragment(cur.plain):
+        return True
+    nxt_start = unwrap_prose_newlines(nxt.plain).lstrip()[:1]
+    return _prose_runs_on(cur.plain) and bool(re.match(r"[a-z]", nxt_start or ""))
+
+
+def _coalesce_prose_fragments(stash: RichStash) -> None:
+    """Join lone ``The`` / mid-sentence soft-wrap ``<p>`` splits onto the following prose."""
+    out: list[BlockJob] = []
+    for cur in stash.blocks:
+        if cur.kind == "prose" and "\n" in (cur.plain or ""):
+            cur = BlockJob(
+                kind=cur.kind,
+                tag=cur.tag,
+                attrs=cur.attrs,
+                marker=cur.marker,
+                plain=unwrap_prose_newlines(cur.plain),
+                html=cur.html,
+                spans=cur.spans,
+                ordered_list=cur.ordered_list,
+            )
+        if out and _should_merge_prose(out[-1], cur):
+            out[-1] = _merge_prose_jobs(out[-1], cur)
+        else:
+            out.append(cur)
+    stash.blocks = out
 
 
 def reassemble_rich(humanized_plain: str, stash: RichStash) -> str:
@@ -208,41 +336,83 @@ def _prose_body(chunk: str, job: BlockJob) -> str:
         chunk_body = _ORDINAL_WORD.sub("", chunk_body.lstrip(), count=1).lstrip()
     else:
         chunk_body = chunk
+    # Strip only TABLE/OPAQUE leaks here — ``⟦F⟧`` must survive until _restore_spans.
+    chunk_body = unwrap_prose_newlines(strip_opaque_table_tokens(chunk_body))
     body = _restore_spans(chunk_body, job.spans)
     if job.marker:
         body = html.escape(job.marker) + body
     return body
 
 
-def humanize_rich(html_doc: str, rewrite_plain: Callable[[str], str]) -> tuple[str, str]:
-    """Returns (humanized_html, humanized_plaintext)."""
+def humanize_rich(
+    html_doc: str,
+    rewrite_plain: Callable[[str], str],
+    *,
+    max_workers: int = 16,
+) -> tuple[str, str]:
+    """Rewrite prose blocks only; tables/headings stay opaque (never sent to the model).
+
+    Returns (humanized_html, humanized_plaintext).
+    """
     plain, stash = prepare_rich(html_doc)
     if not plain.strip():
         cleaned = sanitize_html(html_doc)
         return cleaned, html_to_plaintext(cleaned)
 
     lines = plain.split(stash.separator)
-    out_lines: list[str] = []
+    # Indices that need a model rewrite (skip opaque/table token lines).
+    todo: list[int] = []
     for i, line in enumerate(lines):
         job = stash.blocks[i] if i < len(stash.blocks) else None
         if job and job.kind in ("table", "opaque"):
-            out_lines.append(line)
             continue
+        todo.append(i)
+
+    def _rewrite_one(i: int) -> str:
+        line = lines[i]
+        job = stash.blocks[i] if i < len(stash.blocks) else None
         rewritten = rewrite_plain(line)
+        if not isinstance(rewritten, str) or not rewritten.strip():
+            rewritten = line
+        # Keep ``⟦F⟧`` placeholders for reassembly; drop only structural leaks.
+        rewritten = unwrap_prose_newlines(strip_opaque_table_tokens(rewritten))
         if job and job.marker:
-            body = split_list_marker(rewritten)[1].lstrip() if _LIST_MARKER.match(rewritten or "") else (rewritten or "")
+            body = (
+                split_list_marker(rewritten)[1].lstrip()
+                if _LIST_MARKER.match(rewritten or "")
+                else (rewritten or "")
+            )
             body = _ORDINAL_WORD.sub("", body, count=1).lstrip()
-            out_lines.append(job.marker + body)
+            return job.marker + body
+        return rewritten
+
+    rewritten_map: dict[int, str] = {}
+    if todo:
+        workers = max(1, min(max_workers, len(todo)))
+        if workers == 1:
+            for i in todo:
+                rewritten_map[i] = _rewrite_one(i)
         else:
-            out_lines.append(rewritten)
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for i, text in zip(todo, pool.map(_rewrite_one, todo)):
+                    rewritten_map[i] = text
+
+    out_lines: list[str] = []
+    for i, line in enumerate(lines):
+        if i in rewritten_map:
+            out_lines.append(rewritten_map[i])
+        else:
+            out_lines.append(line)
     humanized = stash.separator.join(out_lines)
     rich = reassemble_rich(humanized, stash)
-    return rich, html_to_plaintext(rich)
+    # Final safety: never return protect markers to the client.
+    rich = strip_rich_tokens(rich)
+    text = strip_rich_tokens(html_to_plaintext(rich))
+    return rich, text
 
 
 _HEADING_TAGS = frozenset({"h1", "h2", "h3", "h4", "h5", "h6"})
 _TITLE_MAX_WORDS = 12
-_SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*\s*$")
 
 
 def _collect_blocks(root: Tag, stash: RichStash) -> None:
@@ -286,7 +456,7 @@ def _collect_blocks(root: Tag, stash: RichStash) -> None:
                     nxt = children[i]
                     if isinstance(nxt, Tag) and (
                         nxt.name in _HEADING_TAGS
-                        or (nxt.name in _BLOCK_TAGS and _is_section_break(nxt.get_text(" ", strip=True)))
+                        or (nxt.name in _BLOCK_TAGS and _is_section_break(nxt))
                     ):
                         break
                     if isinstance(nxt, Tag) and nxt.name == "table":
@@ -298,7 +468,7 @@ def _collect_blocks(root: Tag, stash: RichStash) -> None:
                     BlockJob(kind="opaque", tag="div", attrs={}, html="".join(chunk))
                 )
                 continue
-            if _is_short_title(text):
+            if _is_marked_heading_el(child):
                 stash.blocks.append(
                     BlockJob(kind="opaque", tag=child.name, attrs=dict(child.attrs or {}), html=str(child))
                 )
@@ -316,20 +486,43 @@ def _is_refs_heading(text: str) -> bool:
     return bool(t) and len(t.split()) <= 3 and is_references_section_title(t)
 
 
-def _is_short_title(text: str) -> bool:
-    """Bare short headings pasted as <p><b>…</b></p> — keep verbatim like student titles."""
-    t = text.strip()
-    if not t or "\n" in t:
+def _is_marked_heading_el(el: Tag) -> bool:
+    """Keep verbatim only when the block is explicitly marked as a heading.
+
+    - References / Bibliography label
+    - whole paragraph is a single ``<b>`` / ``<strong>`` (short, no sentence end)
+    Plain short ``<p>Methodology</p>`` is prose — no length guessing.
+    """
+    text = el.get_text(" ", strip=True)
+    if not text or "\n" in text:
         return False
-    # Numbered/bulleted lines are list items, not titles — still humanize.
-    marker, _ = split_list_marker(t)
+    marker, _ = split_list_marker(text)
     if marker:
         return False
-    return len(t.split()) <= _TITLE_MAX_WORDS and not _SENTENCE_END.search(t)
+    if _is_refs_heading(text):
+        return True
+    # Entire block = one bold/strong node (optional whitespace-only siblings).
+    significant: list[Tag] = []
+    for c in el.children:
+        if isinstance(c, NavigableString):
+            if str(c).strip():
+                return False
+            continue
+        if isinstance(c, Tag):
+            if c.name in ("b", "strong"):
+                significant.append(c)
+            else:
+                return False
+    if len(significant) != 1:
+        return False
+    inner = significant[0].get_text(" ", strip=True)
+    return is_explicit_heading_text(f"**{inner}**", max_words=_TITLE_MAX_WORDS)
 
 
-def _is_section_break(text: str) -> bool:
-    return _is_refs_heading(text) or _is_short_title(text)
+def _is_section_break(el_or_text: Tag | str) -> bool:
+    if isinstance(el_or_text, Tag):
+        return _is_marked_heading_el(el_or_text)
+    return _is_refs_heading(el_or_text) or is_explicit_heading_text(el_or_text, max_words=_TITLE_MAX_WORDS)
 
 
 def _prose_from_element(el: Tag, ordered_list: bool | None = None) -> BlockJob:
@@ -371,7 +564,7 @@ def _prose_from_fragment(
     if root:
         for c in root.children:
             walk(c)
-    plain = "".join(plain_parts)
+    plain = unwrap_prose_newlines("".join(plain_parts))
     marker, body = split_list_marker(plain)
     return BlockJob(
         kind="prose",
@@ -402,9 +595,10 @@ def _span_attrs(node: Tag) -> dict[str, str]:
 
 
 def _restore_spans(text: str, spans: list[FormatSpan]) -> str:
+    flat = unwrap_prose_newlines(text or "")
     if not spans:
-        return _escape_keep_newlines(text)
-    result = text or ""
+        return html.escape(flat)
+    result = flat
     for span in spans:
         open_t = _PH_OPEN.format(i=span.index)
         close_t = _PH_CLOSE.format(i=span.index)
@@ -417,23 +611,25 @@ def _restore_spans(text: str, spans: list[FormatSpan]) -> str:
             return f"<{_span.tag}{_attr}>{html.escape(m.group(1))}</{_span.tag}>"
 
         result = re.sub(pattern, repl, result, count=1, flags=re.DOTALL)
-    # Drop leftover placeholder tokens if model mangled them
-    result = re.sub(r"⟦/?F\d+⟧", "", result)
+    # Drop leftover format placeholders if the model mangled them
+    result = _LEAKED_FORMAT_TOKEN.sub("", result)
+    result = re.sub(r"[^\S\n]{2,}", " ", result)
     return _escape_outside_tags(result)
 
 
 def _escape_keep_newlines(text: str) -> str:
-    return "<br>".join(html.escape(line) for line in (text or "").split("\n"))
+    """Legacy helper: prose path unwraps first; leftover newlines become spaces, not ``<br>``."""
+    return html.escape(unwrap_prose_newlines(text or ""))
 
 
 def _escape_outside_tags(text: str) -> str:
     parts: list[str] = []
     last = 0
     for m in re.finditer(r"<[^>]+>", text):
-        parts.append(_escape_keep_newlines(text[last:m.start()]))
+        parts.append(html.escape(unwrap_prose_newlines(text[last:m.start()])))
         parts.append(m.group(0))
         last = m.end()
-    parts.append(_escape_keep_newlines(text[last:]))
+    parts.append(html.escape(unwrap_prose_newlines(text[last:])))
     return "".join(parts)
 
 

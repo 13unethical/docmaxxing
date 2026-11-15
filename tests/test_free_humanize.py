@@ -342,7 +342,7 @@ def test_user_over_daily_limit_pays_with_the_usual_routing(economy, engine, monk
     assert body["free_run"] is False
     assert body["coins_charged"] > 0
     assert WalletService().get_balance(user["id"]) == 500 - body["coins_charged"]
-    assert engine["calls"] == [True, False]
+    assert engine["calls"] == [True, True]
 
 
 def test_user_over_word_limit_pays(economy, engine):
@@ -365,13 +365,13 @@ def test_user_free_run_failure_is_not_charged_or_counted(economy, engine):
     assert free_humanize.used_today(free_humanize.user_subject(user["id"])) == 0
 
 
-def test_default_engine_routes_free_runs_like_paid_ones(economy, engine, monkeypatch):
+def test_default_engine_still_uses_student_only(economy, engine, monkeypatch):
     monkeypatch.setenv("FREE_HUMANIZE_ENGINE", "default")
     client, user = _user_client("default-engine@example.com")
     body = client.post(URL, json={"text": EN}).get_json()
     assert body["free_run"] is True
     assert body["coins_charged"] == 0
-    assert engine["calls"] == [False]
+    assert engine["calls"] == [True]
     assert WalletService().get_balance(user["id"]) == 500
 
 
@@ -382,7 +382,7 @@ def test_user_with_an_active_plan_keeps_the_paid_routing(economy, engine, monkey
     client, user = _user_client("plan-user@example.com")
     body = client.post(URL, json={"text": EN}).get_json()
     assert body["free_run"] is False
-    assert engine["calls"] == [False]
+    assert engine["calls"] == [True]
     assert free_humanize.used_today(free_humanize.user_subject(user["id"])) == 0
 
 

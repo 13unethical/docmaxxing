@@ -98,6 +98,81 @@ def is_references_section_title(title: str) -> bool:
     )
 
 
+# Function words that alone (or only with each other) are broken sentence starts, not headings.
+# Catches paste artifacts like a lone "<p>The</p>" before the rest of the paragraph.
+_TITLE_STOPWORDS = frozenset(
+    """
+    a an the and or but if as at by for from in into of on to with without
+    this that these those it its is are was were be been being have has had
+    do does did will would could should may might must shall can not no nor
+    so yet than then when where while although however therefore moreover
+    furthermore thus hence also just only even about after before between
+    during through under over up down out off again further once here there
+    all each every both few more most other some such own same too very
+    we our they their he she his her them us you your i my me
+    """.split()
+)
+_TITLE_WORD = re.compile(r"[A-Za-z0-9][\w'-]*")
+_SENTENCE_END_TITLE = re.compile(r"[.!?…][\"'”’)\]]*\s*$")
+_MD_WRAP_TITLE = re.compile(r"^(?:\*\*|__)(.+?)(?:\*\*|__)$|^#{1,6}\s+(.+?)$")
+
+
+def title_core(text: str) -> str:
+    """Bare title text: strip ``**…**`` / ``## …`` wrappers used for bold/markdown headings."""
+    stripped = (text or "").strip()
+    m = _MD_WRAP_TITLE.match(stripped)
+    if m:
+        return (m.group(1) or m.group(2) or "").strip()
+    return stripped
+
+
+def _title_tokens(text: str) -> list[str]:
+    return [m.group(0).lower() for m in _TITLE_WORD.finditer(text or "")]
+
+
+def is_sentence_start_fragment(text: str) -> bool:
+    """Lone articles / stopwords split into their own block (e.g. ``The`` before the body)."""
+    core = title_core(text)
+    if not core or "\n" in (text or "").strip():
+        return False
+    if _SENTENCE_END_TITLE.search(core):
+        return False
+    words = core.split()
+    if not words or len(words) > 3:
+        return False
+    tokens = _title_tokens(core)
+    return bool(tokens) and all(t in _TITLE_STOPWORDS for t in tokens)
+
+
+def is_explicit_heading_text(text: str, *, max_words: int = 12) -> bool:
+    """True only when the heading is marked — no guessing from short plain lines.
+
+    Counts as a heading:
+    - markdown ``# …`` / ``## …``
+    - whole-line ``**…**`` / ``__…__``
+    - a References / Bibliography label (structural section)
+
+    Plain ``Methodology`` or ``The`` alone are prose.
+    """
+    stripped = (text or "").strip()
+    if not stripped or "\n" in stripped:
+        return False
+    if _MD_WRAP_TITLE.match(stripped):
+        core = title_core(stripped)
+        if not core or len(core.split()) > max_words:
+            return False
+        if _SENTENCE_END_TITLE.search(core):
+            return False
+        return True
+    core = stripped.rstrip(":")
+    return len(core.split()) <= 3 and is_references_section_title(core)
+
+
+def looks_like_bare_title(text: str, *, max_words: int = 12) -> bool:
+    """Deprecated alias — only explicit / References headings, not length guesses."""
+    return is_explicit_heading_text(text, max_words=max_words)
+
+
 def split_off_references(content: str) -> tuple[str, str]:
     """Split markdown into (body_without_refs, references_block). Refs stay untouched by humanize."""
     text = (content or "").strip()

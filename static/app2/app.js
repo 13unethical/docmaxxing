@@ -920,19 +920,19 @@ const CONFIG = {
     subtitle: 'Start free. Higher plans give higher daily limits, Turnitin reports and Veil.',
     // Feature rows: [label, small line]. `no` rows show crossed out.
     plans: [
-      { id: 'basic', name: 'Basic', month: 9, year: 69, yearFull: 108, yearMo: '5.75', price: 9, cta: 'Get Basic',
+      { id: 'basic', name: 'Basic', month: 9, year: 60, yearMo: 5, price: 9, cta: 'Get Basic',
         credits: 300, hum: { runs: 10, words: 1000 },
         yes: [['10 Humanizer Pro / day', 'up to 1,000 words'], ['10 AI Detector / day', 'up to 1,000 words'],
           ['1 Official Turnitin report', 'per month'], ['1 AI Presentation', 'per month'],
           ['Unlimited Workspace'], ['Unlimited Formatting']],
         no: ['Veil'] },
-      { id: 'pro', name: 'Pro', month: 19, year: 149, yearFull: 228, yearMo: '12.42', price: 19, cta: 'Get Pro',
+      { id: 'pro', name: 'Pro', month: 19, year: 144, yearMo: 12, price: 19, cta: 'Get Pro',
         highlight: true, badges: [{ text: 'Most popular', kind: 'accent' }],
         credits: 1000, hum: { runs: 20, words: 1000 },
         yes: [['20 Humanizer Pro / day', 'up to 1,000 words'], ['20 AI Detector / day', 'up to 1,000 words'],
           ['3 Official Turnitin reports', 'per month'], ['2 AI Presentations', 'per month'],
           ['Veil', '30 days'], ['Unlimited Workspace'], ['Unlimited Formatting']] },
-      { id: 'max', name: 'Max', month: 39, year: 299, yearFull: 468, yearMo: '24.92', price: 39, cta: 'Get Max',
+      { id: 'max', name: 'Max', month: 39, year: 300, yearMo: 25, price: 39, cta: 'Get Max',
         badges: [{ text: 'Best for finals', kind: 'green' }],
         credits: 2500, hum: { runs: 20, words: 2000 },
         yes: [['20 Humanizer Pro / day', 'up to 2,000 words'], ['20 AI Detector / day', 'up to 2,000 words'],
@@ -941,8 +941,8 @@ const CONFIG = {
           ['Unlimited Workspace'], ['Unlimited Formatting']] },
     ],
     // One-time credits for extras after the daily limit.
-    payg: { title: 'Pay as you go', lead: 'No subscription. Buy credits once and use them whenever you need.',
-      extras: 'extra Humanizer Pro runs, AI Detector checks, Turnitin reports and presentations after the daily limit',
+    payg: { title: 'Pay as you go', lead: 'Need more after your daily limit? Buy credits once. Credits never expire.',
+      extras: 'extra Humanizer runs, AI Detector checks, Turnitin reports and presentations',
       min: 500, max: 10000, step: 500, start: 2000, baseUsd: 2, usdPerStep: 5, creditsPerScan: 300, creditsPerRun: 25,
       badge: 'Credits never expire', cta: 'Buy credits' },
   },
@@ -1825,7 +1825,7 @@ function navItemHtml(item) {
        aria-describedby="${descId}">
       ${icon(item.icon)}
       <span class="nav-label">${esc(item.label)}${newTabNote(item)}</span>
-      ${item.free && !item.info ? `<span class="nav-meta"><span class="badge pl-badge-green"><span class="pl-mark" aria-hidden="true">${icon('check')}</span>Free</span></span>` : ''}
+      ${item.free && !item.info ? '<span class="nav-meta"><span class="badge">Free</span></span>' : ''}
       <span id="${descId}" hidden>${esc(item.description)}</span>
     </a>
   </li>`;
@@ -3135,21 +3135,45 @@ function renderTextTool(id) {
 function humHasPlan() {
   return !!(state.signedIn && CONFIG.billing.plan && ['basic', 'pro', 'max'].includes(CONFIG.billing.plan));
 }
+function humPlan() {
+  return humHasPlan() ? CONFIG.pricing.plans.find(p => p.id === CONFIG.billing.plan) : null;
+}
 function humMode(t) {
-  if (t.humMode) return t.humMode;
+  if (t?.humMode) return t.humMode;
   return humHasPlan() ? 'pro' : 'free';
+}
+/** Pro daily allowance left: server plan_usage when present, else the plan's marketed runs. */
+function humQuota(mode = humMode(toolState('humanizer'))) {
+  if (mode === 'free') {
+    const fh = CONFIG.freeHumanize || {};
+    const lim = fh.dailyLimit ?? 5;
+    const left = fh.remaining ?? lim;
+    return { runs: lim, left: Math.max(0, left), words: fh.words ?? 500 };
+  }
+  const plan = humPlan();
+  if (!plan) return { locked: true, words: CONFIG.humVersions?.free?.words ?? 500 };
+  const sp = state.billing?.plan || BOOT.plan;
+  const a = sp?.allowances?.find(x => x.feature === 'humanize');
+  let lim = plan.hum?.runs ?? 20, left = lim;
+  if (sp && Array.isArray(sp.allowances)) {
+    if (a) { lim = a.limit; left = Math.max(0, a.limit - a.used); }
+    else { left = 0; } // plan has no free Humanizer Pro runs (e.g. Basic)
+  }
+  return { runs: lim, left, words: plan.hum?.words ?? 1000 };
+}
+function humBumpProUse() {
+  const sp = state.billing?.plan || BOOT.plan;
+  const a = sp?.allowances?.find(x => x.feature === 'humanize');
+  if (a && a.used < a.limit) a.used += 1;
 }
 function humQuotaHtml(t) {
   const mode = humMode(t);
-  const fh = CONFIG.freeHumanize || {};
+  const q = humQuota(mode);
+  if (q.locked) return `<span class="hum-quota">${icon('lock')} Pro comes with Basic, Pro and Max</span>`;
   if (mode === 'free') {
-    const left = fh.remaining ?? fh.dailyLimit ?? 5;
-    const lim = fh.dailyLimit ?? 5;
-    return `<span class="hum-quota" title="Free runs left today"><b>${left}</b> / ${lim} free</span>`;
+    return `<span class="hum-quota" title="Free runs left today"><b>${q.left}</b> / ${q.runs} free</span>`;
   }
-  const plan = CONFIG.pricing.plans.find(p => p.id === CONFIG.billing.plan);
-  const lim = plan?.hum?.runs ?? 20;
-  return `<span class="hum-quota" title="Humanizer Pro daily limit"><b>${lim}</b> Pro / day</span>`;
+  return `<span class="hum-quota" title="Humanizer Pro daily limit"><b>${q.left}</b> / ${q.runs} Pro</span>`;
 }
 
 function renderHumanizerPage(item, t, flow, tourName) {
@@ -3185,7 +3209,7 @@ function renderHumanizerPage(item, t, flow, tourName) {
         <span class="spacer"></span>
         <button class="btn" data-act="clear-tool">Clear</button>
         ${needPro
-          ? `<button class="btn btn-primary" data-act="pricing">${icon('sparkles')} Get Pro</button>`
+          ? `<button class="btn btn-primary" data-act="hum-plans">${icon('sparkles')} Get Pro</button>`
           : `<button class="btn btn-primary" data-act="run" id="run-btn">${icon('sparkles')} ${esc(flow.runLabel)}</button>`}
       </div>
     </section>
@@ -3238,7 +3262,15 @@ function resultHtml(id) {
 
 /** Show **bold** / ## headings as real bold in the humanizer result (copy still gets plain words). */
 function formatResultText(text) {
-  return markdownLiteToHtml(text) || esc(text || '').replace(/\n/g, '<br>');
+  const md = markdownLiteToHtml(text);
+  if (md) return md;
+  // Soft wraps (Word/PDF) must not become visual line breaks — only blank lines split paragraphs.
+  return String(text || '')
+    .replace(/\r\n/g, '\n')
+    .split(/\n\s*\n/)
+    .map((p) => esc(p.replace(/\s*\n\s*/g, ' ').trim()))
+    .filter(Boolean)
+    .join('<br><br>');
 }
 
 const RICH_PASTE_TAGS = new Set(['P','BR','DIV','SPAN','B','STRONG','I','EM','U','S','STRIKE','DEL','SUP','SUB',
@@ -7243,6 +7275,11 @@ const fmtCr = (n) => n.toLocaleString('en-US');
 const pricePeriod = () => state.pricePeriod || store.get('price-period', 'month') || 'month';
 const currentPlan = (p) => state.signedIn && CONFIG.billing.plan === p.id;
 
+const PERIODS = {
+  month: { label: 'Monthly', months: 1, billed: 'billed monthly', total: p => p.month, mo: p => p.month },
+  year:  { label: 'Annual',  months: 12, billed: 'billed yearly',  total: p => p.year,  mo: p => p.yearMo },
+};
+
 // Feature row: [label] or [label, small]; ok=false for not-included
 function planRowHtml(row, ok = true) {
   const label = Array.isArray(row) ? row[0] : (row.label || row);
@@ -7254,16 +7291,16 @@ function planRowHtml(row, ok = true) {
 }
 
 function planHtml(p) {
-  const year = pricePeriod() === 'year';
+  const per = pricePeriod(), P = PERIODS[per];
   const badges = (p.badges || []).map(b => `<span class="pl-badge pl-badge-${b.kind}">${b.kind === 'green' ? `<span class="pl-mark" aria-hidden="true">${icon('check')}</span>` : ''}${esc(b.text)}</span>`).join('');
-  const price = year
-    ? `<p class="plan-price"><b>$${p.year}</b><span><s><span class="visually-hidden">was </span>$${p.yearFull}</s> / year</span></p>`
-    : `<p class="plan-price"><b>$${p.month ?? p.price}</b><span>/ month</span></p>`;
-  const subline = year ? `$${p.yearMo}/mo · billed once` : 'Billed monthly · cancel anytime';
+  // big: monthly price; annual crosses out the monthly list price and shows total + Save $N
+  const total = P.total(p), mo = P.mo(p), save = p.month * P.months - total;
+  const price = `<p class="plan-price"><b>$${mo}</b><span>/mo</span>${P.months > 1 ? `<s class="plan-was"><span class="visually-hidden">was </span>$${p.month}</s>` : ''}</p>`;
+  const subline = P.months > 1 ? `$${total} ${P.billed} · <span class="plan-save">Save $${save}</span>` : 'Billed monthly';
   const current = currentPlan(p);
   const cta = current
     ? `<button class="btn btn-block" disabled>Your current plan</button>`
-    : `<button class="btn btn-block ${p.highlight ? 'btn-primary' : 'btn-dark'}" data-act="plan-pick" data-plan="${p.id}">${esc(planCta(p))}${year ? ' · Annual' : ''}</button>`;
+    : `<button class="btn btn-block ${p.highlight ? 'btn-primary' : 'btn-dark'}" data-act="plan-pick" data-plan="${p.id}">${esc(planCta(p))}${P.months > 1 ? ` · ${P.label}` : ''}</button>`;
   return `<article class="plan ${p.highlight ? 'plan-hl' : ''}" aria-labelledby="plan-${p.id}">
     <div class="plan-top">
       <div class="plan-name-row"><h2 id="plan-${p.id}">${esc(p.name)}</h2>${badges}</div>
@@ -7283,7 +7320,7 @@ function plansBlockHtml() {
   const opt = (v, label, extra = '') => `<label class="seg-radio"><input type="radio" name="price-period" value="${v}" ${per === v ? 'checked' : ''}>${label}${extra}</label>`;
   return `<div class="plans-block" id="plans-block">
     <fieldset class="seg-radios price-switch"><legend class="visually-hidden">Billing period</legend>
-      ${opt('month', 'Monthly')}${opt('year', 'Annual', '<span class="price-switch-tag"> · 4 months free</span>')}
+      ${Object.entries(PERIODS).map(([v, x]) => opt(v, x.label, x.tag ? `<span class="price-switch-tag">${x.tag}</span>` : '')).join('')}
     </fieldset>
     <div class="plans">${P.plans.map(planHtml).join('')}</div>
   </div>`;
@@ -8126,10 +8163,15 @@ function bindTextTool(id) {
   dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('drag'); takeFile(e.dataTransfer.files[0]); });
 }
 
-async function runTool(id) {
+async function runTool(id, paid = false) {
   const t = toolState(id), item = ITEMS[id];
   if (!state.signedIn && item.guestPrice && state.guestRunsUsed >= 1) return signUp();
   if (t.status === 'loading') return;
+  // Pro daily allowance exhausted → Mobbin-style paywall (upgrade or spend credits).
+  if (id === 'humanizer' && humMode(t) === 'pro' && humHasPlan() && !paid) {
+    const q = humQuota('pro');
+    if (!q.left) return openLimitDialog();
+  }
   const onPage = () => currentRoute() === item.route;
   // Sync from the live editor before the run (render may have stale state).
   const live = $('#tool-text');
@@ -8144,7 +8186,10 @@ async function runTool(id) {
     t.status = 'done';
     t.result = { text: out, html: data.humanized_html || '', file: t.fileName || '' };
     if (!state.signedIn) state.guestRunsUsed = data.free_runs_left === 0 ? 1 : 0;
-    if (state.signedIn) { addDoc(source, id, { text: out }); loadCredits(); }
+    if (state.signedIn) {
+      if (id === 'humanizer' && humMode(t) === 'pro' && !Number(data.coins_charged)) humBumpProUse();
+      addDoc(source, id, { text: out }); loadCredits();
+    }
   } catch (err) {
     const e = apiErrorInfo(err, { intent: id });
     if (err.code === 'REGISTER_REQUIRED') state.guestRunsUsed = 1;
@@ -9155,6 +9200,80 @@ function renderBlogPost(p) {
 }
 
 
+/* ---------- Pro paywall dialogs (match prototype) ---------- */
+
+const proDlg = $('#pro-dialog');
+
+/** Free-plan user on Pro tab: comparison card, then See plans → pricing. */
+function openProDialog() {
+  const plans = CONFIG.pricing.plans;
+  const F = CONFIG.freeHumanize || CONFIG.humVersions?.free || { runs: 5, words: 500 };
+  const runs = plans.map(p => p.hum.runs);
+  const words = Math.max(...plans.map(p => p.hum.words));
+  const from = Math.min(...plans.map(p => +p.yearMo));
+  const rows = [
+    ['Rewrite quality', 'Basic', 'Much better'],
+    ['Runs a day', String(F.dailyLimit ?? F.runs ?? 5), `${Math.min(...runs)} to ${Math.max(...runs)}`],
+    ['Words per run', (F.words ?? 500).toLocaleString('en-US'), `Up to ${words.toLocaleString('en-US')}`],
+    ['Regular upgrades', false, true],
+  ];
+  const cell = (v) => v === true ? `<span class="pl-mark" aria-label="Yes">${icon('check')}</span>`
+    : v === false ? `<span class="muted" aria-label="No">—</span>` : esc(v);
+  proDlg.className = 'pro-dialog pro-dialog-card';
+  proDlg.innerHTML = `<div class="pdc-card">
+      <div class="pdc-head">
+        <div>
+          <h2 id="pro-dlg-title">Get Humanizer Pro</h2>
+          <p class="muted">Pro rewrites much better, so your text sounds natural and human. It gets regular upgrades.</p>
+        </div>
+        <button class="icon-btn pdc-close" type="button" data-act="pro-dlg-close" aria-label="Not now">${icon('close')}</button>
+      </div>
+      <table class="pro-cmp">
+        <thead><tr><th scope="col"><span class="visually-hidden">Feature</span></th><th scope="col">Free</th><th scope="col" class="pro-col"><span class="pdc-pill">${icon('sparkles')} Pro</span></th></tr></thead>
+        <tbody>${rows.map(([l, f, pr]) => `<tr><th scope="row">${l}</th><td>${cell(f)}</td><td class="pro-col">${cell(pr)}</td></tr>`).join('')}</tbody>
+      </table>
+      <div class="pdc-price">
+        <p class="pdc-amount"><span class="muted">from</span> <b>$${from}</b></p>
+        <p class="muted">per month · Included in Basic, Pro and Max</p>
+      </div>
+    </div>
+    <button class="pdc-cta" type="button" data-act="pro-dlg-plans">See plans ${icon('arrow')}</button>`;
+  proDlg.showModal();
+  $('[data-act="pro-dlg-plans"]', proDlg)?.focus();
+}
+
+function openLimitDialog() {
+  const plans = CONFIG.pricing.plans, cur = humPlan(), next = cur ? plans[plans.indexOf(cur) + 1] : null;
+  const rows = next
+    ? next.yes.slice(0, 3).map(([l, sub]) =>
+        `<li><span class="pl-mark" aria-hidden="true">${icon('check')}</span>` +
+        `<span>${esc(l)}${sub ? ` <span class="muted">${esc(sub)}</span>` : ''}</span></li>`).join('')
+    : '';
+  proDlg.className = 'pro-dialog pw-dialog';
+  proDlg.innerHTML = `<button class="icon-btn pw-close" type="button" data-act="pro-dlg-close" aria-label="Close">${icon('close')}</button>
+    <div class="pw-top">
+      <span class="pw-mark" aria-hidden="true">PRO</span>
+      <h2 id="pro-dlg-title">You’ve used today’s Pro runs</h2>
+      <p class="muted">Your ${esc(cur?.name || 'plan')} plan gives ${cur?.hum?.runs ?? 0} Pro runs a day.${!next ? ' New runs come tomorrow.'
+        : next.hum.runs > (cur?.hum?.runs ?? 0) ? ` ${esc(next.name)} gives ${next.hum.runs} a day.`
+        : ` ${esc(next.name)} takes up to ${next.hum.words.toLocaleString('en-US')} words a run and gives more reports.`}</p>
+      <div class="pw-actions">
+        ${next
+          ? `<button class="btn btn-primary btn-lg" type="button" data-act="pro-dlg-plans">Upgrade to ${esc(next.name)}</button>
+             <button class="link-btn pw-alt" type="button" data-act="lim-credits">or use ${estLabel('humanizer')} for this run</button>`
+          : `<button class="btn btn-primary btn-lg" type="button" data-act="lim-credits">Use ${estLabel('humanizer')} for this run</button>
+             <button class="link-btn pw-alt" type="button" data-act="pro-dlg-close">Not now</button>`}
+      </div>
+    </div>
+    ${next ? `<div class="pw-foot">
+      <div class="pw-foot-head"><b>What you get with ${esc(next.name)}</b><span>from <b>$${next.yearMo}</b>/mo</span></div>
+      <ul class="lim-list">${rows}</ul>
+    </div>` : ''}`;
+  proDlg.showModal();
+  $(`[data-act="${next ? 'pro-dlg-plans' : 'lim-credits'}"]`, proDlg)?.focus();
+}
+proDlg?.addEventListener('click', (e) => { if (e.target === proDlg) proDlg.close(); });
+
 /* ---------- Sign up / Log in dialog ---------- */
 
 
@@ -9402,6 +9521,10 @@ document.addEventListener('click', (e) => {
       homeAction(act, el); break;
     case 'clear-filter':state.docFilter = 'all'; rerenderDocs(); break;
     case 'run': runTool(page); break;
+    case 'hum-plans': openProDialog(); break;
+    case 'pro-dlg-close': proDlg?.close(); break;
+    case 'lim-credits': proDlg?.close(); runTool('humanizer', true); break;
+    case 'pro-dlg-plans': proDlg?.close(); go('pricing'); break;
     case 'clear-tool': clearTool(page); break;
     case 'copy': $('.dl-wrap')?.classList.remove('is-open'); copyResult(); break;
     case 'dl-toggle': { const w = el.closest('.dl-wrap'); el.setAttribute('aria-expanded', w.classList.toggle('is-open')); break; }

@@ -14,6 +14,7 @@ from services.humanizer_engine.student_humanizer import (
     pick_student,
     plan_chunks,
     try_student_humanize,
+    try_student_humanize_rich,
 )
 
 PARA = (
@@ -54,7 +55,7 @@ def test_titles_and_headings_of_any_level_stay_verbatim():
     blocks = [
         "# Artificial Intelligence: Its Impact on Modern Society",
         "### Ethical Concerns",
-        "Artificial Intelligence and the Future of Work",
+        "Artificial Intelligence and the Future of Work",  # plain — rewritten, no guessing
         "**Stakeholder Identification**",
         PARA,
         "AI is changing how people work.",
@@ -62,7 +63,7 @@ def test_titles_and_headings_of_any_level_stay_verbatim():
     assert plan_chunks("\n\n".join(blocks), "\n\n", chunk_words=1) == [
         (blocks[0], False),
         (blocks[1], False),
-        (blocks[2], False),
+        (blocks[2], True),
         (blocks[3], False),
         (PARA, True),
         (blocks[5], True),
@@ -89,7 +90,7 @@ def test_paragraphs_hard_wrapped_by_a_pdf_are_joined_and_rewritten():
     body = "\n\n".join([page_one, page_two, address, bullets, table])
     assert plan_chunks(body, "\n\n", chunk_words=1) == [
         (" ".join(lines[:3]), True),
-        ("Methodology", False),
+        ("Methodology", True),  # plain short line — not a marked heading
         (" ".join(lines[4:] + page_two.split("\n")), True),
         (address, False),
         ("- first point of the list here", True),
@@ -110,6 +111,15 @@ def test_a_short_first_line_that_runs_on_is_not_taken_for_a_heading():
     ]
 
 
+def test_lone_article_block_is_rewritten_not_a_title():
+    """A paste that blank-line-splits 'The' from the sentence must still humanize it as one line."""
+    body = "comparison supports the case of coupling across Ireland and France."
+    assert plan_chunks(f"The\n\n{body}\n\n{PARA}", "\n\n", chunk_words=1) == [
+        (f"The {body}", True),
+        (PARA, True),
+    ]
+
+
 def test_references_inside_a_wrapped_page_are_kept_verbatim():
     head, tail = PARA.split(" Researchers")
     tail = "Researchers" + tail
@@ -118,11 +128,15 @@ def test_references_inside_a_wrapped_page_are_kept_verbatim():
         "References\n"
         "Crenshaw, K. (1989). Demarginalizing the intersection of race and sex. University of Chicago Legal Forum."
     )
-    def rewrite_every_word(text: str) -> str:
-        return "\n\n".join(" ".join(f"x{w}" for w in p.split()) for p in text.split("\n\n"))
+    def rewrite_heavy(text: str) -> str:
+        # Rewrite most tokens but keep enough overlap to pass MIN_JACCARD.
+        return "\n\n".join(
+            " ".join(w if i % 3 == 0 else f"alt-{w}" for i, w in enumerate(p.split()))
+            for p in text.split("\n\n")
+        )
 
-    out = StudentTextHumanizer(_config(), complete_fn=rewrite_every_word).humanize(page + "\n\n" + PARA)
-    assert out.startswith("xThe xstudy")
+    out = StudentTextHumanizer(_config(), complete_fn=rewrite_heavy).humanize(page + "\n\n" + PARA)
+    assert "alt-" in out
     assert out.endswith("References\n\nCrenshaw, K. (1989). Demarginalizing the intersection of race and sex. "
                         "University of Chicago Legal Forum.\n\n" + PARA)
 
@@ -140,7 +154,13 @@ def test_a_plain_references_list_stays_in_place_up_to_the_next_section():
 
 
 def test_a_heading_on_the_line_above_its_paragraph_is_split_off():
-    assert plan_chunks(f"Introduction\n{PARA}", "\n\n", chunk_words=1) == [("Introduction", False), (PARA, True)]
+    # Marked heading stays verbatim; plain "Introduction" is rewritten (no guessing).
+    assert plan_chunks(f"## Introduction\n\n{PARA}", "\n\n", chunk_words=1) == [
+        ("## Introduction", False), (PARA, True),
+    ]
+    assert plan_chunks(f"Introduction\n{PARA}", "\n\n", chunk_words=1) == [
+        ("Introduction", True), (PARA, True),
+    ]
 
 
 def test_plan_chunks_splits_long_prose_at_paragraph_breaks():
@@ -164,6 +184,11 @@ def test_chunk_problem_rejects_broken_rewrites():
     assert chunk_problem(two, "## Heading\n\n" + _rewrite(two)) == "EXTRA_MARKUP"
     assert chunk_problem(two, "Short.\n\nShort.") == "LENGTH_RATIO"
     assert chunk_problem(two, two) == "UNCHANGED"
+    drifted = (
+        "There was a low coupling in the United Kingdom in their citizens assemblies. "
+        "Climate Assembly UK met over six weekends with no binding vote for ministers."
+    )
+    assert chunk_problem(PARA, drifted) == "DRIFTED"
 
 
 def test_humanize_rewrites_prose_and_list_items_keeps_headings_and_references():
@@ -383,7 +408,7 @@ def test_detector_pick_falls_back_to_most_rewritten_when_detector_is_down():
 
 
 def test_conclusion_pieces_follow_heading_opener_or_last_paragraph():
-    body = [("Intro text here. It goes on.", True), ("Conclusion", True), ("Wrap up. Done.", True),
+    body = [("Intro text here. It goes on.", True), ("**Conclusion**", False), ("Wrap up. Done.", True),
             ("Another wrap. End.", True), ("References", False)]
     assert sh.conclusion_pieces(body) == {2, 3}
     assert sh.conclusion_pieces([("First point. More.", True), ("In conclusion, it works.", True)]) == {1}
@@ -558,6 +583,31 @@ def test_try_student_humanize_falls_back_on_failure_and_non_english():
 
     off = StudentTextHumanizer(_config(share=0.0), complete_fn=_rewrite)
     assert try_student_humanize(PARA, humanizer=off) is None
+
+
+def test_try_student_humanize_rich_keeps_opaque_and_skips_tokens():
+    html = (
+        f"<h2>Introduction</h2><p>{PARA}</p>"
+        "<table><tr><td>Keep</td><td>Me</td></tr></table>"
+        f"<p>{PARA.replace('study', 'audit').replace('examines', 'reviews')}</p>"
+    )
+    seen: list[str] = []
+
+    def rewrite(text: str) -> str:
+        seen.append(text)
+        assert "⟦OPAQUE" not in text and "⟦TABLE" not in text
+        return _rewrite(text)
+
+    ok = StudentTextHumanizer(_config(), complete_fn=rewrite)
+    result = try_student_humanize_rich(html, humanizer=ok)
+    assert result is not None
+    assert "humanized_html" in result
+    assert "<h2>Introduction</h2>" in result["humanized_html"]
+    assert "<table>" in result["humanized_html"] and "Keep" in result["humanized_html"]
+    assert "⟦OPAQUE" not in result["humanized_text"]
+    assert "⟦TABLE" not in result["humanized_html"]
+    assert "paper explores" in result["humanized_text"] or "paper" in result["humanized_text"]
+    assert seen and all("⟦" not in s for s in seen)
 
 
 def test_cold_model_falls_back_without_waiting(monkeypatch):
@@ -775,37 +825,35 @@ def _stealthwriter_logged_out(monkeypatch):
     monkeypatch.setattr(app_mod, "_stealthwriter_down_until", 0.0)
 
 
-def test_site_humanize_falls_back_to_student_when_stealthwriter_is_logged_out(economy, monkeypatch):
+def test_site_humanize_never_calls_stealthwriter(economy, monkeypatch):
     import app as app_mod
 
-    monkeypatch.setenv("FREE_HUMANIZE_ENGINE", "default")
-    _stealthwriter_logged_out(monkeypatch)
-    calls = []
-
-    def fake_student(_text, *, rescue=False):
-        calls.append(rescue)
-        return _student_result() if rescue else None
-
-    monkeypatch.setattr(app_mod, "_student_humanize", fake_student)
+    monkeypatch.setattr(app_mod, "_student_humanize", lambda _t, **_k: _student_result())
+    _no_stealthwriter(monkeypatch)
     payload = {"text": "Please rewrite this paragraph for a human reader."}
-
     res = _client().post("/api/browser/providers/stealthwriter/humanize", json=payload)
     assert res.status_code == 200, res.get_json()
     assert res.get_json()["humanized_text"] == "Rewritten by our model."
-    assert calls == [False, True]
-    assert app_mod._stealthwriter_down()
-
-    _client().post("/api/browser/providers/stealthwriter/humanize", json=payload)
-    assert calls[2] is True
 
 
-def test_extension_humanize_falls_back_to_student_when_stealthwriter_is_logged_out(economy, monkeypatch):
+def test_site_humanize_errors_when_student_unavailable(economy, monkeypatch):
     import app as app_mod
 
-    _stealthwriter_logged_out(monkeypatch)
-    monkeypatch.setattr(
-        app_mod, "_student_humanize", lambda _t, *, rescue=False: _student_result() if rescue else None
+    monkeypatch.setattr(app_mod, "_student_humanize", lambda _t, **_k: None)
+    _no_stealthwriter(monkeypatch)
+    res = _client().post(
+        "/api/browser/providers/stealthwriter/humanize",
+        json={"text": "Please rewrite this paragraph for a human reader."},
     )
+    assert res.status_code == 503
+    assert res.get_json()["error"] in ("UNAVAILABLE", "FREE_ENGINE_UNAVAILABLE")
+
+
+def test_extension_humanize_uses_student_only(economy, monkeypatch):
+    import app as app_mod
+
+    monkeypatch.setattr(app_mod, "_student_humanize", lambda _t, **_k: _student_result())
+    _no_stealthwriter(monkeypatch)
     user = economy_auth.create_user("student-rescue@example.com", "secret123")
     economy_auth.mark_email_verified(user["id"], user["email"])
     WalletService().set_balance(user["id"], 200)
@@ -818,7 +866,7 @@ def test_extension_humanize_falls_back_to_student_when_stealthwriter_is_logged_o
     assert res.get_json()["humanized_text"] == "Rewritten by our model."
 
 
-def test_regular_requests_wait_briefly_for_a_cold_model(monkeypatch):
+def test_student_requests_force_model_and_wait_for_boot(monkeypatch):
     import app as app_mod
 
     seen = {}
@@ -829,4 +877,4 @@ def test_regular_requests_wait_briefly_for_a_cold_model(monkeypatch):
 
     monkeypatch.setattr(sh, "try_student_humanize", fake_try)
     assert app_mod._student_humanize("Some text.") is None
-    assert seen == {"wait_for_boot": app_mod.STUDENT_COLD_WAIT_SECONDS}
+    assert seen == {"force": True, "wait_for_boot": app_mod.STUDENT_RESCUE_WAIT_SECONDS}

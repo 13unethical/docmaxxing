@@ -90,7 +90,6 @@ from services.reviewer_engine import GeminiAcademicReviewer, ReviewerEngineServi
 from services.revision_engine import GeminiSectionReviser, RevisionEngineService
 from services.humanizer_engine import HumanizerEngineService
 from services.humanizer_engine.mock_validator import ZeroGPTParagraphValidator
-from services.humanizer_engine.stealthwriter_humanizer import StealthWriterTextHumanizer
 from services.humanizer_engine.zerogpt_humanizer import count_words
 from services.ai_detection_engine import AIDetectionEngineService
 from services.ai_detection_engine.zerogpt_detector import ZeroGPTAIDetector
@@ -1138,9 +1137,10 @@ def _zerogpt_configured() -> bool:
 
 
 def _build_humanizer_engine() -> HumanizerEngineService:
-    # Assignment humanization always goes through StealthWriter Legacy 5.1.
-    # ZeroGPT remains available for detection / validation when configured.
-    humanizer = StealthWriterTextHumanizer()
+    # Assignment humanization uses our student model only — never StealthWriter.
+    from services.humanizer_engine.student_humanizer import StudentTextHumanizer
+
+    humanizer = StudentTextHumanizer()
     if _zerogpt_configured():
         return HumanizerEngineService(
             humanizer=humanizer,
@@ -3858,25 +3858,44 @@ def _mark_stealthwriter_down() -> None:
 
 
 def _student_humanize(text: str, *, rescue: bool = False) -> dict[str, Any] | None:
-    """Our own model for its configured share of requests; None means use StealthWriter.
+    """Run our student humanizer. StealthWriter is never used.
 
-    ``rescue``: StealthWriter cannot answer, so our model is the only option and the
-    request waits for it to boot.
+    ``rescue`` keeps the old kwarg for callers/tests; both paths force the student
+    model and wait for a cold boot.
     """
+    del rescue  # always student-only
     try:
         from services.humanizer_engine.student_humanizer import try_student_humanize
 
-        if rescue:
-            return try_student_humanize(text, force=True, wait_for_boot=STUDENT_RESCUE_WAIT_SECONDS)
-        return try_student_humanize(text, wait_for_boot=STUDENT_COLD_WAIT_SECONDS)
+        return try_student_humanize(
+            text, force=True, wait_for_boot=STUDENT_RESCUE_WAIT_SECONDS
+        )
     except Exception:  # noqa: BLE001
         app.logger.exception("student humanizer routing failed")
         return None
 
 
+def _student_humanize_rich(html_in: str) -> dict[str, Any] | None:
+    """Block-wise rich HTML humanize: opaque/table tokens never reach the model."""
+    try:
+        from services.humanizer_engine.student_humanizer import try_student_humanize_rich
+
+        return try_student_humanize_rich(
+            html_in, force=True, wait_for_boot=STUDENT_RESCUE_WAIT_SECONDS
+        )
+    except Exception:  # noqa: BLE001
+        app.logger.exception("student rich humanizer routing failed")
+        return None
+
+
 def _attach_rich_html(result: dict[str, Any] | None, html_in: str | None) -> dict[str, Any] | None:
-    """If the client sent HTML, reassemble formatting around ``humanized_text``."""
+    """Legacy fallback: reassemble when the result has no ``humanized_html`` yet.
+
+    Prefer ``_student_humanize_rich`` so protect tokens are never sent to the model.
+    """
     if result is None or not html_in or not str(html_in).strip():
+        return result
+    if isinstance(result.get("humanized_html"), str) and str(result["humanized_html"]).strip():
         return result
     try:
         from services.humanizer_engine.rich_html import (
@@ -3884,6 +3903,7 @@ def _attach_rich_html(result: dict[str, Any] | None, html_in: str | None) -> dic
             prepare_rich,
             reassemble_rich,
             sanitize_html,
+            strip_rich_tokens,
         )
 
         plain, stash = prepare_rich(str(html_in))
@@ -3895,30 +3915,14 @@ def _attach_rich_html(result: dict[str, Any] | None, html_in: str | None) -> dic
             result = dict(result)
             result["humanized_html"] = sanitize_html(str(html_in))
             return result
-        # If the model was run on the prepared plain (caller responsibility), reassemble.
-        # If lengths wildly diverge, still try block alignment via reassemble_rich.
         result = dict(result)
         rich = reassemble_rich(out_plain, stash)
-        result["humanized_html"] = rich
-        result["humanized_text"] = html_to_plaintext(rich)
+        result["humanized_html"] = strip_rich_tokens(rich)
+        result["humanized_text"] = strip_rich_tokens(html_to_plaintext(rich))
         return result
     except Exception:  # noqa: BLE001
         app.logger.exception("rich html reassembly failed")
         return result
-
-
-def _humanize_plain_for_rich(html_in: str | None, text: str) -> str:
-    """Plain string sent to the model: rich-prepared when HTML is present."""
-    if not html_in or not str(html_in).strip():
-        return text
-    try:
-        from services.humanizer_engine.rich_html import prepare_rich
-
-        plain, _stash = prepare_rich(str(html_in))
-        return plain if plain.strip() else text
-    except Exception:  # noqa: BLE001
-        app.logger.exception("rich html prepare failed")
-        return text
 
 
 def _student_rescue_after(job: Any, text: str) -> dict[str, Any] | None:
@@ -4215,87 +4219,27 @@ _HUMANIZE_FAILED_MESSAGE = "Humanization failed. Credits for this run were not k
 
 
 def _run_stealthwriter_humanize_job(text: str):
-    """Run the production Humanizer job. Returns (job, error_response).
+    """Run the production Humanizer (student model only). Returns (job, error_response).
 
+    Name kept for call sites; StealthWriter is never invoked.
     ``error_response`` is a Flask Response when the job did not complete.
     """
     from types import SimpleNamespace
 
-    from services.browser.jobs.retry import MAX_RETRIES
-
-    student = _student_humanize(text, rescue=_stealthwriter_down())
+    student = _student_humanize(text, rescue=True)
     if student is not None:
         return SimpleNamespace(id=student["request_id"], result=student), None
 
-    ensure_engine_started()
-    if job_manager is None or browser_worker is None:
-        resp = jsonify(
-            {
-                "ok": False,
-                "success": False,
-                "error": "UNAVAILABLE",
-                "message": "Humanizer is not available right now. Try again.",
-            }
-        )
-        resp.status_code = 503
-        return None, resp
-
-    job = job_manager.create(
-        "stealthwriter", "humanize", {"text": text}, max_retries=MAX_RETRIES, owner=_job_owner()
+    resp = jsonify(
+        {
+            "ok": False,
+            "success": False,
+            "error": "UNAVAILABLE",
+            "message": "Humanizer is not available right now. Try again.",
+        }
     )
-    max_wait = (browser_worker.job_timeout + 30) * (job.max_retries + 1) + 30
-    job_manager.wait(job.id, timeout=max_wait)
-    job = job_manager.get(job.id)
-    if job is None:
-        resp = jsonify(
-            {
-                "ok": False,
-                "success": False,
-                "error": "job not found",
-                "message": "Humanizer did not finish. Credits were not kept.",
-            }
-        )
-        resp.status_code = 500
-        return None, resp
-
-    status = job.status.value
-    if status == "COMPLETED":
-        return job, None
-    student = _student_rescue_after(job, text)
-    if student is not None:
-        return SimpleNamespace(id=student["request_id"], result=student), None
-
-    app.logger.warning(
-        "humanize job failed job_id=%s status=%s code=%s error=%s", job.id, status, job.error_code, job.error
-    )
-    body = {
-        "ok": False,
-        "success": False,
-        "error": status.lower(),
-        "message": "Humanizer failed. Try again.",
-        "job_id": job.id,
-    }
-    code = job.error_code
-    if status == "CANCELLED":
-        body["error"] = "cancelled"
-        return job, (jsonify(body), 409)
-    if code == "LOGIN_REQUIRED":
-        body["error"] = "LOGIN_REQUIRED"
-        body["message"] = "Humanizer is temporarily unavailable. Try again shortly."
-        return job, (jsonify(body), 401)
-    if code == "NO_CHANGE":
-        body["error"] = "NO_CHANGE"
-        body["message"] = "The text came back unchanged. Try again later."
-        return job, (jsonify(body), 409)
-    if code == "TIMEOUT":
-        body["error"] = "timeout"
-        body["message"] = "Humanizer timed out. Try a shorter selection."
-        return job, (jsonify(body), 504)
-    if not job.is_terminal:
-        body["error"] = "still running"
-        body["status"] = status
-        return job, (jsonify(body), 202)
-    return job, (jsonify(body), 500)
+    resp.status_code = 503
+    return None, resp
 
 
 @app.post("/api/extension/humanize")
@@ -6221,7 +6165,6 @@ def api_browser_stealthwriter_humanize():
     signed-in users are charged and guests are asked to sign up.
     """
     from services import free_humanize
-    from services.browser.jobs.retry import MAX_RETRIES
 
     payload = request.get_json(silent=True) or {}
     text = payload.get("text")
@@ -6240,7 +6183,7 @@ def api_browser_stealthwriter_humanize():
     if too_long is not None:
         return too_long
 
-    model_text = _humanize_plain_for_rich(html_in, text)
+    use_rich = bool(html_in and str(html_in).strip())
 
     user = economy_auth.current_user()
     guest_trial = user is None
@@ -6297,15 +6240,26 @@ def api_browser_stealthwriter_humanize():
     def _humanize_success(res: dict[str, Any], request_id: str):
         elapsed = res.get("elapsed_seconds")
         latency_ms = int(float(elapsed) * 1000) if elapsed is not None else None
+        # Rich path already returns humanized_html; only reassemble as a fallback.
         res = _attach_rich_html(res, html_in) or res
         humanized_out = res.get("humanized_text")
         humanized_html = res.get("humanized_html")
+        if isinstance(humanized_out, str):
+            from services.humanizer_engine.rich_html import strip_rich_tokens
+
+            humanized_out = strip_rich_tokens(humanized_out)
+            res["humanized_text"] = humanized_out
+        if isinstance(humanized_html, str):
+            from services.humanizer_engine.rich_html import strip_rich_tokens
+
+            humanized_html = strip_rich_tokens(humanized_html)
+            res["humanized_html"] = humanized_html
         if not guest_trial and user_id:
             _record_usage_safe(
                 int(user_id),
                 feature=FEATURE_HUMANIZER,
                 credits_used=cost,
-                provider=res.get("provider") or "StealthWriter",
+                provider=res.get("provider") or "docmaxxing-student",
                 latency=latency_ms,
                 request_id=request_id,
             )
@@ -6323,19 +6277,8 @@ def api_browser_stealthwriter_humanize():
             )
         except Exception:  # noqa: BLE001
             pass
-        # Training pairs must come from the teacher, never from the student itself.
-        if not guest_trial and user_id and not _is_student_result(res):
-            try:
-                from services.dataset_logger import log_humanization_event
+        # Student outputs are not logged as teacher training pairs.
 
-                log_humanization_event(
-                    int(user_id),
-                    dataset_source,
-                    text,
-                    humanized_out if isinstance(humanized_out, str) else "",
-                )
-            except Exception:
-                app.logger.exception("dataset_logger stealthwriter hook failed")
         payload_out = {
             "success": True,
             "humanized_text": humanized_out,
@@ -6354,92 +6297,27 @@ def api_browser_stealthwriter_humanize():
             payload_out["humanized_html"] = humanized_html
         return jsonify(payload_out)
 
-    if free_run and free_humanize.limits().engine == "student":
-        student = _student_humanize(model_text, rescue=True)
-        if student is None:
-            _release_guest_trial()
-            return _free_engine_unavailable()
-        return _humanize_success(student, student["request_id"])
-
+    # Free and paid runs both use our student model only — never StealthWriter.
+    # HTML: rewrite prose blocks only so ⟦OPAQUE⟧/⟦TABLE⟧ never reach the model.
     try:
-        student = _student_humanize(model_text, rescue=_stealthwriter_down())
-        if student is not None:
-            return _humanize_success(student, student["request_id"])
-
-        ensure_engine_started()
-        job = job_manager.create(
-            "stealthwriter", "humanize", {"text": model_text}, max_retries=MAX_RETRIES, owner=_job_owner()
+        student = (
+            _student_humanize_rich(str(html_in))
+            if use_rich
+            else _student_humanize(text, rescue=True)
         )
-        max_wait = (browser_worker.job_timeout + 30) * (job.max_retries + 1) + 30
-        job_manager.wait(job.id, timeout=max_wait)
-        job = job_manager.get(job.id)
-        if job is None:
+        if student is None:
             _refund_humanize()
             _release_guest_trial()
-            return jsonify({"success": False, "error": "job not found"}), 500
-
-        status = job.status.value
-        if status == "COMPLETED":
-            return _humanize_success(job.result or {}, job.id)
-        student = _student_rescue_after(job, model_text)
-        if student is not None:
-            return _humanize_success(student, student["request_id"])
-
-        # Any non-completed terminal/failure state refunds the charge.
-        _refund_humanize(ref_id=job.id)
-        _release_guest_trial()
-
-        if status == "CANCELLED":
-            return jsonify({"success": False, "error": "cancelled", "job_id": job.id}), 409
-
-        # Provider errors and the shared browser's page state go to the server log, never to the caller.
-        code = job.error_code
-        if code != "TIMEOUT":
-            app.logger.warning(
-                "humanize job failed job_id=%s status=%s code=%s error=%s", job.id, status, code, job.error
-            )
-        if code == "LOGIN_REQUIRED":
+            if free_run:
+                return _free_engine_unavailable()
             return jsonify(
                 {
                     "success": False,
-                    "error": "LOGIN_REQUIRED",
-                    "message": "The humanizer service is temporarily unavailable. Try again in a few minutes.",
-                    "job_id": job.id,
-                }
-            ), 401
-        if code == "NO_CHANGE":
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "error": "NO_CHANGE",
-                        "message": "The text came back unchanged. Try again later.",
-                        "job_id": job.id,
-                    }
-                ),
-                409,
-            )
-        if code == "TIMEOUT":
-            return jsonify({"success": False, "error": "timeout", "job_id": job.id}), 504
-        if code == "AUTOMATION_ERROR" and job.error_details:
-            return jsonify(
-                {
-                    "success": False,
-                    "error": "AUTOMATION_ERROR",
+                    "error": "UNAVAILABLE",
                     "message": _HUMANIZE_FAILED_MESSAGE,
-                    "job_id": job.id,
                 }
-            ), 422
-        if not job.is_terminal:
-            return (
-                jsonify(
-                    {"success": False, "error": "still running", "status": status, "job_id": job.id}
-                ),
-                202,
-            )
-        return jsonify(
-            {"success": False, "error": "failed", "message": _HUMANIZE_FAILED_MESSAGE, "job_id": job.id}
-        ), 500
+            ), 503
+        return _humanize_success(student, student["request_id"])
     except Exception:  # noqa: BLE001
         app.logger.exception("humanize request failed")
         _refund_humanize()

@@ -2,9 +2,10 @@
 
 Prose paragraphs are grouped into ~600-word chunks (the size the model was trained on) and
 rewritten in parallel. List items (short bullets and long numbered prose) are rewritten too.
-Only true document structure stays verbatim: headings, tables, figure markers, bare titles,
-addresses, and the references block. Any chunk that fails the quality checks is retried, and
-if it still fails the whole call raises so the caller can fall back to StealthWriter.
+Only true document structure stays verbatim: marked headings (markdown / bold-wrapped), tables,
+figure markers, addresses, and the references block. Plain short lines are not guessed as
+titles. Any chunk that fails the quality checks is retried, and if it still fails the whole
+call raises so the caller can return an error (StealthWriter is not used as a fallback).
 
 pick="document": each chunk is written once, then the AI detector scores the whole text in its
 ~110-word windows and only the chunks holding flagged sentences are rewritten, judged in context.
@@ -31,9 +32,12 @@ import requests
 
 from services.humanizer_engine.constants import MIN_HUMANIZE_CHARS
 from services.humanizer_engine.heading_utils import (
+    is_explicit_heading_text,
     is_references_section_title,
+    is_sentence_start_fragment,
     join_body_and_references,
     split_off_references,
+    title_core,
 )
 from services.humanizer_engine.mock_humanizer import MockTextHumanizer
 from services.humanizer_engine.rich_html import list_marker_ok, restore_list_marker, split_list_marker
@@ -44,6 +48,8 @@ PROVIDER = "DocMaxxing"
 CHUNK_WORDS = 600
 RATIO_RANGE = (0.6, 1.9)
 MAX_JACCARD = 0.9
+# Below this the rewrite drifted onto another topic (names/facts swapped out).
+MIN_JACCARD = 0.28
 ATTEMPTS = 3
 # Sampling the Turnitin checks were run with; greedy decoding scored 40% AI.
 TEMPERATURE = 1.0
@@ -70,7 +76,7 @@ _STRUCTURAL_LINE = re.compile(r"^\s*(#{1,6}\s|\||```)")
 _LIST_ITEM_LINE = re.compile(r"^\s*(?:[-*•+]\s|\d+[.)]\s)")
 _VERBATIM_LINE = re.compile(r"^\s*(#{1,6}\s|\||```|[-*•+]\s|\d+[.)]\s)")
 _SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*\s*$")
-# Given a bare title, the model writes a whole paragraph after it.
+# Marked headings only (``## …`` / ``**…**``); plain short lines are rewritten.
 TITLE_MAX_WORDS = 12
 # Text pasted from a PDF keeps its line breaks: lines of at most this many characters, the last line of
 # each paragraph shorter than the rest.
@@ -140,7 +146,7 @@ def student_config() -> StudentConfig:
         url=(os.environ.get("HUMANIZER_STUDENT_URL") or "").strip().rstrip("/"),
         api_key=(os.environ.get("HUMANIZER_STUDENT_KEY") or "").strip(),
         model=(os.environ.get("HUMANIZER_STUDENT_MODEL") or "humanizer-v1").strip(),
-        share=min(1.0, max(0.0, _float("HUMANIZER_STUDENT_SHARE", 0.0))),
+        share=min(1.0, max(0.0, _float("HUMANIZER_STUDENT_SHARE", 1.0))),
         level=max(1, min(10, int(_float("HUMANIZER_STUDENT_LEVEL", 8)))),
         timeout=max(10.0, _float("HUMANIZER_STUDENT_TIMEOUT", 90.0)),
         chunk_words=max(1, int(_float("HUMANIZER_STUDENT_CHUNK_WORDS", CHUNK_WORDS))),
@@ -211,9 +217,8 @@ def _is_verbatim(block: str) -> bool:
         return True
     if _is_list_item_line(line):
         return False
-    if _wc(block) < 3:
-        return True
-    # Bare titles and markdown/bold-wrapped headings stay put (export turns **…** into real bold).
+    # Markdown / bold-wrapped headings stay put (export turns **…** into real bold).
+    # Plain short lines are rewritten — no length-based title guessing.
     return _is_title(block)
 
 
@@ -233,9 +238,21 @@ def _split_block(block: str) -> tuple[list[str], bool]:
     full = WRAP_FULL_LINE * width
     # A line followed by one starting in lowercase breaks mid-sentence.
     continued = [nxt[:1].islower() for nxt in lines[1:]] + [False]
+    ends = [bool(_SENTENCE_END.search(ln)) for ln in lines]
+    # Address / byline stacks: a few short lines, none a finished sentence — keep together
+    # (do not peel each line off as if it were a heading). Longest line sets width, so
+    # compare to an absolute cap, not to WRAP_FULL_LINE * width.
+    if (
+        2 <= len(lines) <= 6
+        and width <= 80
+        and not any(ends)
+        and not any(continued)
+    ):
+        return [block], False
     if width > WRAP_MAX_CHARS or (sum(len(ln) >= full for ln in lines) < 2 and not any(continued)):
         return (lines if not all(_is_verbatim(ln) for ln in lines) else [block]), False
-    ends = [bool(_SENTENCE_END.search(ln)) for ln in lines]
+    # Short line above a wrapped paragraph (e.g. marked ``## Introduction`` already caught
+    # upstream). Plain short lines stay their own block and are rewritten — not frozen as titles.
     heading = [len(ln) < full and not end and not cont for ln, end, cont in zip(lines, ends, continued)]
     paragraphs: list[str] = []
     current: list[str] = []
@@ -243,8 +260,6 @@ def _split_block(block: str) -> tuple[list[str], bool]:
         current.append(ln)
         if continued[i]:
             continue
-        # A short line ends its paragraph and a short line on its own is a heading; a sentence
-        # that ends right before a heading ends its paragraph too.
         if (len(ln) < full and (ends[i] or len(current) == 1)) or (ends[i] and i + 1 < len(lines) and heading[i + 1]):
             paragraphs.append(" ".join(current))
             current = []
@@ -290,7 +305,24 @@ def _blocks(body: str, separator: str) -> list[str]:
             blocks[-1] = f"{blocks[-1]} {parts.pop(0)}"
         blocks.extend(parts)
         runs_on = next_runs_on
-    return blocks
+    return _coalesce_sentence_start_blocks(blocks)
+
+
+def _coalesce_sentence_start_blocks(blocks: list[str]) -> list[str]:
+    """Join a lone ``The`` (blank-line split) onto the next paragraph."""
+    out: list[str] = []
+    i = 0
+    while i < len(blocks):
+        cur = blocks[i]
+        nxt = blocks[i + 1] if i + 1 < len(blocks) else None
+        if nxt and is_sentence_start_fragment(cur) and not _is_list_item_block(nxt):
+            glue = " " if nxt and not nxt[:1].isspace() else ""
+            out.append(cur.rstrip() + glue + nxt.lstrip())
+            i += 2
+            continue
+        out.append(cur)
+        i += 1
+    return out
 
 
 _APPENDIX_LINE = re.compile(r"(?im)^\s*(appendix|appendices|annex)\b")
@@ -360,26 +392,12 @@ _CONCLUSION_OPENER = re.compile(
 _CONCLUSION_TITLE = re.compile(r"\b(conclusions?|concluding|summary|final thoughts|closing remarks)\b", re.IGNORECASE)
 
 
-_MD_WRAP_TITLE = re.compile(r"^(?:\*\*|__)(.+?)(?:\*\*|__)$|^#{1,6}\s+(.+?)$")
-
-
 def _title_core(text: str) -> str:
-    """Bare title text: strip ``**…**`` / ``## …`` wrappers used for bold/markdown headings."""
-    stripped = text.strip()
-    m = _MD_WRAP_TITLE.match(stripped)
-    if m:
-        return (m.group(1) or m.group(2) or "").strip()
-    return stripped
+    return title_core(text)
 
 
 def _is_title(text: str) -> bool:
-    core = _title_core(text)
-    return (
-        "\n" not in text.strip()
-        and bool(core)
-        and _wc(core) <= TITLE_MAX_WORDS
-        and not _SENTENCE_END.search(core)
-    )
+    return "\n" not in (text or "").strip() and is_explicit_heading_text(text, max_words=TITLE_MAX_WORDS)
 
 
 def conclusion_pieces(pieces: list[tuple[str, bool]]) -> set[int]:
@@ -399,6 +417,11 @@ def conclusion_pieces(pieces: list[tuple[str, bool]]) -> set[int]:
     return found
 
 
+def _strip_think(text: str) -> str:
+    """Qwen3 sometimes leaks a <think>…</think> block even when thinking is off."""
+    return re.sub(r"<think>[\s\S]*?</think>\s*", "", text, flags=re.I).strip()
+
+
 def chunk_problem(source: str, output: str) -> str | None:
     """Why a rewritten chunk is unusable, or None when it is fine."""
     if not output.strip():
@@ -410,8 +433,11 @@ def chunk_problem(source: str, output: str) -> str | None:
     ratio = _wc(output) / max(1, _wc(source))
     if not RATIO_RANGE[0] <= ratio <= RATIO_RANGE[1]:
         return "LENGTH_RATIO"
-    if _jaccard(source, output) > MAX_JACCARD:
+    overlap = _jaccard(source, output)
+    if overlap > MAX_JACCARD:
         return "UNCHANGED"
+    if overlap < MIN_JACCARD:
+        return "DRIFTED"
     marker, _ = split_list_marker(source)
     if marker and not list_marker_ok(source, restore_list_marker(source, output)):
         return "LIST_MARKER"
@@ -722,7 +748,7 @@ class StudentTextHumanizer:
 def _candidate(choice: dict[str, Any]) -> Candidate:
     tokens = ((choice.get("logprobs") or {}).get("content")) or []
     mean = sum(t["logprob"] for t in tokens) / len(tokens) if tokens else 0.0
-    return Candidate(choice["message"]["content"] or "", mean)
+    return Candidate(_strip_think(choice["message"]["content"] or ""), mean)
 
 
 def pick_student(config: StudentConfig | None = None, *, rng: Callable[[], float] = random.random) -> bool:
@@ -843,6 +869,80 @@ def try_student_humanize(
     record_event(cfg, "served", words=words, elapsed=elapsed, **({"waited": waited} if waited >= 1 else {}))
     return {
         "humanized_text": output,
+        "elapsed_seconds": elapsed,
+        "provider": PROVIDER,
+        "engine": engine.VERSION,
+        "request_id": f"student-{uuid.uuid4().hex[:12]}",
+    }
+
+
+def try_student_humanize_rich(
+    html_doc: str,
+    *,
+    humanizer: StudentTextHumanizer | None = None,
+    force: bool = False,
+    wait_for_boot: float = 0.0,
+    sleep: Callable[[float], None] = time.sleep,
+) -> dict[str, Any] | None:
+    """Humanize HTML by rewriting prose blocks only (tables/headings never go to the model).
+
+    Avoids sending ``⟦OPAQUE⟧`` / ``⟦TABLE⟧`` protect tokens through the LLM, which
+    previously leaked into the visible output and scrambled section order.
+    """
+    from services.humanizer_engine.rich_html import html_to_plaintext, humanize_rich
+
+    engine = humanizer or StudentTextHumanizer()
+    cfg = engine.config
+    if not cfg.configured and engine._complete_fn is None:
+        return None
+    if not force and not pick_student(cfg):
+        return None
+    plain_check = html_to_plaintext(html_doc)
+    if not plain_check.strip():
+        return None
+    if not is_english(plain_check):
+        return None
+    words = _wc(plain_check)
+    started = time.monotonic()
+    if not _wait_until_warm(engine, wait_for_boot, sleep):
+        log.info("student humanizer is cold; skipping rich humanize while it boots")
+        record_event(cfg, "cold", words=words, waited=round(time.monotonic() - started, 1))
+        return None
+    waited = round(time.monotonic() - started, 1)
+    started = time.monotonic()
+
+    def rewrite(line: str) -> str:
+        text = (line or "").strip()
+        if not text or len(text) < MIN_HUMANIZE_CHARS:
+            return line
+        try:
+            return engine._rewrite_chunk(line, False)
+        except StudentHumanizerError:
+            return line
+
+    try:
+        rich, text = humanize_rich(html_doc, rewrite, max_workers=engine.max_workers)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("student rich humanizer failed: %s", exc)
+        record_event(
+            cfg,
+            "failed",
+            words=words,
+            elapsed=round(time.monotonic() - started, 2),
+            error=str(exc)[:200],
+        )
+        return None
+    elapsed = round(time.monotonic() - started, 2)
+    if not text.strip():
+        record_event(cfg, "failed", words=words, elapsed=elapsed, error="EMPTY")
+        return None
+    if text.strip() == plain_check.strip():
+        record_event(cfg, "failed", words=words, elapsed=elapsed, error="UNCHANGED")
+        return None
+    record_event(cfg, "served", words=words, elapsed=elapsed, **({"waited": waited} if waited >= 1 else {}))
+    return {
+        "humanized_text": text,
+        "humanized_html": rich,
         "elapsed_seconds": elapsed,
         "provider": PROVIDER,
         "engine": engine.VERSION,

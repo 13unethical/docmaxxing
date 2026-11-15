@@ -517,6 +517,8 @@ textarea.input:focus-visible, .field-input:focus-visible, .select:focus-visible,
 .hum-field:focus-within { background: var(--default); box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--focus); }
 .hum-main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
 .hum-card .hum-field .rich-input { display: block; width: 100%; height: 206px; min-height: 120px; padding: 8px var(--space-4) var(--space-4) 12px; font-size: 15px; line-height: 24px; background: transparent; box-shadow: none; overflow: auto; white-space: pre-wrap; }
+/* field owns the focus ring — no second blue outline on the contenteditable */
+.hum-card .hum-field .rich-input:focus, .hum-card .hum-field .rich-input:focus-visible { outline: none; box-shadow: none; }
 .hum-add { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%; background: var(--surface); color: var(--text); cursor: pointer; }
 .hum-add:hover { background: color-mix(in oklab, var(--surface) 92%, var(--text)); }
 .hum-add svg.icon { width: 18px; height: 18px; }
@@ -1176,7 +1178,9 @@ table.hist { width: 100%; border-collapse: collapse; min-width: 780px; font-size
 .qs .lt-hum .lt-out .qd-actions { margin-top: auto; }
 .plans-block { display: grid; justify-items: center; }
 .price-switch { margin-bottom: var(--space-5); }
-.price-switch-tag { margin-left: 4px; color: var(--chip-success-fg); font-weight: 600; }
+.price-switch-tag { margin-left: 6px; color: var(--chip-success-fg); font-size: 12px; font-weight: 600; }
+.plan-price .plan-was { color: var(--text-muted); font-size: 20px; font-weight: 500; }
+.plan-save { color: var(--chip-success-fg); font-weight: 600; }
 .plans { justify-self: stretch; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); align-items: stretch; text-align: left; }
 @media (max-width: 1000px) { .plans { grid-template-columns: minmax(0, 1fr); max-width: 520px; margin: 0 auto; } }
 .plan-price s { margin-right: 2px; }
@@ -2013,6 +2017,73 @@ dialog { background: var(--overlay); color: var(--text); border: 0; border-radiu
 dialog::backdrop { background: rgba(0, 0, 0, .6); backdrop-filter: blur(2px); }
 dialog h2 { margin-bottom: var(--space-2); }
 
+/* Mobbin-style Pro limit paywall */
+.pro-dialog { max-width: 460px; }
+.pro-dialog h2 { margin: 0 0 var(--space-2); font-family: var(--font-display); font-size: 24px; }
+.lim-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 14px; line-height: 20px; }
+.lim-list li { display: flex; gap: var(--space-2); }
+.lim-list .pl-mark { margin-top: 2px; }
+.pw-dialog { position: relative; max-width: 460px; padding: 0; overflow: hidden; border-radius: 28px; }
+.pw-close { position: absolute; top: 14px; right: 14px; }
+.pw-top { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 40px var(--space-5) var(--space-5); }
+.pw-top h2 { margin: var(--space-4) 0 var(--space-2); font-family: var(--font-display); font-size: 26px; line-height: 32px; text-wrap: balance; }
+.pw-top p { margin: 0; max-width: 340px; font-size: 15px; line-height: 22px; text-wrap: pretty; }
+.pw-mark {
+  display: inline-grid; place-items: center; height: 52px; padding: 0 22px; border-radius: 999px;
+  transform: rotate(-6deg);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .28), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(135deg, color-mix(in oklab, var(--accent) 70%, #fff), var(--accent) 55%, color-mix(in oklab, var(--accent) 75%, #000));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .45),
+    inset 0 -2px 0 rgba(0, 0, 0, .18),
+    0 10px 24px color-mix(in oklab, var(--accent) 45%, transparent);
+  color: #fff; font-family: var(--font-display); font-size: 28px; font-weight: 700;
+  letter-spacing: .04em; text-shadow: 0 1px 1px rgba(0, 0, 0, .2);
+}
+.pw-actions { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); margin-top: var(--space-5); }
+.pw-actions .btn-lg { min-width: 220px; }
+.pw-actions .pw-alt { color: var(--text-muted); font-size: 14px; text-underline-offset: 3px; }
+.pw-actions .pw-alt:hover { color: var(--text); }
+.pw-foot { padding: var(--space-5); background: var(--default-soft, var(--default)); }
+.pw-foot-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-3); font-size: 15px; }
+.pw-foot-head span { color: var(--text-muted); font-size: 14px; white-space: nowrap; }
+.pw-foot-head span b { color: var(--text); }
+
+/* Get Humanizer Pro card (prototype openProDialog) */
+.pro-cmp { width: 100%; border-collapse: collapse; font-size: 14px; }
+.pro-cmp th, .pro-cmp td { padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--separator); vertical-align: middle; }
+.pro-cmp tr:last-child th, .pro-cmp tr:last-child td { border-bottom: 0; }
+.pro-cmp thead th { padding-top: 0; color: var(--text-muted); font-size: 13px; font-weight: 500; }
+.pro-cmp tbody th { padding-left: 0; color: var(--text-muted); font-weight: 400; }
+.pro-cmp td { width: 32%; }
+.pro-cmp .pro-col { color: var(--text); font-weight: 500; background: color-mix(in oklab, var(--accent) 8%, transparent); }
+.pro-cmp thead .pro-col { color: var(--accent-text); border-radius: 10px 10px 0 0; padding-top: 8px; }
+.pro-cmp thead .pro-col svg.icon { width: 14px; height: 14px; vertical-align: -2px; }
+.pro-cmp tr:last-child .pro-col { border-radius: 0 0 10px 10px; }
+.pro-cmp .pl-mark { display: inline-grid; }
+.pro-dialog-card { max-width: 440px; padding: 0; overflow: hidden; border-radius: 28px; background: var(--accent); }
+.pdc-card { position: relative; padding: var(--space-5); border-radius: 28px; box-shadow: rgba(0, 0, 0, 0.12) 0 6px 20px; background: radial-gradient(70% 55% at 100% 0%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 70%), var(--overlay); }
+.pdc-head { display: flex; align-items: flex-start; gap: var(--space-3); padding-bottom: var(--space-4); margin-bottom: var(--space-3); border-bottom: 1px solid var(--separator); }
+.pdc-head h2 { margin: 0 0 6px; font-family: var(--font-display); font-size: 24px; line-height: 30px; }
+.pdc-head p { margin: 0; font-size: 14px; line-height: 21px; }
+.pdc-close { flex: 0 0 auto; margin: -6px -6px 0 auto; }
+.pdc-pill { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px; border-radius: 999px; background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent-text); font-size: 12px; font-weight: 600; }
+.pdc-pill svg.icon { width: 13px; height: 13px; }
+.pro-dialog-card .pro-cmp .pro-col, .pro-dialog-card .pro-cmp thead .pro-col { background: none; border-radius: 0; padding-top: 10px; }
+.pro-dialog-card .pro-cmp thead th { padding-top: 0; padding-bottom: 8px; vertical-align: bottom; }
+.pro-dialog-card .pro-cmp tbody td.pro-col { color: var(--text); font-weight: 600; }
+.pdc-price { margin-top: var(--space-4); }
+.pdc-price p { margin: 0; }
+.pdc-amount { display: flex; align-items: baseline; gap: 6px; }
+.pdc-amount b { font-family: var(--font-display); font-size: 32px; line-height: 1.1; }
+.pdc-price .muted { font-size: 14px; }
+.pdc-cta { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 60px; border: 0; cursor: pointer; background: radial-gradient(circle, rgba(255, 255, 255, .35) 1px, transparent 1.5px) 0 0 / 22px 18px, var(--accent); color: #fff; font: inherit; font-size: 16px; font-weight: 600; transition: background-color 150ms; }
+.pdc-cta:hover { background-color: color-mix(in oklab, var(--accent) 88%, #000); }
+.pdc-cta svg.icon { width: 18px; height: 18px; transition: transform 150ms var(--ease-out); }
+.pdc-cta:hover svg.icon { transform: translateX(3px); }
+.pdc-cta:focus-visible { outline: #fff solid 2px; outline-offset: -6px; }
+
 /* ---------- Pricing ---------- */
 /* Pro header: light blue base + three soft blobs (Figma 179:1368) */
 :root { --plan-top-hl: oklch(0.3 0.08 258); --plan-glow-1: oklch(0.55 0.17 258); --plan-glow-2: oklch(0.6 0.12 225); }
@@ -2047,8 +2118,8 @@ dialog h2 { margin-bottom: var(--space-2); }
 .plan-sub { line-height: 28px; vertical-align: top; }
 .plan-name-row h2 { margin: 0 auto 0 0; font-size: 18px; line-height: 28px; font-weight: 600; }
 .plan-sub { font-weight: 500; color: var(--text-muted); font-size: 14px; }
-.plan-price { display: flex; align-items: baseline; gap: var(--space-2); margin: var(--space-3) 0 0; }
-.plan-price b { font-family: var(--font-display); font-size: 48px; line-height: 1; }
+.plan-price { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-2); row-gap: 4px; margin: var(--space-3) 0 0; }
+.plan-price b { font-family: var(--font-display); font-size: clamp(36px, 3.4vw, 48px); line-height: 1; }
 .plan-price span { color: var(--text-muted); font-size: 14px; }
 .plan-tagline { margin: 0 0 var(--space-3); color: var(--text-muted); font-size: 14px; line-height: 21px; min-height: 21px; }
 .btn-dark { background: var(--text); color: var(--surface); }

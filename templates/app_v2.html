@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ seo.title }}</title>
 {% include "_seo_head.html" %}
-<link rel="stylesheet" href="{{ url_for('static', filename='app2/app.css') }}?v=20261111-blog-css2">
+<link rel="stylesheet" href="{{ url_for('static', filename='app2/app.css') }}?v=20261115-pw-dialog">
 <script defer src="https://cloud.umami.is/script.js" data-website-id="177e569c-f873-485d-9ba7-cb75a43be7b6"></script>
 </head>
 <body>
@@ -92,13 +92,15 @@
 
 <dialog id="veil-dialog" class="veil-dialog" aria-labelledby="veil-dlg-title"></dialog>
 
+<dialog id="pro-dialog" aria-labelledby="pro-dlg-title"></dialog>
+
 <dialog id="review-dialog" aria-labelledby="ur-title"></dialog>
 
 <noscript><p style="padding:24px">DocMaxxing needs JavaScript.</p></noscript>
 
 <script>window.DMX_BOOT = {{ boot|tojson }};</script>
 <script src="{{ url_for('static', filename='device-fingerprint.js') }}?v=20260805-sec"></script>
-<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261111-landing-try"></script>
-<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261111-landing-try"></script>
+<script src="{{ url_for('static', filename='app2/api.js') }}?v=20261115-pw-dialog"></script>
+<script src="{{ url_for('static', filename='app2/app.js') }}?v=20261115-unwrap"></script>
 </body>
 </html>
