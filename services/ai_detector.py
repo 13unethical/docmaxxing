@@ -1,8 +1,8 @@
 """Free AI detector: our DeBERTa model trained on Turnitin highlights (served on Modal).
 
-The model was trained on ~110-word windows of consecutive sentences. Every sentence gets
-the mean probability of the windows that contain it; the document score is the share of
-words in sentences above the threshold, like Turnitin's "% of text flagged as AI".
+Windows match Turnitin's shape: 5–8 consecutive scored sentences, sliding by one sentence.
+Every sentence gets the mean probability of the windows that contain it; the document score
+is the share of words in sentences above the threshold, like Turnitin's "% of text flagged as AI".
 
 Environment:
   AI_DETECTOR_URL / AI_DETECTOR_API_KEY   Modal endpoint (ai_detector/serve_modal.py)
@@ -37,7 +37,11 @@ import requests
 
 log = logging.getLogger(__name__)
 
-WINDOW_WORDS = 110
+# Turnitin uses ~5–10 sentence windows; we use 6 (clamped 5–8) with a one-sentence stride.
+# Keep in sync with scripts/tt_detector_labels.py (LABEL_VERSION bumps when these change).
+WINDOW_SENTENCES = 6
+MIN_WINDOW_SENTENCES = 5
+MAX_WINDOW_SENTENCES = 8
 MIN_SCORED_WORDS = 40
 _SENT = re.compile(r"(?<=[.!?])[\"'”’)]*\s+(?=[A-Z\"“(])")
 _REFERENCE_HINT = re.compile(r"https?://|doi\.org|\bdoi:|\(\d{4}[a-z]?\)\.|Retrieved from", re.I)
@@ -121,18 +125,28 @@ def split_sentences(text: str) -> list[Sentence]:
 
 
 def windows(sentences: list[Sentence]) -> list[tuple[int, int]]:
-    """Index ranges [i, j) of scored sentences, one window starting at each sentence."""
+    """Index ranges [i, j) of scored sentences: ~WINDOW_SENTENCES each, stride one sentence.
+
+    Short pastes with fewer than MIN_WINDOW_SENTENCES scored sentences still get one window
+    over everything scored (document % still needs MIN_SCORED_WORDS).
+    """
     idx = [k for k, s in enumerate(sentences) if s.scored]
-    out = []
-    for a in range(len(idx)):
-        words, b = 0, a
-        while b < len(idx) and words < WINDOW_WORDS:
-            words += sentences[idx[b]].words
-            b += 1
-        out.append((a, b))
-        if b == len(idx):
+    if not idx:
+        return []
+    n = len(idx)
+    size = max(1, min(MAX_WINDOW_SENTENCES, WINDOW_SENTENCES))
+    min_size = 1 if size < MIN_WINDOW_SENTENCES else MIN_WINDOW_SENTENCES
+    if n < min_size:
+        return [(idx[0], idx[-1] + 1)]
+    out: list[tuple[int, int]] = []
+    for a in range(n):
+        b = min(a + size, n)
+        if b - a < min_size:
             break
-    return [(idx[a], idx[b - 1] + 1) for a, b in out]
+        out.append((idx[a], idx[b - 1] + 1))
+        if b == n:
+            break
+    return out
 
 
 def _score_remote(texts: list[str]) -> tuple[list[float], str]:

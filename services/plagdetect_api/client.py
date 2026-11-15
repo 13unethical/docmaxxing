@@ -428,15 +428,27 @@ class PlagDetectAPIClient:
         report_dir: str | Path,
         retry: bool = False,
     ) -> dict[str, Any]:
+        already_done = False
         if retry:
             self.retry_highlights(submission_id)
         else:
-            queued = self.request_highlights(submission_id)
-            if queued.get("success") is False:
-                raise PlagDetectAPIError(
-                    str(queued.get("message") or queued.get("error") or "Highlights request failed.")
-                )
-        hl_status = self.wait_for_highlights(submission_id)
+            try:
+                queued = self.request_highlights(submission_id)
+            except PlagDetectAPIError as exc:
+                msg = str(exc).lower()
+                # Highlights finished earlier but the PDF was never saved locally.
+                if "already completed" in msg or "already complete" in msg:
+                    already_done = True
+                    queued = {"success": True}
+                else:
+                    raise
+            if not already_done and queued.get("success") is False:
+                err = str(queued.get("message") or queued.get("error") or "Highlights request failed.")
+                if "already completed" in err.lower() or "already complete" in err.lower():
+                    already_done = True
+                else:
+                    raise PlagDetectAPIError(err)
+        hl_status = self.wait_for_highlights(submission_id) if not already_done else self.get_highlights_status(submission_id)
         dest = Path(report_dir) / "ai_highlights_report.pdf"
         self.download_report(submission_id, "highlights", dest)
         status = self.get_status(submission_id)

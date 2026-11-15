@@ -35,19 +35,25 @@ def test_sentences_keep_offsets_and_skip_headings_and_references():
     assert sum(s.scored for s in sentences) == 3
 
 
-def test_windows_cover_every_scored_sentence_with_about_110_words():
+def test_windows_slide_by_one_sentence_with_fixed_sentence_count():
     text = " ".join([HUMAN, AI] * 4)
     sentences = ai_detector.split_sentences(text)
     spans = ai_detector.windows(sentences)
-    covered = {k for a, b in spans for k in range(a, b)}
-    assert covered == set(range(len(sentences)))
-    assert spans[-1][1] == len(sentences)
+    scored = [k for k, s in enumerate(sentences) if s.scored]
+    covered = {k for a, b in spans for k in range(a, b) if sentences[k].scored}
+    assert covered == set(scored)
+    assert spans[-1][1] - 1 == scored[-1]
+    size = ai_detector.WINDOW_SENTENCES
     for a, b in spans[:-1]:
-        assert sum(s.words for s in sentences[a:b]) >= ai_detector.WINDOW_WORDS
+        assert sum(1 for k in range(a, b) if sentences[k].scored) == size
+    # One-sentence stride: consecutive windows start one scored sentence apart.
+    starts = [next(k for k in range(a, b) if sentences[k].scored) for a, b in spans]
+    assert starts == scored[: len(starts)]
 
 
 def test_document_score_is_the_share_of_flagged_words(monkeypatch):
-    monkeypatch.setattr(ai_detector, "WINDOW_WORDS", 1)
+    monkeypatch.setattr(ai_detector, "WINDOW_SENTENCES", 1)
+    monkeypatch.setattr(ai_detector, "MIN_WINDOW_SENTENCES", 1)
     result = ai_detector.detect(HUMAN + "\n" + AI, score=_fake_score)
     assert result["model"] == "test-v1"
     flagged = [s for s in result["sentences"] if s["flagged"]]

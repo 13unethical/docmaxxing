@@ -120,6 +120,50 @@ class TurnitinService:
         dest.mkdir(parents=True, exist_ok=True)
         return dest
 
+    @staticmethod
+    def is_star_ai_display(row: dict[str, Any] | None) -> bool:
+        """True when Turnitin/PlagDetect hid 1–19% AI behind ``*%`` — needs a Highlights PDF."""
+        meta = dict((row or {}).get("meta") or {})
+        return str(meta.get("ai_score_display") or "").strip() == "*%"
+
+    def has_highlights_pdf(self, submission_id: str, row: dict[str, Any] | None = None) -> bool:
+        row = row or self.store.get(submission_id) or {}
+        path = str(row.get("ai_highlights_report_path") or "").strip()
+        if path and Path(path).is_file():
+            return True
+        folder = self.report_dir(submission_id)
+        return any(folder.glob("*highlights*.pdf"))
+
+    def maybe_queue_star_highlights(self, submission_id: str) -> bool:
+        """If the AI score is ``*%`` and Highlights PDF is missing, start Get Highlights.
+
+        Low-AI (1–19%) reports hide cyan marks in the AI PDF; only the Highlights report
+        shows where AI is. Detector training and humanizer feedback need those files.
+        """
+        row = self.store.get(submission_id) or {}
+        if not self.is_star_ai_display(row):
+            return False
+        if self.has_highlights_pdf(submission_id, row):
+            return False
+        hl_status = str(row.get("highlights_status") or "").strip().lower()
+        if hl_status in ("queued", "running"):
+            return False
+        meta = dict(row.get("meta") or {})
+        provider = str(meta.get("provider") or "plagdetect").strip().lower()
+        user_id = int(row.get("user_id") or 0)
+        try:
+            if provider == "turnitin":
+                if user_id <= 0:
+                    return False
+                self.start_tca_highlights(submission_id=submission_id, user_id=user_id)
+            else:
+                self.start_plagdetect_api_highlights(submission_id=submission_id)
+        except Exception:  # noqa: BLE001
+            log.exception("auto Get Highlights failed for %s", submission_id)
+            return False
+        log.info("queued Get Highlights for *%% submission %s (%s)", submission_id, provider)
+        return True
+
     def _extract_upload_text(self, row: dict[str, Any]) -> str:
         """Best-effort plain text from the stored Turnitin upload (raw for ML)."""
         upload_path = (row.get("upload_path") or "").strip()
@@ -565,23 +609,31 @@ class TurnitinService:
                 res = job.result or {}
                 ai_unavailable = res.get("ai_unavailable")
                 meta = {
+                    "provider": "plagdetect",
                     "elapsed_seconds": res.get("elapsed_seconds"),
                     "external_id": res.get("external_id"),
                     "ai_score_display": res.get("ai_score_display"),
                     "similarity_display": res.get("similarity_display"),
                     "ai_unavailable": ai_unavailable,
                 }
-                self.store.update(
-                    submission_id,
-                    status="completed",
-                    similarity=res.get("similarity"),
-                    ai_score=res.get("ai_score"),
-                    external_id=res.get("external_id"),
-                    similarity_report_path=res.get("similarity_report_path"),
-                    ai_report_path=res.get("ai_report_path"),
-                    meta_json=json.dumps(meta),
-                    completed_at=job.finished_at.isoformat() if job.finished_at else None,
-                )
+                if res.get("ai_highlights_report_path"):
+                    meta["ai_highlights_display"] = res.get("ai_highlights_display")
+                fields: dict[str, Any] = {
+                    "status": "completed",
+                    "similarity": res.get("similarity"),
+                    "ai_score": res.get("ai_score"),
+                    "external_id": res.get("external_id"),
+                    "similarity_report_path": res.get("similarity_report_path"),
+                    "ai_report_path": res.get("ai_report_path"),
+                    "meta_json": json.dumps(meta),
+                    "completed_at": job.finished_at.isoformat() if job.finished_at else None,
+                }
+                if res.get("ai_highlights_report_path"):
+                    fields["ai_highlights_report_path"] = res["ai_highlights_report_path"]
+                    fields["highlights_status"] = "completed"
+                    if res.get("ai_highlights") is not None:
+                        fields["ai_highlights"] = res["ai_highlights"]
+                self.store.update(submission_id, **fields)
                 try:
                     from services.economy.site_settings import record_turnitin_success
 
@@ -600,6 +652,7 @@ class TurnitinService:
                         fetch_similarity=need_sim,
                         fetch_ai=need_ai,
                     )
+                self.maybe_queue_star_highlights(submission_id)
                 return
 
             if status not in ("FAILED", "CANCELLED"):
@@ -828,6 +881,7 @@ class TurnitinService:
             record_turnitin_success()
         except Exception:  # noqa: BLE001
             pass
+        self.maybe_queue_star_highlights(submission_id)
 
     def fetch_plagdetect_api_reports(
         self,
@@ -1058,6 +1112,7 @@ class TurnitinService:
             record_turnitin_success()
         except Exception:  # noqa: BLE001
             pass
+        self.maybe_queue_star_highlights(submission_id)
 
     def fetch_tca_similarity_pdf(self, submission_id: str) -> str | None:
         """Re-download the similarity PDF for an official Turnitin submission."""

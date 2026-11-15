@@ -44,6 +44,14 @@ GPU = os.environ.get("HUMANIZER_GPU", "L40S")
 # Idle GPU time is the main cost: a lone request otherwise pays for the whole window.
 SCALEDOWN_SECONDS = int(os.environ.get("HUMANIZER_SCALEDOWN_SECONDS", "60"))
 MIN_CONTAINERS = int(os.environ.get("HUMANIZER_MIN_CONTAINERS", "0"))
+# GPU memory snapshots cut restore to ~10s on L40S; some GPUs (e.g. L4 bench) may need them off.
+ENABLE_MEMORY_SNAPSHOT = os.environ.get("HUMANIZER_ENABLE_MEMORY_SNAPSHOT", "1").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
+GPU_MEMORY_UTILIZATION = os.environ.get("HUMANIZER_GPU_MEMORY_UTILIZATION", "0.92").strip() or "0.92"
 SPECULATIVE = {"method": "ngram", "num_speculative_tokens": 6, "prompt_lookup_min": 2, "prompt_lookup_max": 5}
 
 serve_image = (
@@ -58,6 +66,8 @@ serve_image = (
             "VLLM_SERVER_DEV_MODE": "1",
             "TORCHINDUCTOR_COMPILE_THREADS": "1",
             "HUMANIZER_MODEL_VERSION": MODEL_VERSION,
+            "HUMANIZER_GPU_MEMORY_UTILIZATION": GPU_MEMORY_UTILIZATION,
+            "HUMANIZER_ENABLE_MEMORY_SNAPSHOT": "1" if ENABLE_MEMORY_SNAPSHOT else "0",
         }
     )
 )
@@ -162,26 +172,29 @@ def _proxy_app():
     return Starlette(routes=[Route("/v1/{path:path}", forward, methods=["GET", "POST"])])
 
 
-@app.cls(
-    image=serve_image,
-    gpu=GPU,
-    timeout=60 * 60,
-    scaledown_window=SCALEDOWN_SECONDS,
-    min_containers=MIN_CONTAINERS,
-    volumes={
+_cls_kwargs: dict = {
+    "image": serve_image,
+    "gpu": GPU,
+    "timeout": 60 * 60,
+    "scaledown_window": SCALEDOWN_SECONDS,
+    "min_containers": MIN_CONTAINERS,
+    "volumes": {
         "/root/.cache/huggingface": hf_cache,
         "/root/.cache/vllm": vllm_cache,
         "/adapters": adapters,
     },
-    secrets=[modal.Secret.from_name("humanizer-api-key")],
+    "secrets": [modal.Secret.from_name("humanizer-api-key")],
+}
+if ENABLE_MEMORY_SNAPSHOT:
     # Restoring CPU+GPU memory skips model load, compilation and CUDA graph capture.
-    enable_memory_snapshot=True,
-    experimental_options={"enable_gpu_snapshot": True},
-)
+    _cls_kwargs["enable_memory_snapshot"] = True
+    _cls_kwargs["experimental_options"] = {"enable_gpu_snapshot": True}
+
+
+@app.cls(**_cls_kwargs)
 @modal.concurrent(max_inputs=64)
 class Humanizer:
-    @modal.enter(snap=True)
-    def start(self) -> None:
+    def _boot_vllm(self) -> None:
         import subprocess
 
         import requests
@@ -192,23 +205,37 @@ class Humanizer:
             "--quantization", "fp8",
             "--speculative-config", json.dumps(SPECULATIVE),
             "--max-model-len", "8192",
-            "--gpu-memory-utilization", "0.92",
-            "--enable-sleep-mode",
+            "--gpu-memory-utilization", GPU_MEMORY_UTILIZATION,
             "--api-key", os.environ["HUMANIZER_API_KEY"],
             "--host", "127.0.0.1",
             "--port", str(VLLM_PORT),
         ]
+        if ENABLE_MEMORY_SNAPSHOT:
+            cmd.append("--enable-sleep-mode")
         self.proc = subprocess.Popen(cmd)
         _wait_ready(self.proc)
         _warmup()
-        requests.post(_local("/sleep?level=1"), timeout=120).raise_for_status()
+        if ENABLE_MEMORY_SNAPSHOT:
+            requests.post(_local("/sleep?level=1"), timeout=120).raise_for_status()
 
-    @modal.enter(snap=False)
-    def wake(self) -> None:
-        import requests
+    if ENABLE_MEMORY_SNAPSHOT:
 
-        requests.post(_local("/wake_up"), timeout=120).raise_for_status()
-        _wait_ready(self.proc)
+        @modal.enter(snap=True)
+        def start(self) -> None:
+            self._boot_vllm()
+
+        @modal.enter(snap=False)
+        def wake(self) -> None:
+            import requests
+
+            requests.post(_local("/wake_up"), timeout=120).raise_for_status()
+            _wait_ready(self.proc)
+
+    else:
+
+        @modal.enter()
+        def start(self) -> None:
+            self._boot_vllm()
 
     @modal.asgi_app()
     def serve(self):

@@ -1,5 +1,9 @@
 """Weekly retraining of the AI-text detector on fresh Turnitin labels (Modal).
 
+Label windows match inference (``services/ai_detector.py``): ~6 consecutive sentences with a
+one-sentence stride. After changing that shape, bump ``LABEL_VERSION`` in
+``scripts/tt_detector_labels.py``, rebuild+upload labels on the VPS, then ``retrain``.
+
 Data on the ``tt-detector`` volume:
   /labels_vps.jsonl   windows from stored Turnitin AI reports (uploaded nightly by the VPS,
                       scripts/tt_detector_labels.py --upload); never leaves the server/GPU.
@@ -76,7 +80,12 @@ RANK_WEIGHT = 0.0
 RANK_EVERY = 4
 RANK_TEXTS = 16
 # Turnitin labels of the golden set (/data/eval_golden*.jsonl): humanized text, evaluation only.
+# Nov 3: detector showed 0% on essays Turnitin marked 48–49% — golden recall is the main
+# "do we catch humanized AI" check and now participates in promotion (when golden files exist).
 GOLDEN_GLOB = "eval_golden"
+MIN_GOLDEN_RECALL = float(os.environ.get("AI_DETECTOR_MIN_GOLDEN_RECALL", "0.35"))
+MAX_GOLDEN_RECALL_DROP = float(os.environ.get("AI_DETECTOR_MAX_GOLDEN_RECALL_DROP", "0.05"))
+MAX_GOLDEN_FP = float(os.environ.get("AI_DETECTOR_MAX_GOLDEN_FP", "0.15"))
 # Held-out models per retrain (training seeds 0..N-1, same held-out reports); the gate uses their mean.
 HOLDOUT_SEEDS = 3
 PROD_DIR = "/data/models/prod"
@@ -487,7 +496,171 @@ def gate(new: dict, prod: dict | None) -> tuple[bool, str]:
     pick, prod_pick = new.get("pick_unseen_flag_rate"), new.get("prod_pick_unseen_flag_rate")
     if pick is not None and prod_pick is not None and pick > prod_pick + MAX_PICK_RISE:
         return False, f"pick_unseen_flag_rate {pick:.3f} vs prod {prod_pick:.3f}"
+    # Golden is optional until eval_golden*.jsonl exists on the volume; then it is required.
+    g_recall, g_fp = new.get("golden_recall"), new.get("golden_fp")
+    if g_recall is not None:
+        if g_recall < MIN_GOLDEN_RECALL:
+            return False, f"golden_recall {g_recall:.3f} < {MIN_GOLDEN_RECALL}"
+        prod_g = (prod or {}).get("golden_recall")
+        if prod_g is not None and g_recall < prod_g - MAX_GOLDEN_RECALL_DROP:
+            return False, f"golden_recall {g_recall:.3f} vs prod {prod_g:.3f}"
+    if g_fp is not None and g_fp > MAX_GOLDEN_FP:
+        return False, f"golden_fp {g_fp:.3f} > {MAX_GOLDEN_FP}"
     return True, "ok"
+
+
+@app.function(image=gpu_image, gpu="L40S", timeout=2 * 3600,
+              volumes={"/data": data, "/root/.cache/huggingface": hf_cache})
+def eval_prod(seed: int = 0) -> dict:
+    """Score the current /models/prod weights on holdout/golden/corpus — no train, no promote.
+
+    Uses the same 20% report holdout split as ``fit(final=False, seed=…)`` so numbers are
+    comparable to weekly retrain gates. Writes nothing except printing JSON.
+    """
+    import random
+
+    import torch
+    import torch.nn as nn
+    from transformers import AutoConfig, AutoModel, AutoTokenizer, PreTrainedModel
+
+    class Desklib(PreTrainedModel):
+        config_class = AutoConfig
+
+        def __init__(self, config):
+            super().__init__(config)
+            self.model = AutoModel.from_config(config)
+            self.classifier = nn.Linear(config.hidden_size, 1)
+            self.post_init()
+
+        def forward(self, input_ids, attention_mask):
+            hidden = self.model(input_ids, attention_mask=attention_mask)[0]
+            mask = attention_mask.unsqueeze(-1).float()
+            pooled = (hidden * mask).sum(1) / mask.sum(1).clamp(min=1e-9)
+            return self.classifier(pooled).squeeze(-1)
+
+    data.reload()
+    if not os.path.exists(f"{PROD_DIR}/config.json"):
+        raise RuntimeError("no /models/prod on volume")
+    version = open(f"{PROD_DIR}/VERSION").read().strip() if os.path.exists(f"{PROD_DIR}/VERSION") else "?"
+    try:
+        threshold = float(open(f"{PROD_DIR}/THRESHOLD").read())
+    except (OSError, ValueError):
+        threshold = FLAG_THRESHOLD
+    stored = None
+    if os.path.exists(f"{PROD_DIR}/METRICS.json"):
+        with open(f"{PROD_DIR}/METRICS.json") as fh:
+            stored = json.load(fh)
+
+    rng = random.Random(seed)
+    vps = _read("/data/labels_vps.jsonl")
+    reports = sorted({r["report"] for r in vps})
+    rng.shuffle(reports)
+    held = set(reports[: int(len(reports) * HOLDOUT)])
+    vps_test = [r for r in vps if r["report"] in held]
+
+    ext = _read("/data/ext.jsonl")
+    corpus_test = _read("/data/extra_test.jsonl") + [r for r in ext if r["split"] == "test"]
+    for fname in sorted(os.listdir("/data")):
+        if fname.startswith("chatgpt_") and fname.endswith(".jsonl"):
+            corpus_test += [r for r in _read(f"/data/{fname}") if r.get("split") == "test"]
+        if fname.startswith("rawai_") and fname.endswith(".jsonl"):
+            corpus_test += [r for r in _read(f"/data/{fname}") if r.get("split") == "test"]
+
+    pick_test: list[dict] = []
+    for fname in sorted(os.listdir("/data")):
+        if fname.startswith(PICK_BATCH_PREFIX) and fname.endswith(".jsonl"):
+            pick_test += [dict(r, batch=fname) for r in _read(f"/data/{fname}") if _pick_held(r["essay"])]
+
+    golden = [r for f in sorted(os.listdir("/data")) if f.startswith(GOLDEN_GLOB) and f.endswith(".jsonl")
+              for r in _read(f"/data/{f}")]
+    batch_files = [f for f in sorted(os.listdir("/data")) if f.startswith("batch_") and f.endswith(".jsonl")]
+    batch_windows = sum(len(_read(f"/data/{f}")) for f in batch_files)
+    ours_n = len(_read("/data/tt_labels_ours.jsonl")) + batch_windows
+    golden_files = [f for f in sorted(os.listdir("/data")) if f.startswith(GOLDEN_GLOB) and f.endswith(".jsonl")]
+
+    tok = AutoTokenizer.from_pretrained(PROD_DIR)
+    model = Desklib.from_pretrained(PROD_DIR).cuda()
+
+    @torch.no_grad()
+    def predict(texts, bs=32):
+        model.eval()
+        out = []
+        for i in range(0, len(texts), bs):
+            enc = tok(texts[i : i + bs], truncation=True, max_length=MAX_LEN, padding=True, return_tensors="pt").to("cuda")
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                out.extend(torch.sigmoid(model(enc["input_ids"], enc["attention_mask"]).float()).tolist())
+        return out
+
+    metrics: dict = {
+        "name": "eval_prod",
+        "version": version,
+        "threshold": threshold,
+        "seed": seed,
+        "reports_total": len(reports),
+        "reports_held": len(held),
+        "vps_test_windows": len(vps_test),
+        "golden_windows": len(golden),
+        "golden_files": golden_files,
+        "batch_files": batch_files,
+        "batch_windows": batch_windows,
+        "ours_windows": ours_n,
+        "stored_metrics": {k: stored.get(k) for k in (
+            "name", "reports", "train_windows", "human_fp", "chatgpt_recall",
+            "golden_auc", "golden_recall", "golden_fp", "vps_auc", "tt_doc_corr", "threshold", "seeds",
+        )} if stored else None,
+    }
+    by_t: dict = {str(t): {} for t in THRESHOLDS}
+    if vps_test:
+        s = predict([r["text"] for r in vps_test])
+        metrics["vps_auc"] = _auc([r["ai"] for r in vps_test], s)
+        metrics["vps_within_doc_auc"] = _within_doc_auc(vps_test, s, "report")
+        for t in THRESHOLDS:
+            by_t[str(t)]["tt_doc_corr"] = _turnitin_doc_corr(vps_test, s, t)
+    if corpus_test:
+        s = predict([r["text"] for r in corpus_test])
+        metrics["corpus"] = _doc_rates(corpus_test, s, threshold)
+        for t in THRESHOLDS:
+            rates = _doc_rates(corpus_test, s, t)
+            human = [rates[g] for g in GATED_HUMAN if g in rates]
+            by_t[str(t)]["human_fp"] = round(sum(human) / len(human), 4) if human else None
+            by_t[str(t)]["chatgpt_recall"] = rates.get(CHATGPT_GROUP)
+    if golden:
+        s = predict([r["text"] for r in golden])
+        flagged = [p for r, p in zip(golden, s) if r["ai"]]
+        clean = [p for r, p in zip(golden, s) if not r["ai"]]
+        metrics["golden_auc"] = _auc([r["ai"] for r in golden], s)
+        metrics["golden_flagged_n"] = len(flagged)
+        metrics["golden_clean_n"] = len(clean)
+        for t in THRESHOLDS:
+            by_t[str(t)]["golden_recall"] = sum(p > t for p in flagged) / max(1, len(flagged))
+            by_t[str(t)]["golden_fp"] = sum(p > t for p in clean) / max(1, len(clean))
+    if pick_test:
+        scores = predict([r["text"] for r in pick_test])
+        metrics.update(_pick_metrics(pick_test, scores))
+    metrics["by_threshold"] = by_t
+    # Primary numbers at the threshold prod actually serves.
+    primary = by_t.get(str(threshold)) or by_t.get(str(FLAG_THRESHOLD)) or {}
+    metrics.update({k: v for k, v in primary.items() if v is not None})
+    gate_view = {
+        "vps_auc": metrics.get("vps_auc"),
+        "human_fp": metrics.get("human_fp"),
+        "tt_doc_corr": metrics.get("tt_doc_corr"),
+        "chatgpt_recall": metrics.get("chatgpt_recall"),
+        "golden_recall": metrics.get("golden_recall"),
+        "golden_fp": metrics.get("golden_fp"),
+        "golden_auc": metrics.get("golden_auc"),
+        "threshold": threshold,
+        "seeds": 1,
+    }
+    ok, reason = gate(gate_view, stored if stored and stored.get("vps_auc") is not None else None)
+    metrics["would_pass_gate_vs_stored"] = ok
+    metrics["gate_reason"] = reason
+    # Absolute gate as if this were a new candidate with no prod baseline.
+    ok_abs, reason_abs = gate(gate_view, None)
+    metrics["passes_absolute_gate"] = ok_abs
+    metrics["absolute_gate_reason"] = reason_abs
+    print(json.dumps(metrics))
+    return metrics
 
 
 @app.function(image=gpu_image, volumes={"/data": data}, timeout=600)

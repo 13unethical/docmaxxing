@@ -444,7 +444,8 @@ def _ai_if_moreover(texts):
 def test_document_pick_rewrites_only_the_chunks_the_whole_text_check_flags(monkeypatch):
     from services import ai_detector
 
-    monkeypatch.setattr(ai_detector, "WINDOW_WORDS", 1)
+    monkeypatch.setattr(ai_detector, "WINDOW_SENTENCES", 1)
+    monkeypatch.setattr(ai_detector, "MIN_WINDOW_SENTENCES", 1)
     paras = [PARA, PARA.replace("42", "57"), PARA.replace("42", "99")]
     seen = []
 
@@ -461,7 +462,8 @@ def test_document_pick_rewrites_only_the_chunks_the_whole_text_check_flags(monke
 def test_document_pick_keeps_the_current_text_when_rewrites_are_no_better(monkeypatch):
     from services import ai_detector
 
-    monkeypatch.setattr(ai_detector, "WINDOW_WORDS", 1)
+    monkeypatch.setattr(ai_detector, "WINDOW_SENTENCES", 1)
+    monkeypatch.setattr(ai_detector, "MIN_WINDOW_SENTENCES", 1)
     first = "Moreover, " + _rewrite(PARA)
     worse = "Moreover, furthermore, " + _rewrite(PARA)
     outputs = iter([first, worse, worse, worse])

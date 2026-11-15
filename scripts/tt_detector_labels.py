@@ -22,8 +22,13 @@ ROOT = Path(__file__).resolve().parents[1]
 REPORTS = ROOT / "data" / "turnitin" / "reports"
 OUT_DIR = ROOT / "data" / "humanizer_training" / "tt_detector"
 SCALE = 2.0
-WINDOW_WORDS = 110
-LABEL_VERSION = 1
+# Same shape as services/ai_detector.py: 5–8 sentence windows, one-sentence stride.
+WINDOW_SENTENCES = 6
+MIN_WINDOW_SENTENCES = 5
+MAX_WINDOW_SENTENCES = 8
+MIN_WINDOW_WORDS = 40
+# Bump when label extraction / window rules change so per-report cache is rebuilt.
+LABEL_VERSION = 3
 _HEADER = re.compile(r"Page \d+ of \d+ - [^\n]*")
 _SUBMISSION = re.compile(r"Submission ID trn:oid:::[\d:]+")
 _SENT = re.compile(r"(?<=[.!?])[\"'”’)]*\s+(?=[A-Z\"“(])")
@@ -79,34 +84,43 @@ def flagged_text(pdf: Path) -> tuple[str, list[bool]]:
 
 
 def windows(text: str, flags: list[bool]):
-    """Consecutive sentences grouped to ~WINDOW_WORDS words, with the share of highlighted letters."""
+    """Sliding sentence windows (~WINDOW_SENTENCES, stride 1) with highlighted-letter share."""
     spans, start = [], 0
     flat = text.replace("\r", " ").replace("\n", " ")
     for m in _SENT.finditer(flat):
         spans.append((start, m.start()))
         start = m.end()
     spans.append((start, len(flat)))
+    # Drop empty / whitespace-only spans so window counts match scored prose sentences.
+    spans = [(a, b) for a, b in spans if flat[a:b].strip()]
 
-    def emit(group):
+    def emit(group: list[tuple[int, int]]):
         a, b = group[0][0], group[-1][1]
         body = re.sub(r"\s+", " ", flat[a:b]).strip()
         letters = [flags[i] for i in range(a, b) if flat[i].isalnum()]
-        if len(body.split()) < 40 or not letters or _REFERENCE_HINT.search(body):
+        if len(body.split()) < MIN_WINDOW_WORDS or not letters or _REFERENCE_HINT.search(body):
             return None
         return {"text": body, "ai_frac": round(float(sum(letters)) / len(letters), 3)}
 
-    group: list[tuple[int, int]] = []
-    for span in spans:
-        group.append(span)
-        if len(" ".join(flat[a:b] for a, b in group).split()) >= WINDOW_WORDS:
-            row = emit(group)
-            if row:
-                yield row
-            group = []
-    if group:
+    n = len(spans)
+    if not n:
+        return
+    size = max(1, min(MAX_WINDOW_SENTENCES, WINDOW_SENTENCES))
+    min_size = 1 if size < MIN_WINDOW_SENTENCES else MIN_WINDOW_SENTENCES
+    if n < min_size:
+        row = emit(spans)
+        if row:
+            yield row
+        return
+    for i in range(n):
+        group = spans[i : i + size]
+        if len(group) < min_size:
+            break
         row = emit(group)
         if row:
             yield row
+        if i + size >= n:
+            break
 
 
 def label_report(folder: Path) -> tuple[str, list[dict]]:

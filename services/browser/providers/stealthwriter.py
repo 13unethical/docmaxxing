@@ -776,9 +776,10 @@ def _find_output_area(page: Any, input_locator: Any) -> Any:
 # <textarea>. We read that div's innerText directly.
 _RESULT_EXTRACTION_JS = r"""(cleaned) => {
     const norm = s => (s || '').replace(/\s+/g, ' ').trim();
-    // Paragraphs come back as line breaks in the pre-wrap result; keep them.
-    const keepParas = s => (s || '').replace(/\r/g, '').split('\n')
-        .map(l => l.replace(/[ \t\u00a0]+/g, ' ').trim()).filter(Boolean).join('\n\n');
+    // Real paragraphs are blank-line separated. Soft wraps inside a paragraph
+    // must be rejoined — splitting on every \\n invented broken mid-sentence lines.
+    const keepParas = s => (s || '').replace(/\r/g, '').split(/\n\s*\n/)
+        .map(p => p.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n\n');
     const cleanedN = norm(cleaned);
 
     // Preferred: the result prose container inside the Humanized Result card.

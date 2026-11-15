@@ -8,7 +8,7 @@ titles. Any chunk that fails the quality checks is retried, and if it still fail
 call raises so the caller can return an error (StealthWriter is not used as a fallback).
 
 pick="document": each chunk is written once, then the AI detector scores the whole text in its
-~110-word windows and only the chunks holding flagged sentences are rewritten, judged in context.
+sentence windows and only the chunks holding flagged sentences are rewritten, judged in context.
 """
 
 from __future__ import annotations

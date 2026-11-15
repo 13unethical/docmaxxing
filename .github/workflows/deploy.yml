@@ -44,14 +44,18 @@ jobs:
             source venv/bin/activate
             pip install -r requirements.txt
             install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service
+            install -m 644 deploy/docmaxxing-tt-detector-labels.service /etc/systemd/system/docmaxxing-tt-detector-labels.service
+            install -m 644 deploy/docmaxxing-tt-detector-labels.timer /etc/systemd/system/docmaxxing-tt-detector-labels.timer
             bash scripts/install_backup_timers.sh
             bash scripts/install_humanizer_training_timer.sh
             systemctl daemon-reload
             systemctl enable docmaxxing
+            systemctl enable --now docmaxxing-tt-detector-labels.timer
             systemctl restart docmaxxing
             systemctl is-active --quiet docmaxxing
             systemctl is-enabled --quiet docmaxxing-humanizer-training-daily.timer
             systemctl is-enabled --quiet docmaxxing-humanizer-training-export.timer
+            systemctl is-enabled --quiet docmaxxing-tt-detector-labels.timer
             bash scripts/patch_nginx_timeouts.sh || true
             echo "Deployed $(git rev-parse --short HEAD)"
             echo "Storage: $(grep PROJECT_STORAGE_DIR .env || true)"

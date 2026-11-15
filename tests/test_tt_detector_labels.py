@@ -12,10 +12,16 @@ def test_windows_share_of_highlighted_letters():
     half = len(text) // 2
     flags = [i < half for i in range(len(text))]
     rows = list(labels.windows(text, flags))
-    assert len(rows) >= 2
+    # Sliding 6-sentence windows over 30 sentences → many overlapping rows.
+    assert len(rows) >= 20
     assert all(len(r["text"].split()) >= 40 for r in rows)
     assert rows[0]["ai_frac"] == 1.0
     assert rows[-1]["ai_frac"] == 0.0
+    # One-sentence stride: consecutive windows share all but one sentence.
+    first_words = rows[0]["text"].split()
+    second_words = rows[1]["text"].split()
+    assert first_words != second_words
+    assert " ".join(first_words[-20:]) in rows[1]["text"] or " ".join(second_words[:20]) in rows[0]["text"]
 
 
 def test_windows_skip_references():
