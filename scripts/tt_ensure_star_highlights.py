@@ -108,7 +108,8 @@ def main() -> int:
             stats["failed"] += 1
             print(json.dumps({"id": sid, "status": "error", "error": str(exc)[:200]}))
     print(json.dumps({"done": stats}))
-    return 0 if stats["failed"] == 0 else 1
+    # Best-effort: never block the nightly labels rebuild/upload on a few Highlights misses.
+    return 0
 
 
 if __name__ == "__main__":
