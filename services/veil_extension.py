@@ -22,6 +22,25 @@ _FILES = (
     "icons/icon48.png",
     "icons/icon128.png",
 )
+_INSTALL_TXT = """How to add Veil to Chrome
+=========================
+
+You do not need to open any of the other files in this folder.
+
+1. Keep this Veil folder somewhere safe. Do not delete it.
+2. In Chrome, open:  chrome://extensions
+3. Turn on Developer mode (top right).
+4. Click Load unpacked.
+5. Select this Veil folder (the folder itself, not a file inside it).
+6. Click the puzzle icon in Chrome, pin Veil, open it, and sign in.
+
+Then on any page:
+- Select a question and press Control+Q (Windows: Alt+Q) to ask.
+- Press Control+S (Windows: Alt+S) to crop a formula or diagram.
+- Select your own text and press Control+H to humanize it.
+
+Install once. Chrome runs Veil from this folder.
+"""
 
 
 def pack_extension(api_base: str) -> bytes:
@@ -31,6 +50,7 @@ def pack_extension(api_base: str) -> bytes:
         raise ValueError("api_base must be an http(s) origin")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("Veil/How to install.txt", _INSTALL_TXT.encode("utf-8"))
         for name in _FILES:
             data = (_ROOT / name).read_bytes()
             if name.endswith(".js"):

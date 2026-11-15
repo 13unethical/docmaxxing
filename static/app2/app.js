@@ -28,7 +28,7 @@ const CONFIG = {
       ['Why do I install it from a .zip file?', 'Veil isn’t in the Chrome Web Store yet, so you add it yourself through Developer mode. It takes about 3 minutes, and you only do it once.'],
       ['What happens when my {days} days end?', 'Veil stops answering until you renew. The extension stays installed. Renewing early adds {days} days on top of the time you have left.'],
       ['Do questions cost extra credits?', 'No. The {price} credits cover every question you ask during your {days} days.'],
-      ['I use a Mac. Which keys do I press?', 'Use Option instead of Alt: Option+Q to ask, Option+S to crop, Option+H to humanize.'],
+      ['I use a Mac. Which keys do I press?', 'Use Control: Control+Q to ask, Control+S to crop, Control+H to humanize. Option also works for Q and S.'],
       ['Where does Veil work?', 'On any page you open in Chrome — Canvas, Blackboard, Google Docs, Quizlet, Wikipedia and PDFs opened in the browser.'],
     ],
   },
@@ -7737,12 +7737,12 @@ function renderVeil() {
         </section>
         <ol class="veil-steps">
           ${step(1, 'Unlock Veil', `Pay ${price} credits from your balance. Access lasts ${V.days} days.`)}
-          ${step(2, 'Download and unzip', 'You’ll get a folder called <b>Veil</b>. Keep it somewhere safe — Chrome runs Veil from that folder, so don’t delete it.',
+          ${step(2, 'Download and unzip', 'You’ll get one folder called <b>Veil</b>. Open <b>How to install.txt</b> if you want. Ignore the other files — don’t open them. Keep the folder; Chrome runs Veil from it.',
             done ? `<button class="btn btn-sm btn-primary" data-act="veil-download">${icon('download')} Download Veil.zip</button>` : '')}
-          ${step(3, 'Add it to Chrome', 'Open the extensions page, turn on <b>Developer mode</b> (top right), click <b>Load unpacked</b> and choose the Veil folder.',
+          ${step(3, 'Add it to Chrome', 'Open the extensions page, turn on <b>Developer mode</b> (top right), click <b>Load unpacked</b>, and choose the <b>Veil folder</b> — not a file inside it.',
             `<span class="vstep-code"><code>${esc(V.extensionsUrl)}</code><button class="btn btn-sm" data-act="veil-copy" aria-label="Copy address ${esc(V.extensionsUrl)}">${icon('copy')} Copy</button></span>`)}
           ${step(4, 'Pin it and sign in', 'Click the puzzle icon in Chrome, pin Veil, open it and sign in with your DocMaxxing account.')}
-          <li class="vstep-done">${icon('sparkles')}<span>Done. Select any text and press <b>Alt+Q</b>. On a Mac, use <b>Option</b> instead of Alt.</span></li>
+          <li class="vstep-done">${icon('sparkles')}<span>Done. Select text and press <b>Control+Q</b> to ask, <b>Control+S</b> to crop, <b>Control+H</b> to humanize. On Windows you can also use Alt instead of Control.</span></li>
         </ol>
       </div>
     </section>

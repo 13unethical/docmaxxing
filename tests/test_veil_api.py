@@ -40,10 +40,17 @@ def _zip_points_at_this_site(res):
     assert res.mimetype == "application/zip"
     archive = zipfile.ZipFile(io.BytesIO(res.data))
     names = set(archive.namelist())
-    assert "Veil/manifest.json" in names
-    assert "Veil/content.js" in names
-    assert "Veil/icons/icon128.png" in names
-    assert not any("node_modules" in name or name.endswith("veil_landing.html") for name in names)
+    assert names == {
+        "Veil/How to install.txt",
+        "Veil/manifest.json",
+        "Veil/background.js",
+        "Veil/content.js",
+        "Veil/popup.html",
+        "Veil/popup.js",
+        "Veil/icons/icon16.png",
+        "Veil/icons/icon48.png",
+        "Veil/icons/icon128.png",
+    }
     background = archive.read("Veil/background.js").decode()
     popup = archive.read("Veil/popup.js").decode()
     assert "https://docmaxxing.com" in background
