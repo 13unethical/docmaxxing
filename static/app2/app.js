@@ -1614,6 +1614,8 @@ const SERVER_TITLE = document.title;
   if (BOOT.catalog) {
     BOOT.catalog.plans?.forEach?.(sp => {
       const p = CONFIG.pricing.plans.find(x => x.id === sp.id);
+      if (p && sp.words) p.hum = Object.assign({}, p.hum || {}, { words: sp.words });
+      if (p && sp.hum_runs != null) p.hum = Object.assign({}, p.hum || {}, { runs: sp.hum_runs });
       if (p && sp.usd != null) { p.month = sp.usd; p.price = sp.usd; }
     });
   }
@@ -1674,7 +1676,15 @@ const SERVER_TITLE = document.title;
   if (cat) {
     cat.plans.forEach(sp => {
       const p = CONFIG.pricing.plans.find(x => x.id === sp.id);
-      if (p) Object.assign(p, { price: sp.usd, credits: sp.credits });
+      if (p) {
+        Object.assign(p, { price: sp.usd, credits: sp.credits });
+        if (sp.words || sp.hum_runs != null) {
+          p.hum = Object.assign({}, p.hum || {}, {
+            ...(sp.words ? { words: sp.words } : {}),
+            ...(sp.hum_runs != null ? { runs: sp.hum_runs } : {}),
+          });
+        }
+      }
     });
     Object.assign(CONFIG.pricing.payg, {
       min: cat.payg.min, max: cat.payg.max, step: cat.payg.step, baseUsd: cat.payg.base_usd, usdPerStep: cat.payg.usd_per_step,
@@ -3624,53 +3634,54 @@ function humMode(t) {
   if (t?.humMode) return t.humMode;
   return humHasPlan() ? 'pro' : 'free';
 }
-/** Free/Pro daily allowance. Free reads BOOT.freeHumanize (runsLeft / userDaily / guestDaily). */
-function humQuota(mode = humMode(toolState('humanizer'))) {
-  if (mode === 'free') {
-    const fh = CONFIG.freeHumanize || {};
-    const lim = state.signedIn ? (fh.userDaily ?? 5) : (fh.guestDaily ?? 3);
-    const left = fh.runsLeft != null ? Number(fh.runsLeft) : lim;
-    const words = state.signedIn ? (fh.userWords ?? 500) : (fh.guestWords ?? 500);
-    return { runs: lim, left: Math.max(0, left), words };
-  }
+/** One shared daily allowance + word cap for Free and Pro (plan if subscribed, else free tier). */
+function humQuota() {
   const plan = humPlan();
-  if (!plan) return { locked: true, words: CONFIG.humVersions?.free?.words ?? 500 };
-  const sp = state.billing?.plan || BOOT.plan;
-  const a = sp?.allowances?.find(x => x.feature === 'humanize');
-  let lim = plan.hum?.runs ?? 20, left = lim;
-  if (sp && Array.isArray(sp.allowances)) {
-    if (a) { lim = a.limit; left = Math.max(0, a.limit - a.used); }
-    else { left = 0; } // plan has no free Humanizer Pro runs (e.g. Basic)
+  if (plan) {
+    const sp = state.billing?.plan || BOOT.plan;
+    const a = sp?.allowances?.find(x => x.feature === 'humanize');
+    let lim = plan.hum?.runs ?? 20, left = lim;
+    if (sp && Array.isArray(sp.allowances)) {
+      if (a) { lim = a.limit; left = Math.max(0, a.limit - a.used); }
+      else { left = 0; } // plan has no Humanizer runs (e.g. Basic)
+    }
+    return { runs: lim, left, words: plan.hum?.words ?? 1000, pool: 'plan' };
   }
-  return { runs: lim, left, words: plan.hum?.words ?? 1000 };
+  const fh = CONFIG.freeHumanize || {};
+  const lim = state.signedIn ? (fh.userDaily ?? 5) : (fh.guestDaily ?? 3);
+  const left = fh.runsLeft != null ? Number(fh.runsLeft) : lim;
+  const words = state.signedIn ? (fh.userWords ?? 500) : (fh.guestWords ?? 500);
+  return { runs: lim, left: Math.max(0, left), words, pool: 'free' };
 }
-function humBumpFreeUse(runsLeft) {
+function humBumpUse(runsLeft) {
+  const q = humQuota();
+  if (q.pool === 'plan') {
+    const sp = state.billing?.plan || BOOT.plan;
+    const a = sp?.allowances?.find(x => x.feature === 'humanize');
+    if (a && a.used < a.limit) a.used += 1;
+    return;
+  }
   const fh = CONFIG.freeHumanize || (CONFIG.freeHumanize = {});
   if (typeof runsLeft === 'number' && Number.isFinite(runsLeft)) fh.runsLeft = Math.max(0, runsLeft);
   else if (fh.runsLeft != null) fh.runsLeft = Math.max(0, Number(fh.runsLeft) - 1);
 }
-function humBumpProUse() {
-  const sp = state.billing?.plan || BOOT.plan;
-  const a = sp?.allowances?.find(x => x.feature === 'humanize');
-  if (a && a.used < a.limit) a.used += 1;
-}
-function humQuotaLine(mode = humMode(toolState('humanizer'))) {
-  const q = humQuota(mode);
+function humBumpFreeUse(runsLeft) { humBumpUse(runsLeft); }
+function humBumpProUse() { humBumpUse(); }
+function humQuotaLine() {
+  const q = humQuota();
   const cost = estLabel('humanizer');
-  if (q.locked) return 'Pro comes with Basic, Pro and Max';
-  if (mode === 'free') {
-    if (!q.left) return 'Free runs used up today';
-    return `${q.left} of ${q.runs} free runs left today`;
+  if (q.pool === 'plan') {
+    if (!q.left) return `Daily limit reached · ${cost} a run`;
+    return `${q.left} of ${q.runs} runs left today`;
   }
-  if (!q.left) return `Pro limit reached · ${cost} a run`;
-  return `${q.left} of ${q.runs} Pro runs left today`;
+  if (!q.left) return 'Free runs used up today';
+  return `${q.left} of ${q.runs} free runs left today`;
 }
-function humQuotaHtml(t) {
-  const mode = humMode(t);
-  return `<span class="hum-quota" title="${esc(humQuotaLine(mode))}">${esc(humQuotaLine(mode))}</span>`;
+function humQuotaHtml() {
+  return `<span class="hum-quota" title="${esc(humQuotaLine())}">${esc(humQuotaLine())}</span>`;
 }
-function humWordLimit(mode = humMode(toolState('humanizer'))) {
-  return humQuota(mode).words || (mode === 'pro' ? 1000 : 500);
+function humWordLimit() {
+  return humQuota().words || 500;
 }
 
 function renderHumanizerPage(item, t, flow, tourName) {
@@ -3697,7 +3708,7 @@ function renderHumanizerPage(item, t, flow, tourName) {
         </div>
         <input type="file" id="file-input" accept=".txt,.doc,.docx,.pdf" hidden>
       </div>
-      <p class="hum-quota-line muted small" id="hum-quota">${humQuotaHtml(t)}</p>
+      <p class="hum-quota-line muted small" id="hum-quota">${humQuotaHtml()}</p>
       <div class="tool-bar">
         <span class="tool-meta" id="hum-meta">
           <span class="counter" id="counter" aria-live="polite"></span>
@@ -5820,7 +5831,7 @@ async function edHumanize(kind) {
   try {
     const packed = texts.length === 1 ? texts[0] : edPack(texts);
     const packedHtml = htmls.length === 1 ? htmls[0] : null;
-    const data = await API.humanize(packed, 'workspace_partial', packedHtml);
+    const data = await API.humanize(packed, 'workspace_partial', packedHtml, { mode: 'pro' });
     if (typeof data.balance === 'number') state.balance = data.balance;
     parts = texts.length === 1 ? [String(data.humanized_text || '')] : edUnpack(data.humanized_text, texts.length);
     htmlParts = texts.length === 1 && data.humanized_html
@@ -8685,7 +8696,7 @@ function bindTextTool(id) {
 
   function refresh() {
     if (!counter) return;
-    const limit = id === 'humanizer' ? humWordLimit(humMode(t)) : CONFIG.wordLimit;
+    const limit = id === 'humanizer' ? humWordLimit() : CONFIG.wordLimit;
     const words = countWords(t.text), over = words > limit;
     counter.textContent = `${fmtNum(words)} / ${fmtNum(limit)} words${over ? ' — too long' : ''}`;
     counter.classList.toggle('over', over);
@@ -8756,9 +8767,10 @@ async function runTool(id, paid = false) {
   // Free daily runs gone → Get Humanizer Pro. Pro daily allowance gone → upgrade / credits.
   if (id === 'humanizer' && !paid) {
     const mode = humMode(t);
-    if (mode === 'free' && state.signedIn && !humQuota('free').left) return openProDialog();
+    const q = humQuota();
     if (mode === 'pro' && !humHasPlan()) return openProDialog();
-    if (mode === 'pro' && humHasPlan() && !humQuota('pro').left) return openLimitDialog();
+    // One shared counter for Free and Pro.
+    if (!q.left) return q.pool === 'plan' ? openLimitDialog() : openProDialog();
   }
   const onPage = () => currentRoute() === item.route;
   // Sync from the live editor before the run (render may have stale state).
@@ -8768,16 +8780,17 @@ async function runTool(id, paid = false) {
   if (onPage()) { $('#result').innerHTML = resultHtml(id); $('#run-btn').disabled = true; }
   const source = t.text, sourceHtml = t.html || '';
   try {
-    const data = await API.humanize(source, 'standalone', sourceHtml || null);
+    const mode = id === 'humanizer' ? humMode(t) : null;
+    const data = await API.humanize(source, 'standalone', sourceHtml || null, mode ? { mode } : {});
     const out = String(data.humanized_text || data.text || '').trim();
     if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
     t.status = 'done';
     t.result = { text: out, html: data.humanized_html || '', file: t.fileName || '' };
     if (!state.signedIn) state.guestRunsUsed = data.free_runs_left === 0 ? 1 : 0;
     if (id === 'humanizer') {
-      if (data.free_run || data.free_runs_left != null) humBumpFreeUse(data.free_runs_left);
-      else if (humMode(t) === 'free' && !Number(data.coins_charged)) humBumpFreeUse();
-      if (state.signedIn && humMode(t) === 'pro' && !Number(data.coins_charged)) humBumpProUse();
+      // Shared Free|Pro counter: free_run bumps free pool; plan allowance bumps plan pool.
+      if (data.free_run) humBumpUse(data.free_runs_left);
+      else if (state.signedIn && !Number(data.coins_charged)) humBumpUse();
     }
     if (state.signedIn) {
       addDoc(source, id, { text: out }); loadCredits();
@@ -8814,6 +8827,13 @@ function apiErrorInfo(err, { intent } = {}) {
       const need = data.required ?? data.cost, have = data.balance ?? state.balance;
       return { message: need != null ? `Not enough credits: this needs ${need}, you have ${have}.` : 'Not enough credits for this run.', action: 'topup' };
     }
+    case 'FREE_LIMIT_REACHED':
+      if (intent === 'humanizer') { openProDialog(); return { handled: true, message: err.message }; }
+      return { message: err.message || 'Free runs used up today.' };
+    case 'FREE_WORD_LIMIT':
+    case 'PRO_WORD_LIMIT':
+    case 'WORD_LIMIT':
+      return { message: err.message || (data.max_words ? `Up to ${fmtNum(data.max_words)} words per run.` : 'This text is too long.') };
     case 'LOGIN_REQUIRED':
       return { message: 'The humanizer service is temporarily unavailable. Your credits weren’t charged. Try again in a few minutes.' };
     case 'NO_CHANGE':
@@ -9152,7 +9172,7 @@ function ltHumMode() {
 const ltMax = () => {
   if (lt.tab === 'detect') return ltApp() ? CONFIG.detector.maxWords : CONFIG.landing.tryIt.maxWords;
   if (!ltApp()) return CONFIG.landing.tryIt.maxWords;
-  return humWordLimit(ltHumMode());
+  return humWordLimit();
 };
 // Free tries are one-time per tool on this device (3 humanizer + 3 detector). No 24h reset.
 function ltTries(tab = lt.tab) {
@@ -9222,7 +9242,7 @@ function landTryHtml({ intro = false } = {}) {
             : `<div class="input qd-text rich-input" id="lt-text" contenteditable="true" role="textbox" aria-multiline="true"
                 data-placeholder="${esc(T.placeholder)}" spellcheck="false">${lt.html ? sanitizePasteHtml(lt.html) : (lt.text ? markdownLiteToHtml(lt.text) : '')}</div>`}
         </div>
-        ${!det && app ? `<p class="lt-quota muted small">${esc(humQuotaLine(mode))}</p>` : ''}
+        ${!det && app ? `<p class="lt-quota muted small">${esc(humQuotaLine())}</p>` : ''}
         <div class="tool-bar">
           <span class="lt-meta"><span class="muted small" id="lt-count">${ltCountText()}</span></span>
           <span class="spacer"></span>
@@ -9384,9 +9404,9 @@ async function runLandTry() {
   if (!app && !ltLeft(tab)) return ltLimit();
   if (app && !det) {
     const mode = ltHumMode();
-    if (mode === 'free' && !humQuota('free').left) return openProDialog();
+    const q = humQuota();
     if (mode === 'pro' && !humHasPlan()) return openProDialog();
-    if (mode === 'pro' && humHasPlan() && !humQuota('pro').left) return openLimitDialog();
+    if (!q.left) return q.pool === 'plan' ? openLimitDialog() : openProDialog();
   }
   Object.assign(lt, { status: 'loading', result: null, error: null });
   rerenderLandTry('#lt-result-h');
@@ -9396,11 +9416,13 @@ async function runLandTry() {
       lt.result = { kind: 'detect', ai: Math.round(data.ai_percent), sents: data.sentences || [], text };
       if (app) addDoc(text, 'turnitin', { title: 'Pasted text', ai: lt.result.ai, text });
     } else {
-      const data = await API.humanize(text, 'standalone', htmlIn || null);
+      const mode = app ? ltHumMode() : 'free';
+      const data = await API.humanize(text, 'standalone', htmlIn || null, { mode });
       const out = String(data.humanized_text || data.text || '').trim();
       if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
       lt.result = { kind: 'humanize', out, html: data.humanized_html || '', text };
-      if (data.free_run || data.free_runs_left != null) humBumpFreeUse(data.free_runs_left);
+      if (data.free_run) humBumpUse(data.free_runs_left);
+      else if (app && state.signedIn && !Number(data.coins_charged)) humBumpUse();
       if (app) { addDoc(text, 'humanizer', { title: 'Pasted text', text: out }); loadCredits(); }
       else if (data.free_runs_left === 0) state.guestRunsUsed = 1;
     }

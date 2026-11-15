@@ -23,6 +23,8 @@ PLANS: dict[str, dict[str, Any]] = {
         "name": "Basic",
         "usd": 9,
         "credits": 300,
+        # Humanizer Pro word cap when paying with credits (Basic has no free Pro runs).
+        "words": 1000,
         "free": {"assignment": ("period", 1), "presentation": ("period", 1)},
         "unlimited": ("cite", "detect"),
         "veil": False,
@@ -32,6 +34,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "name": "Pro",
         "usd": 19,
         "credits": 1000,
+        "words": 1000,
         "free": {"humanize": ("day", 15), "assignment": ("period", 3), "presentation": ("period", 5)},
         "unlimited": ("cite", "detect", "check"),
         "veil": True,
@@ -41,6 +44,7 @@ PLANS: dict[str, dict[str, Any]] = {
         "name": "Max",
         "usd": 39,
         "credits": 2500,
+        "words": 2000,
         "free": {
             "humanize": ("day", 40),
             "assignment": ("period", 8),
@@ -392,9 +396,29 @@ def payment_history(user_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
     return items[:limit]
 
 
+def humanize_word_limit(user_id: int | None = None) -> int:
+    """Words per Pro Humanizer run for this user (plan cap, else 1000)."""
+    if user_id is not None:
+        current = active_plan(int(user_id))
+        if current:
+            plan = PLANS.get(current["plan_id"]) or {}
+            return max(1, int(plan.get("words") or 1000))
+    return 1000
+
+
 def catalog() -> dict[str, Any]:
     return {
         "plan_days": PLAN_DAYS,
-        "plans": [{"id": p["id"], "name": p["name"], "usd": p["usd"], "credits": p["credits"]} for p in PLANS.values()],
+        "plans": [
+            {
+                "id": p["id"],
+                "name": p["name"],
+                "usd": p["usd"],
+                "credits": p["credits"],
+                "words": int(p.get("words") or 1000),
+                "hum_runs": (p["free"].get("humanize") or (None, None))[1],
+            }
+            for p in PLANS.values()
+        ],
         "payg": dict(PAYG),
     }

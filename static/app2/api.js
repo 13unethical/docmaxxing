@@ -101,13 +101,15 @@
       return { text: String(data.text || ''), html: data.html ? String(data.html) : '' };
     },
 
-    async humanize(text, source = 'standalone', html = null) {
+    async humanize(text, source = 'standalone', html = null, opts = {}) {
       const plain = String(text || '');
       if (isCyrillic(plain)) {
         throw new ApiError("Russian text isn't supported yet. Paste English text to humanize it.", { code: 'RU_NOT_SUPPORTED' });
       }
       const body = { text: plain, source };
       if (html && String(html).trim()) body.html = String(html);
+      // Free and Pro are separate counters + word caps — always send which one the UI selected.
+      if (opts && opts.mode) body.mode = opts.mode;
       return request('POST', '/api/browser/providers/stealthwriter/humanize', { json: body });
     },
     editor: {

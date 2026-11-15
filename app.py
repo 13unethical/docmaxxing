@@ -4073,6 +4073,10 @@ def _humanize_word_cap_error(text: str):
 def _free_humanize_gate(user: dict | None, text: str, *, english_only: bool):
     """Decide whether this humanize request is a free run.
 
+    Free|Pro UI share one counter: subscribers always use the plan/credits path;
+    everyone else uses the free daily pool. Word caps are also shared (see
+    ``_humanize_mode_word_cap_error``).
+
     Returns ``(subject, None)`` for a reserved free run, ``(None, None)`` when the user pays
     as usual, or ``(None, response)`` when a guest is blocked.
     """
@@ -4151,6 +4155,7 @@ def _free_humanize_gate(user: dict | None, text: str, *, english_only: bool):
         g.free_humanize_ip_subject = ip_subject
         return subject, None
 
+    # Subscribers share one Humanizer counter (plan/credits) — Free|Pro toggle does not split it.
     if not eligible or words > lim.user_words or _has_active_plan(user):
         return None, None
     subject = free_humanize.user_subject(int(user["id"]))
@@ -4166,6 +4171,42 @@ def _has_active_plan(user: dict) -> bool:
         return active_plan(int(user["id"])) is not None
     except Exception:
         return False
+
+
+def _humanize_shared_word_cap(user: dict | None) -> int:
+    """One word limit for Free and Pro: plan words if subscribed, else free-tier words."""
+    from services import free_humanize
+    from services.economy.plans import humanize_word_limit
+
+    lim = free_humanize.limits()
+    if user is None:
+        return int(lim.guest_words)
+    if _has_active_plan(user):
+        return int(humanize_word_limit(int(user["id"])))
+    return int(lim.user_words)
+
+
+def _humanize_mode_word_cap_error(user: dict | None, text: str):
+    """Same word cap for Free and Pro (subscription if any, otherwise free tier)."""
+    from services import free_humanize
+
+    cap = _humanize_shared_word_cap(user)
+    words = free_humanize.count_words(text)
+    if words <= cap:
+        return None
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": "WORD_LIMIT",
+                "message": f"Up to {cap:,} words per run"
+                + (" on your plan." if user and _has_active_plan(user) else "."),
+                "max_words": cap,
+                "words": words,
+            }
+        ),
+        403,
+    )
 
 
 def _release_free_run(subject: str) -> None:
@@ -6357,6 +6398,10 @@ def api_browser_stealthwriter_humanize():
         blocked = economy_auth.email_verification_gate()
         if blocked is not None:
             return blocked
+    # Free|Pro share one word cap (plan if subscribed, else free-tier).
+    shared_cap = _humanize_mode_word_cap_error(user, text)
+    if shared_cap is not None:
+        return shared_cap
     free_subject, refused = _free_humanize_gate(user, text, english_only=True)
     if refused is not None:
         return refused
