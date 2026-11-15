@@ -165,6 +165,15 @@ class AdminService:
                 (1 if is_admin else 0, user_id),
             )
 
+        plan = None
+        if is_admin:
+            try:
+                from .plans import ensure_admin_max
+
+                plan = ensure_admin_max(int(user_id))
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to grant Max plan to new admin user_id=%s", user_id)
+
         log_activity(
             "admin.role_changed",
             category="admin",
@@ -172,12 +181,13 @@ class AdminService:
             user_email=row["email"],
             actor_id=actor_id,
             summary=f"{'Granted' if is_admin else 'Revoked'} admin for {row['email']}",
-            details={"is_admin": bool(is_admin)},
+            details={"is_admin": bool(is_admin), "plan": (plan or {}).get("plan_id")},
         )
         return {
             "userId": user_id,
             "email": row["email"],
             "isAdmin": bool(is_admin),
+            "plan": plan,
         }
 
     def delete_user(self, user_id: int, *, actor_id: int) -> dict[str, Any]:
@@ -399,6 +409,12 @@ def grant_admin_to_verified_account(email: str) -> dict[str, Any]:
         if int(row["is_blocked"] or 0):
             raise AdminError("The account is blocked.")
         conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (int(row["id"]),))
+    try:
+        from .plans import ensure_admin_max
+
+        ensure_admin_max(int(row["id"]))
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to grant Max plan to bootstrap admin id=%s", row["id"])
     log_activity(
         "admin.role_changed",
         category="admin",

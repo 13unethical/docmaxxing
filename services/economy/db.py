@@ -166,8 +166,9 @@ CREATE TABLE IF NOT EXISTS daily_stats (
 CREATE TABLE IF NOT EXISTS site_settings (
     id                             INTEGER PRIMARY KEY CHECK (id = 1),
     is_humanizer_discount_active   INTEGER NOT NULL DEFAULT 0,
-    humanizer_discount_percent     INTEGER NOT NULL DEFAULT 50,
+    humanizer_discount_percent     INTEGER NOT NULL DEFAULT 0,
     humanizer_daily_limit          INTEGER NOT NULL DEFAULT 50,
+    humanizer_credit_price         INTEGER NOT NULL DEFAULT 25,
     turnitin_global_balance        INTEGER NOT NULL DEFAULT 0,
     auto_discount_enabled          INTEGER NOT NULL DEFAULT 0,
     auto_discount_time             TEXT NOT NULL DEFAULT '20:00',

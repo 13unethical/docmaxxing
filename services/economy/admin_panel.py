@@ -234,7 +234,14 @@ def _hidden_ids(conn) -> set[int]:
 
 
 def _client_user(u: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
+    from .plans import active_plan
+
     joined = _parse(u.get("created_at"))
+    plan = None
+    try:
+        plan = active_plan(int(u["id"]))
+    except Exception:  # noqa: BLE001
+        plan = None
     return {
         "id": int(u["id"]),
         "name": u.get("name") or "—",
@@ -250,6 +257,10 @@ def _client_user(u: dict[str, Any], now: datetime | None = None) -> dict[str, An
         "isAdmin": bool(u.get("is_admin")),
         "accountFlag": u.get("account_flag"),
         "blocked": bool(u.get("is_blocked")),
+        "planId": (plan or {}).get("plan_id"),
+        "planName": (plan or {}).get("name"),
+        "planDaysLeft": (plan or {}).get("days_left"),
+        "planExpiresAt": (plan or {}).get("expires_at"),
     }
 
 
@@ -377,6 +388,69 @@ def adjust_credits(user_id: int, delta: int, *, reason: str, admin_id: int) -> d
             raise AdminPanelError("The balance is already 0.")
         tx = wallet.debit(int(user_id), amount, "admin_adjust", meta=meta)
     return {"userId": int(user_id), "balance": int(tx["balance_after"]), "delta": int(tx["credits"])}
+
+
+def set_user_plan(
+    user_id: int,
+    *,
+    plan_id: str | None,
+    days: int | None = None,
+    admin_id: int,
+) -> dict[str, Any]:
+    """Grant Basic/Pro/Max for ``days``, or clear the pass when ``plan_id`` is empty."""
+    from .activity_log import log_activity
+    from .plans import PLAN_DAYS, clear_plan, get_plan, grant_plan, plan_summary
+
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id, email, is_admin FROM users WHERE id = ?", (int(user_id),)
+        ).fetchone()
+        if row is None:
+            raise AdminPanelError("User not found.")
+
+    raw = (plan_id or "").strip().lower()
+    if not raw or raw in {"none", "free", "off"}:
+        if int(row["is_admin"] or 0):
+            raise AdminPanelError("Admins keep Max. Remove admin access first to clear the plan.")
+        clear_plan(int(user_id))
+        log_activity(
+            "admin.plan_cleared",
+            category="admin",
+            user_id=int(user_id),
+            user_email=row["email"],
+            actor_id=int(admin_id),
+            summary=f"Cleared plan for {row['email']}",
+            details={"plan_id": None},
+        )
+        return {"userId": int(user_id), "plan": None}
+
+    if get_plan(raw) is None:
+        raise AdminPanelError("Unknown plan. Use basic, pro or max.")
+    length = int(days if days is not None else PLAN_DAYS)
+    if length < 1 or length > 36500:
+        raise AdminPanelError("Days must be between 1 and 36500.")
+    # Admins always land on Max — ignore requests to put an admin on a lower plan.
+    if int(row["is_admin"] or 0) and raw != "max":
+        raw = "max"
+        length = max(length, 3650)
+    grant_plan(
+        int(user_id),
+        raw,
+        days=length,
+        order_ref=f"admin:{int(admin_id)}",
+        extend_same=False,
+    )
+    summary = plan_summary(int(user_id))
+    log_activity(
+        "admin.plan_granted",
+        category="admin",
+        user_id=int(user_id),
+        user_email=row["email"],
+        actor_id=int(admin_id),
+        summary=f"Granted {raw} ({length}d) to {row['email']}",
+        details={"plan_id": raw, "days": length},
+    )
+    return {"userId": int(user_id), "plan": summary}
 
 
 def _guard_target(conn, user_id: int, admin_id: int) -> Any:

@@ -347,6 +347,12 @@ except Exception:  # noqa: BLE001
 
     _logging.getLogger(__name__).exception("telegram poller failed to start")
 bootstrap_admin_from_env()
+try:
+    _admin_max_n = plans_service.ensure_all_admins_max()
+    if _admin_max_n:
+        app.logger.info("ensured Max plan for %s admin account(s)", _admin_max_n)
+except Exception:  # noqa: BLE001
+    app.logger.exception("ensure_all_admins_max failed at startup")
 wallet = WalletService()
 paddle_purchases = PaddlePurchaseService()
 usage_service = UsageService()
@@ -981,6 +987,27 @@ def _redirect_old_pages_to_new_app():
 def _activity_ledger_hook(response):
     from services.economy.activity_log import log_request
 
+    try:
+        status = int(getattr(response, "status_code", 0) or 0)
+        path = request.path or ""
+        if status >= 500 and path.startswith("/api/") and not app.testing:
+            from services.alerts.telegram_alerts import notify_site_error
+
+            uid = None
+            try:
+                user = economy_auth.current_user()
+                if user and user.get("id") is not None:
+                    uid = int(user["id"])
+            except Exception:  # noqa: BLE001
+                uid = None
+            notify_site_error(
+                path=path,
+                method=request.method,
+                status_code=status,
+                user_id=uid,
+            )
+    except Exception:  # noqa: BLE001
+        pass
     return log_request(response)
 
 
@@ -2094,6 +2121,17 @@ def api_admin_site_settings():
                     "error": "auto_discount_min_remaining must be an integer.",
                 }
             ), 400
+    if "humanizer_credit_price" in body:
+        try:
+            kwargs["humanizer_credit_price"] = int(body["humanizer_credit_price"])
+        except (TypeError, ValueError):
+            return jsonify(
+                {"success": False, "error": "humanizer_credit_price must be an integer."}
+            ), 400
+        if int(kwargs["humanizer_credit_price"]) < 1:
+            return jsonify(
+                {"success": False, "error": "humanizer_credit_price must be at least 1."}
+            ), 400
     if not kwargs:
         return jsonify({"success": False, "error": "No settings provided."}), 400
     try:
@@ -2441,6 +2479,29 @@ def api_admin_panel_credits(user_id: int):
     )
 
 
+@app.post("/api/admin/panel/users/<int:user_id>/plan")
+@economy_auth.admin_required
+def api_admin_panel_plan(user_id: int):
+    """Grant or clear a subscription pass for any user."""
+    from services.economy import admin_panel
+
+    body = request.get_json(silent=True) or {}
+    plan_id = body.get("plan_id")
+    days = body.get("days")
+    if days is not None:
+        try:
+            days = int(days)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "days must be a whole number."}), 400
+    return _admin_panel_call(
+        admin_panel.set_user_plan,
+        user_id,
+        plan_id=None if plan_id is None else str(plan_id),
+        days=days,
+        admin_id=int(economy_auth.current_user_id()),
+    )
+
+
 @app.post("/api/admin/panel/users/<int:user_id>/block")
 @economy_auth.admin_required
 def api_admin_panel_block(user_id: int):
@@ -2505,6 +2566,35 @@ def api_admin_panel_activity():
         limit=_admin_int("limit", 60),
         offset=_admin_int("offset", 0),
     )
+
+
+@app.get("/api/admin/panel/blog")
+@economy_auth.admin_required
+def api_admin_panel_blog_list():
+    from services import spa_blog_cms
+
+    return jsonify({"success": True, "posts": spa_blog_cms.list_admin_posts()})
+
+
+@app.put("/api/admin/panel/blog")
+@economy_auth.admin_required
+def api_admin_panel_blog_save():
+    from services import spa_blog_cms
+    from services.economy.activity_log import log_activity
+
+    body = request.get_json(silent=True) or {}
+    posts = body.get("posts")
+    if not isinstance(posts, list):
+        return jsonify({"success": False, "error": "posts must be a list."}), 400
+    saved = spa_blog_cms.save_admin_posts(posts)
+    log_activity(
+        "admin.blog_saved",
+        category="admin",
+        actor_id=int(economy_auth.current_user_id()),
+        summary=f"Blog CMS saved ({len(saved)} articles)",
+        details={"count": len(saved)},
+    )
+    return jsonify({"success": True, "posts": saved, "public": spa_blog_cms.public_boot()})
 
 
 @app.route("/admin/dataset-stats")
@@ -3360,6 +3450,24 @@ def site_webmanifest():
 @app.errorhandler(500)
 def internal_error(_error):
     """Unhandled exceptions: Flask has already logged them; the client never sees their text."""
+    try:
+        from services.alerts.telegram_alerts import notify_site_error
+        from services.economy import auth as _auth_for_alert
+
+        user = None
+        try:
+            user = _auth_for_alert.current_user()
+        except Exception:  # noqa: BLE001
+            user = None
+        notify_site_error(
+            path=request.path,
+            method=request.method,
+            status_code=500,
+            error=str(getattr(_error, "description", None) or _error or "INTERNAL_ERROR")[:240],
+            user_id=int(user["id"]) if user and user.get("id") is not None else None,
+        )
+    except Exception:  # noqa: BLE001
+        pass
     message = "Something went wrong. Please try again."
     if request.path.startswith("/api/"):
         return jsonify({"success": False, "error": "INTERNAL_ERROR", "message": message}), 500
@@ -4214,6 +4322,41 @@ def _free_humanize_boot(user: dict | None) -> dict[str, Any]:
     }
 
 
+def _free_detect_boot(user: dict | None) -> dict[str, Any]:
+    """Free AI-detector allowance for the app's first render."""
+    import hashlib
+
+    from services import ai_detector, free_humanize, rate_limit
+
+    lim = ai_detector.limits()
+    source = rate_limit.source_id(free_humanize.client_ip(request))
+    network = hashlib.sha256(f"{app.secret_key}|{source}".encode("utf-8")).hexdigest()
+    if user is None:
+        subject = "detect:" + free_humanize.guest_subject(
+            source, free_humanize.guest_session_id(session), str(app.secret_key)
+        )
+        left = free_humanize.remaining_today(subject, lim.guest_daily)
+        left = min(left, free_humanize.remaining_today(f"detect:guest-net:{network}", lim.guest_ip_daily))
+        daily = lim.guest_daily
+    else:
+        subject = f"detect:user:{int(user['id'])}"
+        left = free_humanize.remaining_today(subject, lim.user_daily)
+        if not economy_auth.user_email_verified(user):
+            left = min(
+                left,
+                free_humanize.remaining_today(f"detect:unverified-net:{network}", lim.unverified_ip_daily),
+            )
+        daily = lim.user_daily
+    return {
+        "guestWords": lim.guest_words,
+        "guestDaily": lim.guest_daily,
+        "userWords": lim.user_words,
+        "userDaily": lim.user_daily,
+        "checksLeft": left,
+        "daily": daily,
+    }
+
+
 _HUMANIZE_FAILED_MESSAGE = "Humanization failed. Credits for this run were not kept. Please try again."
 
 
@@ -4897,6 +5040,17 @@ def _app_v2_boot() -> dict[str, Any]:
     }
     boot["freeHumanize"] = _free_humanize_boot(user)
     boot["guestHumanizeUsed"] = user is None and boot["freeHumanize"]["runsLeft"] <= 0
+    try:
+        boot["freeDetect"] = _free_detect_boot(user)
+    except Exception:
+        boot["freeDetect"] = {
+            "guestWords": 1500,
+            "guestDaily": 10,
+            "userWords": 5000,
+            "userDaily": 50,
+            "checksLeft": 10,
+            "daily": 10,
+        }
     if user:
         avatar = user.get("avatar_file")
         meta = economy_auth.auth_meta(int(user["id"]))
@@ -4911,6 +5065,11 @@ def _app_v2_boot() -> dict[str, Any]:
             "linkedProviders": list(meta.get("linkedProviders") or []),
         }
         boot["balance"] = wallet.get_balance(user["id"])
+        if boot["user"].get("isAdmin"):
+            try:
+                plans_service.ensure_admin_max(int(user["id"]))
+            except Exception:
+                app.logger.exception("ensure_admin_max failed user_id=%s", user["id"])
         boot["plan"] = plans_service.plan_summary(int(user["id"]))
         boot["renewsAt"] = _credits_renew_at(int(user["id"]))
         boot["veil"] = _veil_client_status(int(user["id"]))
@@ -4938,7 +5097,14 @@ def _app_v2_boot() -> dict[str, Any]:
 
 
 def _spa_blog_boot() -> dict[str, Any]:
-    """SPA #/blog data — same posts/covers as the DocMaxxing prototype (#/blog)."""
+    """SPA #/blog data — admin CMS when present, else seeded blog_posts.json."""
+    from services import spa_blog_cms
+
+    try:
+        return spa_blog_cms.public_boot()
+    except Exception:
+        app.logger.exception("spa blog cms boot failed; falling back to seed JSON")
+
     import json
 
     path = Path(app.root_path) / "static" / "app2" / "blog_posts.json"

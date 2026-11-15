@@ -172,9 +172,10 @@ def log_request(response: Any) -> Any:
         status = int(getattr(response, "status_code", 0) or 0)
         endpoint = request.endpoint or ""
         user_id = ctx.get("actor_id")
+        cat = "error" if status >= 500 else category_for_path(path)
         log_activity(
             "request.download" if is_download else f"request.{method.lower()}",
-            category=category_for_path(path),
+            category=cat,
             user_id=user_id,
             actor_id=user_id,
             summary=f"{method} {path} → {status}",

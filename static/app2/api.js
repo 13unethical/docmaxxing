@@ -318,6 +318,7 @@
         user: (id) => request('GET', `${P}/users/${id}`),
         usersCsvUrl: `${P}/users.csv`,
         credits: (id, delta, reason) => request('POST', `${P}/users/${id}/credits`, { json: { delta, reason } }),
+        plan: (id, planId, days) => request('POST', `${P}/users/${id}/plan`, { json: { plan_id: planId, days } }),
         block: (id, blocked, removeBonus) =>
           request('POST', `${P}/users/${id}/block`, { json: { blocked, remove_bonus: !!removeBonus } }),
         blockMany: (ids) => request('POST', `${P}/users/block`, { json: { ids, remove_bonus: true } }),
@@ -331,6 +332,8 @@
         preflight: (browser) => request(browser ? 'POST' : 'GET', '/api/admin/pipeline-preflight' + (browser ? '?browser=1' : ''),
           { timeoutMs: browser ? 45000 : 15000 }),
         datasetStats: () => request('GET', '/api/admin/dataset-stats'),
+        blogList: () => request('GET', `${P}/blog`),
+        blogSave: (posts) => request('PUT', `${P}/blog`, { json: { posts } }),
       };
     })(),
 

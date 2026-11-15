@@ -169,6 +169,96 @@ def activate_plan(user_id: int, plan_id: str, *, order_ref: str | None = None) -
     return active_plan(user_id) or {}
 
 
+ADMIN_MAX_DAYS = 3650  # ~10 years — admins keep Max without renewing
+
+
+def grant_plan(
+    user_id: int,
+    plan_id: str,
+    *,
+    days: int | None = None,
+    order_ref: str | None = None,
+    extend_same: bool = False,
+) -> dict[str, Any]:
+    """Admin/manual grant: set ``plan_id`` for ``days`` from now (default 30).
+
+    Unlike checkout ``activate_plan``, this replaces the pass by default so an
+    admin can downgrade or re-issue cleanly. Pass ``extend_same=True`` to stack
+    days when the user already has the same plan.
+    """
+    plan = get_plan(plan_id)
+    if plan is None:
+        raise PlanError("Unknown plan.")
+    length = int(days if days is not None else PLAN_DAYS)
+    if length < 1 or length > 36500:
+        raise PlanError("Days must be between 1 and 36500.")
+    now = _now()
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM user_plans WHERE user_id = ?", (int(user_id),)).fetchone()
+        base = now
+        if (
+            extend_same
+            and row is not None
+            and row["plan_id"] == plan["id"]
+            and _parse(row["expires_at"]) > now
+        ):
+            base = _parse(row["expires_at"])
+        expires = base + timedelta(days=length)
+        conn.execute(
+            "INSERT INTO user_plans (user_id, plan_id, started_at, expires_at, order_ref, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, datetime('now')) "
+            "ON CONFLICT(user_id) DO UPDATE SET plan_id = excluded.plan_id, started_at = excluded.started_at, "
+            "expires_at = excluded.expires_at, order_ref = excluded.order_ref, updated_at = datetime('now')",
+            (
+                int(user_id),
+                plan["id"],
+                _stamp(now),
+                _stamp(expires),
+                order_ref or f"admin_grant:{plan['id']}",
+            ),
+        )
+    return active_plan(user_id) or {}
+
+
+def clear_plan(user_id: int) -> None:
+    """Remove the user's active pass (admin revoke)."""
+    with connect() as conn:
+        conn.execute("DELETE FROM user_plans WHERE user_id = ?", (int(user_id),))
+
+
+def ensure_admin_max(user_id: int) -> dict[str, Any] | None:
+    """Admins always get Max. Refresh when missing, wrong plan, or under 30 days left."""
+    current = active_plan(int(user_id))
+    if (
+        current
+        and current.get("plan_id") == "max"
+        and int(current.get("days_left") or 0) >= 30
+    ):
+        return current
+    return grant_plan(
+        int(user_id),
+        "max",
+        days=ADMIN_MAX_DAYS,
+        order_ref="admin_max",
+        extend_same=False,
+    )
+
+
+def ensure_all_admins_max() -> int:
+    """Grant Max to every ``is_admin`` account. Returns how many were (re)granted."""
+    with connect() as conn:
+        rows = conn.execute("SELECT id FROM users WHERE is_admin = 1").fetchall()
+    changed = 0
+    for row in rows:
+        before = active_plan(int(row["id"]))
+        after = ensure_admin_max(int(row["id"]))
+        if not before or before.get("plan_id") != "max" or (
+            after and int(after.get("days_left") or 0) > int(before.get("days_left") or 0)
+        ):
+            changed += 1
+    return changed
+
+
 def _period_key(window: str, started_at: str) -> str:
     return "day:" + _now().strftime("%Y-%m-%d") if window == "day" else "pass:" + started_at
 

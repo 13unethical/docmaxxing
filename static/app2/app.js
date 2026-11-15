@@ -1625,6 +1625,11 @@ const SERVER_TITLE = document.title;
     const step = CONFIG.tours.humanizer.steps.find(s => s.target === '#hum-meta');
     if (step) step.textGuest = `${freeHumanizeNote(false)} without an account. A free account raises it to ${freeHumanizeNote(true).replace(/^Free: up to /, '')}.`;
   }
+  if (BOOT.freeDetect) {
+    CONFIG.freeDetect = BOOT.freeDetect;
+    if (BOOT.freeDetect.userWords) CONFIG.detector.maxWords = BOOT.freeDetect.userWords;
+    if (BOOT.freeDetect.guestWords) CONFIG.detector.guestMaxWords = BOOT.freeDetect.guestWords;
+  }
   Object.assign(item('workspace'), { price: `${cr(c.humanizer)} per humanize` });
   if (BOOT.landing) Object.assign(CONFIG.landing.tryIt, { freeRuns: BOOT.landing.freeRuns, maxWords: BOOT.landing.maxWords });
   CONFIG.slides.price = cr(c.presentation);
@@ -2100,6 +2105,7 @@ function adminState() {
       loading: {}, err: {}, tick: {}, loadedAt: 0,
       period: 'today', excl: true,
       uFilter: 'all', uQuery: '', uOffset: 0, selId: null, uTab: 'overview', mode: 'add', amount: 50,
+      planId: 'max', planDays: 30, planDone: null,
       done: null, undo: null, lastReason: ADM_REASONS[0], busy: false,
       aCat: 'all', aQuery: '', hideBots: true, hideStaff: true, openId: null, older: false,
       draft: null, topup: 500, sess: null, savedMsg: false, saving: false,
@@ -2126,7 +2132,14 @@ async function admLoad(key) {
   if (state.adm !== s || t !== s.tick[key]) return;
   s.loading[key] = false;
   if (err) s.err[key] = err.message || 'Could not load.';
-  else { s[key] = data; if (key === 'ov') s.loadedAt = Date.now(); }
+  else {
+    s[key] = data;
+    if (key === 'ov') s.loadedAt = Date.now();
+    if (key === 'detail' && data?.user) {
+      s.planId = data.user.planId || (data.user.isAdmin ? 'max' : 'none');
+      if (data.user.isAdmin && (!s.planDays || s.planDays < 30)) s.planDays = 3650;
+    }
+  }
   if (isAdminRoute() && canAdmin()) rerenderAdmin();
 }
 // Called while rendering: start loading what the page needs, once
@@ -2339,13 +2352,14 @@ function renderAdminUsers() {
   const sel = admSelUser();
   const sub = t ? `${admFmt(t.all)} accounts · ${admFmt(t.real)} real · ${t.staff} staff · ${t.test} test` : 'Loading…';
   const body = !U
-    ? `<tr><td colspan="5" class="muted adm-empty">${s.err.users ? `${esc(s.err.users)} <button class="link-btn" data-act="adm-retry" data-v="users">Try again</button>` : 'Loading users…'}</td></tr>`
+    ? `<tr><td colspan="6" class="muted adm-empty">${s.err.users ? `${esc(s.err.users)} <button class="link-btn" data-act="adm-retry" data-v="users">Try again</button>` : 'Loading users…'}</td></tr>`
     : list.map(u => `<tr class="${u.id === s.selId ? 'is-sel' : ''} ${u.blocked ? 'is-blocked' : ''}">
             <td><div class="adm-user"><span class="avatar" aria-hidden="true">${esc(admInitial(u))}</span>
               <div><button class="adm-link" data-act="adm-open" data-id="${u.id}">${esc(u.name)}</button><span class="small muted">${esc(u.email)} · #${u.id}</span></div></div></td>
             <td class="adm-right ${u.credits === 0 ? 'adm-amber' : ''}">${admFmt(u.credits)}</td>
+            <td class="muted">${esc(u.planName || 'Free')}</td>
             <td>${admChip(u.flag)}</td><td class="muted">${esc(u.joined)}</td><td class="muted">${esc(u.last)}</td>
-          </tr>`).join('') || `<tr><td colspan="5" class="muted adm-empty">No users match.</td></tr>`;
+          </tr>`).join('') || `<tr><td colspan="6" class="muted adm-empty">No users match.</td></tr>`;
   const from = U && U.total ? U.offset + 1 : 0, to = U ? U.offset + list.length : 0;
   return `<div class="page adm-page adm-users ${sel ? 'has-drawer' : ''}">
     <div class="adm-users-main">
@@ -2359,7 +2373,7 @@ function renderAdminUsers() {
           <p class="small muted">Flagged for disposable email domains, shared IPs, the same device or look-alike emails. Check before blocking — flags can be wrong.</p></div>
           <button class="btn btn-sm btn-warn" data-act="adm-block-all" ${suspLeft.length && !s.busy ? '' : 'disabled'}>${suspLeft.length ? `Block all ${suspLeft.length}` : 'None left'}</button></div>` : ''}
       <div class="table-wrap"><table class="adm-table adm-users-table">
-        <thead><tr><th scope="col">User</th><th scope="col" class="adm-right">Credits</th><th scope="col">Flags</th><th scope="col">Joined ↓</th><th scope="col">Last active</th></tr></thead>
+        <thead><tr><th scope="col">User</th><th scope="col" class="adm-right">Credits</th><th scope="col">Plan</th><th scope="col">Flags</th><th scope="col">Joined ↓</th><th scope="col">Last active</th></tr></thead>
         <tbody>${body}</tbody>
       </table>
       <div class="adm-pager small muted"><span>${U ? (U.total ? `${from}–${to} of ${admFmt(U.total)}` : '0 shown') : ''}</span>
@@ -2373,7 +2387,7 @@ function renderAdminUsers() {
 function adminDrawerHtml(u) {
   const s = adminState(), f = u.flag, bal = u.credits;
   const det = s.detail && s.detail.user.id === u.id ? s.detail : null;
-  const delta = s.mode === 'add' ? s.amount : -Math.min(s.amount, bal);
+  const delta = s.mode === 'add' ? s.amount : s.mode === 'set' ? (Math.max(0, s.amount) - bal) : -Math.min(s.amount, bal);
   const after = bal + delta;
   const tabs = [['overview', 'Overview'], ['history', 'Credits history'], ['purchases', 'Purchases']];
   const self = admIsSelf(u), protectedUser = self || u.isAdmin;
@@ -2402,19 +2416,46 @@ function adminDrawerHtml(u) {
       <div class="adm-stats">
         <div><p class="small muted">Balance</p><p class="adm-stat">${admFmt(bal)}</p></div>
         <div><p class="small muted">Spent</p><p class="adm-stat">${admFmt(u.spent)}</p></div>
-        <div><p class="small muted">Paid</p><p class="adm-stat">${det ? '$' + admFmt(det.paidUsd) : '…'}</p></div>
+        <div><p class="small muted">Plan</p><p class="adm-stat">${esc(u.planName || 'Free')}</p></div>
       </div>
+      <section class="adm-box" aria-labelledby="adm-plan-h">
+        <h3 id="adm-plan-h">Subscription</h3>
+        <p class="small muted" style="margin:0 0 8px">${u.planName
+          ? `${esc(u.planName)} · ${admFmt(u.planDaysLeft ?? 0)} day${(u.planDaysLeft ?? 0) === 1 ? '' : 's'} left${u.isAdmin ? ' · admins keep Max' : ''}`
+          : 'No plan'}</p>
+        ${s.planDone ? `<div class="adm-ok" role="status"><span>${esc(s.planDone)}</span></div>` : ''}
+        <div class="seg adm-seg" role="radiogroup" aria-label="Plan">
+          ${[['none', 'Free'], ['basic', 'Basic'], ['pro', 'Pro'], ['max', 'Max']].map(([id, label]) =>
+            `<button role="radio" aria-checked="${(s.planId || u.planId || 'none') === id}" aria-selected="${(s.planId || u.planId || 'none') === id}" data-act="adm-plan" data-v="${id}" ${u.isAdmin && id !== 'max' ? 'disabled title="Admins stay on Max"' : ''}>${label}</button>`
+          ).join('')}</div>
+        <label class="field" for="adm-plan-days"><span>Days</span>
+          <input class="input field-input" id="adm-plan-days" type="number" inputmode="numeric" min="1" max="36500" step="1" value="${esc(String(s.planDays || 30))}" ${(s.planId || u.planId || 'none') === 'none' ? 'disabled' : ''}></label>
+        <div class="adm-chips" role="group" aria-label="Quick durations">${[7, 30, 90, 365, 3650].map(d =>
+          `<button class="adm-chip" aria-pressed="${d === (s.planDays || 30)}" data-act="adm-plan-days" data-v="${d}" ${(s.planId || u.planId || 'none') === 'none' ? 'disabled' : ''}>${d === 3650 ? '10y' : d + 'd'}</button>`
+        ).join('')}</div>
+        <button class="btn btn-primary btn-block" data-act="adm-plan-apply" ${s.busy ? 'disabled' : ''}>${
+          (s.planId || 'none') === 'none' ? 'Remove plan'
+            : `Give ${(s.planId || 'max').charAt(0).toUpperCase() + (s.planId || 'max').slice(1)} · ${admFmt(s.planDays || 30)} days`
+        }</button>
+      </section>
       <section class="adm-box" aria-labelledby="adm-adj-h">
         <h3 id="adm-adj-h">Adjust credits</h3>
         ${s.done ? `<div class="adm-ok" role="status"><span>${esc(s.done)}</span>${s.undo ? `<button class="link-btn" data-act="adm-undo" ${wait}>Undo</button>` : ''}</div>` : ''}
-        <div class="seg adm-seg" role="radiogroup" aria-label="Add or remove">
+        <div class="seg adm-seg" role="radiogroup" aria-label="Add, remove or set">
           <button role="radio" aria-checked="${s.mode === 'add'}" aria-selected="${s.mode === 'add'}" data-act="adm-mode" data-v="add">+ Add</button>
-          <button role="radio" aria-checked="${s.mode === 'remove'}" aria-selected="${s.mode === 'remove'}" data-act="adm-mode" data-v="remove">− Remove</button></div>
-        <div class="adm-chips" role="group" aria-label="Amount">${[10, 50, 100, 500].map(a => `<button class="adm-chip adm-amt" aria-pressed="${a === s.amount}" data-act="adm-amount" data-v="${a}">${s.mode === 'add' ? '+' : '−'}${a}</button>`).join('')}</div>
+          <button role="radio" aria-checked="${s.mode === 'remove'}" aria-selected="${s.mode === 'remove'}" data-act="adm-mode" data-v="remove">− Remove</button>
+          <button role="radio" aria-checked="${s.mode === 'set'}" aria-selected="${s.mode === 'set'}" data-act="adm-mode" data-v="set">Set to</button></div>
+        <label class="field" for="adm-amount"><span>${s.mode === 'set' ? 'New balance' : 'Amount'}</span>
+          <input class="input field-input" id="adm-amount" type="number" inputmode="numeric" min="0" step="1" value="${esc(String(s.amount || 0))}"></label>
+        <div class="adm-chips" role="group" aria-label="Quick amounts">${[0, 50, 100, 500, 1000, 5000].map(a => `<button class="adm-chip adm-amt" aria-pressed="${a === s.amount}" data-act="adm-amount" data-v="${a}">${s.mode === 'set' || a === 0 ? a : (s.mode === 'add' ? '+' : '−') + a}</button>`).join('')}</div>
         <label class="field" for="adm-reason"><span>Reason (saved to Activity)</span>
           <select class="select" id="adm-reason">${ADM_REASONS.map(r => `<option ${r === s.lastReason ? 'selected' : ''}>${r}</option>`).join('')}</select></label>
-        <p class="adm-newbal"><span class="muted">New balance</span><span>${admFmt(bal)} → <b class="${delta >= 0 ? 'adm-up' : 'adm-down'}">${admFmt(after)}</b></span></p>
-        <button class="btn btn-primary btn-block" data-act="adm-apply" ${s.busy || !delta ? 'disabled' : ''}>${s.mode === 'add' ? 'Add' : 'Remove'} ${admFmt(Math.abs(delta))} credits</button>
+        <p class="adm-newbal"><span class="muted">New balance</span><span>${admFmt(bal)} → <b class="${(s.mode === 'set' ? s.amount - bal : delta) >= 0 ? 'adm-up' : 'adm-down'}">${admFmt(s.mode === 'set' ? Math.max(0, s.amount) : after)}</b></span></p>
+        <button class="btn btn-primary btn-block" data-act="adm-apply" ${s.busy ? 'disabled' : ''}>${
+          s.mode === 'set' ? `Set balance to ${admFmt(Math.max(0, s.amount))}`
+            : s.mode === 'add' ? `Add ${admFmt(Math.max(0, s.amount))} credits`
+            : `Remove ${admFmt(Math.min(Math.max(0, s.amount), bal))} credits`
+        }</button>
       </section>
       <section class="adm-box" aria-labelledby="adm-acc-h">
         <h3 id="adm-acc-h">Account</h3>
@@ -2486,49 +2527,39 @@ function renderAdminActivity() {
 function admSaved() {
   const S = (adminState().ov || {}).settings || {};
   return {
-    mode: S.is_humanizer_discount_active ? 'manual' : S.auto_discount_enabled ? 'auto' : 'off',
-    percent: Number(S.humanizer_discount_percent ?? 50), humLimit: Number(S.humanizer_daily_limit ?? 50),
+    mode: 'off',
+    percent: 0, humLimit: Number(S.humanizer_daily_limit ?? 50),
+    humPrice: Number(S.humanizer_credit_price ?? 25),
     pool: Number(S.turnitin_global_balance || 0), autoTime: S.auto_discount_time || '20:00',
     autoMin: Number(S.auto_discount_min_remaining ?? 10), poolAdd: 0,
   };
 }
-/* ---------- Admin → Blog (client CMS; drafts/schedules in localStorage) ---------- */
-const BLOG_STORE_KEY = 'dm-admin-blog-v1';
+/* ---------- Admin → Blog (server CMS; publish → #/blog and /blog) ---------- */
 function blogSlugify(title) {
   return String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'article';
 }
-function blogStoreLoad() {
-  try { return JSON.parse(localStorage.getItem(BLOG_STORE_KEY) || 'null'); } catch { return null; }
-}
-function blogStoreSave(posts) {
-  localStorage.setItem(BLOG_STORE_KEY, JSON.stringify(posts));
-}
 function blogSeedPosts() {
-  const boot = (BOOT.blog?.posts || []).map((p) => ({
+  return (BOOT.blog?.posts || []).map((p) => ({
     id: p.slug, title: p.title, slug: p.slug, dek: p.dek || '', html: p.html || `<p>${esc(p.dek || '')}</p>`,
     status: 'published', publishedAt: p.date || new Date().toISOString().slice(0, 10),
-    scheduledAt: '', views30: Math.floor(80 + Math.random() * 400),
-    cover: p.cover || '', topic: p.topic || 'AI detection', tool: 'turnitin', toolPlace: 'aside',
+    scheduledAt: '', views30: 0,
+    cover: p.cover || {}, topic: p.cat || p.topic || 'ai', tool: '', toolPlace: 'aside',
     seoTitle: p.title, seoDesc: p.dek || '', ogTitle: p.title, ogDesc: p.dek || '',
+    min: p.min || 5, cta: p.cta || 'try',
   }));
-  boot.push(
-    { id: 'draft-sample', title: 'How to read a Turnitin similarity report', slug: 'how-to-read-turnitin-similarity',
-      dek: 'A draft guide for students who just got their first report back.', html: '<h2>What the percentage means</h2><p>Start here when you open the report.</p>',
-      status: 'draft', publishedAt: '', scheduledAt: '', views30: 0, cover: '', topic: 'AI detection',
-      tool: 'turnitin', toolPlace: 'aside', seoTitle: '', seoDesc: '', ogTitle: '', ogDesc: '' },
-    { id: 'sched-sample', title: 'Harvard referencing checklist before you submit', slug: 'harvard-referencing-checklist',
-      dek: 'A short checklist you can run through the night before the deadline.', html: '<h2>In-text citations</h2><p>Author and year in every claim that needs a source.</p>',
-      status: 'scheduled', publishedAt: '', scheduledAt: new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10),
-      views30: 0, cover: '', topic: 'Formatting', tool: 'format', toolPlace: 'bottom',
-      seoTitle: '', seoDesc: '', ogTitle: '', ogDesc: '' },
-  );
-  return boot;
 }
 function adminBlogPosts() {
   const s = adminState();
   if (!s.blogPosts) {
-    s.blogPosts = blogStoreLoad() || blogSeedPosts();
-    blogStoreSave(s.blogPosts);
+    s.blogPosts = blogSeedPosts();
+    if (!s.blogLoading) {
+      s.blogLoading = true;
+      API.admin.blogList().then((res) => {
+        if (Array.isArray(res.posts) && res.posts.length) s.blogPosts = res.posts;
+        s.blogLoading = false;
+        if (isAdminRoute() && currentRoute().startsWith('admin-blog')) rerenderAdmin();
+      }).catch(() => { s.blogLoading = false; });
+    }
   }
   return s.blogPosts;
 }
@@ -2551,7 +2582,7 @@ function renderAdminBlog() {
   const statusLbl = { published: 'Published', scheduled: 'Scheduled', draft: 'Draft' };
   return `<div class="page adm-page adm-blog">
     <header class="adm-head">
-      <div><h1>Blog</h1><p class="muted">Write guides that appear on the public blog.</p></div>
+      <div><h1>Blog</h1><p class="muted">Write and publish guides — they go live on #/blog and /blog.</p></div>
       <button class="btn btn-primary" data-act="adm-blog-new">${icon('plus')} New article</button>
     </header>
     <div class="adm-blog-tools">
@@ -2676,37 +2707,47 @@ function abValidate(p) {
   if (!String(p.html || '').replace(/<[^>]+>/g, '').trim()) return 'Add article text.';
   return '';
 }
-function abPersist(next) {
+async function abPersist(next, { toastOk } = {}) {
   const s = adminState();
-  const list = adminBlogPosts();
+  const list = adminBlogPosts().slice();
   const i = list.findIndex((x) => x.id === next.id);
   if (i >= 0) list[i] = next; else list.unshift(next);
   s.blogPosts = list;
-  blogStoreSave(list);
-  // Mirror published posts into the SPA blog feed.
-  const published = list.filter((x) => x.status === 'published').map((x) => ({
-    slug: x.slug, title: x.title, dek: x.dek, date: x.publishedAt || new Date().toISOString().slice(0, 10),
-    topic: x.topic, cover: x.cover, html: x.html, path: `/blog/${x.slug}`,
-  }));
-  BOOT.blog = { ...(BOOT.blog || {}), posts: published };
+  try {
+    const res = await API.admin.blogSave(list);
+    if (Array.isArray(res.posts)) s.blogPosts = res.posts;
+    if (res.public) {
+      BOOT.blog = res.public;
+      CONFIG.blog = Object.assign({}, CONFIG.blog || {}, res.public);
+    } else {
+      const published = (s.blogPosts || []).filter((x) => x.status === 'published').map((x) => ({
+        slug: x.slug, title: x.title, dek: x.dek, date: x.publishedAt || new Date().toISOString().slice(0, 10),
+        min: x.min || 5, cat: x.topic || 'ai', cover: x.cover || {}, html: x.html, path: `/blog/${x.slug}`, cta: x.cta || 'try',
+      }));
+      BOOT.blog = { ...(BOOT.blog || {}), posts: published };
+      CONFIG.blog = Object.assign({}, CONFIG.blog || {}, BOOT.blog);
+    }
+    if (toastOk) toast(toastOk);
+  } catch (err) {
+    toast(err.message || 'Could not save the article to the server.');
+    throw err;
+  }
 }
 
 function renderAdminSettings() {
   const s = adminState();
   admNeed('ov', 'pre', 'data');
   const anchors = (red) => `<nav class="adm-chips" aria-label="On this page">
-        <a class="adm-chip" href="#adm-discount" data-act="adm-anchor" data-v="adm-discount">Discount</a>
+        <a class="adm-chip" href="#adm-discount" data-act="adm-anchor" data-v="adm-discount">Price</a>
         <a class="adm-chip" href="#adm-limits" data-act="adm-anchor" data-v="adm-limits">Limits${red ? '<span class="adm-dot red" aria-label="needs attention"></span>' : ''}</a>
         <a class="adm-chip" href="#adm-services" data-act="adm-anchor" data-v="adm-services">AI services</a>
         <a class="adm-chip" href="#adm-data" data-act="adm-anchor" data-v="adm-data">Training data</a></nav>`;
   if (!s.ov) return `<div class="page adm-page adm-settings"><header class="adm-head"><div><h1>Settings</h1>${anchors(false)}</div></header>${admPending('ov', 'settings')}</div>`;
   const sv = admSaved(), v = { ...sv, ...(s.draft || {}) }, pool = sv.pool + v.poolAdd;
   const changes = [];
-  if (v.mode !== sv.mode || v.percent !== sv.percent || v.autoTime !== sv.autoTime || v.autoMin !== sv.autoMin) changes.push('discount');
+  if (Number(v.humPrice) !== Number(sv.humPrice)) changes.push('Humanizer price');
   if (v.humLimit !== sv.humLimit) changes.push('daily limit');
   if (v.poolAdd) changes.push(`+${admFmt(v.poolAdd)} Turnitin checks`);
-  const modes = [['off', 'Off', 'Full price, no badge'], ['manual', 'Manual', 'On until you turn it off'], ['auto', 'Auto', 'Evenings, if capacity is left']];
-  const hints = { off: 'Everyone pays full price.', manual: 'Stays on until you switch it off.', auto: 'Sells unused Humanizer capacity in the evening. Off at midnight.' };
   const used = Number((s.ov.today || {}).humanizer_requests_count || 0);
   const sw = s.sess;
   const sess = !sw ? ['Not checked yet · opens the StealthWriter tab, doesn’t humanize', 'Not checked', 'amber']
@@ -2718,17 +2759,13 @@ function renderAdminSettings() {
   return `<div class="page adm-page adm-settings">
     <header class="adm-head"><div><h1>Settings</h1>${anchors(sv.pool === 0)}</div></header>
 
-    <section class="card adm-card" id="adm-discount" aria-labelledby="adm-disc-h">
-      <div class="adm-card-head"><div><h2 id="adm-disc-h">Humanizer discount</h2><p class="muted small">${hints[v.mode]}</p></div>
-        <span class="lvl ${sv.mode === 'off' ? 'lvl-medium' : 'lvl-low'}">${sv.mode === 'off' ? 'Off' : `${s.ov.discount && s.ov.discount.active ? 'Live' : 'Waiting'} · −${sv.percent}% (${sv.mode})`}</span></div>
-      <div class="adm-modes" role="radiogroup" aria-label="Discount mode">${modes.map(([k, l, sub]) => `<button class="adm-mode" role="radio" aria-checked="${k === v.mode}" data-act="adm-set" data-k="mode" data-v="${k}"><b>${l}</b><span class="small muted">${sub}</span></button>`).join('')}</div>
-      ${v.mode !== 'off' ? `<div class="adm-row adm-end">
-        <div><p class="small muted">Discount</p><div class="adm-chips">${[10, 25, 50, 70].map(p => `<button class="adm-chip adm-amt" aria-pressed="${p === v.percent}" data-act="adm-set" data-k="percent" data-v="${p}">${p}%</button>`).join('')}</div></div>
-        <div><p class="small muted">Users will see</p><p class="adm-preview">Humanizer <span class="badge">−${v.percent}%</span></p></div></div>` : ''}
-      ${v.mode === 'auto' ? `<div class="adm-auto">
-        <p>Turn on after <label><span class="visually-hidden">Trigger time</span><input class="field-input" type="time" id="adm-auto-time" value="${esc(v.autoTime)}"></label> if at least
-          <label><span class="visually-hidden">Minimum requests left</span><input class="field-input adm-num" type="number" id="adm-auto-min" value="${v.autoMin}" min="0"></label> requests are left today</p>
-        <p class="small muted">Turns off at 00:00. Today ${admFmt(Math.max(0, v.humLimit - used))} are left.</p></div>` : ''}
+    <section class="card adm-card" id="adm-discount" aria-labelledby="adm-price-h">
+      <div class="adm-card-head"><div><h2 id="adm-price-h">Humanizer price</h2>
+        <p class="muted small">Credits charged when someone without Pro daily runs pays for a Humanizer run. Plans keep their daily Pro allowance.</p></div>
+        <span class="lvl lvl-low">${v.humPrice ?? 25} credits / run</span></div>
+      <label class="field" for="adm-hum-price"><span>Credits per paid Humanizer run</span>
+        <input class="input field-input" id="adm-hum-price" type="number" inputmode="numeric" min="1" step="1" value="${esc(String(v.humPrice ?? 25))}"></label>
+      <p class="small muted" style="margin-top:8px">No site-wide discount. Change the number and press Save changes.</p>
     </section>
 
     <section class="card adm-card" id="adm-limits" aria-labelledby="adm-lim2-h">
@@ -2744,9 +2781,12 @@ function renderAdminSettings() {
       <div class="adm-limit">
         <div><p class="adm-row"><b>Turnitin pool</b><span class="lvl ${poolState[1] === 'red' ? 'lvl-high' : poolState[1] === 'amber' ? 'lvl-warn' : 'lvl-low'}">${poolState[0]}</span></p>
           <p class="adm-stat">${admFmt(pool)} <span class="small muted">checks left</span></p>
-          <p class="small muted">Shared by all users · doesn’t reset</p></div>
-        <div class="adm-pool"><div class="adm-chips">${[100, 500, 1000].map(n => `<button class="adm-chip adm-amt" aria-pressed="${n === s.topup}" data-act="adm-topup" data-v="${n}">+${n}</button>`).join('')}</div>
-          <button class="btn btn-primary" data-act="adm-addpool">Add ${s.topup} checks</button></div>
+          <p class="small muted">Shared by all users · doesn’t reset. Telegram alerts when under 3. Type any number and press Apply.</p></div>
+        <div class="adm-pool">
+          <label class="field" for="adm-pool-n"><span>Add checks</span>
+            <input class="input field-input" id="adm-pool-n" type="number" inputmode="numeric" min="1" step="1" value="${esc(String(s.topup || 100))}"></label>
+          <button class="btn btn-primary" data-act="adm-addpool-custom" ${s.saving ? 'disabled' : ''}>${s.saving ? 'Saving…' : 'Apply'}</button>
+        </div>
       </div>
     </section>
 
@@ -2816,8 +2856,35 @@ function bindAdmin() {
   search('#adm-u-q', 'users', 'uQuery', () => { s.uOffset = 0; });
   search('#adm-a-q', 'feed', 'aQuery', () => { s.openId = null; });
   $('#adm-reason')?.addEventListener('change', (e) => { s.lastReason = e.target.value; });
-  $('#adm-auto-time')?.addEventListener('change', (e) => { (s.draft = s.draft || {}).autoTime = e.target.value || '20:00'; s.savedMsg = false; rerenderAdmin(); });
-  $('#adm-auto-min')?.addEventListener('change', (e) => { (s.draft = s.draft || {}).autoMin = Math.max(0, parseInt(e.target.value, 10) || 0); s.savedMsg = false; rerenderAdmin(); });
+  $('#adm-amount')?.addEventListener('input', (e) => {
+    s.amount = Math.max(0, parseInt(e.target.value, 10) || 0);
+    const btn = $('[data-act="adm-apply"]');
+    const u = admSelUser();
+    const bal = u ? Number(u.credits || 0) : 0;
+    if (!btn) return;
+    if (s.mode === 'set') btn.textContent = `Set balance to ${admFmt(s.amount)}`;
+    else if (s.mode === 'add') btn.textContent = `Add ${admFmt(s.amount)} credits`;
+    else btn.textContent = `Remove ${admFmt(Math.min(s.amount, bal))} credits`;
+    const preview = $('.adm-newbal b');
+    if (preview) {
+      const after = s.mode === 'set' ? s.amount : s.mode === 'add' ? bal + s.amount : Math.max(0, bal - s.amount);
+      preview.textContent = admFmt(after);
+      preview.className = (after - bal) >= 0 ? 'adm-up' : 'adm-down';
+    }
+  });
+  $('#adm-hum-price')?.addEventListener('change', (e) => {
+    (s.draft = s.draft || {}).humPrice = Math.max(1, parseInt(e.target.value, 10) || 25);
+    s.savedMsg = false; rerenderAdmin('#adm-hum-price');
+  });
+  $('#adm-pool-n')?.addEventListener('change', (e) => { s.topup = Math.max(1, parseInt(e.target.value, 10) || 100); });
+  $('#adm-plan-days')?.addEventListener('input', (e) => {
+    s.planDays = Math.max(1, Math.min(36500, parseInt(e.target.value, 10) || 30));
+    const btn = $('[data-act="adm-plan-apply"]');
+    if (!btn) return;
+    const id = s.planId || 'none';
+    btn.textContent = id === 'none' ? 'Remove plan'
+      : `Give ${id.charAt(0).toUpperCase() + id.slice(1)} · ${admFmt(s.planDays)} days`;
+  });
   $('#adm-blog-q')?.addEventListener('input', (e) => {
     s.blogQuery = e.target.value;
     clearTimeout(admSearchTimer);
@@ -2861,14 +2928,53 @@ async function admRun(work, { ok, reload = ['users', 'detail', 'ov'], focus } = 
 
 async function admApplyCredits(delta, reason, isUndo) {
   const s = adminState(), id = s.selId;
+  if (!delta) { toast(s.mode === 'set' ? 'Balance is already that amount.' : 'Enter an amount first.'); return; }
   const res = await admRun(() => API.admin.credits(id, delta, reason), { reload: ['users', 'detail'], focus: '[data-act="adm-apply"]' });
   if (!res) return;
   const n = Math.abs(res.delta);
   if (isUndo) { s.done = null; s.undo = null; toast(`Undone · ${res.delta > 0 ? 'returned' : 'removed'} ${admFmt(n)} credits`); }
-  else { s.done = `${res.delta > 0 ? 'Added' : 'Removed'} ${admFmt(n)} credits · logged`; s.undo = { delta: -res.delta }; }
+  else if (s.mode === 'set' && !isUndo) {
+    s.done = `Balance set to ${admFmt(res.balance)} · logged`;
+    s.undo = { delta: -res.delta };
+  } else {
+    s.done = `${res.delta > 0 ? 'Added' : 'Removed'} ${admFmt(n)} credits · logged`;
+    s.undo = { delta: -res.delta };
+  }
   if (s.detail && s.detail.user.id === id) s.detail.user.credits = res.balance;
   if (CONFIG.user.id === '#' + id) loadCredits();
   if (isAdminRoute()) rerenderAdmin(isUndo ? '[data-act="adm-apply"]' : '[data-act="adm-undo"]');
+}
+
+async function admApplyPlan(userId, planId, days) {
+  const s = adminState();
+  const res = await admRun(
+    () => API.admin.plan(userId, planId, planId ? days : undefined),
+    { reload: ['users', 'detail'], focus: '[data-act="adm-plan-apply"]' },
+  );
+  if (!res) return;
+  const plan = res.plan;
+  if (plan) {
+    s.planDone = `Gave ${plan.name || plan.plan_id} · ${admFmt(plan.days_left ?? days)} days left`;
+    s.planId = plan.plan_id || planId;
+  } else {
+    s.planDone = 'Plan removed';
+    s.planId = 'none';
+  }
+  if (s.detail?.user?.id === userId && plan) {
+    Object.assign(s.detail.user, {
+      planId: plan.plan_id, planName: plan.name, planDaysLeft: plan.days_left, planExpiresAt: plan.expires_at,
+    });
+  } else if (s.detail?.user?.id === userId) {
+    Object.assign(s.detail.user, { planId: null, planName: null, planDaysLeft: null, planExpiresAt: null });
+  }
+  if (CONFIG.user.id === '#' + userId) {
+    BOOT.plan = plan || null;
+    CONFIG.billing.plan = plan?.plan_id || null;
+    state.billing = state.billing || {};
+    state.billing.plan = plan || null;
+  }
+  toast(s.planDone);
+  if (isAdminRoute()) rerenderAdmin('[data-act="adm-plan-apply"]');
 }
 
 async function admOlder() {
@@ -2885,11 +2991,12 @@ async function admOlder() {
 
 async function admSave() {
   const s = adminState(), sv = admSaved(), v = { ...sv, ...(s.draft || {}) };
-  const patch = {};
-  if (v.mode !== sv.mode) { patch.is_humanizer_discount_active = v.mode === 'manual'; patch.auto_discount_enabled = v.mode === 'auto'; }
-  if (v.percent !== sv.percent) patch.humanizer_discount_percent = v.percent;
-  if (v.autoTime !== sv.autoTime) patch.auto_discount_time = v.autoTime;
-  if (v.autoMin !== sv.autoMin) patch.auto_discount_min_remaining = v.autoMin;
+  const patch = {
+    is_humanizer_discount_active: false,
+    auto_discount_enabled: false,
+    humanizer_discount_percent: 0,
+  };
+  if (Number(v.humPrice) !== Number(sv.humPrice)) patch.humanizer_credit_price = Math.max(1, Number(v.humPrice) || 25);
   if (v.humLimit !== sv.humLimit) patch.humanizer_daily_limit = v.humLimit;
   s.saving = true; rerenderAdmin();
   try {
@@ -2899,6 +3006,7 @@ async function admSave() {
       patch.turnitin_global_balance = Number((fresh.settings || {}).turnitin_global_balance || 0) + v.poolAdd;
     }
     const res = await API.admin.siteSettings(patch);
+    if (patch.humanizer_credit_price && BOOT.costs) BOOT.costs.humanizer = patch.humanizer_credit_price;
     Object.assign(s.ov, { settings: res.settings, today: res.today || s.ov.today, discount: res.discount || s.ov.discount });
     s.draft = null; s.savedMsg = true;
     admLoad('ov');
@@ -2930,15 +3038,39 @@ function adminAction(act, el) {
     case 'adm-prev': s.uOffset = Math.max(0, s.uOffset - ADM_PAGE); admLoad('users'); break;
     case 'adm-next': s.uOffset += ADM_PAGE; admLoad('users'); break;
     case 'adm-open':
-      s.selId = +el.dataset.id; s.uTab = 'overview'; s.done = null; s.undo = null; s.detail = null; s.err.detail = null;
+      s.selId = +el.dataset.id; s.uTab = 'overview'; s.done = null; s.undo = null; s.planDone = null; s.detail = null; s.err.detail = null;
+      {
+        const opened = (s.users ? s.users.users : []).find(x => x.id === s.selId);
+        s.planId = opened?.planId || (opened?.isAdmin ? 'max' : 'none');
+        s.planDays = opened?.isAdmin ? 3650 : 30;
+      }
       admLoad('detail'); keep('[data-act="adm-close"]'); break;
     case 'adm-close': { const id = s.selId; s.selId = null; s.detail = null; keep(`[data-act="adm-open"][data-id="${id}"]`); break; }
     case 'adm-utab': s.uTab = v; keep(`[data-act="adm-utab"][data-v="${v}"]`); break;
     case 'adm-mode': s.mode = v; keep(`[data-act="adm-mode"][data-v="${v}"]`); break;
-    case 'adm-amount': s.amount = +v; keep(`[data-act="adm-amount"][data-v="${v}"]`); break;
+    case 'adm-amount': s.amount = Math.max(0, +v || 0); keep(`[data-act="adm-amount"][data-v="${v}"]`); break;
+    case 'adm-plan':
+      s.planId = v;
+      if (u?.isAdmin && v !== 'max') s.planId = 'max';
+      keep(`[data-act="adm-plan"][data-v="${s.planId}"]`);
+      break;
+    case 'adm-plan-days':
+      s.planDays = Math.max(1, Math.min(36500, +v || 30));
+      keep(`[data-act="adm-plan-days"][data-v="${s.planDays}"]`);
+      break;
+    case 'adm-plan-apply': {
+      if (!u) break;
+      const planId = s.planId || 'none';
+      const days = Math.max(1, Math.min(36500, parseInt($('#adm-plan-days')?.value, 10) || s.planDays || 30));
+      s.planDays = days;
+      admApplyPlan(u.id, planId === 'none' ? null : planId, days);
+      break;
+    }
     case 'adm-apply': {
       if (!u) break;
-      const delta = s.mode === 'add' ? s.amount : -Math.min(s.amount, u.credits);
+      const amt = Math.max(0, parseInt($('#adm-amount')?.value, 10) || s.amount || 0);
+      s.amount = amt;
+      const delta = s.mode === 'add' ? amt : s.mode === 'set' ? (amt - u.credits) : -Math.min(amt, u.credits);
       if (delta) admApplyCredits(delta, $('#adm-reason')?.value || s.lastReason);
       break;
     }
@@ -2992,6 +3124,33 @@ function adminAction(act, el) {
     case 'adm-hum': { const cur = s.draft?.humLimit ?? admSaved().humLimit; draft().humLimit = Math.max(10, cur + +v); s.savedMsg = false; keep(`[data-act="adm-hum"][data-v="${v}"]`); break; }
     case 'adm-topup': s.topup = +v; keep(`[data-act="adm-topup"][data-v="${v}"]`); break;
     case 'adm-addpool': draft().poolAdd = (s.draft.poolAdd || 0) + s.topup; s.savedMsg = false; keep('[data-act="adm-addpool"]'); break;
+    case 'adm-addpool-custom': {
+      const n = Math.max(1, parseInt($('#adm-pool-n')?.value, 10) || 0);
+      if (!n) { toast('Enter how many checks to add.'); break; }
+      s.topup = n;
+      (async () => {
+        s.saving = true; rerenderAdmin('#adm-pool-n');
+        try {
+          const fresh = await API.admin.dailyStats();
+          const cur = Number((fresh.settings || {}).turnitin_global_balance || 0);
+          const res = await API.admin.siteSettings({ turnitin_global_balance: cur + n });
+          Object.assign(s.ov || (s.ov = {}), {
+            settings: res.settings,
+            today: res.today || s.ov?.today,
+            discount: res.discount || s.ov?.discount,
+          });
+          if (s.draft) s.draft.poolAdd = 0;
+          s.savedMsg = true;
+          toast(`Added ${admFmt(n)} Turnitin checks`);
+        } catch (e) {
+          toast(e.message || 'Could not add Turnitin checks.');
+        } finally {
+          s.saving = false;
+          if (isAdminRoute()) rerenderAdmin('#adm-pool-n');
+        }
+      })();
+      break;
+    }
     case 'adm-sess':
       s.sess = 'checking'; keep('[data-act="adm-sess"]');
       API.admin.preflight(true).then(res => {
@@ -3006,18 +3165,20 @@ function adminAction(act, el) {
       const id = 'p-' + Date.now().toString(36);
       const draft = {
         id, title: 'Untitled article', slug: 'untitled-article', dek: '', html: '<p></p>',
-        status: 'draft', publishedAt: '', scheduledAt: '', views30: 0, cover: '', topic: '',
+        status: 'draft', publishedAt: '', scheduledAt: '', views30: 0, cover: {}, topic: '',
         tool: '', toolPlace: 'aside', seoTitle: '', seoDesc: '', ogTitle: '', ogDesc: '',
+        min: 5, cta: 'try',
       };
-      adminBlogPosts().unshift(draft); blogStoreSave(adminBlogPosts());
-      s.blogEditId = id; navigate('admin-blog-edit'); break;
+      adminBlogPosts().unshift(draft);
+      abPersist(draft).then(() => { s.blogEditId = id; navigate('admin-blog-edit'); }).catch(() => keep());
+      break;
     }
     case 'adm-blog-open':
       s.blogEditId = el.dataset.id; navigate('admin-blog-edit'); break;
     case 'adm-blog-save': {
       const cur = adminBlogEditing(); if (!cur) break;
       const next = { ...abReadForm(cur), status: cur.status === 'published' ? 'published' : 'draft' };
-      abPersist(next); toast('Draft saved'); keep(); break;
+      abPersist(next, { toastOk: 'Draft saved' }).then(() => keep()).catch(() => keep()); break;
     }
     case 'adm-blog-publish': {
       const cur = adminBlogEditing(); if (!cur) break;
@@ -3025,26 +3186,29 @@ function adminAction(act, el) {
       const err = abValidate(next); if (err) { toast(err); break; }
       next.status = 'published';
       next.publishedAt = next.publishedAt || new Date().toISOString().slice(0, 10);
-      abPersist(next); toast('Published — live on the blog'); keep(); break;
+      abPersist(next, { toastOk: 'Published — live on the blog' }).then(() => keep()).catch(() => keep()); break;
     }
     case 'adm-blog-schedule': {
       const cur = adminBlogEditing(); if (!cur) break;
       const next = abReadForm(cur);
       const err = abValidate(next); if (err) { toast(err); break; }
       if (!next.scheduledAt) { toast('Pick a schedule date.'); break; }
-      next.status = 'scheduled'; abPersist(next); toast('Scheduled'); keep(); break;
+      next.status = 'scheduled';
+      abPersist(next, { toastOk: 'Scheduled' }).then(() => keep()).catch(() => keep()); break;
     }
     case 'adm-blog-unpublish': {
       const cur = adminBlogEditing(); if (!cur) break;
       const next = { ...abReadForm(cur), status: 'draft' };
-      abPersist(next); toast('Unpublished'); keep(); break;
+      abPersist(next, { toastOk: 'Unpublished' }).then(() => keep()).catch(() => keep()); break;
     }
     case 'adm-blog-preview': {
       const cur = adminBlogEditing(); if (!cur) break;
       const next = abReadForm(cur);
       const err = abValidate(next); if (err) { toast(err); break; }
-      abPersist({ ...next, status: next.status || 'draft' });
-      window.open(`#/blog/${encodeURIComponent(next.slug)}`, '_blank'); break;
+      abPersist({ ...next, status: next.status || 'draft' })
+        .then(() => window.open(`#/blog/${encodeURIComponent(next.slug)}`, '_blank'))
+        .catch(() => keep());
+      break;
     }
     case 'ab-fmt': {
       const body = $('#ab-body'); if (!body) break;
@@ -3513,7 +3677,6 @@ function renderHumanizerPage(item, t, flow, tourName) {
   if (!t.humMode) t.humMode = humMode(t);
   const mode = t.humMode;
   const needPro = mode === 'pro' && !humHasPlan();
-  const words = humWordLimit(mode);
   return `<div class="page page-hum">
     ${pageHead(item, '', tourName ? `<button class="btn btn-sm" data-act="start-tour" data-tour-name="${tourName}">${icon('help')} Take the tour</button>` : '')}
     <section class="card hum-card" aria-label="Input">
@@ -3538,7 +3701,7 @@ function renderHumanizerPage(item, t, flow, tourName) {
       <div class="tool-bar">
         <span class="tool-meta" id="hum-meta">
           <span class="counter" id="counter" aria-live="polite"></span>
-          <span class="cost" id="cost">${needPro ? 'Get Pro to unlock' : `Up to ${fmtNum(words)} words`}</span>
+          ${needPro ? '<span class="cost" id="cost">Get Pro to unlock</span>' : '<span class="cost" id="cost" hidden></span>'}
         </span>
         <span class="spacer"></span>
         <button class="btn" data-act="clear-tool">Clear</button>
@@ -4550,8 +4713,9 @@ function quickDetHtml() {
           <div class="qd-backdrop" id="qd-backdrop" aria-hidden="true">${qdBackdropHtml()}</div>
           <textarea class="input qd-text" id="qd-text" placeholder="Paste your essay, report or any text (at least ${D.minWords} words)…">${esc(q.text)}</textarea>
         </div>
+        <p class="hum-quota-line muted small" id="qd-quota">${qdQuotaHtml()}</p>
         <div class="tool-bar">
-          <span class="tool-meta"><span class="counter" id="qd-count" aria-live="polite">${qdCountText()}</span><span class="cost">Cost: <span class="free">Free</span></span></span>
+          <span class="tool-meta"><span class="counter" id="qd-count" aria-live="polite">${qdCountText()}</span></span>
           <span class="spacer"></span>
           <button class="btn" data-act="qd-clear">Clear</button>
           <button class="btn btn-primary" data-act="qd-run" id="qd-run" ${qdReady() ? '' : 'disabled'}>${icon('scan')} Detect AI</button>
@@ -4564,6 +4728,26 @@ function quickDetHtml() {
 const qdWords = () => countWords(state.qd.text);
 const qdMaxWords = () => state.signedIn ? CONFIG.detector.maxWords : CONFIG.detector.guestMaxWords;
 const qdReady = () => { const w = qdWords(); return w >= CONFIG.detector.minWords && w <= qdMaxWords() && state.qd.status !== 'loading'; };
+
+function qdQuota() {
+  const fd = CONFIG.freeDetect || {};
+  const lim = state.signedIn ? (fd.userDaily ?? fd.daily ?? 10) : (fd.guestDaily ?? fd.daily ?? 10);
+  const left = fd.checksLeft != null ? Number(fd.checksLeft) : lim;
+  return { runs: lim, left: Math.max(0, left) };
+}
+function qdQuotaLine() {
+  const q = qdQuota();
+  if (!q.left) return 'Free checks used up today';
+  return `${q.left} of ${q.runs} free runs left today`;
+}
+function qdQuotaHtml() {
+  return `<span class="hum-quota" title="${esc(qdQuotaLine())}">${esc(qdQuotaLine())}</span>`;
+}
+function qdBumpUse(checksLeft) {
+  const fd = CONFIG.freeDetect || (CONFIG.freeDetect = {});
+  if (typeof checksLeft === 'number' && Number.isFinite(checksLeft)) fd.checksLeft = Math.max(0, checksLeft);
+  else if (fd.checksLeft != null) fd.checksLeft = Math.max(0, Number(fd.checksLeft) - 1);
+}
 
 function qdCountText() {
   const D = CONFIG.detector, w = qdWords(), max = qdMaxWords();
@@ -4652,6 +4836,8 @@ async function runQuickDet() {
     left: typeof data.checks_left === 'number' ? data.checks_left : null,
     animate: !matchMedia('(prefers-reduced-motion: reduce)').matches,
   });
+  if (data.checks_left != null) qdBumpUse(data.checks_left);
+  else qdBumpUse();
   addDoc(text, 'turnitin', { ai: data.ai_percent, text });
   show();
 }

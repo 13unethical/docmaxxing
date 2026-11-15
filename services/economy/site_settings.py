@@ -23,8 +23,9 @@ TZ_TASHKENT = ZoneInfo("Asia/Tashkent")
 
 DEFAULT_SETTINGS = {
     "is_humanizer_discount_active": False,
-    "humanizer_discount_percent": 50,
+    "humanizer_discount_percent": 0,
     "humanizer_daily_limit": 50,
+    "humanizer_credit_price": 25,
     "turnitin_global_balance": 0,
     "auto_discount_enabled": False,
     "auto_discount_time": "20:00",
@@ -83,6 +84,7 @@ def ensure_schema(conn) -> None:
     }
     alters = [
         ("humanizer_daily_limit", "INTEGER NOT NULL DEFAULT 50"),
+        ("humanizer_credit_price", "INTEGER NOT NULL DEFAULT 25"),
         ("turnitin_global_balance", "INTEGER NOT NULL DEFAULT 0"),
         ("auto_discount_enabled", "INTEGER NOT NULL DEFAULT 0"),
         ("auto_discount_time", "TEXT NOT NULL DEFAULT '20:00'"),
@@ -102,9 +104,9 @@ def ensure_schema(conn) -> None:
         conn.execute(
             "INSERT INTO site_settings "
             "(id, is_humanizer_discount_active, humanizer_discount_percent, "
-            "humanizer_daily_limit, turnitin_global_balance, auto_discount_enabled, "
-            "auto_discount_time, auto_discount_min_remaining) "
-            "VALUES (?, 0, 50, 50, 0, 0, '20:00', 10)",
+            "humanizer_daily_limit, humanizer_credit_price, turnitin_global_balance, "
+            "auto_discount_enabled, auto_discount_time, auto_discount_min_remaining) "
+            "VALUES (?, 0, 0, 50, 25, 0, 0, '20:00', 10)",
             (SITE_SETTINGS_ID,),
         )
 
@@ -144,8 +146,9 @@ def _row_to_settings(row) -> dict[str, Any]:
 
     return {
         "is_humanizer_discount_active": _bool("is_humanizer_discount_active"),
-        "humanizer_discount_percent": max(0, min(100, _int("humanizer_discount_percent", 50))),
+        "humanizer_discount_percent": max(0, min(100, _int("humanizer_discount_percent", 0))),
         "humanizer_daily_limit": max(0, _int("humanizer_daily_limit", 50)),
+        "humanizer_credit_price": max(1, _int("humanizer_credit_price", 25)),
         "turnitin_global_balance": max(0, _int("turnitin_global_balance", 0)),
         "auto_discount_enabled": _bool("auto_discount_enabled"),
         "auto_discount_time": _str("auto_discount_time", "20:00"),
@@ -168,6 +171,7 @@ def update_site_settings(**kwargs: Any) -> dict[str, Any]:
         "is_humanizer_discount_active",
         "humanizer_discount_percent",
         "humanizer_daily_limit",
+        "humanizer_credit_price",
         "turnitin_global_balance",
         "auto_discount_enabled",
         "auto_discount_time",
@@ -198,6 +202,13 @@ def update_site_settings(**kwargs: Any) -> dict[str, Any]:
                 "UPDATE site_settings SET humanizer_daily_limit = ?, "
                 "updated_at = datetime('now') WHERE id = ?",
                 (limit, SITE_SETTINGS_ID),
+            )
+        if "humanizer_credit_price" in updates:
+            price = max(1, int(updates["humanizer_credit_price"]))
+            conn.execute(
+                "UPDATE site_settings SET humanizer_credit_price = ?, "
+                "updated_at = datetime('now') WHERE id = ?",
+                (price, SITE_SETTINGS_ID),
             )
         if "turnitin_global_balance" in updates:
             balance = max(0, int(updates["turnitin_global_balance"]))
@@ -336,8 +347,16 @@ def decrement_turnitin_global_balance(*, by: int = 1) -> dict[str, Any]:
                 (by, SITE_SETTINGS_ID),
             )
     settings = get_site_settings()
+    left = int(settings["turnitin_global_balance"] or 0)
+    if left < 3:
+        try:
+            from services.alerts.telegram_alerts import notify_turnitin_slots_low
+
+            notify_turnitin_slots_low(left=left)
+        except Exception:  # noqa: BLE001
+            pass
     return {
-        "turnitin_global_balance": int(settings["turnitin_global_balance"] or 0),
+        "turnitin_global_balance": left,
     }
 
 
@@ -345,94 +364,42 @@ def record_turnitin_success() -> dict[str, Any]:
     return decrement_turnitin_global_balance(by=1)
 
 def get_current_humanizer_discount_status() -> dict[str, Any]:
-    """Lazy evaluation: manual toggle OR auto-pilot after trigger time (GMT+5).
-
-    If percent <= 0, discount is never active (no badge, no price cut).
-    """
-    settings = get_site_settings()
-    percent = int(settings["humanizer_discount_percent"] or 0)
-    percent = max(0, min(100, percent))
+    """Discounts are retired — always off. Price comes from humanizer_credit_price."""
     remaining = get_daily_stats().get("humanizer_remaining")
-
-    if percent <= 0:
-        return {
-            "active": False,
-            "percent": 0,
-            "source": "none",
-            "remaining": remaining,
-        }
-
-    if settings["is_humanizer_discount_active"]:
-        return {
-            "active": True,
-            "percent": percent,
-            "source": "manual",
-            "remaining": remaining,
-        }
-
-    if not settings["auto_discount_enabled"]:
-        return {
-            "active": False,
-            "percent": percent,
-            "source": "none",
-            "remaining": remaining,
-        }
-
-    now = now_tashkent()
-    trigger = _parse_hhmm(settings["auto_discount_time"])
-    trigger_dt = datetime.combine(now.date(), trigger, tzinfo=TZ_TASHKENT)
-    remaining_n = int(remaining or 0)
-    min_remaining = int(settings["auto_discount_min_remaining"] or 0)
-
-    if now >= trigger_dt and remaining_n >= min_remaining:
-        return {
-            "active": True,
-            "percent": percent,
-            "source": "auto",
-            "remaining": remaining_n,
-            "triggered_at": trigger.strftime("%H:%M"),
-        }
-
     return {
         "active": False,
-        "percent": percent,
-        "source": "auto_waiting",
-        "remaining": remaining_n,
-        "trigger_time": trigger.strftime("%H:%M"),
-        "min_remaining": min_remaining,
+        "percent": 0,
+        "source": "none",
+        "remaining": remaining,
     }
 
 
 def apply_humanizer_site_discount(base_cost: int) -> int:
-    """Charge (100 - percent)% of base when discount is active (manual or auto)."""
-    base = int(base_cost)
-    if base <= 0:
-        return 0
-    status = get_current_humanizer_discount_status()
-    if not status.get("active"):
-        return base
-    pct = int(status.get("percent") or 0)
-    pct = max(0, min(100, pct))
-    if pct <= 0:
-        return base
-    if pct >= 100:
-        return 0
-    # Strict formula: original * (100 - discount_percent) / 100
-    return max(0, int(base * (100 - pct) / 100))
+    """No site-wide Humanizer discount — return the configured price as-is."""
+    return max(0, int(base_cost))
+
+
+def humanizer_configured_credit_price() -> int:
+    """Credits charged for a paid Humanizer run (no subscription allowance)."""
+    try:
+        return max(1, int(get_site_settings().get("humanizer_credit_price") or 25))
+    except Exception:  # noqa: BLE001
+        return 25
 
 
 def humanize_credit_cost(base_cost: int | None = None) -> dict[str, Any]:
-    """Explicit cost breakdown for the humanize charge path."""
-    from .pricing import FEATURE_COSTS
+    """Paid Humanizer run cost from Admin → Settings (humanizer_credit_price).
 
-    original = int(base_cost if base_cost is not None else FEATURE_COSTS["humanize"])
-    status = get_current_humanizer_discount_status()
+    ``base_cost`` is ignored when a configured price exists; kept for call-site compat.
+    """
+    original = humanizer_configured_credit_price()
+    if original <= 0 and base_cost is not None:
+        original = max(1, int(base_cost))
     charged = apply_humanizer_site_discount(original)
-    active = bool(status.get("active")) and int(status.get("percent") or 0) > 0
     return {
         "original_price": original,
         "charged": charged,
-        "discount_active": active,
-        "discount_percent": int(status.get("percent") or 0),
-        "discount_source": status.get("source") if active else "none",
+        "discount_active": False,
+        "discount_percent": 0,
+        "discount_source": "none",
     }

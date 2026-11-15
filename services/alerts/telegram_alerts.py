@@ -171,3 +171,46 @@ def notify_browser_job_failure(
     key = f"browser_failure:{provider}:{operation}:{code}"
     return send_telegram_alert("\n".join(lines), key=key, cooldown_sec=cooldown)
 
+
+def notify_turnitin_slots_low(*, left: int) -> bool:
+    """Alert when the shared Turnitin check pool drops below 3."""
+    cooldown = _env_int("TELEGRAM_TURNITIN_SLOTS_ALERT_COOLDOWN_SEC", 1800)
+    n = max(0, int(left))
+    lines = [
+        f"Turnitin pool low: {n} check{'s' if n != 1 else ''} left",
+        f"Host: {_host_label()}",
+        "Action: Admin → Settings → Turnitin pool → add checks and Save.",
+    ]
+    return send_telegram_alert(
+        "\n".join(lines),
+        key=f"turnitin_slots_low:{n}",
+        cooldown_sec=cooldown,
+    )
+
+
+def notify_site_error(
+    *,
+    path: str | None = None,
+    method: str | None = None,
+    status_code: int | None = None,
+    error: str | None = None,
+    user_id: int | None = None,
+) -> bool:
+    """Alert when a user-facing request fails with a server error."""
+    cooldown = _env_int("TELEGRAM_SITE_ERROR_ALERT_COOLDOWN_SEC", 300)
+    safe_error = (error or "").strip().replace("\n", " ")
+    if len(safe_error) > 240:
+        safe_error = safe_error[:240] + "..."
+    status = int(status_code or 500)
+    lines = [
+        f"Site error {status}",
+        f"Host: {_host_label()}",
+        f"Request: {(method or '?').upper()} {path or '/'}",
+    ]
+    if user_id is not None:
+        lines.append(f"User id: {int(user_id)}")
+    if safe_error:
+        lines.append(f"Error: {safe_error}")
+    key = f"site_error:{status}:{(path or '/')[:80]}"
+    return send_telegram_alert("\n".join(lines), key=key, cooldown_sec=cooldown)
+

@@ -206,11 +206,12 @@ def feature_cost(feature: str, **params: Any) -> int:
         return presentation_cost(int(params.get("slide_count") or 0))
     if feature not in FEATURE_COSTS:
         raise KeyError(f"Unknown paid feature: {feature!r}")
-    cost = int(FEATURE_COSTS[feature])
     if feature == "humanize":
-        from .site_settings import apply_humanizer_site_discount
+        from .site_settings import humanizer_configured_credit_price
 
-        cost = apply_humanizer_site_discount(cost)
+        cost = humanizer_configured_credit_price()
+    else:
+        cost = int(FEATURE_COSTS[feature])
     return int(cost)
 
 
