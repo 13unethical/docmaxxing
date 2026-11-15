@@ -910,35 +910,53 @@ const CONFIG = {
     { id: 'admin', label: 'Admin', route: 'admin', icon: 'shield', hidden: true, description: 'Users, credits, activity and service settings' },
     { id: 'admin-users', label: 'Users · Admin', route: 'admin-users', icon: 'users', hidden: true, description: '' },
     { id: 'admin-activity', label: 'Activity · Admin', route: 'admin-activity', icon: 'pulse', hidden: true, description: '' },
+    { id: 'admin-blog', label: 'Blog · Admin', route: 'admin-blog', icon: 'book', hidden: true, description: 'Write and publish blog articles' },
+    { id: 'admin-blog-edit', label: 'Edit article · Admin', route: 'admin-blog-edit', icon: 'book', hidden: true, description: '' },
     { id: 'admin-settings', label: 'Settings · Admin', route: 'admin-settings', icon: 'sliders', hidden: true, description: '' },
   ],
 
-  // Pricing page (Figma 179:1227). ok: false = not included (✕). value = amount on the right; hint = tooltip.
-  // Credit equivalents follow the plans: 25 credits per Humanize run, 300 credits per Turnitin scan.
+  // Pricing page. Feature rows: [tool name, how much you get]. Icons: Solar Bold Duotone paths in planRowHtml.
+  // Credit equivalents: 25 credits per Humanize run, 300 credits per Turnitin scan.
   pricing: {
     title: 'Choose your plan',
     subtitle: 'Start free. Higher plans give higher daily limits, Turnitin reports and Veil.',
-    // Feature rows: [label, small line]. `no` rows show crossed out.
     plans: [
       { id: 'basic', name: 'Basic', month: 9, year: 60, yearMo: 5, price: 9, cta: 'Get Basic',
         credits: 300, hum: { runs: 10, words: 1000 },
-        yes: [['10 Humanizer Pro / day', 'up to 1,000 words'], ['10 AI Detector / day', 'up to 1,000 words'],
-          ['1 Official Turnitin report', 'per month'], ['1 AI Presentation', 'per month'],
-          ['Unlimited Workspace'], ['Unlimited Formatting']],
-        no: ['Veil'] },
+        yes: [
+          ['humanizer', 'Humanizer Pro', '10 runs a day, up to 1,000 words each'],
+          ['detector', 'AI Detector', '10 checks a day, up to 1,000 words each'],
+          ['turnitin', 'Official Turnitin report', '1 a month'],
+          ['presentation', 'AI Presentations', '1 a month'],
+          ['workspace', 'Editor', 'Unlimited'],
+          ['format', 'Formatting', 'Unlimited'],
+        ] },
       { id: 'pro', name: 'Pro', month: 19, year: 144, yearMo: 12, price: 19, cta: 'Get Pro',
         highlight: true, badges: [{ text: 'Most popular', kind: 'accent' }],
-        credits: 1000, hum: { runs: 20, words: 1000 },
-        yes: [['20 Humanizer Pro / day', 'up to 1,000 words'], ['20 AI Detector / day', 'up to 1,000 words'],
-          ['3 Official Turnitin reports', 'per month'], ['2 AI Presentations', 'per month'],
-          ['Veil', '30 days'], ['Unlimited Workspace'], ['Unlimited Formatting']] },
+        credits: 1000, hum: { runs: 20, words: 1000 }, veil: true,
+        yes: [
+          ['humanizer', 'Humanizer Pro', '20 runs a day, up to 1,000 words each'],
+          ['detector', 'AI Detector', '20 checks a day, up to 1,000 words each'],
+          ['turnitin', 'Official Turnitin reports', '3 a month'],
+          ['presentation', 'AI Presentations', '2 a month'],
+          ['veil', 'Veil for Chrome', 'Help right on the page you study'],
+          ['workspace', 'Editor', 'Unlimited'],
+          ['format', 'Formatting', 'Unlimited'],
+        ] },
       { id: 'max', name: 'Max', month: 39, year: 300, yearMo: 25, price: 39, cta: 'Get Max',
         badges: [{ text: 'Best for finals', kind: 'green' }],
-        credits: 2500, hum: { runs: 20, words: 2000 },
-        yes: [['20 Humanizer Pro / day', 'up to 2,000 words'], ['20 AI Detector / day', 'up to 2,000 words'],
-          ['5 Official Turnitin reports', 'per month'], ['5 AI Presentations', 'per month'],
-          ['Veil', '30 days'], ['Unlimited Academic Check'], ['Unlimited Citations'],
-          ['Unlimited Workspace'], ['Unlimited Formatting']] },
+        credits: 2500, hum: { runs: 20, words: 2000 }, veil: true,
+        yes: [
+          ['humanizer', 'Humanizer Pro', '20 runs a day, up to 2,000 words each'],
+          ['detector', 'AI Detector', '20 checks a day, up to 2,000 words each'],
+          ['turnitin', 'Official Turnitin reports', '5 a month'],
+          ['presentation', 'AI Presentations', '5 a month'],
+          ['veil', 'Veil for Chrome', 'Help right on the page you study'],
+          ['check', 'Academic Check', 'Unlimited'],
+          ['citations', 'Citations', 'Unlimited'],
+          ['workspace', 'Editor', 'Unlimited'],
+          ['format', 'Formatting', 'Unlimited'],
+        ] },
     ],
     // One-time credits for extras after the daily limit.
     payg: { title: 'Pay as you go', lead: 'Need more after your daily limit? Buy credits once. Credits never expire.',
@@ -1288,7 +1306,21 @@ const CONFIG = {
   },
 
   signup: {
-    perks: ['5 free Humanizer runs a day', 'Formatting and Work Review are free', 'Plans unlock higher daily limits'],
+    perks: [
+      ['5 Humanizer runs a day', 'every day, no card'],
+      ['Formatting and Work Review', 'free, no limits'],
+      ['History of your texts', 'come back to any of them'],
+      ['Price shown before every run', 'no surprise charges'],
+    ],
+    freeStripTitle: 'Free with your account',
+    freeStrip: [
+      ['5 Humanizer runs a day', 'every day, no card'],
+      ['Formatting and Work Review', 'free, no limits'],
+      ['History of your texts', 'come back to any of them'],
+      ['Price shown before every run', 'no surprise charges'],
+    ],
+    proStripTitle: 'What you get with Pro',
+    proStrip: ['Much better rewrites that sound like you', '10 to 20 Pro runs a day', 'Up to 2,000 words a run', 'Regular upgrades'],
   },
 
   // Guided tours, one per tool. Shown once on the first visit, then via "Take the tour".
@@ -2055,7 +2087,7 @@ function currentRoute() {
    app menu: Overview, Users, Activity, Settings, Back to app.
    Data comes from /api/admin/*; every change is recorded in Activity.
    ========================================================= */
-const ADMIN_ROUTES = ['admin', 'admin-users', 'admin-activity', 'admin-settings'];
+const ADMIN_ROUTES = ['admin', 'admin-users', 'admin-activity', 'admin-blog', 'admin-blog-edit', 'admin-settings'];
 const isAdminRoute = (r = currentRoute()) => ADMIN_ROUTES.includes(r);
 const canAdmin = () => state.signedIn && CONFIG.user.isAdmin;
 const ADM_PAGE = 50;
@@ -2147,6 +2179,7 @@ function adminNavHtml() {
         ${item('admin', 'grid', 'Overview', alerts ? `<span class="nav-meta"><span class="adm-count" aria-label="${alerts} alerts">${alerts}</span></span>` : '')}
         ${item('admin-users', 'users', 'Users', s.ov ? `<span class="nav-meta small muted">${admFmt(s.ov.totals.all)}</span>` : '')}
         ${item('admin-activity', 'pulse', 'Activity')}
+        ${item('admin-blog', 'book', 'Blog')}
         ${item('admin-settings', 'sliders', 'Settings')}
       </ul>
       </div>
@@ -2459,6 +2492,205 @@ function admSaved() {
     autoMin: Number(S.auto_discount_min_remaining ?? 10), poolAdd: 0,
   };
 }
+/* ---------- Admin → Blog (client CMS; drafts/schedules in localStorage) ---------- */
+const BLOG_STORE_KEY = 'dm-admin-blog-v1';
+function blogSlugify(title) {
+  return String(title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'article';
+}
+function blogStoreLoad() {
+  try { return JSON.parse(localStorage.getItem(BLOG_STORE_KEY) || 'null'); } catch { return null; }
+}
+function blogStoreSave(posts) {
+  localStorage.setItem(BLOG_STORE_KEY, JSON.stringify(posts));
+}
+function blogSeedPosts() {
+  const boot = (BOOT.blog?.posts || []).map((p) => ({
+    id: p.slug, title: p.title, slug: p.slug, dek: p.dek || '', html: p.html || `<p>${esc(p.dek || '')}</p>`,
+    status: 'published', publishedAt: p.date || new Date().toISOString().slice(0, 10),
+    scheduledAt: '', views30: Math.floor(80 + Math.random() * 400),
+    cover: p.cover || '', topic: p.topic || 'AI detection', tool: 'turnitin', toolPlace: 'aside',
+    seoTitle: p.title, seoDesc: p.dek || '', ogTitle: p.title, ogDesc: p.dek || '',
+  }));
+  boot.push(
+    { id: 'draft-sample', title: 'How to read a Turnitin similarity report', slug: 'how-to-read-turnitin-similarity',
+      dek: 'A draft guide for students who just got their first report back.', html: '<h2>What the percentage means</h2><p>Start here when you open the report.</p>',
+      status: 'draft', publishedAt: '', scheduledAt: '', views30: 0, cover: '', topic: 'AI detection',
+      tool: 'turnitin', toolPlace: 'aside', seoTitle: '', seoDesc: '', ogTitle: '', ogDesc: '' },
+    { id: 'sched-sample', title: 'Harvard referencing checklist before you submit', slug: 'harvard-referencing-checklist',
+      dek: 'A short checklist you can run through the night before the deadline.', html: '<h2>In-text citations</h2><p>Author and year in every claim that needs a source.</p>',
+      status: 'scheduled', publishedAt: '', scheduledAt: new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10),
+      views30: 0, cover: '', topic: 'Formatting', tool: 'format', toolPlace: 'bottom',
+      seoTitle: '', seoDesc: '', ogTitle: '', ogDesc: '' },
+  );
+  return boot;
+}
+function adminBlogPosts() {
+  const s = adminState();
+  if (!s.blogPosts) {
+    s.blogPosts = blogStoreLoad() || blogSeedPosts();
+    blogStoreSave(s.blogPosts);
+  }
+  return s.blogPosts;
+}
+function adminBlogFilter() {
+  const s = adminState();
+  const q = (s.blogQuery || '').trim().toLowerCase();
+  const st = s.blogStatus || 'all';
+  return adminBlogPosts().filter((p) => {
+    if (st === 'published' && p.status !== 'published') return false;
+    if (st === 'scheduled' && p.status !== 'scheduled') return false;
+    if (st === 'drafts' && p.status !== 'draft') return false;
+    if (!q) return true;
+    return (p.title + ' ' + p.slug).toLowerCase().includes(q);
+  });
+}
+function renderAdminBlog() {
+  const s = adminState();
+  const posts = adminBlogFilter();
+  const filters = [['all', 'All'], ['published', 'Published'], ['scheduled', 'Scheduled'], ['drafts', 'Drafts']];
+  const statusLbl = { published: 'Published', scheduled: 'Scheduled', draft: 'Draft' };
+  return `<div class="page adm-page adm-blog">
+    <header class="adm-head">
+      <div><h1>Blog</h1><p class="muted">Write guides that appear on the public blog.</p></div>
+      <button class="btn btn-primary" data-act="adm-blog-new">${icon('plus')} New article</button>
+    </header>
+    <div class="adm-blog-tools">
+      <label class="adm-search"><span class="visually-hidden">Search articles</span>${icon('search')}
+        <input type="search" id="adm-blog-q" value="${esc(s.blogQuery || '')}" placeholder="Search by title or address"></label>
+      <fieldset class="seg-radios"><legend class="visually-hidden">Status</legend>
+        ${filters.map(([v, l]) => `<label class="seg-radio"><input type="radio" name="adm-blog-st" value="${v}" ${(s.blogStatus || 'all') === v ? 'checked' : ''}>${l}</label>`).join('')}
+      </fieldset>
+    </div>
+    <div class="card adm-card">
+      <table class="adm-table adm-blog-table">
+        <thead><tr><th>Article</th><th>Status</th><th>Views · 30d</th><th></th></tr></thead>
+        <tbody>${posts.length ? posts.map((p) => `<tr>
+          <td><a href="#/admin-blog-edit?id=${encodeURIComponent(p.id)}" data-act="adm-blog-open" data-id="${esc(p.id)}"><b>${esc(p.title)}</b></a>
+            <div class="muted small">/${esc(p.slug)}</div></td>
+          <td><span class="lvl ${p.status === 'published' ? 'lvl-low' : p.status === 'scheduled' ? 'lvl-medium' : ''}">${statusLbl[p.status] || p.status}</span>
+            ${p.status === 'scheduled' && p.scheduledAt ? `<div class="muted small">${esc(p.scheduledAt)}</div>` : ''}</td>
+          <td>${admFmt(p.views30 || 0)}</td>
+          <td><button class="btn btn-sm" data-act="adm-blog-open" data-id="${esc(p.id)}">Edit</button></td>
+        </tr>`).join('') : `<tr><td colspan="4"><div class="empty">No articles match.</div></td></tr>`}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function adminBlogEditing() {
+  const s = adminState();
+  const id = s.blogEditId || new URLSearchParams(location.hash.split('?')[1] || '').get('id');
+  return adminBlogPosts().find((p) => p.id === id) || null;
+}
+function renderAdminBlogEdit() {
+  const s = adminState();
+  const p = adminBlogEditing();
+  if (!p) {
+    return `<div class="page adm-page"><header class="adm-head"><div><h1>Article</h1></div>
+      <a class="btn" href="#/admin-blog">Back</a></header><div class="card adm-card"><div class="empty">Article not found.</div></div></div>`;
+  }
+  const dekMax = 160;
+  const tools = [['', 'None'], ['turnitin', 'AI Detector'], ['humanizer', 'Humanizer'], ['format', 'Formatting'], ['review', 'Work Review']];
+  const places = [['aside', 'Beside the article'], ['bottom', 'Under the article'], ['top', 'Above the article']];
+  const pub = p.status === 'published';
+  return `<div class="page adm-page adm-blog-edit">
+    <header class="adm-head">
+      <div><a class="muted small" href="#/admin-blog">← Blog</a><h1>${pub ? 'Update article' : 'Edit article'}</h1></div>
+      <div class="adm-blog-acts">
+        <button class="btn" data-act="adm-blog-preview">Preview</button>
+        <button class="btn" data-act="adm-blog-save">Save draft</button>
+        ${pub
+          ? `<button class="btn" data-act="adm-blog-unpublish">Unpublish</button>
+             <button class="btn btn-primary" data-act="adm-blog-publish">Update article</button>`
+          : `<button class="btn" data-act="adm-blog-schedule">Schedule</button>
+             <button class="btn btn-primary" data-act="adm-blog-publish">Publish now</button>`}
+      </div>
+    </header>
+    <div class="adm-blog-grid">
+      <section class="card adm-card">
+        <label class="field"><span>Title</span><input class="input field-input" id="ab-title" value="${esc(p.title)}"></label>
+        <label class="field" style="margin-top:12px"><span>Address</span>
+          <span class="adm-slug"><span class="muted">/blog/</span><input class="input field-input" id="ab-slug" value="${esc(p.slug)}"></span></label>
+        <label class="field" style="margin-top:12px"><span>Short description <span class="muted" id="ab-dek-n">${(p.dek || '').length}/${dekMax}</span></span>
+          <textarea class="input field-input" id="ab-dek" rows="3" maxlength="${dekMax}">${esc(p.dek || '')}</textarea></label>
+        <div class="field" style="margin-top:16px"><span>Body</span>
+          <div class="ab-toolbar" role="toolbar" aria-label="Formatting">
+            <button type="button" class="btn btn-sm" data-act="ab-fmt" data-fmt="h2">H2</button>
+            <button type="button" class="btn btn-sm" data-act="ab-fmt" data-fmt="b"><b>B</b></button>
+            <button type="button" class="btn btn-sm" data-act="ab-fmt" data-fmt="ul">List</button>
+            <button type="button" class="btn btn-sm" data-act="ab-fmt" data-fmt="ol">Steps</button>
+            <button type="button" class="btn btn-sm" data-act="ab-fmt" data-fmt="a">Link…</button>
+          </div>
+          <div class="input rich-input ab-body" id="ab-body" contenteditable="true" role="textbox" aria-multiline="true">${p.html || ''}</div>
+        </div>
+      </section>
+      <aside class="adm-blog-side">
+        <section class="card adm-card">
+          <h2 class="adm-h2">Cover &amp; topic</h2>
+          <label class="field"><span>Cover image URL</span><input class="input field-input" id="ab-cover" value="${esc(p.cover || '')}" placeholder="https://…"></label>
+          <label class="field" style="margin-top:12px"><span>Topic</span>
+            <input class="input field-input" id="ab-topic" value="${esc(p.topic || '')}"></label>
+          <label class="field" style="margin-top:12px"><span>Tool inside the article</span>
+            <select class="input field-input" id="ab-tool">${tools.map(([v, l]) => `<option value="${v}" ${p.tool === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+          <label class="field" style="margin-top:12px"><span>Tool placement</span>
+            <select class="input field-input" id="ab-place">${places.map(([v, l]) => `<option value="${v}" ${p.toolPlace === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
+          ${p.status === 'scheduled' || true ? `<label class="field" style="margin-top:12px"><span>Schedule date</span>
+            <input class="input field-input" id="ab-sched" type="date" value="${esc(p.scheduledAt || '')}"></label>` : ''}
+        </section>
+        <section class="card adm-card">
+          <h2 class="adm-h2">Google &amp; social</h2>
+          <label class="field"><span>SEO title</span><input class="input field-input" id="ab-seo-t" value="${esc(p.seoTitle || p.title)}"></label>
+          <label class="field" style="margin-top:12px"><span>SEO description</span>
+            <textarea class="input field-input" id="ab-seo-d" rows="3">${esc(p.seoDesc || p.dek || '')}</textarea></label>
+          <div class="ab-serp" aria-label="Search preview">
+            <div class="ab-serp-url">docmaxxing.com › blog › ${esc(p.slug || '…')}</div>
+            <div class="ab-serp-t" id="ab-serp-t">${esc(p.seoTitle || p.title || 'Title')}</div>
+            <div class="ab-serp-d" id="ab-serp-d">${esc(p.seoDesc || p.dek || 'Description')}</div>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </div>`;
+}
+function abReadForm(p) {
+  const title = $('#ab-title')?.value?.trim() || p.title;
+  const slug = ($('#ab-slug')?.value?.trim() || blogSlugify(title)).replace(/^\/+|\/+$/g, '');
+  const dek = $('#ab-dek')?.value || '';
+  const html = $('#ab-body')?.innerHTML || '';
+  return {
+    ...p, title, slug, dek, html,
+    cover: $('#ab-cover')?.value?.trim() || '',
+    topic: $('#ab-topic')?.value?.trim() || '',
+    tool: $('#ab-tool')?.value || '',
+    toolPlace: $('#ab-place')?.value || 'aside',
+    scheduledAt: $('#ab-sched')?.value || '',
+    seoTitle: $('#ab-seo-t')?.value?.trim() || title,
+    seoDesc: $('#ab-seo-d')?.value?.trim() || dek,
+    ogTitle: $('#ab-seo-t')?.value?.trim() || title,
+    ogDesc: $('#ab-seo-d')?.value?.trim() || dek,
+  };
+}
+function abValidate(p) {
+  if (!p.title.trim()) return 'Add a title.';
+  if (!p.slug.trim()) return 'Add an address.';
+  if (!p.dek.trim()) return 'Add a short description.';
+  if (!String(p.html || '').replace(/<[^>]+>/g, '').trim()) return 'Add article text.';
+  return '';
+}
+function abPersist(next) {
+  const s = adminState();
+  const list = adminBlogPosts();
+  const i = list.findIndex((x) => x.id === next.id);
+  if (i >= 0) list[i] = next; else list.unshift(next);
+  s.blogPosts = list;
+  blogStoreSave(list);
+  // Mirror published posts into the SPA blog feed.
+  const published = list.filter((x) => x.status === 'published').map((x) => ({
+    slug: x.slug, title: x.title, dek: x.dek, date: x.publishedAt || new Date().toISOString().slice(0, 10),
+    topic: x.topic, cover: x.cover, html: x.html, path: `/blog/${x.slug}`,
+  }));
+  BOOT.blog = { ...(BOOT.blog || {}), posts: published };
+}
+
 function renderAdminSettings() {
   const s = adminState();
   admNeed('ov', 'pre', 'data');
@@ -2586,6 +2818,27 @@ function bindAdmin() {
   $('#adm-reason')?.addEventListener('change', (e) => { s.lastReason = e.target.value; });
   $('#adm-auto-time')?.addEventListener('change', (e) => { (s.draft = s.draft || {}).autoTime = e.target.value || '20:00'; s.savedMsg = false; rerenderAdmin(); });
   $('#adm-auto-min')?.addEventListener('change', (e) => { (s.draft = s.draft || {}).autoMin = Math.max(0, parseInt(e.target.value, 10) || 0); s.savedMsg = false; rerenderAdmin(); });
+  $('#adm-blog-q')?.addEventListener('input', (e) => {
+    s.blogQuery = e.target.value;
+    clearTimeout(admSearchTimer);
+    admSearchTimer = setTimeout(() => rerenderAdmin('#adm-blog-q'), 200);
+  });
+  $$('input[name="adm-blog-st"]').forEach((inp) => inp.addEventListener('change', () => {
+    s.blogStatus = inp.value; rerenderAdmin();
+  }));
+  const title = $('#ab-title'), slug = $('#ab-slug'), dek = $('#ab-dek');
+  let slugTouched = false;
+  slug?.addEventListener('input', () => { slugTouched = true; });
+  title?.addEventListener('input', () => {
+    if (!slugTouched && slug) slug.value = blogSlugify(title.value);
+    const serp = $('#ab-serp-t'); if (serp && !$('#ab-seo-t')?.value) serp.textContent = title.value || 'Title';
+  });
+  dek?.addEventListener('input', () => {
+    const n = $('#ab-dek-n'); if (n) n.textContent = `${dek.value.length}/160`;
+    const serp = $('#ab-serp-d'); if (serp && !$('#ab-seo-d')?.value) serp.textContent = dek.value || 'Description';
+  });
+  $('#ab-seo-t')?.addEventListener('input', (e) => { const el = $('#ab-serp-t'); if (el) el.textContent = e.target.value || 'Title'; });
+  $('#ab-seo-d')?.addEventListener('input', (e) => { const el = $('#ab-serp-d'); if (el) el.textContent = e.target.value || 'Description'; });
 }
 
 // Run a change on the server, then refresh what it affects
@@ -2749,6 +3002,64 @@ function adminAction(act, el) {
       break;
     case 'adm-discard': s.draft = null; keep(); break;
     case 'adm-save': admSave(); break;
+    case 'adm-blog-new': {
+      const id = 'p-' + Date.now().toString(36);
+      const draft = {
+        id, title: 'Untitled article', slug: 'untitled-article', dek: '', html: '<p></p>',
+        status: 'draft', publishedAt: '', scheduledAt: '', views30: 0, cover: '', topic: '',
+        tool: '', toolPlace: 'aside', seoTitle: '', seoDesc: '', ogTitle: '', ogDesc: '',
+      };
+      adminBlogPosts().unshift(draft); blogStoreSave(adminBlogPosts());
+      s.blogEditId = id; navigate('admin-blog-edit'); break;
+    }
+    case 'adm-blog-open':
+      s.blogEditId = el.dataset.id; navigate('admin-blog-edit'); break;
+    case 'adm-blog-save': {
+      const cur = adminBlogEditing(); if (!cur) break;
+      const next = { ...abReadForm(cur), status: cur.status === 'published' ? 'published' : 'draft' };
+      abPersist(next); toast('Draft saved'); keep(); break;
+    }
+    case 'adm-blog-publish': {
+      const cur = adminBlogEditing(); if (!cur) break;
+      const next = abReadForm(cur);
+      const err = abValidate(next); if (err) { toast(err); break; }
+      next.status = 'published';
+      next.publishedAt = next.publishedAt || new Date().toISOString().slice(0, 10);
+      abPersist(next); toast('Published — live on the blog'); keep(); break;
+    }
+    case 'adm-blog-schedule': {
+      const cur = adminBlogEditing(); if (!cur) break;
+      const next = abReadForm(cur);
+      const err = abValidate(next); if (err) { toast(err); break; }
+      if (!next.scheduledAt) { toast('Pick a schedule date.'); break; }
+      next.status = 'scheduled'; abPersist(next); toast('Scheduled'); keep(); break;
+    }
+    case 'adm-blog-unpublish': {
+      const cur = adminBlogEditing(); if (!cur) break;
+      const next = { ...abReadForm(cur), status: 'draft' };
+      abPersist(next); toast('Unpublished'); keep(); break;
+    }
+    case 'adm-blog-preview': {
+      const cur = adminBlogEditing(); if (!cur) break;
+      const next = abReadForm(cur);
+      const err = abValidate(next); if (err) { toast(err); break; }
+      abPersist({ ...next, status: next.status || 'draft' });
+      window.open(`#/blog/${encodeURIComponent(next.slug)}`, '_blank'); break;
+    }
+    case 'ab-fmt': {
+      const body = $('#ab-body'); if (!body) break;
+      body.focus();
+      const fmt = el.dataset.fmt;
+      if (fmt === 'b') document.execCommand('bold');
+      else if (fmt === 'ul') document.execCommand('insertUnorderedList');
+      else if (fmt === 'ol') document.execCommand('insertOrderedList');
+      else if (fmt === 'h2') document.execCommand('formatBlock', false, 'h2');
+      else if (fmt === 'a') {
+        const url = prompt('Link URL');
+        if (url) document.execCommand('createLink', false, url);
+      }
+      break;
+    }
   }
 }
 
@@ -2771,6 +3082,8 @@ const PAGES = {
   admin: adminPage(renderAdminOverview),
   'admin-users': adminPage(renderAdminUsers),
   'admin-activity': adminPage(renderAdminActivity),
+  'admin-blog': adminPage(renderAdminBlog),
+  'admin-blog-edit': adminPage(renderAdminBlogEdit),
   'admin-settings': adminPage(renderAdminSettings),
 };
 CONFIG.legal.forEach(d => { PAGES[d.id] = () => renderLegal(d.id); });
@@ -2989,8 +3302,13 @@ function historyHtml() {
 }
 
 /* What else do you need: the other tools as small tiles */
-// Solar icons (Bold Duotone, CC BY 4.0, 480 Design) for the home tool tiles, keyed by tool id
+// Solar icons (Bold Duotone, CC BY 4.0, 480 Design) for home tiles and pricing rows
 const SOLAR = {
+  humanizer: '<path d="M7.45284 2.71266C7.8276 1.76244 9.1724 1.76245 9.54716 2.71267L10.7085 5.65732C10.8229 5.94743 11.0526 6.17707 11.3427 6.29148L14.2873 7.45284C15.2376 7.8276 15.2376 9.1724 14.2873 9.54716L11.3427 10.7085C11.0526 10.8229 10.8229 11.0526 10.7085 11.3427L9.54716 14.2873C9.1724 15.2376 7.8276 15.2376 7.45284 14.2873L6.29148 11.3427C6.17707 11.0526 5.94743 10.8229 5.65732 10.7085L2.71266 9.54716C1.76244 9.1724 1.76245 7.8276 2.71267 7.45284L5.65732 6.29148C5.94743 6.17707 6.17707 5.94743 6.29148 5.65732L7.45284 2.71266Z"/><path d="M16.9245 13.3916C17.1305 12.8695 17.8695 12.8695 18.0755 13.3916L18.9761 15.6753C19.039 15.8348 19.1652 15.961 19.3247 16.0239L21.6084 16.9245C22.1305 17.1305 22.1305 17.8695 21.6084 18.0755L19.3247 18.9761C19.1652 19.039 19.039 19.1652 18.9761 19.3247L18.0755 21.6084C17.8695 22.1305 17.1305 22.1305 16.9245 21.6084L16.0239 19.3247C15.961 19.1652 15.8348 19.039 15.6753 18.9761L13.3916 18.0755C12.8695 17.8695 12.8695 17.1305 13.3916 16.9245L15.6753 16.0239C15.8348 15.961 15.961 15.8348 16.0239 15.6753L16.9245 13.3916Z" opacity=".5"/>',
+  detector: '<path d="M3.46447 3.46447C2 4.92893 2 7.28595 2 12C2 16.714 2 19.0711 3.46447 20.5355C4.92893 22 7.28595 22 12 22C16.714 22 19.0711 22 20.5355 20.5355C22 19.0711 22 16.714 22 12C22 7.28595 22 4.92893 20.5355 3.46447C19.0711 2 16.714 2 12 2C7.28595 2 4.92893 2 3.46447 3.46447Z" opacity=".5"/><path d="M10.004 5.7517C10.4182 5.7495 10.7522 5.41194 10.75 4.99773C10.7478 4.58353 10.4102 4.24952 9.99602 4.25172C8.91427 4.25745 8.01583 4.28215 7.28261 4.41042C6.53075 4.54195 5.88786 4.79244 5.36144 5.29379C4.90634 5.72721 4.60191 6.16616 4.43626 6.79676C4.28612 7.36833 4.25937 8.07154 4.25231 8.99426C4.24914 9.40846 4.58234 9.74681 4.99654 9.74998C5.41074 9.75315 5.74909 9.41994 5.75226 9.00574C5.75952 8.05697 5.79204 7.53952 5.88704 7.17786C5.96654 6.87522 6.09314 6.66836 6.39592 6.38C6.63788 6.14955 6.96814 5.98821 7.54109 5.88798C8.13268 5.78449 8.91071 5.75749 10.004 5.7517Z"/><path d="M14.0041 4.25172C13.5899 4.24952 13.2523 4.58352 13.2501 4.99773C13.2479 5.41194 13.5819 5.7495 13.9961 5.7517C15.0894 5.7575 15.8674 5.78449 16.4589 5.88799C17.0319 5.98822 17.3621 6.14956 17.6041 6.37999C17.9069 6.66836 18.0335 6.87522 18.113 7.17786C18.208 7.53952 18.2405 8.05697 18.2477 9.00574C18.2509 9.41994 18.5893 9.75315 19.0035 9.74998C19.4177 9.74681 19.7509 9.40846 19.7477 8.99426C19.7406 8.07154 19.7139 7.36833 19.5637 6.79676C19.3981 6.16616 19.0937 5.72721 18.6386 5.29379C18.1121 4.79244 17.4693 4.54196 16.7174 4.41043C15.9842 4.28216 15.0858 4.25746 14.0041 4.25172Z"/><path d="M5 11.2501C4.58579 11.2501 4.25 11.5858 4.25 12.0001C4.25 12.4143 4.58579 12.7501 5 12.7501H19C19.4142 12.7501 19.75 12.4143 19.75 12.0001C19.75 11.5858 19.4142 11.2501 19 11.2501H5Z"/><path d="M5.75226 14.9944C5.74909 14.5802 5.41074 14.247 4.99654 14.2501C4.58234 14.2533 4.24914 14.5916 4.25231 15.0058C4.25937 15.9286 4.28612 16.6318 4.43626 17.2034C4.60191 17.8339 4.90634 18.2729 5.36144 18.7063C5.88785 19.2077 6.53073 19.4581 7.28258 19.5897C8.01578 19.718 8.91421 19.7427 9.99593 19.7484C10.4101 19.7506 10.7477 19.4166 10.7499 19.0024C10.7521 18.5882 10.4181 18.2506 10.0039 18.2484C8.91065 18.2426 8.13264 18.2156 7.54107 18.1121C6.96814 18.0119 6.63788 17.8506 6.39592 17.6201C6.09314 17.3318 5.96654 17.1249 5.88704 16.8223C5.79204 16.4606 5.75952 15.9431 5.75226 14.9944Z"/><path d="M19.7477 15.0058C19.7509 14.5916 19.4177 14.2533 19.0035 14.2501C18.5893 14.247 18.2509 14.5802 18.2477 14.9944C18.2405 15.9431 18.208 16.4606 18.113 16.8223C18.0335 17.1249 17.9069 17.3318 17.6041 17.6201C17.3621 17.8506 17.0319 18.0119 16.4589 18.1121C15.8674 18.2156 15.0894 18.2426 13.9961 18.2484C13.5819 18.2506 13.2479 18.5882 13.2501 19.0024C13.2523 19.4166 13.5899 19.7506 14.0041 19.7484C15.0858 19.7427 15.9842 19.718 16.7174 19.5897C17.4693 19.4581 18.1121 19.2077 18.6386 18.7063C19.0937 18.2729 19.3981 17.8339 19.5637 17.2034C19.7139 16.6318 19.7406 15.9286 19.7477 15.0058Z"/>',
+  turnitin: '<path d="M3.37752 5.08241C3 5.62028 3 7.21907 3 10.4167V11.9914C3 17.6294 7.23896 20.3655 9.89856 21.5273C10.62 21.8424 10.9807 22 12 22C13.0193 22 13.38 21.8424 14.1014 21.5273C16.761 20.3655 21 17.6294 21 11.9914V10.4167C21 7.21907 21 5.62028 20.6225 5.08241C20.245 4.54454 18.7417 4.02996 15.7351 3.00079L15.1623 2.80472C13.595 2.26824 12.8114 2 12 2C11.1886 2 10.405 2.26824 8.83772 2.80472L8.26491 3.00079C5.25832 4.02996 3.75503 4.54454 3.37752 5.08241Z" opacity=".5"/><path d="M15.0595 10.4995C15.3353 10.1905 15.3085 9.71643 14.9995 9.44055C14.6905 9.16468 14.2164 9.19152 13.9406 9.5005L10.9286 12.8739L10.0595 11.9005C9.78359 11.5915 9.30947 11.5647 9.0005 11.8406C8.69152 12.1164 8.66468 12.5905 8.94055 12.8995L10.3691 14.4995C10.5114 14.6589 10.7149 14.75 10.9286 14.75C11.1422 14.75 11.3457 14.6589 11.488 14.4995L15.0595 10.4995Z"/>',
+  citations: '<path d="M8 18H7.42578C6.34231 18 5.96314 18.0059 5.67285 18.0684C5.15962 18.1788 4.71302 18.4149 4.3877 18.7344C4.27803 18.8421 4.22312 18.8962 4.09668 19.2393C4.0241 19.4362 4.00002 19.5686 4 19.7002V7.8418C4 6.24463 4.0022 5.13053 4.11426 4.29004C4.22312 3.47366 4.42217 3.04134 4.72754 2.7334C5.03292 2.42551 5.46192 2.225 6.27148 2.11523C7.10491 2.00228 8.20938 2 9.79297 2H14.207C15.7906 2 16.8951 2.00228 17.7285 2.11523C18.5381 2.225 18.9671 2.42551 19.2725 2.7334C19.5778 3.04134 19.7769 3.47366 19.8857 4.29004C19.9978 5.13053 20 6.24463 20 7.8418V18H12V20.0283C12 20.3053 12 20.444 11.9053 20.5C11.8104 20.556 11.6804 20.4941 11.4209 20.3701L10.1787 19.7764C10.0911 19.7345 10.0472 19.7139 10 19.7139C9.95283 19.7139 9.9089 19.7345 9.82129 19.7764L8.5791 20.3701C8.31965 20.4941 8.18958 20.556 8.09473 20.5C7.99997 20.444 8 20.3053 8 20.0283V18Z" opacity=".5"/><path d="M8.00027 18V20.0283C8.00027 20.3053 8.00024 20.444 8.09499 20.5C8.18985 20.556 8.31992 20.4941 8.57937 20.3701L9.82156 19.7764C9.90917 19.7345 9.9531 19.7139 10.0003 19.7139C10.0474 19.7139 10.0914 19.7345 10.179 19.7764L11.4212 20.3701C11.6806 20.4941 11.8107 20.556 11.9055 20.5C12.0003 20.444 12.0003 20.3053 12.0003 20.0283V18H20.0003C19.9967 18.9296 19.9788 19.6231 19.887 20.1709C19.7777 20.8229 19.5773 21.1681 19.2708 21.4141C18.9642 21.66 18.5336 21.8205 17.721 21.9082C16.8843 21.9984 15.7755 22 14.1858 22H9.75515C8.16514 22 7.05572 21.9985 6.21902 21.9082C5.40635 21.8205 4.97576 21.6601 4.66921 21.4141C4.36282 21.1681 4.16325 20.8228 4.05398 20.1709C4.04579 20.122 4.0376 20.0717 4.03054 20.0205C3.99045 19.7292 3.9704 19.5826 4.09695 19.2393C4.22339 18.8962 4.2783 18.8421 4.38796 18.7344C4.71328 18.4149 5.15989 18.1788 5.67312 18.0684C5.96341 18.0059 6.34258 18 7.42605 18H8.00027Z"/><path d="M13.0003 9.75C13.4145 9.75 13.7503 10.0858 13.7503 10.5C13.7503 10.9142 13.4145 11.25 13.0003 11.25H8.00027C7.58605 11.25 7.25027 10.9142 7.25027 10.5C7.25027 10.0858 7.58605 9.75 8.00027 9.75H13.0003Z"/><path d="M16.0003 6.25C16.4145 6.25 16.7503 6.58579 16.7503 7C16.7503 7.41421 16.4145 7.75 16.0003 7.75H8.00027C7.58605 7.75 7.25027 7.41421 7.25027 7C7.25027 6.58579 7.58605 6.25 8.00027 6.25H16.0003Z"/>',
+  blog: '<path opacity=".5" d="M4 8c0-2.83 0-4.24.88-5.12C5.76 2 7.17 2 10 2h4c2.83 0 4.24 0 5.12.88C20 3.76 20 5.17 20 8v8c0 2.83 0 4.24-.88 5.12C18.24 22 16.83 22 14 22h-4c-2.83 0-4.24 0-5.12-.88C4 20.24 4 18.83 4 16z"/><path d="M13 2v6.6c0 .5.56.8.97.52L15.5 8l1.53 1.12c.41.29.97 0 .97-.52V2.1C17.2 2 16.2 2 15 2z"/><path fill-rule="evenodd" d="M7.25 13a.75.75 0 0 1 .75-.75h8a.75.75 0 0 1 0 1.5H8a.75.75 0 0 1-.75-.75m0 4a.75.75 0 0 1 .75-.75h5a.75.75 0 0 1 0 1.5H8a.75.75 0 0 1-.75-.75"/>',   // our own, in the same duotone style
   assignment: '<path fill-rule="evenodd" d="M20.0821 3.01774C21.1538 2.98054 22.0001 3.86139 22.0001 4.93375V16.1437C22.0001 17.2546 21.0941 18.1533 19.9854 18.2228C19.016 18.2834 17.8768 18.4026 17.0001 18.6339C15.9186 18.9193 15.0102 19.7011 13.627 20.0695C13.001 20.2362 12.3029 20.326 12.0001 20.3927V5.17399C12.3208 5.09543 13.3825 4.97156 13.6739 4.80289C13.8581 4.69626 14.0513 4.5874 14.2501 4.47965V7.53727C14.2499 7.64849 14.2493 7.8074 14.2706 7.94352C14.2966 8.10994 14.3826 8.43087 14.7149 8.62614C15.0353 8.81425 15.3492 8.7447 15.4981 8.6984C15.6279 8.65804 15.7699 8.58977 15.876 8.53922L17.0001 8.00602L18.1241 8.53922C18.2302 8.58977 18.3723 8.65804 18.502 8.6984C18.651 8.7447 18.9649 8.81425 19.2852 8.62614C19.6175 8.43088 19.7035 8.10994 19.7296 7.94352C19.7508 7.80741 19.7502 7.64849 19.7501 7.53727V3.03141C19.8629 3.02611 19.9739 3.02151 20.0821 3.01774ZM19.7276 12.8185C19.6272 12.4167 19.2202 12.1723 18.8184 12.2726L14.8184 13.2726C14.4167 13.3731 14.1722 13.78 14.2725 14.1818C14.373 14.5836 14.7799 14.828 15.1817 14.7277L19.1817 13.7277C19.5835 13.6273 19.8279 13.2203 19.7276 12.8185Z" clip-rule="evenodd"/><path d="M4.27253 12.8185C4.37296 12.4168 4.78001 12.1724 5.18171 12.2726L9.18171 13.2726C9.58344 13.3731 9.82784 13.7801 9.72761 14.1818C9.62715 14.5836 9.22027 14.8281 8.81843 14.7277L4.81843 13.7277C4.41662 13.6272 4.17214 13.2203 4.27253 12.8185Z"/><path d="M4.27253 8.81852C4.37296 8.41682 4.78001 8.17245 5.18171 8.27262L9.18171 9.27262C9.58344 9.37305 9.82784 9.78007 9.72761 10.1818C9.62715 10.5836 9.22027 10.8281 8.81843 10.7277L4.81843 9.7277C4.41662 9.62725 4.17214 9.22033 4.27253 8.81852Z"/><path d="M18.2501 6.93864L17.501 6.58317L17.4923 6.57828C17.4531 6.55827 17.3129 6.48706 17.1378 6.45914C17.0938 6.45214 17.0475 6.44743 17.0001 6.44743C16.7637 6.44743 16.5569 6.55323 16.5079 6.57828L16.4991 6.58317L15.7501 6.93864V3.757C16.0063 3.65201 16.2585 3.55977 16.5001 3.48746C17.0206 3.33165 17.6301 3.22482 18.2501 3.15153V6.93864Z"/><path d="M12 5.21395C11.6658 5.15047 10.9426 5.05264 10.2823 4.87544C8.9381 4.51475 8.04921 3.76429 7 3.48742C6.11349 3.25349 4.95877 3.13488 3.9824 3.07487C2.8863 3.0075 2 3.89961 2 4.99778V16.1436C2 17.2545 2.90605 18.1534 4.01486 18.2228C4.98428 18.2834 6.12329 18.402 7 18.6333C7.48596 18.7616 8.21615 19.0645 8.87295 19.3592C9.87752 19.81 10.9247 20.1556 12 20.3926V5.21395Z" opacity=".5"/>',
   workspace: '<path d="M1 12C1 6.81455 1 4.22183 2.61091 2.61091C4.22183 1 6.81455 1 12 1C17.1854 1 19.7782 1 21.3891 2.61091C23 4.22183 23 6.81455 23 12C23 17.1854 23 19.7782 21.3891 21.3891C19.7782 23 17.1854 23 12 23C6.81455 23 4.22183 23 2.61091 21.3891C1 19.7782 1 17.1854 1 12Z" opacity=".5"/><path d="M13.9261 14.3018C14.1711 14.1107 14.3933 13.8885 14.8377 13.4441L20.378 7.90374C20.512 7.7698 20.4507 7.53909 20.2717 7.477C19.6178 7.25011 18.767 6.82414 17.9713 6.02835C17.1755 5.23257 16.7495 4.38186 16.5226 3.72788C16.4605 3.54892 16.2298 3.48761 16.0959 3.62156L10.5555 9.16192C10.1111 9.60634 9.88888 9.82854 9.69778 10.0736C9.47235 10.3626 9.27908 10.6753 9.12139 11.0062C8.98771 11.2867 8.88834 11.5848 8.68959 12.181L8.43278 12.9515L8.02443 14.1765L7.64153 15.3252C7.54373 15.6186 7.6201 15.9421 7.8388 16.1608C8.0575 16.3795 8.38099 16.4559 8.67441 16.3581L9.82308 15.9752L11.0481 15.5668L11.8186 15.31L11.8186 15.31C12.4148 15.1113 12.7129 15.0119 12.9934 14.8782C13.3243 14.7205 13.637 14.5273 13.9261 14.3018Z"/><path d="M22.1127 6.16905C23.2952 4.98656 23.2952 3.06936 22.1127 1.88687C20.9302 0.704377 19.013 0.704377 17.8306 1.88687L17.6524 2.06499C17.4806 2.23687 17.4027 2.47695 17.4456 2.7162C17.4726 2.8667 17.5227 3.08674 17.6138 3.3493C17.796 3.87439 18.14 4.56368 18.788 5.21165C19.4359 5.85961 20.1252 6.20364 20.6503 6.38581C20.9129 6.4769 21.1329 6.52697 21.2834 6.55399C21.5227 6.59693 21.7627 6.51905 21.9346 6.34717L22.1127 6.16905Z"/>',
   presentation: '<path d="M4 10.5V2.75H20V10.5C20 13.5641 20 15.0962 18.9958 16.0481C17.9916 17 16.3753 17 13.1429 17H12.75H11.25H10.8571C7.62465 17 6.00841 17 5.00421 16.0481C4 15.0962 4 13.5641 4 10.5Z" opacity=".5"/><path d="M12.75 17V20.5361L14.3359 21.3291C14.7061 21.5144 14.8558 21.9646 14.6709 22.335C14.4857 22.7054 14.0355 22.8559 13.665 22.6709L12 21.8389L10.3359 22.6709C9.96545 22.8561 9.51434 22.7054 9.3291 22.335C9.14421 21.9646 9.29471 21.5143 9.66504 21.3291L11.25 20.5361V17H12.75Z"/><path d="M14.4697 7.96973C14.7626 7.67683 15.2374 7.67683 15.5303 7.96973C15.8232 8.26262 15.8232 8.73738 15.5303 9.03027L14.2129 10.3477C14.0679 10.4927 13.9109 10.6491 13.7607 10.7637C13.5848 10.8979 13.3335 11.043 13 11.043C12.6668 11.043 12.4152 10.8988 12.2393 10.7646C12.0891 10.6501 11.9321 10.4927 11.7871 10.3477L11.1768 9.7373C11.1068 9.66733 11.0499 9.61078 11 9.5625C10.9501 9.61078 10.8932 9.66733 10.8232 9.7373L9.53027 11.0303C9.23738 11.3232 8.76262 11.3232 8.46973 11.0303C8.17683 10.7374 8.17683 10.2626 8.46973 9.96973L9.78711 8.65234C9.93205 8.50729 10.0891 8.35088 10.2393 8.23633C10.4152 8.1021 10.6665 7.95703 11 7.95703C11.3335 7.95703 11.5848 8.1021 11.7607 8.23633C11.9109 8.35088 12.0679 8.50729 12.2129 8.65234L12.8232 9.2627C12.8932 9.33267 12.9501 9.38922 13 9.4375C13.0499 9.38922 13.1068 9.33267 13.1768 9.2627L14.4697 7.96973Z"/><path d="M22 1.25C22.4142 1.25 22.75 1.58579 22.75 2C22.75 2.41421 22.4142 2.75 22 2.75H2C1.58579 2.75 1.25 2.41421 1.25 2C1.25 1.58579 1.58579 1.25 2 1.25H22Z"/>',
@@ -3142,13 +3460,14 @@ function humMode(t) {
   if (t?.humMode) return t.humMode;
   return humHasPlan() ? 'pro' : 'free';
 }
-/** Pro daily allowance left: server plan_usage when present, else the plan's marketed runs. */
+/** Free/Pro daily allowance. Free reads BOOT.freeHumanize (runsLeft / userDaily / guestDaily). */
 function humQuota(mode = humMode(toolState('humanizer'))) {
   if (mode === 'free') {
     const fh = CONFIG.freeHumanize || {};
-    const lim = fh.dailyLimit ?? 5;
-    const left = fh.remaining ?? lim;
-    return { runs: lim, left: Math.max(0, left), words: fh.words ?? 500 };
+    const lim = state.signedIn ? (fh.userDaily ?? 5) : (fh.guestDaily ?? 3);
+    const left = fh.runsLeft != null ? Number(fh.runsLeft) : lim;
+    const words = state.signedIn ? (fh.userWords ?? 500) : (fh.guestWords ?? 500);
+    return { runs: lim, left: Math.max(0, left), words };
   }
   const plan = humPlan();
   if (!plan) return { locked: true, words: CONFIG.humVersions?.free?.words ?? 500 };
@@ -3161,50 +3480,65 @@ function humQuota(mode = humMode(toolState('humanizer'))) {
   }
   return { runs: lim, left, words: plan.hum?.words ?? 1000 };
 }
+function humBumpFreeUse(runsLeft) {
+  const fh = CONFIG.freeHumanize || (CONFIG.freeHumanize = {});
+  if (typeof runsLeft === 'number' && Number.isFinite(runsLeft)) fh.runsLeft = Math.max(0, runsLeft);
+  else if (fh.runsLeft != null) fh.runsLeft = Math.max(0, Number(fh.runsLeft) - 1);
+}
 function humBumpProUse() {
   const sp = state.billing?.plan || BOOT.plan;
   const a = sp?.allowances?.find(x => x.feature === 'humanize');
   if (a && a.used < a.limit) a.used += 1;
 }
+function humQuotaLine(mode = humMode(toolState('humanizer'))) {
+  const q = humQuota(mode);
+  const cost = estLabel('humanizer');
+  if (q.locked) return 'Pro comes with Basic, Pro and Max';
+  if (mode === 'free') {
+    if (!q.left) return 'Free runs used up today';
+    return `${q.left} of ${q.runs} free runs left today`;
+  }
+  if (!q.left) return `Pro limit reached · ${cost} a run`;
+  return `${q.left} of ${q.runs} Pro runs left today`;
+}
 function humQuotaHtml(t) {
   const mode = humMode(t);
-  const q = humQuota(mode);
-  if (q.locked) return `<span class="hum-quota">${icon('lock')} Pro comes with Basic, Pro and Max</span>`;
-  if (mode === 'free') {
-    return `<span class="hum-quota" title="Free runs left today"><b>${q.left}</b> / ${q.runs} free</span>`;
-  }
-  return `<span class="hum-quota" title="Humanizer Pro daily limit"><b>${q.left}</b> / ${q.runs} Pro</span>`;
+  return `<span class="hum-quota" title="${esc(humQuotaLine(mode))}">${esc(humQuotaLine(mode))}</span>`;
+}
+function humWordLimit(mode = humMode(toolState('humanizer'))) {
+  return humQuota(mode).words || (mode === 'pro' ? 1000 : 500);
 }
 
 function renderHumanizerPage(item, t, flow, tourName) {
   if (!t.humMode) t.humMode = humMode(t);
   const mode = t.humMode;
   const needPro = mode === 'pro' && !humHasPlan();
+  const words = humWordLimit(mode);
   return `<div class="page page-hum">
     ${pageHead(item, '', tourName ? `<button class="btn btn-sm" data-act="start-tour" data-tour-name="${tourName}">${icon('help')} Take the tour</button>` : '')}
     <section class="card hum-card" aria-label="Input">
-      <div class="tool-head">
-        <fieldset class="seg-radios hum-mode"><legend class="visually-hidden">Humanizer version</legend>
-          <label class="seg-radio"><input type="radio" name="hum-mode" value="free" ${mode === 'free' ? 'checked' : ''}>Free</label>
-          <label class="seg-radio"><input type="radio" name="hum-mode" value="pro" ${mode === 'pro' ? 'checked' : ''}>${icon('sparkles')} Pro</label>
-        </fieldset>
-        <span class="hum-quota-wrap">${humQuotaHtml(t)}</span>
-      </div>
       ${t.note ? `<p class="note">${esc(t.note)}</p>` : ''}
+      <div class="qd-label-row hum-label-row">
+        <label class="qd-label" for="tool-text">Text to humanize</label>
+        <fieldset class="seg-radios hum-mode lt-ver"><legend class="visually-hidden">Humanizer version</legend>
+          <label class="seg-radio"><input type="radio" name="hum-mode" value="free" ${mode === 'free' ? 'checked' : ''}>Free</label>
+          <label class="seg-radio"><input type="radio" name="hum-mode" value="pro" ${mode === 'pro' ? 'checked' : ''}>${needPro ? icon('lock') : icon('sparkles')} Pro</label>
+        </fieldset>
+      </div>
       <div class="hum-field" id="hum-field">
         <button type="button" class="hum-add" id="hum-add" aria-label="Add a file" title="Paste your text here, or add a file">${icon('plus')}</button>
         <div class="hum-main">
-          <label class="visually-hidden" for="tool-text">Your text</label>
           <div class="input rich-input" id="tool-text" contenteditable="true" role="textbox" aria-multiline="true"
             data-placeholder="Paste your text here, or add a file">${t.html ? sanitizePasteHtml(t.html) : esc(t.text).replace(/\n/g, '<br>')}</div>
           ${t.fileName ? `<span class="hum-file">${icon('file')}<span>${esc(t.fileName)}</span></span>` : ''}
         </div>
         <input type="file" id="file-input" accept=".txt,.doc,.docx,.pdf" hidden>
       </div>
+      <p class="hum-quota-line muted small" id="hum-quota">${humQuotaHtml(t)}</p>
       <div class="tool-bar">
         <span class="tool-meta" id="hum-meta">
           <span class="counter" id="counter" aria-live="polite"></span>
-          <span class="cost" id="cost">${needPro ? 'Included in Basic, Pro and Max' : (mode === 'free' ? 'Free daily runs' : `Cost after limit: ${estLabel('humanizer')}`)}</span>
+          <span class="cost" id="cost">${needPro ? 'Get Pro to unlock' : `Up to ${fmtNum(words)} words`}</span>
         </span>
         <span class="spacer"></span>
         <button class="btn" data-act="clear-tool">Clear</button>
@@ -7110,34 +7444,75 @@ function veilShortcutDemo(kind) {
       <span class="vs-label vs-after">After</span><p class="vs-text vs-new">Social media shapes how teens feel about themselves — more than most of us admit.</p></div>`;
 }
 
+function veilPlanIncludes() {
+  const id = CONFIG.billing.plan;
+  const plan = CONFIG.pricing.plans.find((p) => p.id === id);
+  return !!(plan && plan.veil);
+}
+function veilPlanBadge() {
+  const id = CONFIG.billing.plan;
+  if (id === 'pro' || id === 'max') return `<span class="pl-badge pl-badge-accent">Included in ${id === 'pro' ? 'Pro' : 'Max'}</span>`;
+  return '';
+}
+
+function openVeilPlanGate() {
+  proDlg.className = 'pro-dialog pw-dialog';
+  proDlg.innerHTML = `<button class="icon-btn pw-close" type="button" data-act="pro-dlg-close" aria-label="Close">${icon('close')}</button>
+    <div class="pw-top">
+      <span class="pw-mark" aria-hidden="true">PRO</span>
+      <h2 id="pro-dlg-title">Veil comes with Pro and Max</h2>
+      <p class="muted">Upgrade to unlock Veil for Chrome — help right on the page you study.</p>
+      <div class="pw-actions">
+        <button class="btn btn-primary btn-lg" type="button" data-act="pro-dlg-plans">Upgrade to Pro</button>
+        <button class="link-btn pw-alt" type="button" data-act="pro-dlg-close">Not now</button>
+      </div>
+    </div>`;
+  proDlg.showModal();
+  $('[data-act="pro-dlg-plans"]', proDlg)?.focus();
+}
+
 function renderVeil() {
   const V = CONFIG.veil, acc = veilAccess(), price = fmtCr(V.price);
-  // Main button is always "Download for Chrome"; what it does depends on access:
-  // guest → sign up, signed in without access → unlock first (too few credits: says how many and opens Pricing), active → download
-  const ctaAct = { guest: 'signup', locked: 'veil-unlock', low: 'veil-unlock', active: 'veil-download', expired: 'veil-unlock' }[acc];
+  const onPlan = veilPlanIncludes();
+  const basicOnly = state.signedIn && CONFIG.billing.plan === 'basic';
+  // Plan Pro/Max: download immediately. Basic: gate. Guest/no plan: credits unlock as before.
+  let ctaAct = { guest: 'signup', locked: 'veil-unlock', low: 'veil-unlock', active: 'veil-download', expired: 'veil-unlock' }[acc];
+  if (onPlan) ctaAct = 'veil-download';
+  else if (basicOnly) ctaAct = 'veil-plan-gate';
   const cta = `<button class="btn btn-primary btn-lg" data-act="${ctaAct}">${icon('chrome')} Download for Chrome</button>`;
-  const note = {
-    guest: `Free account first. Veil itself is ${price} credits for ${V.days} days.`,
-    locked: `${V.days} days, every question included. You have ${fmtCr(state.balance)} credits.`,
-    low: `You have ${fmtCr(state.balance)} credits — ${fmtCr(V.price - state.balance)} short of ${price}.`,
-    active: `Active until ${fmtLong(state.veil.expiresAt)}. Already installed? You’re all set.`,
-    expired: `Access ended ${fmtLong(state.veil.expiresAt).replace(/, \d{4}$/, '')}. Veil is still installed — renew to switch it back on.`,
-  }[acc];
-  const done = acc === 'active';
+  const note = onPlan
+    ? `Included in your ${CONFIG.billing.plan === 'max' ? 'Max' : 'Pro'} plan. Download and install once.`
+    : basicOnly
+      ? 'Veil comes with the Pro and Max plans.'
+      : {
+        guest: `Free account first. Veil itself is ${price} credits for ${V.days} days.`,
+        locked: `${V.days} days, every question included. You have ${fmtCr(state.balance)} credits.`,
+        low: `You have ${fmtCr(state.balance)} credits — ${fmtCr(V.price - state.balance)} short of ${price}.`,
+        active: `Active until ${fmtLong(state.veil.expiresAt)}. Already installed? You’re all set.`,
+        expired: `Access ended ${fmtLong(state.veil.expiresAt).replace(/, \d{4}$/, '')}. Veil is still installed — renew to switch it back on.`,
+      }[acc];
+  const done = onPlan || acc === 'active';
+  const showTopup = !onPlan && !basicOnly;
   const step = (n, title, body, extra = '') => `<li class="vstep ${n === 1 && done ? 'done' : ''}">
       <span class="vstep-num" aria-hidden="true">${n === 1 && done ? icon('check') : n}</span>
       <div><h3>${title}${n === 1 && done ? '<span class="visually-hidden"> (done)</span>' : ''}</h3><p class="muted">${body}</p>${extra}</div>
     </li>`;
-  const activeChip = acc === 'active' ? `<span class="lvl lvl-low veil-active-chip">Active · ${veilDaysLeft()} days left</span>` : '';
+  const headExtra = [veilPlanBadge(), acc === 'active' && !onPlan ? `<span class="lvl lvl-low veil-active-chip">Active · ${veilDaysLeft()} days left</span>` : '']
+    .filter(Boolean).join(' ');
+  // Basic: show the upgrade dialog on first visit to the page.
+  if (basicOnly && !state._veilGateShown) {
+    state._veilGateShown = true;
+    queueMicrotask(() => openVeilPlanGate());
+  }
   return `<div class="page veil-page">
-    ${pageHead(ITEMS.veil, '', activeChip)}
+    ${pageHead(ITEMS.veil, '', headExtra)}
 
     <section class="veil-hero" aria-labelledby="veil-hero-h">
       <div class="veil-hero-text">
         <h2 id="veil-hero-h">${esc(V.headline)}</h2>
         <p class="veil-lead">Veil is a small panel that opens over any tab. Select a question, press <b>Alt+Q / control+Q</b> — the answer shows up right next to it. Select your own text, press <b>Alt+H / option+H</b> — it comes back humanized.</p>
-        <div class="veil-cta">${cta}<button class="btn btn-lg btn-ghost" data-act="${acc === 'guest' ? 'signup' : 'topup'}">${icon('plus')} Top up credits</button></div>
-        <p class="veil-note ${acc === 'low' || acc === 'expired' ? 'is-warn' : ''}">${note}</p>
+        <div class="veil-cta">${cta}${showTopup ? `<button class="btn btn-lg btn-ghost" data-act="${acc === 'guest' ? 'signup' : 'topup'}">${icon('plus')} Top up credits</button>` : ''}</div>
+        <p class="veil-note ${!onPlan && (acc === 'low' || acc === 'expired' || basicOnly) ? 'is-warn' : ''}">${note}</p>
       </div>
       ${veilDemoHtml()}
     </section>
@@ -7256,9 +7631,11 @@ function veilAction(act, el) {
   const V = CONFIG.veil;
   switch (act) {
     case 'veil-unlock': openVeilConfirm(); break;
+    case 'veil-plan-gate': openVeilPlanGate(); break;
     case 'veil-confirm': veilConfirm(el); break;
     case 'veil-dlg-close': veilDlg.close(); break;
     case 'veil-download':
+      if (CONFIG.billing.plan === 'basic' && !veilPlanIncludes()) { openVeilPlanGate(); break; }
       if (veilAccess() === 'active') location.href = V.zipUrl;
       else openVeilConfirm();
       break;
@@ -7280,13 +7657,21 @@ const PERIODS = {
   year:  { label: 'Annual',  months: 12, billed: 'billed yearly',  total: p => p.year,  mo: p => p.yearMo },
 };
 
-// Feature row: [label] or [label, small]; ok=false for not-included
-function planRowHtml(row, ok = true) {
-  const label = Array.isArray(row) ? row[0] : (row.label || row);
-  const sub = Array.isArray(row) ? row[1] : row.hint;
-  return `<li class="pl-row ${ok ? '' : 'off'}">
-    <span class="pl-mark" aria-hidden="true">${icon(ok ? 'check' : 'xmark')}</span>
-    <span class="pl-label">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ''}${ok ? '' : '<span class="visually-hidden"> (not included)</span>'}</span>
+// Feature row: [solarKey, label, note] or {icon, label, hint}
+function planRowHtml(row) {
+  let ic = 'check', label = '', sub = '';
+  if (Array.isArray(row)) {
+    if (row.length >= 3 && SOLAR[row[0]]) { ic = row[0]; label = row[1]; sub = row[2]; }
+    else { label = row[0]; sub = row[1] || ''; }
+  } else {
+    ic = row.icon || 'check'; label = row.label || ''; sub = row.hint || '';
+  }
+  const mark = SOLAR[ic]
+    ? `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${SOLAR[ic]}</svg>`
+    : icon(ic);
+  return `<li class="pl-row">
+    <span class="pl-ic" aria-hidden="true">${mark}</span>
+    <span class="pl-label">${esc(label)}${sub ? `<small>${esc(sub)}</small>` : ''}</span>
   </li>`;
 }
 
@@ -7310,7 +7695,6 @@ function planHtml(p) {
     </div>
     <div class="plan-body">
       <ul class="pl-list" aria-label="What you get">${(p.yes || []).map(r => planRowHtml(r)).join('')}</ul>
-      ${p.no ? `<ul class="pl-list pl-list-off" aria-label="Not included">${p.no.map(x => planRowHtml([x], false)).join('')}</ul>` : ''}
     </div>
   </article>`;
 }
@@ -7376,6 +7760,17 @@ function planCta(p) {
   if (!state.signedIn || CONFIG.billing.plan !== p.id) return p.cta;
   const sub = state.billing?.subscription;
   return sub && sub.status !== 'expired' ? 'Manage subscription' : 'Extend for a month';
+}
+
+/** OAuth / sign-in failures redirect here with ?auth_error=… instead of the legacy login page. */
+function watchAuthError() {
+  const params = new URLSearchParams(location.search);
+  const msg = params.get('auth_error');
+  if (!msg) return;
+  params.delete('auth_error');
+  history.replaceState(null, '', location.pathname + (params.size ? '?' + params : '') + location.hash);
+  toast(msg);
+  if (!state.signedIn) queueMicrotask(() => openSignup({ mode: 'login', title: 'Log in' }));
 }
 
 // Back from checkout (?paid=1): the webhook usually lands within seconds, so poll until it shows.
@@ -8104,8 +8499,9 @@ function bindTextTool(id) {
 
   function refresh() {
     if (!counter) return;
-    const words = countWords(t.text), over = words > CONFIG.wordLimit;
-    counter.textContent = `${fmtNum(words)} / ${fmtNum(CONFIG.wordLimit)} words${over ? ' — too long' : ''}`;
+    const limit = id === 'humanizer' ? humWordLimit(humMode(t)) : CONFIG.wordLimit;
+    const words = countWords(t.text), over = words > limit;
+    counter.textContent = `${fmtNum(words)} / ${fmtNum(limit)} words${over ? ' — too long' : ''}`;
     counter.classList.toggle('over', over);
     if (!runBtn) return;
     const guestOut = !state.signedIn && item.guestPrice && state.guestRunsUsed >= 1;
@@ -8124,6 +8520,10 @@ function bindTextTool(id) {
   });
 
   $$('input[name="hum-mode"]').forEach((inp) => inp.addEventListener('change', () => {
+    if (inp.value === 'pro' && !humHasPlan()) {
+      openProDialog();
+      // Keep selection on Pro so Get Pro CTA shows; dialog explains the upgrade.
+    }
     t.humMode = inp.value;
     render();
   }));
@@ -8167,10 +8567,12 @@ async function runTool(id, paid = false) {
   const t = toolState(id), item = ITEMS[id];
   if (!state.signedIn && item.guestPrice && state.guestRunsUsed >= 1) return signUp();
   if (t.status === 'loading') return;
-  // Pro daily allowance exhausted → Mobbin-style paywall (upgrade or spend credits).
-  if (id === 'humanizer' && humMode(t) === 'pro' && humHasPlan() && !paid) {
-    const q = humQuota('pro');
-    if (!q.left) return openLimitDialog();
+  // Free daily runs gone → Get Humanizer Pro. Pro daily allowance gone → upgrade / credits.
+  if (id === 'humanizer' && !paid) {
+    const mode = humMode(t);
+    if (mode === 'free' && state.signedIn && !humQuota('free').left) return openProDialog();
+    if (mode === 'pro' && !humHasPlan()) return openProDialog();
+    if (mode === 'pro' && humHasPlan() && !humQuota('pro').left) return openLimitDialog();
   }
   const onPage = () => currentRoute() === item.route;
   // Sync from the live editor before the run (render may have stale state).
@@ -8186,8 +8588,12 @@ async function runTool(id, paid = false) {
     t.status = 'done';
     t.result = { text: out, html: data.humanized_html || '', file: t.fileName || '' };
     if (!state.signedIn) state.guestRunsUsed = data.free_runs_left === 0 ? 1 : 0;
+    if (id === 'humanizer') {
+      if (data.free_run || data.free_runs_left != null) humBumpFreeUse(data.free_runs_left);
+      else if (humMode(t) === 'free' && !Number(data.coins_charged)) humBumpFreeUse();
+      if (state.signedIn && humMode(t) === 'pro' && !Number(data.coins_charged)) humBumpProUse();
+    }
     if (state.signedIn) {
-      if (id === 'humanizer' && humMode(t) === 'pro' && !Number(data.coins_charged)) humBumpProUse();
       addDoc(source, id, { text: out }); loadCredits();
     }
   } catch (err) {
@@ -8553,7 +8959,15 @@ const appLinkAttrs = (item) => `href="${esc(itemHref(item))}" ${itemLinkAttrs(it
 /* ---------- Detector / humanizer box: landing-try hero (3 free tries per tool) and the dashboard's Start here (credits) ---------- */
 const lt = { tab: BOOT.landing?.tab || 'humanize', pro: false, text: '', html: '', status: 'idle', result: null, error: null, animate: false };
 const ltApp = () => state.signedIn && !PUBLIC_ROUTES.includes(currentRoute());
-const ltMax = () => !ltApp() ? CONFIG.landing.tryIt.maxWords : lt.tab === 'detect' ? CONFIG.detector.maxWords : CONFIG.wordLimit;
+function ltHumMode() {
+  if (!ltApp()) return 'free'; // landing: Pro opens a dialog; toggle stays Free
+  return humMode(toolState('humanizer'));
+}
+const ltMax = () => {
+  if (lt.tab === 'detect') return ltApp() ? CONFIG.detector.maxWords : CONFIG.landing.tryIt.maxWords;
+  if (!ltApp()) return CONFIG.landing.tryIt.maxWords;
+  return humWordLimit(ltHumMode());
+};
 // Free tries are one-time per tool on this device (3 humanizer + 3 detector). No 24h reset.
 function ltTries(tab = lt.tab) {
   return store.get(`lt-tries-${tab}`, null) || { used: 0 };
@@ -8596,7 +9010,12 @@ const ltMarked = () => lt.tab === 'detect' && lt.status === 'done' && lt.result?
 function landTryHtml({ intro = false } = {}) {
   const T = CONFIG.landing.tryIt, det = lt.tab === 'detect', app = ltApp();
   if (lt.status === 'limit' && (app || ltLeft())) lt.status = 'idle';
+  const hum = toolState('humanizer');
+  if (app && !hum.humMode) hum.humMode = humMode(hum);
+  const mode = ltHumMode();
+  const needPro = app && mode === 'pro' && !humHasPlan();
   const tab = (v, label, ic) => `<button role="tab" id="lt-tab-${v}" aria-selected="${lt.tab === v}" aria-controls="lt-panel" tabindex="${lt.tab === v ? 0 : -1}" data-act="lt-tab" data-v="${v}">${icon(ic)} ${label}</button>`;
+  const verName = app ? 'hum-mode-home' : 'lt-ver';
   return `<div class="land-try${intro ? ' lt-intro' : ''}" id="land-try">
     <div class="lt-top">
       <div class="seg lt-seg" role="tablist" aria-label="Free tool">${tab('humanize', 'Humanizer', 'sparkles')}${tab('detect', 'AI Detector', 'scan')}</div>
@@ -8605,9 +9024,9 @@ function landTryHtml({ intro = false } = {}) {
     <section class="card qd lt-card${det ? '' : ' lt-hum'}" id="lt-panel" role="tabpanel" aria-labelledby="lt-tab-${lt.tab}">
       <div class="qd-input">
         <div class="qd-label-row"><label class="qd-label" for="lt-text">${det ? 'Text to check' : 'Text to humanize'}</label>
-          ${!det && !app ? `<fieldset class="seg-radios lt-ver"><legend class="visually-hidden">Humanizer version</legend>
-            <label class="seg-radio"><input type="radio" name="lt-ver" value="free" ${lt.pro ? '' : 'checked'}>Free</label>
-            <label class="seg-radio"><input type="radio" name="lt-ver" value="pro" ${lt.pro ? 'checked' : ''}>${icon('lock')} Pro</label>
+          ${!det ? `<fieldset class="seg-radios lt-ver"><legend class="visually-hidden">Humanizer version</legend>
+            <label class="seg-radio"><input type="radio" name="${verName}" value="free" ${mode === 'free' ? 'checked' : ''}>Free</label>
+            <label class="seg-radio"><input type="radio" name="${verName}" value="pro" ${mode === 'pro' ? 'checked' : ''}>${needPro || !app ? icon('lock') : icon('sparkles')} Pro</label>
           </fieldset>` : ''}
           ${ltMarked() ? '<span class="qd-legend" id="lt-legend"><span><i class="lv-ai"></i>Looks AI</span><span><i></i>Looks human</span></span>' : ''}</div>
         <div class="qd-field">
@@ -8617,17 +9036,17 @@ function landTryHtml({ intro = false } = {}) {
             : `<div class="input qd-text rich-input" id="lt-text" contenteditable="true" role="textbox" aria-multiline="true"
                 data-placeholder="${esc(T.placeholder)}" spellcheck="false">${lt.html ? sanitizePasteHtml(lt.html) : (lt.text ? markdownLiteToHtml(lt.text) : '')}</div>`}
         </div>
+        ${!det && app ? `<p class="lt-quota muted small">${esc(humQuotaLine(mode))}</p>` : ''}
         <div class="tool-bar">
-          <span class="lt-meta"><span class="muted small" id="lt-count">${ltCountText()}</span>
-          ${app ? `<span class="muted small">Cost: ${det ? 'Free' : esc(estLabel('humanizer'))}</span>` : ''}</span>
+          <span class="lt-meta"><span class="muted small" id="lt-count">${ltCountText()}</span></span>
           <span class="spacer"></span>
           <input type="file" id="lt-file" accept=".txt,.docx,.pdf" hidden>
           ${app
             ? `<button class="btn btn-ghost" data-act="lt-upload">${icon('upload')} Upload file</button>`
             : `<button class="btn btn-ghost lt-up-ic" data-act="lt-upload" aria-label="Upload file" title="Upload file (.txt, .docx, .pdf)">${icon('upload')}</button>`}
           <button class="btn" data-act="lt-clear" ${lt.text ? '' : 'hidden'} id="lt-clear">Clear</button>
-          ${!det && !app && lt.pro
-            ? `<button class="btn btn-primary" data-act="lt-pro">${icon('lock')} Get Pro</button>`
+          ${needPro
+            ? `<button class="btn btn-primary" data-act="hum-plans">${icon('sparkles')} Get Pro</button>`
             : `<button class="btn btn-primary" data-act="lt-run" id="lt-run" ${ltReady() ? '' : 'disabled'}>${det ? `${icon('scan')} Detect AI` : `${icon('sparkles')} Humanize`}</button>`}
         </div>
       </div>
@@ -8662,9 +9081,12 @@ function ltResultHtml() {
         : 'We rewrite stiff, AI-sounding phrases so the text reads like you wrote it.'}</p>`;
   const r = lt.result;
   if (r.kind === 'humanize') return `<div class="lt-out">
-      <div class="lt-out-head"><b id="lt-result-h" tabindex="-1">Humanized text</b><button class="btn btn-sm" data-act="lt-copy">${icon('copy')} Copy</button></div>
+      <div class="lt-out-head"><b id="lt-result-h" tabindex="-1">Humanized text</b>
+        <span class="spacer"></span>
+        <button class="btn btn-sm" data-act="lt-copy">${icon('copy')} Copy</button>
+        <button class="btn btn-sm btn-primary" data-act="lt-check-out">${icon('scan')} Check it for AI</button>
+      </div>
       <div class="lt-out-text result-text" id="lt-out-text">${r.html ? sanitizePasteHtml(r.html) : formatResultText(r.out)}</div>
-      <div class="qd-actions"><button class="btn btn-primary" data-act="lt-check-out">${icon('scan')} Check it for AI</button></div>
     </div>`;
   const lv = scanLevel('ai', r.ai).toLowerCase();
   const scored = r.sents.filter(x => x.ai_prob != null), flagged = scored.filter(x => x.flagged).length;
@@ -8721,8 +9143,21 @@ function bindLandTry() {
     });
   }
   $('#lt-file').addEventListener('change', (e) => { ltTakeFile(e.target.files[0]); e.target.value = ''; });
-  $$('input[name="lt-ver"]').forEach((inp) => inp.addEventListener('change', () => {
+  $$('input[name="lt-ver"], input[name="hum-mode-home"]').forEach((inp) => inp.addEventListener('change', () => {
+    // Landing (guest): Pro opens the Get Pro dialog; Free stays selected.
+    if (!ltApp() && inp.value === 'pro') {
+      inp.checked = false;
+      $$(`input[name="${inp.name}"][value="free"]`).forEach((x) => { x.checked = true; });
+      openProDialog({ guest: true });
+      return;
+    }
+    const hum = toolState('humanizer');
+    hum.humMode = inp.value;
     lt.pro = inp.value === 'pro';
+    if (inp.value === 'pro' && !humHasPlan()) {
+      openProDialog();
+      return;
+    }
     rerenderLandTry('#lt-text');
   }));
   const g = $('#lt-result .qd-gauge[data-v]');
@@ -8761,6 +9196,12 @@ async function runLandTry() {
   const htmlIn = !det && lt.html ? lt.html : '';
   // Out of free tries: the sign-up dialog opens right away; the card behind it keeps a Sign up button for later
   if (!app && !ltLeft(tab)) return ltLimit();
+  if (app && !det) {
+    const mode = ltHumMode();
+    if (mode === 'free' && !humQuota('free').left) return openProDialog();
+    if (mode === 'pro' && !humHasPlan()) return openProDialog();
+    if (mode === 'pro' && humHasPlan() && !humQuota('pro').left) return openLimitDialog();
+  }
   Object.assign(lt, { status: 'loading', result: null, error: null });
   rerenderLandTry('#lt-result-h');
   try {
@@ -8773,6 +9214,7 @@ async function runLandTry() {
       const out = String(data.humanized_text || data.text || '').trim();
       if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
       lt.result = { kind: 'humanize', out, html: data.humanized_html || '', text };
+      if (data.free_run || data.free_runs_left != null) humBumpFreeUse(data.free_runs_left);
       if (app) { addDoc(text, 'humanizer', { title: 'Pasted text', text: out }); loadCredits(); }
       else if (data.free_runs_left === 0) state.guestRunsUsed = 1;
     }
@@ -8798,8 +9240,7 @@ async function runLandTry() {
 function landTryAction(act, el) {
   switch (act) {
     case 'lt-pro':
-      openSignup({ intent: 'humanizer', title: 'Get Humanizer Pro',
-        lead: 'Pro rewrites much better and gets regular upgrades. Sign up, then pick Basic, Pro or Max.' });
+      openProDialog({ guest: true });
       break;
     case 'lt-tab':
       if (lt.tab === el.dataset.v || lt.status === 'loading') return;
@@ -9204,51 +9645,78 @@ function renderBlogPost(p) {
 
 const proDlg = $('#pro-dialog');
 
-/** Free-plan user on Pro tab: comparison card, then See plans → pricing. */
-function openProDialog() {
-  const plans = CONFIG.pricing.plans;
-  const F = CONFIG.freeHumanize || CONFIG.humVersions?.free || { runs: 5, words: 500 };
-  const runs = plans.map(p => p.hum.runs);
-  const words = Math.max(...plans.map(p => p.hum.words));
-  const from = Math.min(...plans.map(p => +p.yearMo));
-  const rows = [
-    ['Rewrite quality', 'Basic', 'Much better'],
-    ['Runs a day', String(F.dailyLimit ?? F.runs ?? 5), `${Math.min(...runs)} to ${Math.max(...runs)}`],
-    ['Words per run', (F.words ?? 500).toLocaleString('en-US'), `Up to ${words.toLocaleString('en-US')}`],
-    ['Regular upgrades', false, true],
-  ];
-  const cell = (v) => v === true ? `<span class="pl-mark" aria-label="Yes">${icon('check')}</span>`
-    : v === false ? `<span class="muted" aria-label="No">—</span>` : esc(v);
-  proDlg.className = 'pro-dialog pro-dialog-card';
-  proDlg.innerHTML = `<div class="pdc-card">
-      <div class="pdc-head">
-        <div>
-          <h2 id="pro-dlg-title">Get Humanizer Pro</h2>
-          <p class="muted">Pro rewrites much better, so your text sounds natural and human. It gets regular upgrades.</p>
+function planPerkItems(plan, n = 4) {
+  return (plan?.yes || []).slice(0, n).map((row) => {
+    let label = '', hint = '';
+    if (Array.isArray(row)) {
+      if (row.length >= 3 && SOLAR[row[0]]) { label = row[1]; hint = row[2]; }
+      else { label = row[0]; hint = row[1] || ''; }
+    } else { label = row.label; hint = row.hint; }
+    return `<li><span class="pl-mark" aria-hidden="true">${icon('check')}</span>` +
+      `<span>${esc(label)}${hint ? ` <span class="muted">${esc(hint)}</span>` : ''}</span></li>`;
+  }).join('');
+}
+
+/** Get Humanizer Pro — same shell as the daily-limit dialog (PRO capsule + footer strip). */
+function openProDialog({ guest = false } = {}) {
+  const from = Math.min(...CONFIG.pricing.plans.map((p) => +p.yearMo));
+  const S = CONFIG.signup;
+  const strip = (S.proStrip || []).map((p) =>
+    `<li><span class="pl-mark" aria-hidden="true">${icon('check')}</span><span>${esc(p)}</span></li>`).join('');
+  proDlg.className = 'pro-dialog pw-dialog';
+  if (guest || !state.signedIn) {
+    proDlg.innerHTML = `<button class="icon-btn pw-close" type="button" data-act="pro-dlg-close" aria-label="Close">${icon('close')}</button>
+      <div class="pw-top">
+        <span class="pw-mark" aria-hidden="true">PRO</span>
+        <h2 id="pro-dlg-title">Get Humanizer Pro</h2>
+        <p class="muted">Pro rewrites much better, so your text sounds natural and human. Sign up, then pick a plan.</p>
+        <p class="pw-from muted">from <b>$${from}</b>/mo</p>
+        <form id="pro-signup-form" class="pw-form" novalidate>
+          <label class="field" for="pro-signup-email"><span class="visually-hidden">Email</span>
+            <input class="input field-input" id="pro-signup-email" type="email" autocomplete="email" placeholder="you@university.edu" required></label>
+          <button type="submit" class="btn btn-primary btn-lg btn-block">Create account</button>
+        </form>
+        <p class="or pw-or"><span>or</span></p>
+        ${oauthGoogleOnlyHtml()}
+        <p class="small muted pw-login">Already have an account? <button type="button" class="link-btn" data-act="open-login">Log in</button></p>
+      </div>
+      <div class="pw-foot">
+        <div class="pw-foot-head"><b>${esc(S.proStripTitle || 'What you get with Pro')}</b><span>from <b>$${from}</b>/mo</span></div>
+        <ul class="lim-list">${strip}</ul>
+      </div>`;
+    $('#pro-signup-form', proDlg)?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = $('#pro-signup-email', proDlg)?.value?.trim() || '';
+      proDlg.close();
+      state.intent = 'humanizer-pro';
+      openSignup({ intent: 'humanizer-pro', title: 'Create your account', lead: 'Then pick a plan to unlock Humanizer Pro.', email });
+    });
+  } else {
+    proDlg.innerHTML = `<button class="icon-btn pw-close" type="button" data-act="pro-dlg-close" aria-label="Close">${icon('close')}</button>
+      <div class="pw-top">
+        <span class="pw-mark" aria-hidden="true">PRO</span>
+        <h2 id="pro-dlg-title">Get Humanizer Pro</h2>
+        <p class="muted">Pro rewrites much better, so your text sounds natural and human. It gets regular upgrades.</p>
+        <p class="pw-from muted">from <b>$${from}</b>/mo</p>
+        <div class="pw-actions">
+          <button class="btn btn-primary btn-lg" type="button" data-act="pro-dlg-plans">See plans</button>
+          <button class="link-btn pw-alt" type="button" data-act="pro-dlg-close">Not now</button>
         </div>
-        <button class="icon-btn pdc-close" type="button" data-act="pro-dlg-close" aria-label="Not now">${icon('close')}</button>
       </div>
-      <table class="pro-cmp">
-        <thead><tr><th scope="col"><span class="visually-hidden">Feature</span></th><th scope="col">Free</th><th scope="col" class="pro-col"><span class="pdc-pill">${icon('sparkles')} Pro</span></th></tr></thead>
-        <tbody>${rows.map(([l, f, pr]) => `<tr><th scope="row">${l}</th><td>${cell(f)}</td><td class="pro-col">${cell(pr)}</td></tr>`).join('')}</tbody>
-      </table>
-      <div class="pdc-price">
-        <p class="pdc-amount"><span class="muted">from</span> <b>$${from}</b></p>
-        <p class="muted">per month · Included in Basic, Pro and Max</p>
-      </div>
-    </div>
-    <button class="pdc-cta" type="button" data-act="pro-dlg-plans">See plans ${icon('arrow')}</button>`;
+      <div class="pw-foot">
+        <div class="pw-foot-head"><b>${esc(S.proStripTitle || 'What you get with Pro')}</b><span>from <b>$${from}</b>/mo</span></div>
+        <ul class="lim-list">${strip}</ul>
+      </div>`;
+  }
   proDlg.showModal();
-  $('[data-act="pro-dlg-plans"]', proDlg)?.focus();
+  (guest || !state.signedIn
+    ? $('#pro-signup-email', proDlg)
+    : $('[data-act="pro-dlg-plans"]', proDlg))?.focus();
 }
 
 function openLimitDialog() {
   const plans = CONFIG.pricing.plans, cur = humPlan(), next = cur ? plans[plans.indexOf(cur) + 1] : null;
-  const rows = next
-    ? next.yes.slice(0, 3).map(([l, sub]) =>
-        `<li><span class="pl-mark" aria-hidden="true">${icon('check')}</span>` +
-        `<span>${esc(l)}${sub ? ` <span class="muted">${esc(sub)}</span>` : ''}</span></li>`).join('')
-    : '';
+  const rows = next ? planPerkItems(next, 3) : '';
   proDlg.className = 'pro-dialog pw-dialog';
   proDlg.innerHTML = `<button class="icon-btn pw-close" type="button" data-act="pro-dlg-close" aria-label="Close">${icon('close')}</button>
     <div class="pw-top">
@@ -9280,65 +9748,101 @@ proDlg?.addEventListener('click', (e) => { if (e.target === proDlg) proDlg.close
 const signupDlg = $('#signup-dialog');
 let signupOpener = null;
 
-function oauthButtonsHtml() {
+const GOOGLE_G_SVG = `<svg class="oauth-g" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>`;
+// Kept for a future “Continue with Apple” button (not shown in the UI).
+const APPLE_ICON_SVG = `<svg class="oauth-apple" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.7 12.6c0-2.1 1.7-3.1 1.8-3.2-1-1.4-2.5-1.6-3-1.7-1.3-.1-2.5.8-3.1.8-.6 0-1.6-.7-2.7-.7-1.4 0-2.7.8-3.4 2.1-1.5 2.5-.4 6.3 1 8.3.7 1 1.5 2.1 2.6 2 1-.1 1.4-.7 2.7-.7s1.6.7 2.7.7c1.1 0 1.8-1 2.5-2 .8-1.1 1.1-2.2 1.1-2.3-.1 0-2-.8-2.2-3.3zM14.5 6.2c.6-.7 1-1.7.9-2.7-0.9.1-1.9.6-2.5 1.3-.6.6-1.1 1.7-.9 2.6 1 .1 1.9-.4 2.5-1.2z"/></svg>`;
+void APPLE_ICON_SVG;
+
+function oauthGoogleOnlyHtml(nextPath = '/app') {
   const providers = Array.isArray(BOOT.oauthProviders) ? BOOT.oauthProviders : [];
-  if (!providers.length) return '';
-  const labels = { google: 'Continue with Google', apple: 'Continue with Apple', microsoft: 'Continue with Microsoft' };
-  const next = encodeURIComponent('/app');
-  const buttons = providers.map((p) => {
-    const key = String(p || '').toLowerCase();
-    return `<a class="btn btn-block oauth-btn oauth-btn--${esc(key)}" href="/auth/oauth/${encodeURIComponent(key)}/start?next=${next}">${esc(labels[key] || ('Continue with ' + key))}</a>`;
-  }).join('');
-  return `<div class="oauth-stack" role="group" aria-label="Sign in with">${buttons}<p class="or"><span>or</span></p></div>`;
+  if (!providers.map((p) => String(p).toLowerCase()).includes('google')) return '';
+  const next = encodeURIComponent(nextPath);
+  return `<a class="btn btn-block oauth-btn oauth-btn--google" href="/auth/oauth/google/start?next=${next}">${GOOGLE_G_SVG} Continue with Google</a>`;
 }
 
-function openSignup({ intent, mode = 'signup', title, lead } = {}) {
+function oauthButtonsHtml() {
+  // Email/password first in the form; Google sits below an “or” divider. Apple kept in code only.
+  const google = oauthGoogleOnlyHtml(state.intent === 'humanizer-pro' ? '/app#/pricing' : '/app');
+  if (!google) return '';
+  return `<div class="oauth-stack oauth-stack-after" role="group" aria-label="Sign in with"><p class="or"><span>or</span></p>${google}</div>`;
+}
+
+function signupPerkHtml(p) {
+  if (Array.isArray(p)) {
+    const [t, sub] = p;
+    return `<li><span class="pl-mark" aria-hidden="true">${icon('check')}</span><span>${esc(t)}${sub ? ` <span class="muted">· ${esc(sub)}</span>` : ''}</span></li>`;
+  }
+  return `<li><span class="pl-mark" aria-hidden="true">${icon('check')}</span><span>${esc(p)}</span></li>`;
+}
+
+function openSignup({ intent, mode = 'signup', title, lead, email = '', step = 'email' } = {}) {
   if (intent) state.intent = intent;
   const item = state.intent && ITEMS[state.intent];
   const isLogin = mode === 'login';
+  const isProIntent = state.intent === 'humanizer-pro';
+  const needPw = isLogin || step === 'password';
   signupOpener = document.activeElement;
-  signupDlg.innerHTML = `<form method="dialog" id="signup-form" novalidate>
-    <div class="dlg-head">
-      <h2 id="signup-title">${isLogin ? 'Log in' : esc(title || 'Create your account')}</h2>
-      <button type="button" class="icon-btn" data-act="close-signup" aria-label="Close">${icon('close')}</button>
+  const stripTitle = isLogin ? '' : (isProIntent ? CONFIG.signup.proStripTitle : CONFIG.signup.freeStripTitle);
+  const stripItems = isLogin ? [] : (isProIntent ? CONFIG.signup.proStrip : (CONFIG.signup.freeStrip || CONFIG.signup.perks));
+  const from = Math.min(...CONFIG.pricing.plans.map((p) => +p.yearMo));
+  const defaultLead = item
+    ? `You picked <b>${esc(item.label)}</b>. We’ll take you there after three quick questions.`
+    : 'Three quick questions after this, then you’re in.';
+  signupDlg.className = `pw-dialog pw-signup${isLogin ? ' pw-login' : ''}`;
+  signupDlg.innerHTML = `<form method="dialog" id="signup-form" class="signup-form" novalidate>
+    <button type="button" class="icon-btn pw-close" data-act="close-signup" aria-label="Close">${icon('close')}</button>
+    <div class="pw-top">
+      ${isLogin ? '' : `<span class="pw-mark${isProIntent ? '' : ' pw-mark-free'}" aria-hidden="true">${isProIntent ? 'PRO' : 'FREE'}</span>`}
+      <h2 id="signup-title">${isLogin ? 'Log in' : esc(title || (needPw && !isLogin ? 'Choose a password' : 'Create your account'))}</h2>
+      <p class="muted signup-lead">${isLogin ? 'Welcome back.'
+        : needPw && !isLogin ? 'Almost done — set a password for this account.'
+        : lead ? esc(lead)
+        : defaultLead}</p>
+      ${isProIntent && !needPw ? `<p class="pw-from muted">from <b>$${from}</b>/mo</p>` : ''}
+      <div class="pw-form">
+        <label class="field" for="signup-email"><span>Email</span>
+          <input class="input field-input" id="signup-email" type="email" autocomplete="email" placeholder="you@university.edu" value="${esc(email)}" ${needPw && !isLogin ? 'readonly' : ''} aria-describedby="signup-error"></label>
+        ${needPw ? `<label class="field" for="signup-password" style="margin-top:12px"><span>Password</span>
+          <input class="input field-input" id="signup-password" type="password" autocomplete="${isLogin ? 'current-password' : 'new-password'}"
+            placeholder="${isLogin ? 'Your password' : `At least ${CONFIG.user.minPassword} characters`}" aria-describedby="signup-error"></label>
+        ${isLogin ? '' : `<label class="field" for="signup-password2" style="margin-top:12px"><span>Repeat password</span>
+          <input class="input field-input" id="signup-password2" type="password" autocomplete="new-password" aria-describedby="signup-error"></label>`}` : ''}
+        <p class="small" id="signup-error" role="alert" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" style="margin-top:12px" data-mode="${mode}">${isLogin ? 'Log in' : 'Create account'}</button>
+        ${needPw && !isLogin ? '' : oauthButtonsHtml()}
+        <p class="small muted" style="text-align:center;margin:12px 0 0">${isLogin
+          ? 'Forgot password? <a href="/forgot-password">Reset it</a> · New here? <button type="button" class="link-btn" data-act="signup">Create an account</button>'
+          : 'Already have an account? <button type="button" class="link-btn" data-act="open-login">Log in</button>'}</p>
+      </div>
     </div>
-    <p class="muted" style="margin-top:0">${isLogin ? 'Welcome back.'
-      : lead ? esc(lead)
-      : item ? `You picked <b>${esc(item.label)}</b>. We’ll take you there after three quick questions.`
-      : 'Three quick questions after this, then you’re in.'}</p>
-    ${isLogin ? '' : `<ul class="perks">${CONFIG.signup.perks.map(p => `<li>${icon('check')}${esc(p)}</li>`).join('')}</ul>`}
-    ${oauthButtonsHtml()}
-    <label class="field" for="signup-email"><span>Email</span>
-      <input class="input field-input" id="signup-email" type="email" autocomplete="email" placeholder="you@university.edu" aria-describedby="signup-error"></label>
-    <label class="field" for="signup-password" style="margin-top:12px"><span>Password</span>
-      <input class="input field-input" id="signup-password" type="password" autocomplete="${isLogin ? 'current-password' : 'new-password'}"
-        placeholder="${isLogin ? 'Your password' : `At least ${CONFIG.user.minPassword} characters`}" aria-describedby="signup-error"></label>
-    ${isLogin ? '' : `<label class="field" for="signup-password2" style="margin-top:12px"><span>Repeat password</span>
-      <input class="input field-input" id="signup-password2" type="password" autocomplete="new-password" aria-describedby="signup-error"></label>`}
-    <p class="small" id="signup-error" role="alert" hidden></p>
-    <button type="submit" class="btn btn-primary btn-block" style="margin-top:12px" data-mode="${mode}">${isLogin ? 'Log in' : 'Create account'}</button>
-    <p class="small muted" style="text-align:center;margin:12px 0 0">${isLogin
-      ? 'Forgot password? <a href="/forgot-password">Reset it</a> · New here? <button type="button" class="link-btn" data-act="signup">Create an account</button>'
-      : 'Already have an account? <button type="button" class="link-btn" data-act="open-login">Log in</button>'}</p>
+    ${!isLogin && stripItems?.length ? `<div class="pw-foot signup-foot">
+      <div class="pw-foot-head"><b>${esc(stripTitle || 'Free with your account')}</b>${isProIntent ? `<span>from <b>$${from}</b>/mo</span>` : ''}</div>
+      <ul class="lim-list">${stripItems.map(signupPerkHtml).join('')}</ul>
+    </div>` : ''}
   </form>`;
   $('#signup-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const email = $('#signup-email'), pw = $('#signup-password'), pw2 = $('#signup-password2');
+    const emailEl = $('#signup-email'), pw = $('#signup-password'), pw2 = $('#signup-password2');
     const fail = (input, msg) => {
       const err = $('#signup-error'); err.hidden = false; err.textContent = msg;
       $$('#signup-form [aria-invalid]').forEach(x => x.removeAttribute('aria-invalid'));
       if (input) { input.setAttribute('aria-invalid', 'true'); input.focus(); }
     };
-    if (!/^\S+@\S+\.\S+$/.test(email.value)) return fail(email, 'Enter an email like you@university.edu');
-    if (!pw.value) return fail(pw, 'Enter your password');
+    if (!/^\S+@\S+\.\S+$/.test(emailEl.value)) return fail(emailEl, 'Enter an email like you@university.edu');
+    // Sign-up first screen matches the prototype: Email → Create account → Google. Password is step 2.
+    if (!isLogin && !needPw) {
+      openSignup({ intent: state.intent, mode: 'signup', title, lead, email: emailEl.value.trim(), step: 'password' });
+      return;
+    }
+    if (!pw?.value) return fail(pw, 'Enter your password');
     if (!isLogin && pw.value.length < CONFIG.user.minPassword) return fail(pw, `Use at least ${CONFIG.user.minPassword} characters`);
     if (pw2 && pw2.value !== pw.value) return fail(pw2, 'Passwords do not match');
     const btn = $('#signup-form [type=submit]'), label = btn.textContent;
     btn.disabled = true; btn.textContent = 'Please wait…';
     try {
       const data = isLogin
-        ? await API.login(email.value.trim(), pw.value)
-        : await API.register({ email: email.value.trim(), password: pw.value, passwordConfirm: pw2.value });
+        ? await API.login(emailEl.value.trim(), pw.value)
+        : await API.register({ email: emailEl.value.trim(), password: pw.value, passwordConfirm: pw2.value });
       finishSignup(mode, data);
     } catch (err) {
       btn.disabled = false; btn.textContent = label;
@@ -9346,7 +9850,7 @@ function openSignup({ intent, mode = 'signup', title, lead } = {}) {
     }
   });
   if (!signupDlg.open) signupDlg.showModal();
-  $('#signup-email').focus();
+  (needPw ? $('#signup-password') : $('#signup-email'))?.focus();
   syncProto();
 }
 
@@ -9378,6 +9882,14 @@ function finishSignup(mode, data) {
     const here = currentRoute();
     navigate(PUBLIC_ROUTES.includes(here) ? 'home' : here);
     toast('Logged in');
+    return;
+  }
+  // Guest who opened Pro on the landing → pricing after signup (requirement 136).
+  if (state.intent === 'humanizer-pro') {
+    state.intent = null;
+    state.returning = false;
+    navigate('pricing');
+    toast(data.welcome_bonus_granted ? `Welcome! ${CONFIG.signupCredits} credits added` : `Welcome to ${CONFIG.brand}`);
     return;
   }
   state.returning = false;
@@ -9659,3 +10171,4 @@ render();
 loadCredits();
 loadScans();
 watchPaymentReturn();
+watchAuthError();

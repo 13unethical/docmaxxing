@@ -1392,6 +1392,20 @@ def _safe_local_path(url: str | None) -> str | None:
     return safe_local_path(url)
 
 
+def _app_auth_error_redirect(message: str, next_url: str | None = None):
+    """Keep OAuth/sign-in failures inside the SPA instead of the legacy login.html page."""
+    from urllib.parse import quote
+
+    msg = quote(str(message or "Sign-in failed. Try again."), safe="")
+    route = "landing"
+    nxt = _safe_local_path(next_url) or ""
+    if nxt.startswith("/app") and "#/" in nxt:
+        route = nxt.split("#/", 1)[1].split("?", 1)[0] or "landing"
+    elif nxt.startswith("/app"):
+        route = "home"
+    return redirect(f"/app?auth_error={msg}#/{route}")
+
+
 def _redirect_after_auth(*, default: str | None = None) -> Any:
     nxt = _safe_local_path(session.pop("post_verify_next", None))
     if nxt:
@@ -1771,19 +1785,11 @@ def auth_oauth_start(provider: str):
     try:
         url = begin_login(provider, next_url=next_url, session=session)
     except PublicOriginError:
-        return render_template(
-            "login.html",
-            nav_active=None,
-            error="Sign-in with a provider is temporarily unavailable.",
-            next_url=next_url,
-        ), 503
+        return _app_auth_error_redirect(
+            "Sign-in with a provider is temporarily unavailable.", next_url
+        )
     except OAuthError as exc:
-        return render_template(
-            "login.html",
-            nav_active=None,
-            error=_public_error(exc),
-            next_url=next_url,
-        ), 400
+        return _app_auth_error_redirect(_public_error(exc), next_url)
     return redirect(url)
 
 
@@ -1793,14 +1799,14 @@ def auth_oauth_callback(provider: str):
     from services.economy.oauth_login import OAuthError, complete_login
 
     values = request.values
+    # Prefer next from OAuth state when present; otherwise land on the SPA.
+    # Read before complete_login — it pops oauth_state from the session.
+    pending_next = _safe_local_path((session.get("oauth_state") or {}).get("next")) or ""
     error = (values.get("error") or values.get("error_description") or "").strip()
     if error:
-        return render_template(
-            "login.html",
-            nav_active=None,
-            error="Sign-in was cancelled or denied. Try again.",
-            next_url="",
-        ), 401
+        return _app_auth_error_redirect(
+            "Sign-in was cancelled or denied. Try again.", pending_next
+        )
     try:
         result = complete_login(
             provider,
@@ -1811,21 +1817,14 @@ def auth_oauth_callback(provider: str):
             form_user=values.get("user"),
         )
     except OAuthError as exc:
-        return render_template(
-            "login.html",
-            nav_active=None,
-            error=_public_error(exc),
-            next_url="",
-        ), 400
+        return _app_auth_error_redirect(_public_error(exc), pending_next)
 
     user = economy_auth.get_user(int(result["user_id"]))
     if user is None or user.get("is_blocked"):
-        return render_template(
-            "login.html",
-            nav_active=None,
-            error=ACCOUNT_BLOCKED_MESSAGE if user and user.get("is_blocked") else "Sign-in failed.",
-            next_url="",
-        ), 403
+        return _app_auth_error_redirect(
+            ACCOUNT_BLOCKED_MESSAGE if user and user.get("is_blocked") else "Sign-in failed.",
+            pending_next or _safe_local_path(result.get("next")),
+        )
     economy_auth.login_user(int(user["id"]))
     next_url = _safe_local_path(result.get("next")) or ""
     if not economy_auth.user_email_verified(user):
