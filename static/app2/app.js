@@ -7737,9 +7737,9 @@ function renderVeil() {
         </section>
         <ol class="veil-steps">
           ${step(1, 'Unlock Veil', `Pay ${price} credits from your balance. Access lasts ${V.days} days.`)}
-          ${step(2, 'Download and unzip', 'You’ll get one folder called <b>Veil</b>. Open <b>How to install.txt</b> if you want. Ignore the other files — don’t open them. Keep the folder; Chrome runs Veil from it.',
+          ${step(2, 'Download and unzip', 'You’ll see two things: <b>How to install.txt</b> and a folder named <b>Veil</b>. Don’t open the folder. Keep it; Chrome runs Veil from it.',
             done ? `<button class="btn btn-sm btn-primary" data-act="veil-download">${icon('download')} Download Veil.zip</button>` : '')}
-          ${step(3, 'Add it to Chrome', 'Open the extensions page, turn on <b>Developer mode</b> (top right), click <b>Load unpacked</b>, and choose the <b>Veil folder</b> — not a file inside it.',
+          ${step(3, 'Add it to Chrome', 'Open the extensions page, turn on <b>Developer mode</b> (top right), click <b>Load unpacked</b>, and choose the <b>Veil</b> folder. Do not click into the files inside.',
             `<span class="vstep-code"><code>${esc(V.extensionsUrl)}</code><button class="btn btn-sm" data-act="veil-copy" aria-label="Copy address ${esc(V.extensionsUrl)}">${icon('copy')} Copy</button></span>`)}
           ${step(4, 'Pin it and sign in', 'Click the puzzle icon in Chrome, pin Veil, open it and sign in with your DocMaxxing account.')}
           <li class="vstep-done">${icon('sparkles')}<span>Done. Select text and press <b>Control+Q</b> to ask, <b>Control+S</b> to crop, <b>Control+H</b> to humanize. On Windows you can also use Alt instead of Control.</span></li>

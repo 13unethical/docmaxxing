@@ -41,7 +41,7 @@ def _zip_points_at_this_site(res):
     archive = zipfile.ZipFile(io.BytesIO(res.data))
     names = set(archive.namelist())
     assert names == {
-        "Veil/How to install.txt",
+        "How to install.txt",
         "Veil/manifest.json",
         "Veil/background.js",
         "Veil/content.js",
