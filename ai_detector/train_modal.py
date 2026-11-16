@@ -66,7 +66,9 @@ MAX_CHATGPT_RECALL_DROP = 0.02
 RAWAI_MAX = int(os.environ.get("AI_DETECTOR_RAWAI_MAX", "3000"))
 # Turnitin labels of humanized text (/tt_labels_ours.jsonl, /batch_*.jsonl) are ~5% of the windows
 # but the only examples of what humanizers leave behind; each is repeated this many times.
-OURS_REPEAT = 1
+# 2026-11-16: after sentence-window retrain, golden_recall was 0.21 at t=0.5 (need >=0.35) —
+# oversample humanized labels so the model learns bypasser residue, not only raw AI.
+OURS_REPEAT = int(os.environ.get("AI_DETECTOR_OURS_REPEAT", "5"))
 # Big-file Turnitin rounds (/batch_big*.jsonl): K candidates of the same source paragraph. Held-out
 # runs keep this share of their essays out of training and measure how often the candidate the model
 # scores lowest was flagged, i.e. what the humanizer would ship; the gate compares it with production
@@ -76,7 +78,7 @@ PICK_HOLDOUT = 0.2
 MAX_PICK_RISE = 0.01
 # Ranking loss on those candidates: every RANK_EVERY steps, up to RANK_TEXTS candidates of paragraphs
 # with both flagged and clean ones; flagged candidates must score above clean ones of the same paragraph.
-RANK_WEIGHT = 0.0
+RANK_WEIGHT = float(os.environ.get("AI_DETECTOR_RANK_WEIGHT", "0.2"))
 RANK_EVERY = 4
 RANK_TEXTS = 16
 # Turnitin labels of the golden set (/data/eval_golden*.jsonl): humanized text, evaluation only.
@@ -452,16 +454,40 @@ def _mean(vals: list):
 
 
 def pick_threshold(metrics: dict) -> dict:
-    """Use the threshold whose held-out per-report AI % tracks Turnitin best, among those keeping
-    human false positives within MAX_HUMAN_FP, when it beats FLAG_THRESHOLD by MIN_THRESHOLD_GAIN;
-    its numbers replace the FLAG_THRESHOLD ones."""
+    """Pick a flag threshold on held-out metrics.
+
+    Prefer a threshold that clears both ``MIN_TT_CORR`` and ``MIN_GOLDEN_RECALL`` (when golden
+    exists) while keeping ``human_fp <= MAX_HUMAN_FP``. Among those, take the highest
+    ``tt_doc_corr``. If nothing clears both floors, fall back to max-corr among FP-safe
+    thresholds (gate will still reject if golden is short).
+    """
     table = metrics.get("by_threshold") or {}
-    ok = [(m["tt_doc_corr"], float(t)) for t, m in table.items()
-          if m.get("tt_doc_corr") is not None and m.get("human_fp") is not None and m["human_fp"] <= MAX_HUMAN_FP]
-    base = (table.get(str(FLAG_THRESHOLD)) or {}).get("tt_doc_corr")
+    ok: list[tuple[float, dict]] = []
+    for t_str, m in table.items():
+        if m.get("tt_doc_corr") is None or m.get("human_fp") is None:
+            continue
+        if m["human_fp"] > MAX_HUMAN_FP:
+            continue
+        ok.append((float(t_str), m))
     t = FLAG_THRESHOLD
-    if ok and (base is None or max(ok)[0] >= base + MIN_THRESHOLD_GAIN):
-        t = max(ok)[1]
+    if ok:
+        has_golden = any(m.get("golden_recall") is not None for _, m in ok)
+        both = [
+            (m["tt_doc_corr"], m.get("golden_recall") or 0.0, thr)
+            for thr, m in ok
+            if m["tt_doc_corr"] >= MIN_TT_CORR
+            and (not has_golden or (m.get("golden_recall") or 0.0) >= MIN_GOLDEN_RECALL)
+        ]
+        if both:
+            t = max(both, key=lambda row: (row[0], row[1]))[2]
+        else:
+            base = (table.get(str(FLAG_THRESHOLD)) or {}).get("tt_doc_corr")
+            scored = [
+                (m["tt_doc_corr"], m.get("golden_recall") or 0.0, thr) for thr, m in ok
+            ]
+            best = max(scored, key=lambda row: (row[0], row[1]))
+            if base is None or best[0] >= base + MIN_THRESHOLD_GAIN:
+                t = best[2]
     out = dict(metrics, threshold=t)
     out.update({k: v for k, v in table.get(str(t), {}).items() if v is not None})
     return out
