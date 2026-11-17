@@ -1,14 +1,15 @@
 ---
 title: What does *% mean in Turnitin's AI report?
-seo_title: What Does *% Mean in Turnitin's AI Report?
-description: Turnitin shows an asterisk instead of a number for low AI scores. Here's what *% means, why it's there, and what to do if your teacher asks about it.
+seo_title: What Does *% Mean in Turnitin AI Score?
+description: Turnitin shows *% instead of a number when the AI score is low. Here’s what the asterisk means, why it’s there, and what to do if a teacher asks.
 date: 2026-11-02
+updated: 2026-11-17
 lang: en
 ---
 
-If you've seen a Turnitin AI writing report with **\*%** instead of a number, you're not alone. It's one of the most searched questions about Turnitin, and the short answer is reassuring: the asterisk means the detector found only a small amount of text it considers AI-like — too little for Turnitin to show a reliable number.
+If you've seen a Turnitin AI writing report with **\*%** instead of a number, you're not alone. The asterisk means Turnitin found only a small amount of text it considers AI-like — too little to print a reliable percentage — not a hidden high score and not proof that you used AI.
 
-Below is what the asterisk means, why Turnitin added it, and what you can do if a teacher asks about your report.
+Below is what the asterisk means, why Turnitin added it, and what you can do if a teacher asks about your report. You can also preview AI-like sentences with DocMaxxing's free [AI detector](/ai-detector), or smooth stiff passages with the [AI humanizer](/humanizer) when your course allows editing help.
 
 ## The short answer
 
@@ -56,7 +57,7 @@ A \*% result is a weak signal, and Turnitin itself says AI scores should not be 
 
 The honest answer: write in your own voice and keep evidence of your process. Varying sentence length, adding concrete examples from your reading or lectures, and cutting filler phrases all make writing clearer *and* less template-like.
 
-If you've drafted with AI help where your course allows it, a humanizer like the [DocMaxxing AI Humanizer](/humanizer) can rewrite stiff passages into more natural prose. No tool can promise a particular detector result, though — and you should be wary of any that does. Always read the output, fix anything that changed your meaning, and cite your sources.
+If you've drafted with AI help where your course allows it, a humanizer like the [DocMaxxing AI Humanizer](/humanizer) can rewrite stiff passages into more natural prose. No tool can promise a particular detector result, though — and you should be wary of any that does. Always read the output, fix anything that changed your meaning, and cite your sources. For a second look at which sentences look AI-like before you submit, try the free [AI detector](/ai-detector).
 
 ## Key takeaways
 

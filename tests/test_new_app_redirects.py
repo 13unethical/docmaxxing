@@ -108,7 +108,8 @@ def test_without_landing_pages_pricing_stays_ssr_for_guests(client, monkeypatch)
     html = resp.get_data(as_text=True)
     assert "Simple credit pricing" in html
     assert 'href="/app#/pricing"' in html
-    assert '"@type": "Product"' in html
+    assert '"@type": "SoftwareApplication"' in html
+    assert '"@type": "Product"' not in html
 
 
 @pytest.mark.parametrize(
@@ -116,8 +117,6 @@ def test_without_landing_pages_pricing_stays_ssr_for_guests(client, monkeypatch)
     [
         ("/", "detect", "Check your text for AI"),
         ("/ai-detector", "detect", "Free AI Detector"),
-        ("/humanizer", "humanize", "Free AI Humanizer"),
-        ("/formatter", "format", "Free Essay Formatter for APA, MLA, Harvard and Chicago"),
     ],
 )
 def test_without_landing_pages_guests_get_the_app_landing_in_place(client, monkeypatch, path, tab, h1):
@@ -136,6 +135,23 @@ def test_without_landing_pages_guests_get_the_app_landing_in_place(client, monke
     assert '"@type": "FAQPage"' in html
     assert '"@type": "SoftwareApplication"' in html
     assert '<details class="card">' in html
+
+
+def test_humanizer_and_formatter_stay_unique_ssr_without_guest_landing_flag(client, monkeypatch):
+    from services.seo import PUBLIC_PAGES, canonical_url
+
+    monkeypatch.setenv("GUEST_LANDING_PAGES", "0")
+    hum = client.get("/humanizer").get_data(as_text=True)
+    assert 'id="app"' not in hum
+    assert PUBLIC_PAGES["/humanizer"].h1 in hum
+    assert f'<link rel="canonical" href="{canonical_url("/humanizer")}" />' in hum
+    assert "How the AI humanizer works" in hum
+
+    fmt = client.get("/formatter").get_data(as_text=True)
+    assert "data-format-v2" in fmt
+    assert PUBLIC_PAGES["/formatter"].h1 in fmt
+    assert "What the essay formatter applies" in fmt
+    assert f'<link rel="canonical" href="{canonical_url("/formatter")}" />' in fmt
 
 
 def test_ai_detector_page_sends_signed_in_users_to_the_dashboard(signed_in_client):

@@ -3517,16 +3517,19 @@ def not_found(_error):
 
 @app.route("/formatter")
 def formatter():
-    """SEO landing URL for the Format tool (same UI as home)."""
-    if _serve_public_landing():
-        if formatter_v2_enabled():
-            return render_template("format_v2.html", nav_active="formatter")
-        return render_template("index.html", nav_active="formatter")
-    if _serve_app_landing():
-        return _render_app_landing()
-    if formatter_v2_enabled():
-        return render_template("format_v2.html", nav_active="formatter")
-    return render_template("index.html", nav_active="formatter")
+    """SEO landing URL for the Format tool — real formatter UI plus unique crawlable copy."""
+    from services.site_content import faq_items_for_path
+
+    tpl = "format_v2.html" if formatter_v2_enabled() else "index.html"
+    # Guests always get the live tool plus unique crawlable copy (LEGACY_UI is for signed-in UI).
+    if economy_auth.current_user() is None and request.args.get("classic") != "1":
+        return render_template(
+            tpl,
+            nav_active="formatter",
+            show_formatter_seo=True,
+            faq_items=faq_items_for_path("/formatter") or [],
+        )
+    return render_template(tpl, nav_active="formatter")
 
 
 @app.route("/icon.png")
@@ -4959,10 +4962,10 @@ def editor():
 @app.route("/humanizer")
 @economy_auth.email_verified_required(allow_guest_preview=True)
 def humanizer():
-    if _serve_public_landing():
+    # Guests/crawlers always get the unique SSR landing — the SPA twin of "/" caused Google to
+    # pick the homepage as canonical for /humanizer. LEGACY_UI only affects signed-in users.
+    if economy_auth.current_user() is None and request.args.get("classic") != "1":
         return _render_landing("landing/humanizer_en.html", signup_next="/humanizer")
-    if _serve_app_landing():
-        return _render_app_landing()
     from services.economy.pricing import FEATURE_COSTS
     from services.economy.site_settings import humanize_credit_cost
 

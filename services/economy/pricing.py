@@ -349,7 +349,7 @@ def pricing_cost_rows() -> list[dict[str, str]]:
 
 
 def pricing_schema_nodes(*, packages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    """Product + Offer JSON-LD nodes from the live credit catalog (no hardcoded prices)."""
+    """SoftwareApplication + Offer JSON-LD from the live credit catalog (no Product / Merchant fields)."""
     from services.seo import SITE_NAME, SITE_URL
 
     rows = packages if packages is not None else pricing_page_packages()
@@ -365,8 +365,6 @@ def pricing_schema_nodes(*, packages: list[dict[str, Any]] | None = None) -> lis
                 "price": price,
                 "priceCurrency": "USD",
                 "url": f"{SITE_URL}/pricing",
-                "availability": "https://schema.org/InStock",
-                "category": "Credits",
                 "description": f"{coins} DocMaxxing credits",
             }
         )
@@ -374,14 +372,15 @@ def pricing_schema_nodes(*, packages: list[dict[str, Any]] | None = None) -> lis
         return []
     return [
         {
-            "@type": "Product",
-            "name": f"{SITE_NAME} credit packs",
-            "description": (
-                "One-time DocMaxxing credit packs for paid tools (humanizer, Turnitin checks, "
-                "slides and related features). Formatting stays free."
-            ),
-            "brand": {"@type": "Brand", "name": SITE_NAME},
+            "@type": "SoftwareApplication",
+            "name": SITE_NAME,
+            "applicationCategory": "EducationalApplication",
+            "operatingSystem": "Web",
             "url": f"{SITE_URL}/pricing",
+            "description": (
+                "DocMaxxing credit packs for paid tools (humanizer, Turnitin checks, slides). "
+                "Essay formatting stays free."
+            ),
             "offers": offers,
         }
     ]

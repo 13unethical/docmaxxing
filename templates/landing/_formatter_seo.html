@@ -1,0 +1,71 @@
+{# Crawlable SEO copy under the live formatter tool. Uses app-shell styles (card / muted). #}
+<section class="card" style="margin-top:1.25rem" aria-labelledby="fmt-what-h">
+  <h2 class="card-title" id="fmt-what-h">What the essay formatter applies</h2>
+  <p class="muted">
+    Upload a DOCX or paste your draft, pick a style profile, and generate a submission-ready layout.
+    The formatter does not rewrite your sentences — it sets the document rules your brief asks for.
+  </p>
+  <div class="v2-grid" style="margin-top:0.75rem">
+    <div class="card">
+      <h3 class="card-title">Page &amp; type</h3>
+      <p class="muted">Margins, body font and size, line spacing, and first-line or hanging indents that match the style.</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Headings &amp; page numbers</h3>
+      <p class="muted">Heading levels and running page numbers (or headers) placed where APA, MLA, Harvard or Chicago expect them.</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Cover / title block</h3>
+      <p class="muted">Optional title page or title block fields when the style uses them — student name, course, instructor, date.</p>
+    </div>
+    <div class="card">
+      <h3 class="card-title">Citations &amp; references</h3>
+      <p class="muted">In-text citation shape and a reference list / Works Cited / bibliography layout for the chosen style.</p>
+    </div>
+  </div>
+</section>
+
+<section class="card" style="margin-top:1rem" aria-labelledby="fmt-styles-h">
+  <h2 class="card-title" id="fmt-styles-h">APA, MLA, Harvard, Chicago — short guides</h2>
+  <h3>APA 7</h3>
+  <p class="muted">
+    Common for psychology and social sciences. Expects student title-page fields, double spacing, page numbers,
+    Level 1–3 headings, author–date citations, and a References list with hanging indents. The APA preset
+    wires those defaults so you are not hunting through Word styles.
+  </p>
+  <h3>MLA 9</h3>
+  <p class="muted">
+    Standard for many literature and humanities courses. First-page title block instead of a separate cover,
+    double spacing, surname page numbers, and a Works Cited list. Parenthetical citations use author–page
+    where the source has pages.
+  </p>
+  <h3>Harvard</h3>
+  <p class="muted">
+    Author–date referencing used widely in UK and Commonwealth universities. Our Harvard preset follows a
+    Cite Them Right-style layout for body text, headings and the reference list — still confirm any local
+    faculty variant your module handbook names.
+  </p>
+  <h3>Chicago 17</h3>
+  <p class="muted">
+    Used across history and some social sciences. Notes-bibliography and author–date variants both appear in
+    briefs; the Chicago preset sets typography, spacing and bibliography layout as a solid starting point you
+    can adjust if your instructor requires notes.
+  </p>
+  <p class="muted">
+    IEEE is also available for engineering reports (numbered citations). After formatting, pair the file with
+    the free <a href="/ai-detector">AI detector</a> or <a href="/humanizer">AI humanizer</a> only if your course
+    allows those tools — layout and wording are separate jobs.
+  </p>
+</section>
+
+{% if faq_items %}
+<section class="card" style="margin-top:1rem" aria-labelledby="fmt-faq-h">
+  <h2 class="card-title" id="fmt-faq-h">Essay formatter FAQ</h2>
+  {% for question, answer in faq_items %}
+  <details class="card" style="margin-top:0.5rem">
+    <summary><strong>{{ question }}</strong></summary>
+    <p class="muted">{{ answer|safe }}</p>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}

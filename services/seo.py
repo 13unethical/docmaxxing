@@ -126,16 +126,22 @@ _PAGES: tuple[PublicPage, ...] = (
     ),
     PublicPage(
         path="/humanizer",
-        title="Free AI Humanizer — Humanize AI Text Online | DocMaxxing",
+        title="AI Humanizer: Make AI Text Sound Human | DocMaxxing",
         description=(
-            "Paste an AI draft and get natural, readable writing in seconds. Free AI humanizer "
-            "for essays and reports — no sign-up needed for short texts."
+            "Free AI humanizer: humanize AI text from ChatGPT or Claude so it sounds human. "
+            "Keeps meaning and citations. No sign-up for short essay drafts."
         ),
-        h1="Free AI Humanizer — Turn AI Text into Natural Writing",
-        keywords=("AI humanizer", "free AI humanizer", "humanize AI text", "rewrite ChatGPT text"),
+        h1="AI Humanizer — Make AI Text Sound Human",
+        keywords=(
+            "AI humanizer",
+            "humanize AI text",
+            "make AI text sound human",
+            "free AI humanizer",
+            "rewrite ChatGPT text",
+        ),
         og_image=OG_IMAGE_HUMANIZER,
         breadcrumb="AI Humanizer",
-        sources=("templates/app_v2.html", "static/app2/app.js", "services/site_content.py"),
+        sources=("templates/landing/humanizer_en.html", "services/site_content.py"),
         software_app=True,
     ),
     # On hold (noindex, unlinked) until there is a real Russian engine.
@@ -157,19 +163,25 @@ _PAGES: tuple[PublicPage, ...] = (
     ),
     PublicPage(
         path="/formatter",
-        title="Free APA, MLA & Harvard Essay Formatter | DocMaxxing",
+        title="Essay Formatter — APA, MLA, Harvard, Chicago | DocMaxxing",
         description=(
-            "Format an essay in APA 7, MLA 9, Harvard, Chicago or IEEE for free. Upload a DOCX "
-            "or paste text — margins, headings and references are set for you."
+            "Free essay formatter for APA 7, MLA 9, Harvard, Chicago and IEEE. Fonts, margins, "
+            "spacing, cover page, citations and reference list from DOCX or paste."
         ),
-        h1="Free Essay Formatter for APA, MLA, Harvard and Chicago",
+        h1="Essay Formatter — APA, MLA, Harvard, Chicago",
         lede=(
             "Turn a rough draft into a submission-ready document with the right "
-            "style profile, spacing, and reference layout."
+            "style profile, spacing, cover page, and reference layout."
         ),
-        keywords=("essay formatter", "APA 7 formatter", "MLA formatter", "Harvard referencing"),
+        keywords=(
+            "essay formatter",
+            "APA 7 formatter",
+            "MLA formatter",
+            "Harvard referencing",
+            "Chicago style formatter",
+        ),
         breadcrumb="Essay Formatter",
-        sources=("templates/format_v2.html", "templates/index.html"),
+        sources=("templates/format_v2.html", "templates/landing/_formatter_seo.html"),
         software_app=True,
     ),
     PublicPage(

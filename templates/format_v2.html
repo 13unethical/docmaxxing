@@ -777,6 +777,9 @@
           </div>
         </div>
       </div>
+{% if show_formatter_seo %}
+{% include "landing/_formatter_seo.html" %}
+{% endif %}
 {% endblock %}
 {% block scripts %}
     <script src="{{ url_for('static', filename='format_v2.js') }}?v=20260812-v2-en"></script>

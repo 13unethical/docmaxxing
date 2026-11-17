@@ -254,60 +254,40 @@ def humanizer_en_faq() -> list[FaqItem]:
     c = _costs()
     return [
         (
-            "Is the AI humanizer really free?",
-            f"Yes. Without an account you can humanize up to {f['guest_words_s']} words, "
+            "Does the humanizer keep my meaning and citations?",
+            "It aims to. The rewrite tries to keep your argument, numbers and in-text citations, and it leaves "
+            "headings and reference lists untouched. Any automatic pass can still miss a nuance, so read the "
+            "output and fix anything that shifted before you submit.",
+        ),
+        (
+            "What are the free limits?",
+            f"Without an account you can humanize up to {f['guest_words_s']} words, "
             f"{_times_en(f['guest_daily'])} a day. A free account raises that to {f['user_words_s']} words, "
             f"{_times_en(f['user_daily'])} a day. Longer texts and extra runs cost {c['humanize']} credits each — "
             'see <a href="/pricing">Pricing</a>.',
         ),
         (
-            "Do I need to sign up?",
-            "No. You can run the humanizer right on this page. An account gives you a higher free limit, "
-            "saved history and the full document editor.",
-        ),
-        (
-            "What does “humanize AI text” mean?",
-            "It means rewriting text produced by a language model so it reads the way a person writes: "
-            "less predictable phrasing, sentences of different lengths, fewer filler transitions. "
-            "The meaning should stay the same.",
-        ),
-        (
-            "Will the result pass AI detectors?",
-            "We don’t promise any detector score, and you should be wary of anyone who does. Detectors are "
-            "statistical, they often disagree with each other, and they sometimes flag text written entirely "
-            "by people. Our goal is natural, readable writing — review the result and follow your "
-            "institution’s rules.",
-        ),
-        (
-            "Will it change my meaning or citations?",
-            "It shouldn’t. The humanizer aims to keep your argument, numbers and in-text citations, and it "
-            "leaves headings and reference lists untouched. Any automatic rewrite can miss a nuance, so read "
-            "the output before you use it.",
-        ),
-        (
             "Which languages does it support?",
-            "English only for now. Russian and other languages are not supported yet.",
+            "English only for now. Russian and other languages are not supported yet; we will not ship a "
+            "synonym-swap and call it a humanizer.",
         ),
         (
-            "How long can my text be?",
-            f"Free runs take up to {f['guest_words_s']} words without an account and {f['user_words_s']} words "
-            f"with one. Paid runs handle up to {f['max_words_s']} words at a time.",
+            "Will humanized text get a low score on AI detectors?",
+            "No honest tool can promise that. Detectors are statistical, they often disagree, and they "
+            "sometimes flag writing people produced entirely by hand. We do not claim a specific Turnitin, "
+            "GPTZero or Copyleaks score. Use the humanizer to make drafts read more naturally, then review "
+            "them and follow your institution’s rules.",
         ),
         (
-            "Is it OK to use a humanizer for university work?",
+            "Is it OK to use an AI humanizer for university work?",
             "That depends on your course. Many universities allow AI help for brainstorming or editing but ask "
-            "you to say so. Use the humanizer to improve how your own draft reads, cite your sources, and check "
-            "your school’s AI policy.",
+            "you to disclose it. Use the humanizer to improve how your own draft reads, cite your sources, and "
+            "check your school’s AI policy — do not use it to hide prohibited assistance.",
         ),
         (
             "How is this different from a paraphrasing tool?",
-            "Most paraphrasers swap words for synonyms, which often makes text sound stranger. The humanizer "
-            "rewrites whole sentences and paragraphs, changing rhythm and structure while keeping the point.",
-        ),
-        (
-            "What if I don’t like the result?",
-            "Edit it by hand or run it again. If a free run fails on our side, it doesn’t count toward your "
-            "daily limit.",
+            "Most paraphrasers swap words for synonyms, which often makes text sound stranger. The AI humanizer "
+            "rewrites whole sentences and paragraphs — rhythm and structure — while trying to keep the point.",
         ),
     ]
 
@@ -467,9 +447,15 @@ def ai_detector_faq() -> list[FaqItem]:
 def formatter_faq() -> list[FaqItem]:
     return [
         (
-            "Which citation styles does the formatter support?",
-            "APA 7, MLA 9, Harvard, Chicago and IEEE, with control over fonts, spacing, margins, "
-            "the cover page and the reference list.",
+            "Which styles does the essay formatter support?",
+            "APA 7, MLA 9, Harvard (Cite Them Right), Chicago 17 and IEEE. Each preset sets fonts, margins, "
+            "line spacing, headings, the cover or title block where the style uses one, and the reference list.",
+        ),
+        (
+            "What exactly gets formatted?",
+            "Body text, heading levels, page margins, font and size, line spacing, first-line or hanging "
+            "indents, page numbers, an optional cover/title page, in-text citation shape, and the reference "
+            "or Works Cited list layout.",
         ),
         (
             "Does formatting cost credits?",
@@ -477,11 +463,17 @@ def formatter_faq() -> list[FaqItem]:
         ),
         (
             "What can I upload?",
-            "Paste text or upload a DOCX (and related academic files shown on the Format page).",
+            "Paste text or upload a DOCX. Then pick a style profile and generate a formatted document you can "
+            "download and edit.",
         ),
         (
             "Do I need an account?",
             "Not to format. An account keeps history and unlocks paid tools like Turnitin checks.",
+        ),
+        (
+            "Will it rewrite my sentences?",
+            "No. The formatter applies layout and style rules; it does not humanize or paraphrase your prose. "
+            'Use the <a href="/humanizer">AI humanizer</a> if you need wording changes.',
         ),
     ]
 
@@ -555,7 +547,7 @@ _TOOL_LANDINGS: dict[str, dict[str, Any]] = {
     },
     "/formatter": {
         "tab": "format",
-        "hero": "Free Essay Formatter for APA, MLA, Harvard and Chicago",
+        "hero": "Essay Formatter — APA, MLA, Harvard, Chicago",
         "about_title": "Submission-ready formatting, free",
         "about": (
             ("Style profiles that match the brief",

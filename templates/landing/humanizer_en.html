@@ -3,76 +3,46 @@
 <section class="lp-hero lp-wrap" aria-labelledby="lp-h1">
   <h1 id="lp-h1">{{ seo.h1 }}</h1>
   <p class="lp-lede">
-    Paste a draft from ChatGPT, Gemini or Claude and get back writing that sounds like a person wrote it:
-    sentences of different lengths, plain words, and your meaning intact. Free for short texts, no sign-up needed.
+    An AI humanizer rewrites stiff, machine-sounding drafts so they read like a student actually wrote them:
+    uneven sentence length, plain wording, and fewer stock transitions — while aiming to keep your argument,
+    numbers and in-text citations. Paste text from ChatGPT, Claude, Gemini or your own outline; get a version
+    you can edit and own. Free for short runs, no account required.
   </p>
   {% include "landing/_tool.html" %}
 </section>
 
 <section class="lp-section lp-wrap" aria-labelledby="how-h">
-  <h2 id="how-h">How it works</h2>
+  <h2 id="how-h">How the AI humanizer works</h2>
   <ol class="lp-steps">
     <li>
-      <h3>Paste your draft</h3>
-      <p>Add up to {{ free.guest_words_s }} words without an account, or up to {{ free.user_words_s }} with a free one.
-        Headings and reference lists are left as they are.</p>
+      <h3>Paste the draft you want to humanize</h3>
+      <p>Drop in up to {{ free.guest_words_s }} words without signing up, or up to {{ free.user_words_s }} with a free
+        account. Headings and reference lists are left alone so your structure survives the rewrite.</p>
     </li>
     <li>
-      <h3>Press Humanize</h3>
-      <p>Our rewriting model works through the text paragraph by paragraph, breaking up repetitive sentence
-        patterns and replacing stock phrases with plain wording.</p>
+      <h3>Run Humanize</h3>
+      <p>The model works paragraph by paragraph: it breaks repetitive sentence patterns, cuts filler openers
+        (“In today’s rapidly evolving…”) and replaces generic phrasing with wording a person would say in a seminar.</p>
     </li>
     <li>
-      <h3>Read, edit, copy</h3>
-      <p>Compare the result with your original, fix anything that shifted your meaning, and copy it into your
-        document with one click.</p>
+      <h3>Compare before and after</h3>
+      <p>Read the output against your original. Fix any claim that drifted, restore a citation if something moved,
+        and keep the voice that matches your course.</p>
+    </li>
+    <li>
+      <h3>Copy into your document</h3>
+      <p>Paste the result into Word or Google Docs, then finish with formatting and a careful proofread. The
+        humanizer is an editing step — not a substitute for your sources or your judgment.</p>
     </li>
   </ol>
 </section>
 
-<section class="lp-section lp-wrap" aria-labelledby="features-h">
-  <h2 id="features-h">What the humanizer changes</h2>
-  <p class="lp-lede">AI drafts are usually correct but flat. The humanizer targets the habits that make them read that way.</p>
-  <ul class="lp-cards">
-    <li class="lp-card">
-      <h3>Sentence rhythm</h3>
-      <p>Language models like sentences of the same length and shape. The rewrite mixes short and long sentences
-        the way people do when they actually think on the page.</p>
-    </li>
-    <li class="lp-card">
-      <h3>Stock phrases</h3>
-      <p>“In today’s fast-paced world”, “it is important to note”, “delve into”, “a testament to” — these get
-        swapped for direct wording or cut altogether.</p>
-    </li>
-    <li class="lp-card">
-      <h3>Over-hedging</h3>
-      <p>AI text qualifies everything. The humanizer keeps the caution that matters and drops the rest, so your
-        argument reads with more confidence.</p>
-    </li>
-    <li class="lp-card">
-      <h3>Your structure stays</h3>
-      <p>Headings, lists and reference lists are not touched, and the rewrite aims to keep your claims, numbers
-        and in-text citations where they were.</p>
-    </li>
-    <li class="lp-card">
-      <h3>Built for coursework</h3>
-      <p>The model was trained mostly on essays, reports and other academic writing, so the tone stays right
-        for university work rather than drifting into marketing copy.</p>
-    </li>
-    <li class="lp-card">
-      <h3>Short wait</h3>
-      <p>Short texts usually come back within a minute. Longer documents take a little more, so paste them
-        once you have finished editing the draft itself.</p>
-    </li>
-  </ul>
-</section>
-
 <section class="lp-section lp-wrap" aria-labelledby="example-h">
-  <h2 id="example-h">Before and after</h2>
-  <p class="lp-lede">A typical paragraph from a chatbot, and the same idea after humanizing.</p>
+  <h2 id="example-h">Before / after: humanize AI text</h2>
+  <p class="lp-lede">Same idea, same facts — after humanizing, the paragraph no longer reads like a template.</p>
   <div class="lp-compare">
     <figure>
-      <figcaption>Before</figcaption>
+      <figcaption>Before (typical AI draft)</figcaption>
       <blockquote>
         <p>In today’s rapidly evolving digital landscape, it is important to note that social media platforms have
           become a pivotal source of news for students. Furthermore, this phenomenon raises significant concerns
@@ -80,64 +50,78 @@
       </blockquote>
     </figure>
     <figure>
-      <figcaption>After</figcaption>
+      <figcaption>After (humanized)</figcaption>
       <blockquote>
         <p>Social media is now one of the main places students get their news. That raises a fair question: how
           good is the information they read every day, and how much of it can they actually trust?</p>
       </blockquote>
     </figure>
   </div>
-  <p>Same point, same length range — but the second version sounds like someone who has an opinion about it.</p>
+  <p>Making AI text sound human is mostly about rhythm and word choice, not inventing new claims. You still need
+    to check every fact against your sources.</p>
 </section>
 
 <section class="lp-section lp-wrap" aria-labelledby="why-h">
   <div class="lp-prose">
-    <h2 id="why-h">Why AI text sounds “off”</h2>
+    <h2 id="why-h">What “humanize AI text” actually means</h2>
     <p>
-      A language model writes by picking a likely next word, again and again. That makes its prose smooth but
-      predictable: the same transitions (“Moreover”, “Additionally”), the same three-part lists, and paragraphs
-      that open with a summary and close with another one. Readers notice the pattern even when they can’t name it.
+      Language models write by predicting likely next words. That produces smooth prose with repeating habits:
+      parallel three-item lists, summary sentences that open and close every paragraph, and transitions like
+      “Moreover” and “Additionally” stacked until the page feels generated. Readers notice the pattern even when
+      they cannot name it. An AI humanizer targets those habits — not by swapping random synonyms, but by
+      rewriting clauses so the cadence matches how people explain ideas under a deadline.
     </p>
     <p>
-      People write less evenly. We use a short sentence to land a point, then a longer one to explain it. We pick
-      the plain word over the impressive one, skip transitions when the logic is obvious, and leave out the
-      qualifiers nobody asked for. Humanizing AI text means bringing back that unevenness without losing what the
-      draft gets right.
+      Students usually need this after brainstorming with ChatGPT or cleaning a translation. The goal is not to
+      “beat” a detector with a magic score. Detectors disagree with each other, flag human writing, and change
+      over time. The useful goal is clearer, more natural prose that still says what you meant. If your
+      institution allows AI assistance, say so when asked; if it does not, do not use a humanizer to hide
+      prohibited help.
     </p>
-    <h3>Tips for a natural final draft</h3>
+    <p>
+      DocMaxxing’s humanizer was trained mainly on academic drafts — essays, reports and literature reviews —
+      so the tone stays closer to coursework than to marketing copy. It tries to preserve numbers, names and
+      parenthetical citations. Automatic rewrites can still miss nuance, so treat the output as a first pass you
+      edit, not as a finished submission.
+    </p>
+    <h3>When a humanizer helps most</h3>
     <ul>
-      <li>Read the result out loud. Anything you would never say is worth rewriting.</li>
-      <li>Add one example from your own reading, lecture notes or experience to each main point.</li>
-      <li>Check every fact, figure and citation against the source.</li>
-      <li>Finish with your formatting: our free <a href="/formatter">essay formatter</a> handles APA, MLA, Harvard and Chicago.</li>
+      <li>ChatGPT drafts that are correct but flat, with identical sentence length throughout.</li>
+      <li>Non-native English that is accurate but overly formal or repetitive.</li>
+      <li>Summaries that lean on stock academic filler instead of your own examples.</li>
+    </ul>
+    <h3>What you should still do yourself</h3>
+    <ul>
+      <li>Add one concrete example from your reading, lab or lecture notes to each main point.</li>
+      <li>Verify every quotation and citation against the original source.</li>
+      <li>Read the result out loud; cut anything you would never say in a tutorial.</li>
+      <li>Apply the citation style your brief requires with our free
+        <a href="/formatter">essay formatter</a> (APA, MLA, Harvard, Chicago).</li>
+      <li>Optionally preview AI-like sentences with the free
+        <a href="/ai-detector">AI detector</a> — scores are estimates, not verdicts.</li>
     </ul>
   </div>
 </section>
 
-<section class="lp-section lp-wrap" aria-labelledby="who-h">
-  <h2 id="who-h">Who it’s for</h2>
-  <ul class="lp-cards">
-    <li class="lp-card">
-      <h3>Students</h3>
-      <p>For drafts you wrote with AI help where your course allows it, so the final text reads like you.</p>
-    </li>
-    <li class="lp-card">
-      <h3>Non-native English writers</h3>
-      <p>When your English comes out stiff or overly formal, the humanizer smooths it into everyday academic tone.</p>
-    </li>
-    <li class="lp-card">
-      <h3>Researchers and professionals</h3>
-      <p>Reports, summaries, cover letters and emails that need to sound human without a full rewrite.</p>
-    </li>
-  </ul>
-  <p class="lp-muted">
-    Use it responsibly: a humanizer improves how text reads — it doesn’t make someone else’s ideas yours.
-    Cite your sources and disclose AI help when your institution asks you to.
-  </p>
+<section class="lp-section lp-wrap" aria-labelledby="limits-h">
+  <div class="lp-prose">
+    <h2 id="limits-h">Free limits, languages and academic honesty</h2>
+    <p>
+      Guests can humanize up to {{ free.guest_words_s }} words, {{ free.guest_daily_s }} a day. A free account raises
+      that to {{ free.user_words_s }} words and {{ free.user_daily_s }} runs a day. Longer texts use credits — see
+      <a href="/pricing">pricing</a>. The live engine works in English only; Russian and other languages are not
+      supported yet, and we will not pretend a synonym swap is a real humanizer.
+    </p>
+    <p>
+      We do not promise that humanized text will pass Turnitin, GPTZero, Copyleaks or any other detector. Anyone
+      selling a guaranteed “0% AI” score is overselling what these tools can know. Use the humanizer to improve
+      how your own draft reads, keep evidence of your process, and follow your course rules.
+    </p>
+  </div>
 </section>
 
 <section class="lp-section lp-wrap lp-faq" aria-labelledby="faq-h">
-  <h2 id="faq-h">Frequently asked questions</h2>
+  <h2 id="faq-h">AI humanizer FAQ</h2>
   {% for question, answer in faq_items %}
   <details>
     <summary>{{ question }}</summary>
@@ -148,13 +132,10 @@
 
 <section class="lp-section lp-wrap">
   <div class="lp-cta">
-    <h2>More words, more runs — still free</h2>
-    <p>A free account raises your limit to {{ free.user_words_s }} words, {{ free.user_daily }} times a day, and adds history,
-      the document editor and the AI check.</p>
+    <h2>Humanize a short draft free</h2>
+    <p>Paste above to try without an account, or create a free account for {{ free.user_words_s }}-word runs and
+      history.</p>
     <a class="lp-btn lp-btn-primary lp-btn-lg" href="/register?next=/humanizer" data-umami-event="landing_signup_click" data-umami-event-place="cta_bottom">Create a free account</a>
-    <p class="lp-muted" style="margin-top:16px">
-      Also see: <a href="/formatter">Essay formatter</a> · <a href="/pricing">Pricing</a> · <a href="/faq">FAQ</a>
-    </p>
   </div>
 </section>
 {% endblock %}

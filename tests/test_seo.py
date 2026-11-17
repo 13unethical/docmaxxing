@@ -419,8 +419,67 @@ def test_formatter_landing_page():
     res = _client().get("/formatter", follow_redirects=False)
     assert res.status_code == 200
     html = res.get_data(as_text=True)
-    assert PUBLIC_PAGES["/formatter"].title.replace("&", "&amp;") in html
+    page = PUBLIC_PAGES["/formatter"]
+    assert page.title.replace("&", "&amp;") in html
+    assert page.h1 in html
     assert "data-format-v2" in html
+    visible = _visible_text(html)
+    assert "What the essay formatter applies" in visible
+    assert "APA 7" in visible and "MLA 9" in visible and "Harvard" in visible and "Chicago" in visible
+    assert "Essay formatter FAQ" in visible
+    assert {"SoftwareApplication", "FAQPage"} <= set(_types(html))
+    assert f'<link rel="canonical" href="{SITE_URL}/formatter" />' in html
+
+
+def _token_jaccard(a: str, b: str) -> float:
+    left, right = set(a.lower().split()), set(b.lower().split())
+    return len(left & right) / len(left | right) if left or right else 1.0
+
+
+def test_humanizer_ssr_is_unique_vs_homepage():
+    client = _client()
+    home = _visible_text(client.get("/").get_data(as_text=True))
+    hum_html = client.get("/humanizer").get_data(as_text=True)
+    hum = _visible_text(hum_html)
+    page = PUBLIC_PAGES["/humanizer"]
+    assert page.title.replace("&", "&amp;") in hum_html
+    assert page.h1 in hum
+    assert "How the AI humanizer works" in hum
+    assert "Before / after: humanize AI text" in hum
+    assert "AI humanizer FAQ" in hum
+    assert f'<link rel="canonical" href="{SITE_URL}/humanizer" />' in hum_html
+    assert {"SoftwareApplication", "FAQPage"} <= set(_types(hum_html))
+    words = hum.split()
+    assert len(words) >= 600, len(words)
+    overlap = _token_jaccard(home, hum)
+    assert overlap < 0.35, overlap
+    faq = faq_items_for_path("/humanizer") or []
+    assert 5 <= len(faq) <= 6
+    banned = ("guarantee", "undetectable", "0% ai", "bypass turnitin")
+    for q, a in faq:
+        blob = f"{q} {plain_text(a)}".lower()
+        assert not any(b in blob for b in banned)
+
+
+def test_turnitin_asterisk_post_meta_and_first_paragraph():
+    from services import blog
+
+    post = blog.find_post("en", "turnitin-ai-score-asterisk")
+    assert post is not None
+    assert len(post.seo_title) <= seo_module.TITLE_MAX
+    assert len(post.description) <= seo_module.DESCRIPTION_MAX
+    assert "asterisk" in post.description.lower() or "*%" in post.description
+    html = _client().get(post.path).get_data(as_text=True)
+    assert post.seo_title.replace("&", "&amp;") in html or post.seo_title in html
+    assert post.author_name in html
+    assert post.date in html or "2026-11-02" in html
+    assert 'href="/ai-detector"' in html
+    assert 'href="/humanizer"' in html
+    # First visible paragraph answers the asterisk question.
+    visible = _visible_text(html)
+    head = visible[:500].lower()
+    assert "*%" in head or "asterisk" in head
+    assert "not" in head and ("high score" in head or "proof" in head)
 
 
 # ------------------------------------------------------------------ pricing / about / social / RSS
@@ -436,10 +495,16 @@ def test_pricing_ssr_independent_of_guest_landing_flag(monkeypatch):
     assert "Simple credit pricing" in html
     assert "/credits" in html and "/faq" in html
     assert html.count('href="/app#/pricing"') >= 1
-    product = next(n for n in _json_ld(html) if n["@type"] == "Product")
-    offers = product["offers"]
+    assert "Product" not in _types(html)
+    app_node = next(n for n in _json_ld(html) if n["@type"] == "SoftwareApplication")
+    offers = app_node["offers"]
+    assert isinstance(offers, list)
     packages = pricing_page_packages()
     assert len(offers) == len(packages) >= 1
+    banned = ("aggregateRating", "review", "shippingDetails", "hasMerchantReturnPolicy", "image")
+    blob = json.dumps(app_node)
+    for key in banned:
+        assert key not in blob
     for offer, pkg in zip(offers, packages):
         assert offer["@type"] == "Offer"
         assert offer["priceCurrency"] == "USD"
