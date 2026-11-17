@@ -71,3 +71,5 @@ jobs:
               echo "WARNING: TURNITIN_USE_BROWSER=1 — forcing Chrome fallback"
             fi
             ls -la /root/docmaxxing/data/assignment-trace.log || true
+            # Post-deploy SEO smoke (Googlebot UA): locales, canonical, hreflang, robots.
+            python scripts/prod_seo_smoke.py --base https://docmaxxing.com

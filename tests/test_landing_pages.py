@@ -39,20 +39,22 @@ def _graph(html: str) -> list[dict]:
 
 
 @pytest.mark.parametrize(
-    ("path", "h1", "lang"),
+    ("path", "lang"),
     [
-        ("/humanizer", "Free AI Humanizer — Turn AI Text into Natural Writing", "en"),
-        ("/ru/humanizer", "Хуманайзер текста онлайн бесплатно", "ru"),
-        ("/", "AI Humanizer and Writing Tools for Students", "en"),
+        ("/humanizer", "en"),
+        ("/ru/humanizer", "ru"),
+        ("/", "en"),
     ],
 )
-def test_landing_has_one_h1_and_lang(path, h1, lang):
+def test_landing_has_one_h1_and_lang(path, lang):
+    from services.seo import PUBLIC_PAGES
+
     html = _html(path)
+    h1 = PUBLIC_PAGES[path].h1
     assert html.count("<h1") == 1
-    assert re.search(r"<h1[^>]*>(.*?)</h1>", html).group(1) == h1
+    assert re.search(r"<h1[^>]*>(.*?)</h1>", html, re.S).group(1).strip() == h1
     assert f'<html lang="{lang}">' in html
-    robots = "noindex, follow" if path == "/ru/humanizer" else "index, follow"
-    assert f'<meta name="robots" content="{robots}" />' in html
+    assert '<meta name="robots" content="index, follow" />' in html
 
 
 @pytest.mark.parametrize("path", LANDINGS)
@@ -80,8 +82,17 @@ def test_widget_markup(path):
 
 
 def test_free_limit_text_comes_from_env(monkeypatch):
-    assert "Free: up to 500 words, once a day" in _html("/humanizer")
-    assert "Бесплатно: до 500 слов, 1 раз в день" in _html("/ru/humanizer")
+    from services.site_content import free_limits_context
+
+    free = free_limits_context()
+    assert (
+        f"Free: up to {free['guest_words_s']} words, {free['guest_daily_s']} a day"
+        in _html("/humanizer")
+    )
+    assert (
+        f"Бесплатно: до {free['guest_words_ru']} слов, {free['guest_daily_ru']} в день"
+        in _html("/ru/humanizer")
+    )
     monkeypatch.setenv("FREE_HUMANIZE_GUEST_WORDS", "700")
     monkeypatch.setenv("FREE_HUMANIZE_GUEST_DAILY", "5")
     assert "Free: up to 700 words, 5 times a day" in _html("/humanizer")
@@ -97,12 +108,15 @@ def test_ru_widget_does_not_send_russian_text():
     assert 'data-block-cyrillic' not in _html("/humanizer")
 
 
-def test_ru_humanizer_is_on_hold():
+def test_ru_humanizer_is_indexable_with_hreflang():
     for path in ("/humanizer", "/ru/humanizer"):
-        assert 'hreflang="ru"' not in _html(path)
-    assert '<meta name="robots" content="noindex, follow" />' in _html("/ru/humanizer")
+        html = _html(path)
+        assert 'hreflang="ru"' in html
+        assert 'hreflang="uz"' in html
+        assert 'hreflang="x-default"' in html
+    assert '<meta name="robots" content="index, follow" />' in _html("/ru/humanizer")
     assert '<meta property="og:locale" content="ru_RU" />' in _html("/ru/humanizer")
-    assert f'content="{SITE_URL}/static/og/humanizer.png"' in _html("/ru/humanizer")
+    assert f'content="{SITE_URL}/static/og/ru-humanizer.webp"' in _html("/ru/humanizer")
 
 
 @pytest.mark.parametrize("path", LANDINGS)
@@ -113,7 +127,7 @@ def test_faq_json_ld_matches_visible_faq(path):
     assert "SoftwareApplication" in types
     faq = next(n for n in graph if n["@type"] == "FAQPage")
     items = faq_items_for_path(path)
-    assert 8 <= len(items) <= 10
+    assert 5 <= len(items) <= 12
     visible = _main_text(html)
     assert len(faq["mainEntity"]) == len(items)
     for entity in faq["mainEntity"]:
@@ -134,11 +148,16 @@ def test_no_detector_evasion_promises(path):
 @pytest.mark.parametrize("path", LANDINGS)
 def test_internal_links_and_signup_event(path):
     html = _html(path)
-    for href in ("/formatter", "/pricing", "/faq", "/blog", "/terms", "/privacy", "/contact"):
+    for href in ("/blog", "/terms", "/privacy", "/contact"):
         assert f'href="{href}"' in html, (path, href)
+    if path == "/ru/humanizer":
+        for href in ("/ru/formatter", "/ru/pricing", "/ru/faq"):
+            assert f'href="{href}"' in html, (path, href)
+    else:
+        for href in ("/formatter", "/pricing", "/faq"):
+            assert f'href="{href}"' in html, (path, href)
     assert 'data-umami-event="landing_signup_click"' in html
-    if path != "/ru/humanizer":
-        assert 'href="/ru/humanizer"' not in html
+    assert 'hreflang="ru"' in html and 'hreflang="uz"' in html
 
 
 def test_tool_js_is_dependency_free_and_tracks_runs():

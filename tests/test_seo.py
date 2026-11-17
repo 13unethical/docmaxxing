@@ -22,10 +22,23 @@ from services.seo import (
 from services.site_content import faq_items_for_path, plain_text
 
 REPO = Path(__file__).resolve().parents[1]
-INFO_PATHS = [
-    "/about", "/faq", "/terms", "/privacy", "/contact", "/credits", "/account-info",
-    "/disclaimer", "/payment-policy", "/delivery-policy", "/refund-policy", "/changelog",
+INDEXABLE_INFO_PATHS = [
+    "/about",
+    "/faq",
+    "/contact",
+    "/credits",
+    "/disclaimer",
+    "/payment-policy",
+    "/changelog",
 ]
+NOINDEX_INFO_PATHS = [
+    "/account-info",
+    "/terms",
+    "/privacy",
+    "/delivery-policy",
+    "/refund-policy",
+]
+INFO_PATHS = INDEXABLE_INFO_PATHS + NOINDEX_INFO_PATHS
 
 
 def _client():
@@ -63,7 +76,7 @@ def test_homepage_has_seo_meta_tags():
     assert '<meta property="og:url" content="https://docmaxxing.com" />' in html
     assert '<meta property="og:type" content="website" />' in html
     assert '<meta property="og:locale" content="en_US" />' in html
-    assert f'<meta property="og:image" content="{SITE_URL}/static/og/default.png" />' in html
+    assert f'<meta property="og:image" content="{SITE_URL}/static/og/home.webp" />' in html
     assert '<meta property="og:image:width" content="1200" />' in html
     assert '<meta property="og:image:height" content="630" />' in html
     assert "/apple-icon.png" in html
@@ -92,7 +105,7 @@ def test_no_detector_evasion_promises_in_metadata():
         assert not any(word in text for word in banned), page.path
 
 
-@pytest.mark.parametrize("path", INFO_PATHS)
+@pytest.mark.parametrize("path", INDEXABLE_INFO_PATHS)
 def test_info_pages_have_their_own_title_and_description(path):
     res = _client().get(path)
     assert res.status_code == 200
@@ -105,14 +118,29 @@ def test_info_pages_have_their_own_title_and_description(path):
     assert "BreadcrumbList" in _types(html)
 
 
-def test_humanizer_og_image_and_no_ru_hreflang_while_ru_is_on_hold():
+@pytest.mark.parametrize("path", NOINDEX_INFO_PATHS)
+def test_noindex_info_pages_still_render(path):
+    res = _client().get(path)
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    page = PUBLIC_PAGES[path]
+    assert f"<title>{page.title}" in html.replace("&amp;", "&")
+    assert '<meta name="robots" content="noindex, follow" />' in html
+    assert 'rel="canonical"' not in html
+
+
+def test_humanizer_og_image_and_hreflang_for_locales():
     seo = page_seo_for_path("/humanizer")
-    assert seo["og_image"] == f"{SITE_URL}/static/og/humanizer.png"
-    assert seo["alternates"] == []
+    assert seo["og_image"] == f"{SITE_URL}/static/og/humanizer.webp"
+    hrefs = dict(seo["alternates"])
+    assert hrefs["en"] == f"{SITE_URL}/humanizer"
+    assert hrefs["ru"] == f"{SITE_URL}/ru/humanizer"
+    assert hrefs["uz"] == f"{SITE_URL}/uz/humanizer"
+    assert hrefs["x-default"] == f"{SITE_URL}/humanizer"
     ru = page_seo_for_path("/ru/humanizer")
     assert ru["lang"] == "ru"
-    assert ru["robots"] == "noindex, follow"
-    assert ru["alternates"] == []
+    assert ru["robots"] == "index, follow"
+    assert dict(ru["alternates"])["uz"] == f"{SITE_URL}/uz/humanizer"
 
 
 @pytest.mark.parametrize(
@@ -196,16 +224,47 @@ def test_sitemap_lists_indexable_pages_only():
     xml = sitemap_xml()
     assert 'xmlns:xhtml="http://www.w3.org/1999/xhtml"' in xml
     locs = re.findall(r"<loc>(.*?)</loc>", xml)
-    for path in ("/humanizer", "/formatter", "/pricing", *INFO_PATHS):
+    for path in ("/humanizer", "/formatter", "/pricing", *INDEXABLE_INFO_PATHS):
         assert f"{SITE_URL}{path}" in locs
     assert SITE_URL in locs
-    for path in ("/ru/humanizer", "/assignments", "/app", "/login", "/register", "/veil", "/account"):
+    for path in (
+        "/assignments",
+        "/app",
+        "/login",
+        "/register",
+        "/veil",
+        "/account",
+        *NOINDEX_INFO_PATHS,
+    ):
         assert f"{SITE_URL}{path}" not in locs
+    for path in (
+        "/ru",
+        "/uz",
+        "/ru/humanizer",
+        "/uz/humanizer",
+        "/ru/ai-detector",
+        "/uz/formatter",
+        "/ru/pricing",
+        "/uz/faq",
+        "/ru/about",
+    ):
+        assert f"{SITE_URL}{path}" in locs
     assert "<priority>" not in xml
 
 
-def test_sitemap_has_no_link_to_the_ru_humanizer():
-    assert "/ru/humanizer" not in sitemap_xml()
+@pytest.mark.parametrize("path", NOINDEX_INFO_PATHS)
+def test_legal_and_account_info_are_noindex(path):
+    seo = page_seo_for_path(path)
+    assert seo["robots"] == "noindex, follow"
+    assert seo["canonical"] is None
+    html = _client().get(path).get_data(as_text=True)
+    assert '<meta name="robots" content="noindex, follow" />' in html
+
+
+def test_sitemap_includes_ru_and_uz_humanizer():
+    xml = sitemap_xml()
+    assert f"{SITE_URL}/ru/humanizer" in xml
+    assert f"{SITE_URL}/uz/humanizer" in xml
 
 
 def test_sitemap_lastmod_is_last_change_not_today(monkeypatch):
@@ -213,7 +272,7 @@ def test_sitemap_lastmod_is_last_change_not_today(monkeypatch):
     file_lastmod.cache_clear()
     try:
         xml = sitemap_xml()
-        block = xml.split(f"<loc>{SITE_URL}/terms</loc>", 1)[1].split("</url>", 1)[0]
+        block = xml.split(f"<loc>{SITE_URL}/about</loc>", 1)[1].split("</url>", 1)[0]
         assert "<lastmod>2026-03-14</lastmod>" in block
     finally:
         file_lastmod.cache_clear()
@@ -223,7 +282,7 @@ def test_lastmod_falls_back_to_mtime_without_git(monkeypatch):
     monkeypatch.setattr(seo_module, "_git", lambda *args: "")
     file_lastmod.cache_clear()
     try:
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", file_lastmod("templates/info/terms.html"))
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", file_lastmod("templates/info/about.html"))
         assert file_lastmod("templates/does-not-exist.html") is None
     finally:
         file_lastmod.cache_clear()
@@ -306,6 +365,8 @@ def test_llms_txt_lists_core_tools():
         "/blog",
         "/about",
         "/blog/rss.xml",
+        "/ru/humanizer",
+        "/uz/ai-detector",
     ):
         assert f"{SITE_URL}{path}" in text
 
@@ -335,7 +396,6 @@ def test_custom_404_page():
     assert 'rel="canonical"' not in html
     for href in ("/humanizer", "/formatter", "/pricing"):
         assert f'href="{href}"' in html
-    assert 'href="/ru/humanizer"' not in html
     assert html.count("<h1") == 1
 
 
@@ -380,9 +440,26 @@ def test_icon_routes():
 def test_og_images_are_1200x630():
     from PIL import Image
 
-    for name in ("default.png", "humanizer.png"):
+    for name in ("home.webp", "humanizer.webp", "ai-detector.webp"):
         with Image.open(REPO / "static" / "og" / name) as img:
             assert img.size == (1200, 630)
+
+
+def test_sitemap_includes_image_entries_for_tools():
+    xml = sitemap_xml()
+    assert 'xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"' in xml
+    assert "<image:image>" in xml
+    assert f"{SITE_URL}/static/media/ai-detector-sentence-highlights.webp" in xml
+    assert f"{SITE_URL}/static/og/humanizer.webp" in xml
+
+
+def test_software_application_json_ld_lists_images():
+    html = _client().get("/humanizer").get_data(as_text=True)
+    block = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.S).group(1)
+    graph = json.loads(block)["@graph"]
+    app = next(n for n in graph if n["@type"] == "SoftwareApplication")
+    assert isinstance(app["image"], list)
+    assert any("ai-humanizer-result-panel.webp" in u for u in app["image"])
 
 
 # ------------------------------------------------------------------ footers
@@ -395,7 +472,7 @@ def test_server_footer_has_real_links():
     footer = html.split('<footer class="site-footer"', 1)[1]
     for href in FOOTER_LINKS:
         assert f'href="{href}"' in footer, href
-    assert 'href="/ru/humanizer"' not in footer
+    assert 'hreflang="ru"' in footer or 'href="/ru/faq"' in footer
 
 
 def test_spa_landing_footer_has_real_links():
@@ -411,7 +488,6 @@ def test_spa_landing_footer_has_real_links():
         else:
             assert f"path: '{href}'" in links, href
     assert "route: 'humanizer'" in js
-    assert "/ru/humanizer" not in footer
     assert "Terms · Privacy · Contact" not in js
 
 
@@ -475,11 +551,11 @@ def test_turnitin_asterisk_post_meta_and_first_paragraph():
     assert post.date in html or "2026-11-02" in html
     assert 'href="/ai-detector"' in html
     assert 'href="/humanizer"' in html
-    # First visible paragraph answers the asterisk question.
-    visible = _visible_text(html)
-    head = visible[:500].lower()
-    assert "*%" in head or "asterisk" in head
-    assert "not" in head and ("high score" in head or "proof" in head)
+    # Article body answers the asterisk question (skip sticky nav chrome).
+    main = html.split("<main", 1)[1].split("</main>", 1)[0]
+    body = _visible_text(main).lower()
+    assert "*%" in body or "asterisk" in body
+    assert "not" in body and ("high score" in body or "proof" in body)
 
 
 # ------------------------------------------------------------------ pricing / about / social / RSS

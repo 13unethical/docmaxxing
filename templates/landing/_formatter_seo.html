@@ -1,4 +1,20 @@
 {# Crawlable SEO copy under the live formatter tool. Uses app-shell styles (card / muted). #}
+{% from "landing/_picture.html" import picture %}
+<section class="card" style="margin-top:1.25rem" aria-labelledby="fmt-shots-h">
+  <h2 class="card-title" id="fmt-shots-h">What a formatted essay looks like</h2>
+  <p class="muted">Real product screenshots from DocMaxxing — replace placeholders with your APA preview captures.</p>
+  <div class="v2-grid" style="margin-top:0.75rem">
+    <figure style="margin:0">
+      {{ picture('essay-formatter-apa-preview', 'APA-formatted essay preview after running the DocMaxxing formatter', 1200, 760, lazy=false) }}
+      <figcaption class="muted" style="margin-top:0.5rem">APA essay preview</figcaption>
+    </figure>
+    <figure style="margin:0">
+      {{ picture('essay-formatter-style-settings', 'Essay formatter style settings for APA, MLA, Harvard and more', 1200, 760, lazy=true) }}
+      <figcaption class="muted" style="margin-top:0.5rem">Style settings</figcaption>
+    </figure>
+  </div>
+</section>
+
 <section class="card" style="margin-top:1.25rem" aria-labelledby="fmt-what-h">
   <h2 class="card-title" id="fmt-what-h">What the essay formatter applies</h2>
   <p class="muted">
@@ -32,24 +48,38 @@
     Common for psychology and social sciences. Expects student title-page fields, double spacing, page numbers,
     Level 1–3 headings, author–date citations, and a References list with hanging indents. The APA preset
     wires those defaults so you are not hunting through Word styles.
+    How-to cite pilots:
+    <a href="/cite/apa7-website">website</a>,
+    <a href="/cite/apa7-youtube-video">YouTube</a>,
+    <a href="/cite/apa7-book">book</a>,
+    <a href="/cite/apa7-journal-article">journal article</a>.
   </p>
   <h3>MLA 9</h3>
   <p class="muted">
     Standard for many literature and humanities courses. First-page title block instead of a separate cover,
     double spacing, surname page numbers, and a Works Cited list. Parenthetical citations use author–page
     where the source has pages.
+    How-to cite pilots:
+    <a href="/cite/mla9-website">website</a>,
+    <a href="/cite/mla9-youtube-video">YouTube</a>,
+    <a href="/cite/mla9-book">book</a>.
   </p>
   <h3>Harvard</h3>
   <p class="muted">
     Author–date referencing used widely in UK and Commonwealth universities. Our Harvard preset follows a
     Cite Them Right-style layout for body text, headings and the reference list — still confirm any local
     faculty variant your module handbook names.
+    How-to cite pilots:
+    <a href="/cite/harvard-website">website</a>,
+    <a href="/cite/harvard-book">book</a>.
   </p>
   <h3>Chicago 17</h3>
   <p class="muted">
     Used across history and some social sciences. Notes-bibliography and author–date variants both appear in
     briefs; the Chicago preset sets typography, spacing and bibliography layout as a solid starting point you
     can adjust if your instructor requires notes.
+    How-to cite pilot:
+    <a href="/cite/chicago17-website">website</a>.
   </p>
   <p class="muted">
     IEEE is also available for engineering reports (numbered citations). After formatting, pair the file with

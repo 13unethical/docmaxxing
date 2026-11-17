@@ -1,0 +1,16 @@
+{# Language switcher: plain links only — never auto-redirect by IP or Accept-Language. #}
+{% set cur = (seo.lang if seo is defined and seo.lang is defined else 'en') %}
+{% set path = request.path if request is defined else '/' %}
+{% set links = lang_switch_links|default([]) %}
+{% if links %}
+<nav class="lp-lang" aria-label="Language">
+  {% for item in links %}
+  {% if item.lang == cur %}
+  <span class="lp-lang-current" aria-current="page">{{ item.label }}</span>
+  {% else %}
+  <a class="lp-lang-link" href="{{ item.href }}" hreflang="{{ item.lang }}" lang="{{ item.lang }}">{{ item.label }}</a>
+  {% endif %}
+  {% if not loop.last %}<span class="lp-lang-sep" aria-hidden="true">·</span>{% endif %}
+  {% endfor %}
+</nav>
+{% endif %}

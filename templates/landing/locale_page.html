@@ -1,0 +1,99 @@
+{% extends "landing/base.html" %}
+{# Localized marketing SSR page. Visible copy includes [REVIEW] for editorial pass. #}
+{% block content %}
+<!-- seo-copy: REVIEW — title/description/H1/body for {{ seo.lang }} -->
+<section class="lp-hero">
+  <div class="lp-wrap">
+    <p class="lp-eyebrow">DocMaxxing · {{ seo.lang|upper }} · REVIEW</p>
+    <h1>{{ seo.h1 }}</h1>
+    {% if locale_copy and locale_copy.lede %}
+    <p class="lp-lede">{{ locale_copy.lede }}</p>
+    {% elif seo.lede %}
+    <p class="lp-lede">{{ seo.lede }}</p>
+    {% endif %}
+    <div class="lp-hero-cta">
+      {% if page_key in ('home', 'humanizer') %}
+      <a class="lp-btn lp-btn-primary lp-btn-lg" href="{{ signup_next }}#try">{{ 'Попробовать' if seo.lang == 'ru' else ('Sinab ko‘rish' if seo.lang == 'uz' else 'Try free') }}</a>
+      {% elif page_key == 'ai-detector' %}
+      <a class="lp-btn lp-btn-primary lp-btn-lg" href="/ai-detector">{{ 'Проверить на ИИ' if seo.lang == 'ru' else 'AI tekshirish' }}</a>
+      {% elif page_key == 'formatter' %}
+      <a class="lp-btn lp-btn-primary lp-btn-lg" href="/formatter">{{ 'Оформить работу' if seo.lang == 'ru' else 'Formatlash' }}</a>
+      {% elif page_key == 'pricing' %}
+      <a class="lp-btn lp-btn-primary lp-btn-lg" href="/pricing">{{ 'Смотреть цены' if seo.lang == 'ru' else 'Narxlarni ko‘rish' }}</a>
+      {% else %}
+      <a class="lp-btn lp-btn-primary lp-btn-lg" href="{{ '/' ~ seo.lang if seo.lang != 'en' else '/' }}">{{ 'На главную' if seo.lang == 'ru' else 'Bosh sahifa' }}</a>
+      {% endif %}
+      <a class="lp-btn lp-btn-ghost lp-btn-lg" href="/register?next={{ signup_next|urlencode }}">{{ 'Создать аккаунт' if seo.lang == 'ru' else 'Akkount ochish' }}</a>
+    </div>
+  </div>
+</section>
+
+{% if locale_copy and locale_copy.show_tool and free is defined %}
+<section class="lp-section" id="try">
+  <div class="lp-wrap">
+    <h2>{{ 'Бесплатный лимит' if seo.lang == 'ru' else 'Bepul limit' }} [REVIEW]</h2>
+    <p class="lp-muted">
+      {% if seo.lang == 'ru' %}
+      Гостевой лимит: до {{ free.guest_words_s|default(free.max_words_s|default('500')) }} слов.
+      С аккаунтом — выше. Движок сейчас лучше всего работает с английским текстом.
+      {% else %}
+      Mehmon limiti: {{ free.guest_words_s|default(free.max_words_s|default('500')) }} so‘zgacha.
+      Akkount bilan yuqoriroq. Engine hozir inglizcha matnda eng yaxshi ishlaydi.
+      {% endif %}
+      [REVIEW]
+    </p>
+    <p><a class="lp-btn lp-btn-primary" href="/humanizer">{{ 'Открыть хуманайзер' if seo.lang == 'ru' else 'Humanizerni ochish' }}</a></p>
+  </div>
+</section>
+{% endif %}
+
+{% if page_key == 'home' %}
+{% set tool = 'home' %}
+{% include "landing/_product_shots.html" %}
+{% elif page_key == 'ai-detector' %}
+{% set tool = 'detector' %}
+{% include "landing/_product_shots.html" %}
+{% elif page_key == 'humanizer' %}
+{% set tool = 'humanizer' %}
+{% include "landing/_product_shots.html" %}
+{% elif page_key == 'formatter' %}
+{% set tool = 'formatter' %}
+{% include "landing/_product_shots.html" %}
+{% endif %}
+
+{% if locale_copy %}
+{% for section in locale_copy.sections %}
+{% if section.type == 'cards' %}
+<section class="lp-section">
+  <div class="lp-wrap">
+    <h2>{{ section.title }}</h2>
+    {% if section.lede %}<p class="lp-lede">{{ section.lede }}</p>{% endif %}
+    <div class="lp-cards">
+      {% for item in section['items'] %}
+      <article class="lp-card">
+        <h3>{{ item.title }}</h3>
+        <p>{{ item.text }}</p>
+        <a href="{{ item.href }}">{{ item.cta }}</a>
+      </article>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% elif section.type == 'faq' %}
+<section class="lp-section" id="faq">
+  <div class="lp-wrap">
+    <h2>{{ section.title }}</h2>
+    <dl class="lp-faq">
+      {% for q, a in section['items'] %}
+      <div class="lp-faq-item">
+        <dt>{{ q }}</dt>
+        <dd>{{ a }}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+  </div>
+</section>
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endblock %}

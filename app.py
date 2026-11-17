@@ -935,6 +935,7 @@ _NEW_APP_SCREENS = {
     "/check": "check",
     "/humanizer": "humanizer",
     "/ru/humanizer": "humanizer",
+    "/uz/humanizer": "humanizer",
     "/ai-detector": "home",
     "/turnitin": "turnitin",
     "/assignment": "assignment",
@@ -977,10 +978,13 @@ def _redirect_old_pages_to_new_app():
         guest_landings_enabled,
     )
 
+    # Guests/crawlers keep SSR marketing HTML (en + /ru/* + /uz/*). Never 302 → /app#/...
     if economy_auth.current_user() is None and (
         request.path in APP_LANDING_PATHS
         or request.path in ALWAYS_SSR_PATHS
         or (guest_landings_enabled() and request.path in GUEST_LANDING_PATHS)
+        or request.path.startswith(("/ru/", "/uz/"))
+        or request.path in {"/ru", "/uz"}
     ):
         return None
     if screen == "home" and economy_auth.current_user() is None:
@@ -1401,6 +1405,7 @@ def inject_account():
             "source": "none",
         }
     from services.seo import SOCIAL_LINKS, page_seo_for_path
+    from services.seo_i18n import lang_switch_links
     from services.economy.oauth_login import configured_providers
 
     return {
@@ -1414,6 +1419,7 @@ def inject_account():
         "oauth_providers": configured_providers(),
         "seo": page_seo_for_path(request.path, args=request.args),
         "social_links": list(SOCIAL_LINKS),
+        "lang_switch_links": lang_switch_links(request.path),
     }
 
 
@@ -3499,16 +3505,27 @@ def not_found(_error):
         return jsonify({"success": False, "error": "NOT_FOUND", "message": "Not found."}), 404
     from services.seo import ROBOTS_NOINDEX, PublicPage, page_lang, page_seo_for_path
 
-    ru = page_lang(request.path) == "ru"
+    lang = page_lang(request.path)
+    if lang == "ru":
+        title, description = (
+            "Страница не найдена | DocMaxxing",
+            "Такой страницы нет. Откройте проверку на ИИ, хуманайзер или цены DocMaxxing.",
+        )
+    elif lang == "uz":
+        title, description = (
+            "Sahifa topilmadi | DocMaxxing",
+            "Bunday sahifa yo‘q. AI tekshiruv, humanizer yoki narxlarni oching.",
+        )
+    else:
+        title, description = (
+            "Page not found | DocMaxxing",
+            "This page does not exist. Try the DocMaxxing AI humanizer, essay formatter or pricing.",
+        )
     page = PublicPage(
         path=request.path,
-        title="Страница не найдена | DocMaxxing" if ru else "Page not found | DocMaxxing",
-        description=(
-            "Такой страницы нет. Откройте хуманайзер, оформление работ или цены DocMaxxing."
-            if ru
-            else "This page does not exist. Try the DocMaxxing AI humanizer, essay formatter or pricing."
-        ),
-        lang="ru" if ru else "en",
+        title=title,
+        description=description,
+        lang=lang,
         in_sitemap=False,
     )
     seo = page_seo_for_path(request.path, page=page, robots=ROBOTS_NOINDEX, faq=[])
@@ -4990,8 +5007,9 @@ def humanizer():
 
 @app.route("/ai-detector")
 def ai_detector_page():
-    """Guests: the app landing opened on the free AI detector (there is no older page for it).
-    Signed-in users go to the dashboard, where the detector is."""
+    """Guests: SSR marketing page with detector screenshots; signed-in users go to the app."""
+    if economy_auth.current_user() is None and request.args.get("classic") != "1":
+        return _render_landing("landing/ai_detector_en.html", signup_next="/ai-detector")
     if economy_auth.current_user() is None:
         return _render_app_landing()
     return redirect("/app#/home")
@@ -4999,7 +5017,71 @@ def ai_detector_page():
 
 @app.route("/ru/humanizer")
 def ru_humanizer():
+    """RU humanizer keeps the interactive landing; meta/hreflang come from PUBLIC_PAGES."""
     return _render_landing("landing/humanizer_ru.html", signup_next="/ru/humanizer")
+
+
+@app.route("/<locale>", defaults={"page": None})
+@app.route("/<locale>/<page>")
+def locale_public_page(locale: str, page: str | None):
+    """SSR marketing pages for ``/ru/...`` and ``/uz/...`` (never ``/app``).
+
+    Only ``ru`` / ``uz`` are valid; other single-segment paths 404 without a
+    slash-redirect (do not register a trailing-slash twin of this rule).
+    """
+    if locale not in {"ru", "uz"}:
+        from flask import abort
+
+        abort(404)
+    # /ru/humanizer has a dedicated interactive landing registered above.
+    if locale == "ru" and page == "humanizer":
+        return ru_humanizer()
+    allowed = {"ai-detector", "humanizer", "formatter", "pricing", "faq", "about"}
+    if page is None:
+        return _render_locale_page(locale, "home")
+    if page not in allowed:
+        from flask import abort
+
+        abort(404)
+    return _render_locale_page(locale, page)
+
+
+def _render_locale_page(locale: str, key: str):
+    from services.seo_i18n import locale_copy_for, locale_path
+    from services.site_content import free_limits_context
+
+    path = locale_path(locale, key)
+    copy = locale_copy_for(path)
+    return render_template(
+        "landing/locale_page.html",
+        free=free_limits_context(),
+        locale_copy=copy,
+        page_key=key,
+        signup_next=path,
+        faq_items=list(copy.sections[-1]["items"]) if copy and copy.sections and copy.sections[-1].get("type") == "faq" else [],
+    )
+
+
+@app.route("/cite/<style_slug>-<source_slug>")
+def cite_guide(style_slug: str, source_slug: str):
+    """Pilot programmatic pages: How to cite [source] in [style]. Always noindex."""
+    from flask import abort
+
+    from services.cite_guides import get_guide, howto_json_ld, public_page_for
+    from services.seo import ROBOTS_NOINDEX, page_seo_for_path
+
+    guide = get_guide(style_slug, source_slug)
+    if guide is None:
+        abort(404)
+    page = public_page_for(guide)
+    seo = page_seo_for_path(
+        guide.path,
+        page=page,
+        robots=ROBOTS_NOINDEX,
+        faq=list(guide.faq),
+        extra_nodes=[howto_json_ld(guide)],
+    )
+    return render_template("landing/cite_guide.html", seo=seo, guide=guide)
 
 
 @app.route("/blog")

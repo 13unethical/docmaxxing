@@ -1,18 +1,22 @@
 {% extends "landing/base.html" %}
 {% block content %}
 <section class="lp-hero lp-wrap" aria-labelledby="lp-h1">
+  <!-- REVIEW: RU humanizer copy -->
   <h1 id="lp-h1">{{ seo.h1 }}</h1>
   <p class="lp-lede">
     Хуманайзер переписывает черновик после ChatGPT, Gemini или Claude так, чтобы он читался как живой текст:
-    предложения разной длины, простые слова, никаких дежурных оборотов. Смысл остаётся вашим.
+    предложения разной длины, простые слова, никаких дежурных оборотов. Смысл остаётся вашим. [REVIEW]
   </p>
   <p class="lp-tool-msg is-cta">
     <strong>Сейчас хуманайзер работает с английскими текстами.</strong> Русскоязычный движок в разработке, и мы
     не будем выдавать за него простую замену слов или символов. Если вы пишете по-английски — пробуйте прямо здесь;
-    для русского текста страница обновится, когда движок будет готов.
+    для русского текста страница обновится, когда движок будет готов. [REVIEW]
   </p>
   {% include "landing/_tool.html" %}
 </section>
+
+{% set tool = 'humanizer' %}
+{% include "landing/_product_shots.html" %}
 
 <section class="lp-section lp-wrap" aria-labelledby="how-h">
   <h2 id="how-h">Как это работает</h2>
@@ -157,8 +161,10 @@
       появляются история, редактор документов и проверка на ИИ.</p>
     <a class="lp-btn lp-btn-primary lp-btn-lg" href="/register?next=/ru/humanizer" data-umami-event="landing_signup_click" data-umami-event-place="cta_bottom">Создать аккаунт бесплатно</a>
     <p class="lp-muted" style="margin-top:16px">
-      Смотрите также: <a href="/formatter">оформление работ</a> · <a href="/pricing">цены</a> · <a href="/faq">FAQ</a> ·
-      <a href="/humanizer" hreflang="en" lang="en">AI Humanizer in English</a>
+      Смотрите также: <a href="/ru/formatter">оформление работ</a> · <a href="/ru/pricing">цены</a> · <a href="/ru/faq">FAQ</a> ·
+      <a href="/ru/ai-detector">проверка на ИИ</a> ·
+      <a href="/humanizer" hreflang="en" lang="en">AI Humanizer in English</a> ·
+      <a href="/uz/humanizer" hreflang="uz" lang="uz">O‘zbekcha</a>
     </p>
   </div>
 </section>

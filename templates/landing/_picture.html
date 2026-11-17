@@ -1,0 +1,16 @@
+{# Responsive WebP with JPEG/PNG fallback. Decorative: pass alt="" #}
+{% macro picture(stem, alt, width, height, lazy=true, class='') -%}
+{%- set webp = '/static/media/' ~ stem ~ '.webp' -%}
+{%- set fallback = '/static/media/' ~ stem ~ '.jpg' -%}
+<picture>
+  <source srcset="{{ webp }}" type="image/webp">
+  <img
+    src="{{ fallback }}"
+    alt="{{ alt }}"
+    width="{{ width }}"
+    height="{{ height }}"
+    {% if lazy %}loading="lazy" decoding="async"{% else %}fetchpriority="high" decoding="async"{% endif %}
+    {% if class %}class="{{ class }}"{% endif %}
+  >
+</picture>
+{%- endmacro %}

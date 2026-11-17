@@ -1,0 +1,110 @@
+{# 1–2 product screenshots for a tool. Expects: tool ('detector'|'humanizer'|'formatter'|'home'), optional lang. #}
+{% from "landing/_picture.html" import picture %}
+{% set lang = lang|default(seo.lang|default('en')) %}
+{% if tool == 'detector' %}
+  {% if lang == 'ru' %}
+    {% set a1 = 'Результат проверки на ИИ: подсвеченные предложения, похожие на сгенерированный текст' %}
+    {% set a2 = 'Общий AI-score эссе в интерфейсе DocMaxxing' %}
+    {% set cap = 'Как выглядит результат проверки' %}
+  {% elif lang == 'uz' %}
+    {% set a1 = 'AI tekshiruv natijasi: sun’iy matnga o‘xshash jumlalar ajratib ko‘rsatilgan' %}
+    {% set a2 = 'DocMaxxing interfeysida esse uchun umumiy AI ball' %}
+    {% set cap = 'Tekshiruv natijasi qanday ko‘rinadi' %}
+  {% else %}
+    {% set a1 = 'AI detector result with sentences highlighted as likely AI-written' %}
+    {% set a2 = 'Overall AI score for an essay in the DocMaxxing detector' %}
+    {% set cap = 'What a detector result looks like' %}
+  {% endif %}
+  <section class="lp-section lp-wrap lp-shots" aria-labelledby="shots-{{ tool }}-h">
+    <h2 id="shots-{{ tool }}-h">{{ cap }}</h2>
+    <div class="lp-shot-grid">
+      <figure class="lp-shot">
+        {{ picture('ai-detector-sentence-highlights', a1, 1200, 567, lazy=false, class='lp-shot-img') }}
+      </figure>
+      <figure class="lp-shot">
+        {{ picture('ai-detector-overall-score', a2, 1400, 875, lazy=true, class='lp-shot-img') }}
+      </figure>
+    </div>
+  </section>
+{% elif tool == 'humanizer' %}
+  {% if lang == 'ru' %}
+    {% set a1 = 'Панель результата хуманайзера DocMaxxing с переписанным абзацем' %}
+    {% set a2 = 'Сравнение текста до и после очеловечивания в DocMaxxing' %}
+    {% set cap = 'Как выглядит результат хуманайзера' %}
+  {% elif lang == 'uz' %}
+    {% set a1 = 'DocMaxxing humanizer natijasi: qayta yozilgan paragraf paneli' %}
+    {% set a2 = 'Humanizatsiyadan oldin va keyin matn solishtiruvi' %}
+    {% set cap = 'Humanizer natijasi qanday ko‘rinadi' %}
+  {% else %}
+    {% set a1 = 'DocMaxxing humanizer result panel showing a rewritten paragraph' %}
+    {% set a2 = 'Before-and-after comparison of humanized AI text in DocMaxxing' %}
+    {% set cap = 'What a humanizer result looks like' %}
+  {% endif %}
+  <section class="lp-section lp-wrap lp-shots" aria-labelledby="shots-{{ tool }}-h">
+    <h2 id="shots-{{ tool }}-h">{{ cap }}</h2>
+    <div class="lp-shot-grid">
+      <figure class="lp-shot">
+        {{ picture('ai-humanizer-result-panel', a1, 1200, 796, lazy=false, class='lp-shot-img') }}
+      </figure>
+      <figure class="lp-shot">
+        {{ picture('ai-humanizer-before-after', a2, 1200, 796, lazy=true, class='lp-shot-img') }}
+      </figure>
+    </div>
+  </section>
+{% elif tool == 'formatter' %}
+  {% if lang == 'ru' %}
+    {% set a1 = 'Предпросмотр эссе в стиле APA после оформления в DocMaxxing' %}
+    {% set a2 = 'Настройки стиля оформления: APA, MLA, Harvard и другие' %}
+    {% set cap = 'Как выглядит оформленный документ' %}
+  {% elif lang == 'uz' %}
+    {% set a1 = 'DocMaxxingda APA uslubida formatlangan esse oldindan ko‘rinishi' %}
+    {% set a2 = 'Formatlash uslubi sozlamalari: APA, MLA, Harvard va boshqalar' %}
+    {% set cap = 'Formatlangan hujjat qanday ko‘rinadi' %}
+  {% else %}
+    {% set a1 = 'APA-formatted essay preview after running the DocMaxxing formatter' %}
+    {% set a2 = 'Essay formatter style settings for APA, MLA, Harvard and more' %}
+    {% set cap = 'What a formatted essay looks like' %}
+  {% endif %}
+  <section class="lp-section lp-wrap lp-shots" aria-labelledby="shots-{{ tool }}-h">
+    <h2 id="shots-{{ tool }}-h">{{ cap }}</h2>
+    <div class="lp-shot-grid">
+      <figure class="lp-shot">
+        {{ picture('essay-formatter-apa-preview', a1, 1200, 760, lazy=false, class='lp-shot-img') }}
+      </figure>
+      <figure class="lp-shot">
+        {{ picture('essay-formatter-style-settings', a2, 1200, 760, lazy=true, class='lp-shot-img') }}
+      </figure>
+    </div>
+  </section>
+{% elif tool == 'home' %}
+  {% if lang == 'ru' %}
+    {% set a1 = 'Результат хуманайзера DocMaxxing с естественным абзацем' %}
+    {% set a2 = 'Подсветка предложений в проверке на ИИ' %}
+    {% set a3 = 'Предпросмотр эссе в APA после оформления' %}
+    {% set cap = 'Инструменты в действии' %}
+  {% elif lang == 'uz' %}
+    {% set a1 = 'DocMaxxing humanizer natijasi — tabiiy o‘qiladigan paragraf' %}
+    {% set a2 = 'AI tekshiruvida jumlalarni ajratib ko‘rsatish' %}
+    {% set a3 = 'APA uslubida formatlangan esse oldindan ko‘rinishi' %}
+    {% set cap = 'Vositalar ish jarayonida' %}
+  {% else %}
+    {% set a1 = 'DocMaxxing humanizer result with a natural-sounding paragraph' %}
+    {% set a2 = 'AI detector highlighting sentences that look machine-written' %}
+    {% set a3 = 'APA essay preview after formatting in DocMaxxing' %}
+    {% set cap = 'The tools in action' %}
+  {% endif %}
+  <section class="lp-section lp-wrap lp-shots" aria-labelledby="shots-{{ tool }}-h">
+    <h2 id="shots-{{ tool }}-h">{{ cap }}</h2>
+    <div class="lp-shot-grid lp-shot-grid--3">
+      <figure class="lp-shot">
+        {{ picture('ai-humanizer-result-panel', a1, 1200, 796, lazy=false, class='lp-shot-img') }}
+      </figure>
+      <figure class="lp-shot">
+        {{ picture('ai-detector-sentence-highlights', a2, 1200, 567, lazy=true, class='lp-shot-img') }}
+      </figure>
+      <figure class="lp-shot">
+        {{ picture('essay-formatter-apa-preview', a3, 1200, 760, lazy=true, class='lp-shot-img') }}
+      </figure>
+    </div>
+  </section>
+{% endif %}

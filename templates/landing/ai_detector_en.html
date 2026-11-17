@@ -1,0 +1,70 @@
+{% extends "landing/base.html" %}
+{% block content %}
+<section class="lp-hero lp-wrap" aria-labelledby="lp-h1">
+  <h1 id="lp-h1">{{ seo.h1 }}</h1>
+  <p class="lp-lede">
+    Paste an essay and see an AI score plus the sentences that look machine-written. The detector is tuned
+    against real Turnitin-style reports so you get a useful preview before you submit — free for short checks,
+    no account required.
+  </p>
+  <div class="lp-hero-cta">
+    <a class="lp-btn lp-btn-primary lp-btn-lg" href="/app#/home" data-umami-event="landing_tool_click" data-umami-event-place="detector_hero">Check text for AI</a>
+    <a class="lp-btn lp-btn-ghost lp-btn-lg" href="/register?next=/ai-detector">Create a free account</a>
+  </div>
+</section>
+
+{% set tool = 'detector' %}
+{% include "landing/_product_shots.html" %}
+
+<section class="lp-section lp-wrap" aria-labelledby="how-h">
+  <h2 id="how-h">How the free AI detector works</h2>
+  <ol class="lp-steps">
+    <li>
+      <h3>Paste your draft</h3>
+      <p>Drop in up to {{ free.guest_words_s }} words without signing up. English essays and coursework work best.</p>
+    </li>
+    <li>
+      <h3>Get a score and highlights</h3>
+      <p>The model scores sentence by sentence, then shows an overall AI estimate and marks the passages that look generated.</p>
+    </li>
+    <li>
+      <h3>Revise what is flagged</h3>
+      <p>Rewrite those sentences yourself, or send them through the <a href="/humanizer">AI humanizer</a>, then check again.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="lp-section lp-wrap" aria-labelledby="why-h">
+  <div class="lp-prose">
+    <h2 id="why-h">What an AI score actually means</h2>
+    <p>
+      AI detectors estimate how much of a passage matches patterns common in machine-generated writing. They are
+      statistical tools: they can disagree with each other, change over time, and sometimes flag text a person wrote.
+      Treat the DocMaxxing score as a revision hint, not a classroom verdict. For the official Turnitin AI and
+      similarity report, use the Turnitin check inside the app.
+    </p>
+    <p>
+      Guests get a few free runs a day. A free account raises the daily limit. Formatting stays free; longer paid
+      checks use credits — see <a href="/pricing">pricing</a>.
+    </p>
+  </div>
+</section>
+
+<section class="lp-section lp-wrap lp-faq" aria-labelledby="faq-h">
+  <h2 id="faq-h">AI detector FAQ</h2>
+  {% for question, answer in faq_items %}
+  <details>
+    <summary>{{ question }}</summary>
+    <div><p>{{ answer|safe }}</p></div>
+  </details>
+  {% endfor %}
+</section>
+
+<section class="lp-section lp-wrap">
+  <div class="lp-cta">
+    <h2>Check a short draft free</h2>
+    <p>Open the detector, paste your essay, and review the highlighted sentences before you submit.</p>
+    <a class="lp-btn lp-btn-primary lp-btn-lg" href="/register?next=/ai-detector" data-umami-event="landing_signup_click" data-umami-event-place="cta_bottom">Create a free account</a>
+  </div>
+</section>
+{% endblock %}

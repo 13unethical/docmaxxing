@@ -8,6 +8,7 @@ Each file starts with a front matter block::
     description: One or two sentences for search results (<= 155 chars).
     date: 2026-11-02
     updated: 2026-11-10                                   (optional)
+    author: DocMaxxing Editorial                          (required to publish; drafts may omit)
     lang: en                                              (en -> /blog/<slug>, ru -> /ru/blog/<slug>)
     slug: turnitin-ai-score                               (optional, defaults to the file name)
     alternate: /ru/blog/some-slug                         (optional, same post in the other language)
@@ -16,6 +17,9 @@ Each file starts with a front matter block::
 
 The body is a small Markdown subset: ``##``/``###`` headings, paragraphs, ``-``/``1.`` lists,
 ``>`` quotes, fenced code, ``**bold**``, ``*italic*``, ```code``` and ``[links](/url)``.
+
+Publishing gate (``publication_issues`` / tests): a non-draft post must have ``date``,
+``author``, and must not contain the marker ``TODO-AMAL`` (see ``seo/ARTICLE_CHECKLIST.md``).
 """
 
 from __future__ import annotations
@@ -40,10 +44,14 @@ from services.seo import (
     PublicPage,
     absolute_url,
     canonical_url,
+    og_image_path_for,
 )
 
 CONTENT_DIR = REPO_ROOT / "content" / "blog"
 BLOG_INDEX_PATH = "/blog"
+
+
+TODO_AMAL_MARKER = "TODO-AMAL"
 
 
 @dataclass(frozen=True)
@@ -55,9 +63,11 @@ class Post:
     description: str
     date: str
     updated: str | None
+    author: str
     draft: bool
     html: str
     source: str
+    raw: str = ""
     alternates: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -70,23 +80,32 @@ class Post:
 
     @property
     def author_name(self) -> str:
-        """Visible + JSON-LD author (Organization until individual bylines exist)."""
-        return SITE_NAME
+        """Visible + JSON-LD author name (front matter, else site name)."""
+        return self.author or SITE_NAME
 
     def page(self) -> PublicPage:
+        og = og_image_path_for(self.path)
         return PublicPage(
             path=self.path,
             title=self.seo_title,
             description=self.description,
             lang=self.lang,
             h1=self.title,
+            og_image=og,
             breadcrumb=_short(self.title, 60),
             sources=(self.source,),
             alternates=dict(self.alternates),
+            images=(og,),
         )
 
     def article_node(self) -> dict[str, Any]:
-        org = {"@type": "Organization", "name": self.author_name, "url": SITE_URL}
+        author_name = self.author_name
+        if author_name == SITE_NAME or author_name.lower().startswith("docmaxxing"):
+            author: dict[str, Any] = {"@type": "Organization", "name": author_name, "url": SITE_URL}
+        else:
+            author = {"@type": "Person", "name": author_name}
+        og_path = og_image_path_for(self.path)
+        image = absolute_url(og_path if (REPO_ROOT / og_path.lstrip("/")).is_file() else OG_IMAGE_DEFAULT)
         return {
             "@type": "BlogPosting",
             "headline": _short(self.title, 110),
@@ -96,8 +115,8 @@ class Post:
             "inLanguage": self.lang,
             "mainEntityOfPage": canonical_url(self.path),
             "url": canonical_url(self.path),
-            "image": absolute_url(OG_IMAGE_DEFAULT),
-            "author": org,
+            "image": [image],
+            "author": author,
             "publisher": {"@id": f"{SITE_URL}/#organization"},
         }
 
@@ -136,7 +155,8 @@ def split_front_matter(text: str) -> tuple[dict[str, Any], str]:
 
 def parse_post(path: Path) -> Post | None:
     """A post from one Markdown file, or None when its front matter is incomplete."""
-    meta, body = split_front_matter(path.read_text(encoding="utf-8"))
+    raw = path.read_text(encoding="utf-8")
+    meta, body = split_front_matter(raw)
     title = str(meta.get("title") or "").strip()
     description = str(meta.get("description") or "").strip()
     date = str(meta.get("date") or "").strip()
@@ -147,10 +167,12 @@ def parse_post(path: Path) -> Post | None:
     if not _SLUG.fullmatch(slug):
         return None
     updated = str(meta.get("updated") or "").strip()
+    author = str(meta.get("author") or "").strip()
     seo_title = str(meta.get("seo_title") or "").strip()
     if not seo_title:
         with_brand = f"{title} | {SITE_NAME}"
         seo_title = with_brand if len(with_brand) <= TITLE_MAX else _short(title, TITLE_MAX)
+    draft = meta.get("draft") is True
     post = Post(
         slug=slug,
         lang=lang,
@@ -159,15 +181,38 @@ def parse_post(path: Path) -> Post | None:
         description=_short(description, DESCRIPTION_MAX),
         date=date,
         updated=updated if _DATE.fullmatch(updated) else None,
-        draft=meta.get("draft") is True,
+        author=author,
+        draft=draft,
         html=render_markdown(body),
         source=_rel(path),
+        raw=raw,
     )
     alternate = str(meta.get("alternate") or "").strip()
     if alternate.startswith(("/blog/", "/ru/blog/")):
         other = "ru" if lang == "en" else "en"
         post.alternates.update({lang: post.path, other: alternate})
     return post
+
+
+def publication_issues(post: Post, *, raw: str | None = None) -> list[str]:
+    """Reasons this post must not be published (empty = ok to set draft: false).
+
+    Drafts may omit ``author`` and keep ``TODO-AMAL`` placeholders; published posts may not.
+    ``date`` is already required to parse a post — we still report it if somehow blank.
+    """
+    issues: list[str] = []
+    text = raw if raw is not None else (post.raw or "")
+    if not (post.date or "").strip() or not _DATE.fullmatch(post.date.strip()):
+        issues.append("missing or invalid date (need YYYY-MM-DD)")
+    if not (post.author or "").strip():
+        issues.append("missing author")
+    if TODO_AMAL_MARKER in text:
+        issues.append(f"unresolved {TODO_AMAL_MARKER} marker")
+    return issues
+
+
+def is_publishable(post: Post, *, raw: str | None = None) -> bool:
+    return not publication_issues(post, raw=raw)
 
 
 def _rel(path: Path) -> str:
@@ -339,17 +384,31 @@ def all_posts() -> list[Post]:
 
 
 def published_posts(lang: str | None = None) -> list[Post]:
-    return [p for p in all_posts() if not p.draft and (lang is None or p.lang == lang)]
+    """Non-draft posts that also pass the publish gate (no TODO-AMAL; date + author set)."""
+    out: list[Post] = []
+    for post in all_posts():
+        if post.draft or (lang is not None and post.lang != lang):
+            continue
+        if publication_issues(post):
+            continue
+        out.append(post)
+    return out
 
 
 def find_post(lang: str, slug: str, *, include_drafts: bool = False) -> Post | None:
     for post in all_posts():
-        if post.lang == lang and post.slug == slug and (include_drafts or not post.draft):
+        if post.lang != lang or post.slug != slug:
+            continue
+        if include_drafts:
             return post
+        if post.draft or publication_issues(post):
+            continue
+        return post
     return None
 
 
 def index_page() -> PublicPage:
+    og = og_image_path_for(BLOG_INDEX_PATH)
     return PublicPage(
         path=BLOG_INDEX_PATH,
         title="DocMaxxing Blog — AI Writing, Detection & Citations",
@@ -358,7 +417,9 @@ def index_page() -> PublicPage:
             "mean, how to cite AI tools, and how to make your writing your own."
         ),
         h1="Blog",
+        og_image=og,
         breadcrumb="Blog",
+        images=(og,),
     )
 
 

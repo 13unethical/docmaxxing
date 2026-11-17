@@ -54,20 +54,55 @@ DEFAULT_KEYWORDS = [
     "essay formatter",
 ]
 
-OG_IMAGE_DEFAULT = "/static/og/default.png"
-OG_IMAGE_HUMANIZER = "/static/og/humanizer.png"
-OG_IMAGE_DETECTOR = "/static/og/ai-detector.png"
+OG_IMAGE_DEFAULT = "/static/og/home.webp"
+OG_IMAGE_HUMANIZER = "/static/og/ai-humanizer.webp"
+OG_IMAGE_DETECTOR = "/static/og/ai-detector.webp"
+OG_IMAGE_FORMATTER = "/static/og/formatter.webp"
 OG_IMAGE_SIZE = (1200, 630)
+
+# On-page product screenshots (WebP + JPEG fallback under the same stem).
+MEDIA_DETECTOR_HIGHLIGHTS = "/static/media/ai-detector-sentence-highlights.webp"
+MEDIA_DETECTOR_SCORE = "/static/media/ai-detector-overall-score.webp"
+MEDIA_HUMANIZER_RESULT = "/static/media/ai-humanizer-result-panel.webp"
+MEDIA_HUMANIZER_COMPARE = "/static/media/ai-humanizer-before-after.webp"
+MEDIA_FORMATTER_PREVIEW = "/static/media/essay-formatter-apa-preview.webp"
+MEDIA_FORMATTER_SETTINGS = "/static/media/essay-formatter-style-settings.webp"
+
+
+def og_stem_for_path(path: str) -> str:
+    """Map a public path to ``static/og/<stem>.webp`` (``/`` → ``home``)."""
+    if path == "/":
+        return "home"
+    clean = path.strip("/").replace("/", "-")
+    return re.sub(r"[^a-z0-9\-]+", "-", clean.lower()).strip("-") or "page"
+
+
+def og_image_path_for(path: str) -> str:
+    """Relative OG image URL for a public page or blog path."""
+    return f"/static/og/{og_stem_for_path(path)}.webp"
 
 ROBOTS_INDEX = "index, follow"
 ROBOTS_NOINDEX = "noindex, follow"
 
 # Pages that must never show up in search results. They stay crawlable (not blocked in
 # robots.txt) so crawlers can actually see the noindex tag.
-NOINDEX_PATHS = frozenset({"/login", "/register", "/account", "/admin", "/ru/humanizer"})
-NOINDEX_PREFIXES = ("/verify-email/", "/admin/")
+# Keep /about, /faq, /pricing, /contact indexable (marketing + support).
+NOINDEX_PATHS = frozenset(
+    {
+        "/login",
+        "/register",
+        "/account",
+        "/account-info",
+        "/admin",
+        "/terms",
+        "/privacy",
+        "/delivery-policy",
+        "/refund-policy",
+    }
+)
+NOINDEX_PREFIXES = ("/verify-email/", "/admin/", "/cite/")
 
-_OG_LOCALES = {"en": "en_US", "ru": "ru_RU"}
+_OG_LOCALES = {"en": "en_US", "ru": "ru_RU", "uz": "uz_UZ"}
 
 
 @dataclass(frozen=True)
@@ -88,15 +123,31 @@ class PublicPage:
     # hreflang -> path of the same page in that language (this page included).
     alternates: dict[str, str] = field(default_factory=dict)
     in_sitemap: bool = True
+    # Absolute-path image URLs for sitemap ``image:image`` (OG + on-page shots).
+    images: tuple[str, ...] = ()
 
 
-def _info(path: str, template: str, title: str, description: str, crumb: str) -> PublicPage:
+def _info(
+    path: str,
+    template: str,
+    title: str,
+    description: str,
+    crumb: str,
+    *,
+    indexable: bool | None = None,
+) -> PublicPage:
+    og = og_image_path_for(path)
+    if indexable is None:
+        indexable = path not in NOINDEX_PATHS
     return PublicPage(
         path=path,
         title=title,
         description=description,
+        og_image=og,
         breadcrumb=crumb,
         sources=(f"templates/info/{template}",),
+        images=(og,),
+        in_sitemap=indexable,
     )
 
 
@@ -107,8 +158,10 @@ _PAGES: tuple[PublicPage, ...] = (
         description=DEFAULT_DESCRIPTION,
         h1="AI Humanizer and Writing Tools for Students",
         keywords=tuple(DEFAULT_KEYWORDS),
-        sources=("templates/app_v2.html", "static/app2/app.js", "services/site_content.py"),
+        og_image=OG_IMAGE_DEFAULT,
+        sources=("templates/landing/home.html", "services/site_content.py"),
         software_app=True,
+        images=(MEDIA_HUMANIZER_RESULT, MEDIA_DETECTOR_HIGHLIGHTS, MEDIA_FORMATTER_PREVIEW),
     ),
     PublicPage(
         path="/ai-detector",
@@ -121,8 +174,9 @@ _PAGES: tuple[PublicPage, ...] = (
         keywords=("AI detector", "free AI detector", "AI checker", "check essay for AI", "ChatGPT detector"),
         og_image=OG_IMAGE_DETECTOR,
         breadcrumb="AI Detector",
-        sources=("templates/app_v2.html", "static/app2/app.js", "services/site_content.py"),
+        sources=("templates/landing/ai_detector_en.html", "services/site_content.py"),
         software_app=True,
+        images=(MEDIA_DETECTOR_HIGHLIGHTS, MEDIA_DETECTOR_SCORE),
     ),
     PublicPage(
         path="/humanizer",
@@ -143,23 +197,7 @@ _PAGES: tuple[PublicPage, ...] = (
         breadcrumb="AI Humanizer",
         sources=("templates/landing/humanizer_en.html", "services/site_content.py"),
         software_app=True,
-    ),
-    # On hold (noindex, unlinked) until there is a real Russian engine.
-    PublicPage(
-        path="/ru/humanizer",
-        title="Хуманайзер текста онлайн бесплатно | DocMaxxing",
-        description=(
-            "Хуманайзер текста: перепишите черновик после ChatGPT так, чтобы он звучал "
-            "естественно. Английские тексты — уже сейчас, русский движок готовим."
-        ),
-        lang="ru",
-        h1="Хуманайзер текста онлайн бесплатно",
-        keywords=("хуманайзер", "хуманайзер текста", "очеловечить текст", "AI humanizer"),
-        og_image=OG_IMAGE_HUMANIZER,
-        breadcrumb="Хуманайзер",
-        sources=("templates/landing/humanizer_ru.html", "templates/landing/base.html"),
-        software_app=True,
-        in_sitemap=False,
+        images=(MEDIA_HUMANIZER_RESULT, MEDIA_HUMANIZER_COMPARE),
     ),
     PublicPage(
         path="/formatter",
@@ -180,9 +218,11 @@ _PAGES: tuple[PublicPage, ...] = (
             "Harvard referencing",
             "Chicago style formatter",
         ),
+        og_image=OG_IMAGE_FORMATTER,
         breadcrumb="Essay Formatter",
         sources=("templates/format_v2.html", "templates/landing/_formatter_seo.html"),
         software_app=True,
+        images=(MEDIA_FORMATTER_PREVIEW, MEDIA_FORMATTER_SETTINGS),
     ),
     PublicPage(
         path="/pricing",
@@ -191,8 +231,10 @@ _PAGES: tuple[PublicPage, ...] = (
             "See what DocMaxxing costs: free formatting and free humanizer runs, monthly plans, "
             "and one-time credit packs for paid tools. No hidden fees."
         ),
+        og_image="/static/og/pricing.webp",
         breadcrumb="Pricing",
         sources=("templates/pricing.html",),
+        images=("/static/og/pricing.webp",),
     ),
     _info(
         "/about",
@@ -292,16 +334,57 @@ _PAGES: tuple[PublicPage, ...] = (
     ),
 )
 
-PUBLIC_PAGES: dict[str, PublicPage] = {page.path: page for page in _PAGES}
+def _build_public_pages() -> dict[str, PublicPage]:
+    from services.seo_i18n import apply_en_alternates, build_localized_public_pages
+
+    pages = {page.path: page for page in _PAGES}
+    for page in build_localized_public_pages():
+        pages[page.path] = page
+    return apply_en_alternates(pages)
+
+
+PUBLIC_PAGES: dict[str, PublicPage] = _build_public_pages()
+
+_LOCALE_MARKETING_PATHS = frozenset(
+    path
+    for path in PUBLIC_PAGES
+    if path == "/ru"
+    or path == "/uz"
+    or path.startswith("/ru/")
+    or path.startswith("/uz/")
+)
+
+def _marketing_locale_paths() -> frozenset[str]:
+    """All en/ru/uz marketing SSR paths (home, tools, pricing, faq, about)."""
+    from services.seo_i18n import LOCALES, PAGE_KEYS, locale_path
+
+    return frozenset(locale_path(lang, key) for lang in LOCALES for key in PAGE_KEYS)
+
 
 # Public pages served to guests instead of the app (signed-in users go to /app#/<screen>).
 # /pricing is always SSR for guests/bots (see ALWAYS_SSR_PATHS) — not gated on this flag.
-GUEST_LANDING_PATHS = frozenset({"/", "/humanizer", "/ru/humanizer", "/formatter"})
+GUEST_LANDING_PATHS = frozenset(
+    {
+        "/",
+        "/ai-detector",
+        "/humanizer",
+        "/formatter",
+        "/ru",
+        "/ru/humanizer",
+        "/ru/formatter",
+        "/ru/ai-detector",
+        "/uz",
+        "/uz/humanizer",
+        "/uz/formatter",
+        "/uz/ai-detector",
+    }
+)
 # Without those pages, guests get the app's own landing at these URLs (no redirect), opened on
 # the matching tool and with the page's text already in the HTML for crawlers.
 APP_LANDING_PATHS = frozenset({"/", "/ai-detector", "/humanizer", "/formatter"})
 # Always server-rendered for anonymous visitors and crawlers (never redirect to /app#/...).
-ALWAYS_SSR_PATHS = frozenset({"/pricing"})
+# Includes every localized marketing URL so /ru/* and /uz/* never 302 to /app for guests.
+ALWAYS_SSR_PATHS = frozenset({"/pricing", "/ru/pricing", "/uz/pricing"} | _LOCALE_MARKETING_PATHS | _marketing_locale_paths())
 
 
 def normalize_path(path: str | None) -> str:
@@ -320,7 +403,11 @@ def absolute_url(path: str) -> str:
 
 def page_lang(path: str) -> str:
     path = normalize_path(path)
-    return "ru" if path == "/ru" or path.startswith("/ru/") else "en"
+    if path == "/ru" or path.startswith("/ru/"):
+        return "ru"
+    if path == "/uz" or path.startswith("/uz/"):
+        return "uz"
+    return "en"
 
 
 def guest_landings_enabled() -> bool:
@@ -397,7 +484,11 @@ def page_seo_for_path(
     keywords = list(page.keywords) if page and page.keywords else list(DEFAULT_KEYWORDS)
     # Without landing pages the app is what guests see at "/".
     canonical = canonical_url("/" if norm == "/app" else norm) if indexable else None
-    og_image = absolute_url(page.og_image if page else OG_IMAGE_DEFAULT)
+    # Prefer the per-path generated OG board when the asset exists; else page.og_image.
+    og_rel = og_image_path_for(page.path if page else norm)
+    if not (REPO_ROOT / og_rel.lstrip("/")).is_file():
+        og_rel = page.og_image if page else OG_IMAGE_DEFAULT
+    og_image = absolute_url(og_rel)
     alternates = [
         (hreflang, canonical_url(alt_path)) for hreflang, alt_path in (page.alternates if page else {}).items()
     ]
@@ -469,7 +560,7 @@ def build_json_ld(
                 "contactType": "customer support",
                 "email": "support@docmaxxing.com",
                 "telephone": "+998990779909",
-                "availableLanguage": ["en", "ru"],
+                "availableLanguage": ["en", "ru", "uz"],
             },
             "sameAs": organization_same_as(),
         },
@@ -480,40 +571,50 @@ def build_json_ld(
             "name": SITE_NAME,
             "description": DEFAULT_DESCRIPTION,
             "publisher": {"@id": org_id},
-            "inLanguage": ["en", "ru"],
+            "inLanguage": ["en", "ru", "uz"],
         },
     ]
     if page is not None:
         url = canonical_url(page.path)
-        if page.path == "/about":
+        about_paths = {"/about", "/ru/about", "/uz/about"}
+        if page.path in about_paths:
             graph.append(
                 {
                     "@type": "AboutPage",
                     "name": page.h1 or page.title,
                     "url": url,
                     "description": page.description,
+                    "inLanguage": page.lang,
                     "isPartOf": {"@id": website_id},
                     "about": {"@id": org_id},
                 }
             )
         if page.software_app:
-            graph.append(
-                {
-                    "@type": "SoftwareApplication",
-                    "name": page.h1 or page.title,
-                    "url": url,
-                    "applicationCategory": "EducationalApplication",
-                    "operatingSystem": "Web",
-                    "inLanguage": page.lang,
-                    "publisher": {"@id": org_id},
-                    "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
-                }
-            )
+            app_node: dict[str, Any] = {
+                "@type": "SoftwareApplication",
+                "name": page.h1 or page.title,
+                "url": url,
+                "applicationCategory": "EducationalApplication",
+                "operatingSystem": "Web",
+                "inLanguage": page.lang,
+                "publisher": {"@id": org_id},
+                "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+            }
+            app_images = [absolute_url(og_image_path_for(page.path))]
+            app_images.extend(absolute_url(img) for img in page.images)
+            app_node["image"] = app_images
+            graph.append(app_node)
         if page.breadcrumb:
-            home = "Главная" if page.lang == "ru" else "Home"
-            crumbs = [(home, SITE_URL)]
+            home_labels = {"ru": "Главная", "uz": "Bosh sahifa", "en": "Home"}
+            home = home_labels.get(page.lang, "Home")
+            home_url = SITE_URL
+            if page.lang in {"ru", "uz"}:
+                home_url = canonical_url(f"/{page.lang}")
+            crumbs = [(home, home_url)]
             if page.path.startswith(("/blog/", "/ru/blog/")):
                 crumbs.append(("Блог" if page.lang == "ru" else "Blog", f"{SITE_URL}/blog"))
+            elif page.path.startswith("/cite/"):
+                crumbs.append(("Essay Formatter", f"{SITE_URL}/formatter"))
             crumbs.append((page.breadcrumb, url))
             graph.append(
                 {
@@ -525,19 +626,20 @@ def build_json_ld(
                 }
             )
     if faq:
-        graph.append(
-            {
-                "@type": "FAQPage",
-                "mainEntity": [
-                    {
-                        "@type": "Question",
-                        "name": question,
-                        "acceptedAnswer": {"@type": "Answer", "text": answer},
-                    }
-                    for question, answer in faq
-                ],
-            }
-        )
+        faq_node: dict[str, Any] = {
+            "@type": "FAQPage",
+            "mainEntity": [
+                {
+                    "@type": "Question",
+                    "name": question,
+                    "acceptedAnswer": {"@type": "Answer", "text": answer},
+                }
+                for question, answer in faq
+            ],
+        }
+        if page is not None:
+            faq_node["inLanguage"] = page.lang
+        graph.append(faq_node)
     graph.extend(extra_nodes or [])
     return {"@context": "https://schema.org", "@graph": graph}
 
@@ -584,6 +686,17 @@ class SitemapEntry:
     path: str
     lastmod: str | None
     alternates: dict[str, str] = field(default_factory=dict)
+    images: tuple[str, ...] = ()
+
+
+def _sitemap_images_for(page: PublicPage) -> tuple[str, ...]:
+    """OG board plus on-page media, as absolute URLs for image:image."""
+    seen: list[str] = []
+    for rel in (og_image_path_for(page.path), *page.images):
+        abs_url = absolute_url(rel)
+        if abs_url not in seen:
+            seen.append(abs_url)
+    return tuple(seen)
 
 
 def sitemap_entries() -> list[SitemapEntry]:
@@ -591,8 +704,13 @@ def sitemap_entries() -> list[SitemapEntry]:
 
     landings = guest_landings_enabled()
     entries = [
-        SitemapEntry(page.path, page_lastmod(page), dict(page.alternates))
-        for page in _PAGES
+        SitemapEntry(
+            page.path,
+            page_lastmod(page),
+            dict(page.alternates),
+            _sitemap_images_for(page),
+        )
+        for page in PUBLIC_PAGES.values()
         if page.in_sitemap
         and (
             page.path in APP_LANDING_PATHS
@@ -602,7 +720,14 @@ def sitemap_entries() -> list[SitemapEntry]:
         )
     ]
     for post_page, lastmod in blog.sitemap_pages():
-        entries.append(SitemapEntry(post_page.path, lastmod, dict(post_page.alternates)))
+        entries.append(
+            SitemapEntry(
+                post_page.path,
+                lastmod,
+                dict(post_page.alternates),
+                _sitemap_images_for(post_page),
+            )
+        )
     return entries
 
 
@@ -610,7 +735,8 @@ def sitemap_xml() -> str:
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" '
-        'xmlns:xhtml="http://www.w3.org/1999/xhtml">',
+        'xmlns:xhtml="http://www.w3.org/1999/xhtml" '
+        'xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">',
     ]
     for entry in sitemap_entries():
         lines.append("  <url>")
@@ -625,6 +751,10 @@ def sitemap_xml() -> str:
                     f'    <xhtml:link rel="alternate" hreflang="{hreflang}" '
                     f'href="{xml_escape(canonical_url(alt_path))}"/>'
                 )
+        for image_url in entry.images:
+            lines.append("    <image:image>")
+            lines.append(f"      <image:loc>{xml_escape(image_url)}</image:loc>")
+            lines.append("    </image:image>")
         lines.append("  </url>")
     lines.append("</urlset>")
     return "\n".join(lines) + "\n"
@@ -709,6 +839,8 @@ def llms_txt() -> str:
             "DocMaxxing is a set of academic writing tools for students: a free AI detector,",
             "an AI humanizer, a free essay formatter (APA, MLA, Harvard, Chicago, IEEE),",
             "credit-based Turnitin checks, a document workspace, slides, and assignment help.",
+            "Public marketing pages are available in English (default), Russian (/ru/...), and",
+            "Uzbek Latin (/uz/...). The product app at /app is English-only.",
             "",
             "## Primary tools",
             "",
@@ -718,6 +850,22 @@ def llms_txt() -> str:
             "  student writing while keeping meaning, numbers and citations. Free runs for short texts.",
             f"- [Essay Formatter]({SITE_URL}/formatter): format DOCX/paste text for APA 7, MLA 9,",
             "  Harvard, Chicago or IEEE — free.",
+            "",
+            "## Russian (ru)",
+            "",
+            f"- [Главная]({SITE_URL}/ru): проверка на ИИ, хуманайзер и оформление.",
+            f"- [Проверка на ИИ]({SITE_URL}/ru/ai-detector)",
+            f"- [Хуманайзер]({SITE_URL}/ru/humanizer)",
+            f"- [Оформление]({SITE_URL}/ru/formatter)",
+            f"- [Цены]({SITE_URL}/ru/pricing) · [FAQ]({SITE_URL}/ru/faq) · [О нас]({SITE_URL}/ru/about)",
+            "",
+            "## Oʻzbekcha (uz)",
+            "",
+            f"- [Bosh sahifa]({SITE_URL}/uz): AI matn tekshirish, humanizer va formatlash.",
+            f"- [AI matn tekshirish]({SITE_URL}/uz/ai-detector)",
+            f"- [Humanizer]({SITE_URL}/uz/humanizer)",
+            f"- [Formatlash]({SITE_URL}/uz/formatter)",
+            f"- [Narxlar]({SITE_URL}/uz/pricing) · [FAQ]({SITE_URL}/uz/faq) · [Haqida]({SITE_URL}/uz/about)",
             "",
             "## Plans and help",
             "",
