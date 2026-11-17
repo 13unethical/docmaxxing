@@ -40,7 +40,12 @@ from services.humanizer_engine.heading_utils import (
     title_core,
 )
 from services.humanizer_engine.mock_humanizer import MockTextHumanizer
-from services.humanizer_engine.rich_html import list_marker_ok, restore_list_marker, split_list_marker
+from services.humanizer_engine.rich_html import (
+    list_marker_ok,
+    restore_list_marker,
+    split_list_marker,
+    unwrap_prose_newlines,
+)
 
 log = logging.getLogger(__name__)
 
@@ -422,6 +427,36 @@ def _strip_think(text: str) -> str:
     return re.sub(r"<think>[\s\S]*?</think>\s*", "", text, flags=re.I).strip()
 
 
+_SPACE_BEFORE_PUNCT = re.compile(r"\s+([,.;:!?])")
+_SPACE_AFTER_OPEN = re.compile(r"([(\[])\s+")
+_SPACE_BEFORE_CLOSE = re.compile(r"\s+([)\]])")
+
+
+def _tidy_joined_prose(text: str) -> str:
+    """Fix artifacts left when soft-wrapped lines like ``item\\n, next`` are joined."""
+    text = _SPACE_BEFORE_PUNCT.sub(r"\1", text)
+    text = _SPACE_AFTER_OPEN.sub(r"\1", text)
+    text = _SPACE_BEFORE_CLOSE.sub(r"\1", text)
+    return re.sub(r"[^\S\n]{2,}", " ", text).strip()
+
+
+def _normalize_rewrite_layout(source: str, output: str, single_paragraph: bool) -> str:
+    """Collapse model-invented soft wraps / blank splits so layout matches the source chunk.
+
+    The student model often inserts single newlines mid-sentence (fake headings, one list item
+    per line). The older fix only joined blank-line splits, so those soft wraps survived into
+    the UI. Rich HTML already unwraps after rewrite; plain path needs the same here.
+    """
+    text = (output or "").strip()
+    if not text:
+        return text
+    if single_paragraph:
+        # One source paragraph → one line of prose (blank splits and soft wraps both go).
+        return _tidy_joined_prose(unwrap_prose_newlines(text))
+    # Keep real paragraph breaks; unwrap soft wraps inside each paragraph.
+    return "\n\n".join(_tidy_joined_prose(unwrap_prose_newlines(p)) for p in _paragraphs(text))
+
+
 def chunk_problem(source: str, output: str) -> str | None:
     """Why a rewritten chunk is unusable, or None when it is fine."""
     if not output.strip():
@@ -564,10 +599,7 @@ class StudentTextHumanizer:
         problem = "NO_VARIANTS"
         lightest: tuple[float, str] | None = None
         for variant in variants:
-            output = variant.text.strip()
-            if single_paragraph:
-                # The model sometimes splits a long paragraph in two; keep the source layout.
-                output = " ".join(_paragraphs(output))
+            output = _normalize_rewrite_layout(chunk, variant.text.strip(), single_paragraph)
             problem = chunk_problem(chunk, output) or ""
             if not problem:
                 usable.append(Candidate(output, variant.mean_logprob))

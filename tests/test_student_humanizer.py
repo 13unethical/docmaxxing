@@ -245,6 +245,32 @@ def test_humanize_keeps_single_newline_paragraphs():
     assert "\n\n" not in out
 
 
+def test_model_soft_newlines_inside_a_paragraph_are_unwrapped():
+    """Regression: model inserts mid-sentence line breaks that looked like fake headings."""
+    source = (
+        "My field of study is Economics. Economics is the study of how individuals allocate resources. "
+        "Organizations increasingly need AI economists, economic data scientists, and AI policy advisors."
+    )
+
+    def broken_model(chunk: str) -> str:
+        assert "\n" not in chunk
+        return (
+            "My field of study is\n"
+            "Economics\n"
+            "Economics is the social science of how individuals allocate resources. "
+            "Organizations increasingly need\n"
+            "AI economists\n"
+            ", economic data scientists\n"
+            ", and AI policy advisors."
+        )
+
+    out = StudentTextHumanizer(_config(chunk_words=1), complete_fn=broken_model).humanize(source)
+    assert "\n" not in out
+    assert "AI economists, economic data scientists, and AI policy advisors" in out
+    assert "My field of study is Economics" in out
+    assert " ," not in out
+
+
 def test_bad_chunk_is_retried_then_raises():
     calls = []
 
