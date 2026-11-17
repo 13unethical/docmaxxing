@@ -970,10 +970,16 @@ def _redirect_old_pages_to_new_app():
         return None
     if (os.environ.get("LEGACY_UI") or "").strip().lower() in {"1", "true", "yes"}:
         return None
-    from services.seo import APP_LANDING_PATHS, GUEST_LANDING_PATHS, guest_landings_enabled
+    from services.seo import (
+        ALWAYS_SSR_PATHS,
+        APP_LANDING_PATHS,
+        GUEST_LANDING_PATHS,
+        guest_landings_enabled,
+    )
 
     if economy_auth.current_user() is None and (
         request.path in APP_LANDING_PATHS
+        or request.path in ALWAYS_SSR_PATHS
         or (guest_landings_enabled() and request.path in GUEST_LANDING_PATHS)
     ):
         return None
@@ -1394,7 +1400,7 @@ def inject_account():
             "percent": 50,
             "source": "none",
         }
-    from services.seo import page_seo_for_path
+    from services.seo import SOCIAL_LINKS, page_seo_for_path
     from services.economy.oauth_login import configured_providers
 
     return {
@@ -1407,6 +1413,7 @@ def inject_account():
         "humanizer_discount_percent": int(discount.get("percent") or 0),
         "oauth_providers": configured_providers(),
         "seo": page_seo_for_path(request.path, args=request.args),
+        "social_links": list(SOCIAL_LINKS),
     }
 
 
@@ -3435,6 +3442,14 @@ def robots_txt():
     return Response(build_robots(), mimetype="text/plain; charset=utf-8")
 
 
+@app.get("/llms.txt")
+def llms_txt():
+    """Public AI-agent summary (llmstxt.org). Kept crawlable and cacheable."""
+    from services.seo import llms_txt as build_llms
+
+    return Response(build_llms(), mimetype="text/plain; charset=utf-8")
+
+
 @app.get("/favicon.ico")
 def favicon():
     return send_from_directory(app.static_folder, "favicon.ico", mimetype="image/vnd.microsoft.icon", max_age=86400)
@@ -3503,6 +3518,12 @@ def not_found(_error):
 @app.route("/formatter")
 def formatter():
     """SEO landing URL for the Format tool (same UI as home)."""
+    if _serve_public_landing():
+        if formatter_v2_enabled():
+            return render_template("format_v2.html", nav_active="formatter")
+        return render_template("index.html", nav_active="formatter")
+    if _serve_app_landing():
+        return _render_app_landing()
     if formatter_v2_enabled():
         return render_template("format_v2.html", nav_active="formatter")
     return render_template("index.html", nav_active="formatter")
@@ -4981,13 +5002,14 @@ def ru_humanizer():
 @app.route("/blog")
 def blog_index():
     from services import blog
-    from services.seo import ROBOTS_NOINDEX, page_seo_for_path
+    from services.seo import ROBOTS_INDEX, ROBOTS_NOINDEX, page_seo_for_path
 
     posts = blog.published_posts()
+    # Index the listing only once there is at least one published article.
     seo = page_seo_for_path(
         blog.BLOG_INDEX_PATH,
         page=blog.index_page(),
-        robots=None if posts else ROBOTS_NOINDEX,
+        robots=ROBOTS_INDEX if posts else ROBOTS_NOINDEX,
         faq=[],
     )
     return render_template(
@@ -4995,11 +5017,18 @@ def blog_index():
     )
 
 
+@app.get("/blog/rss.xml")
+def blog_rss_xml():
+    from services import blog
+
+    return Response(blog.rss_xml(), mimetype="application/rss+xml; charset=utf-8")
+
+
 def _render_blog_post(lang: str, slug: str):
     from flask import abort
 
     from services import blog
-    from services.seo import ROBOTS_NOINDEX, page_seo_for_path
+    from services.seo import ROBOTS_INDEX, ROBOTS_NOINDEX, page_seo_for_path
 
     user = economy_auth.current_user()
     preview = user is not None and economy_auth.is_admin(user)
@@ -5009,7 +5038,7 @@ def _render_blog_post(lang: str, slug: str):
     seo = page_seo_for_path(
         post.path,
         page=blog.post_page(post),
-        robots=ROBOTS_NOINDEX if post.draft else None,
+        robots=ROBOTS_NOINDEX if post.draft else ROBOTS_INDEX,
         faq=[],
         extra_nodes=[post.article_node()],
         og_type="article",
@@ -5134,6 +5163,12 @@ def _app_v2_boot() -> dict[str, Any]:
         boot["blog"] = _spa_blog_boot()
     except Exception:
         boot["blog"] = {"posts": []}
+    from services.seo import SOCIAL_LINKS
+
+    boot["socialLinks"] = [
+        {"label": item["label"], "icon": item["icon"], "url": item["url"]}
+        for item in SOCIAL_LINKS
+    ]
     return boot
 
 
@@ -9308,8 +9343,13 @@ def api_browser_plagdetect_login():
 
 @app.route("/pricing")
 def pricing():
-    """Coin packages — clear pricing without subscription pressure."""
-    from services.economy.pricing import pricing_cost_rows, pricing_page_packages
+    """Coin packages — clear pricing without subscription pressure.
+
+    Guests and crawlers always get server-rendered HTML (see ALWAYS_SSR_PATHS).
+    Signed-in users still redirect to ``/app#/pricing`` via ``_redirect_old_pages_to_new_app``.
+    """
+    from services.economy.pricing import pricing_cost_rows, pricing_page_packages, pricing_schema_nodes
+    from services.seo import PUBLIC_PAGES, page_seo_for_path
 
     user = economy_auth.current_user()
     user_id = int(user["id"]) if user else None
@@ -9319,11 +9359,19 @@ def pricing():
         tool="pricing",
         dedupe_key=None,
     )
+    packages = pricing_page_packages(user_id=user_id)
+    seo = page_seo_for_path(
+        "/pricing",
+        page=PUBLIC_PAGES["/pricing"],
+        faq=[],
+        extra_nodes=pricing_schema_nodes(packages=packages),
+    )
     return render_template(
         "pricing.html",
+        seo=seo,
         nav_active="pricing",
         welcome_bonus=WELCOME_BONUS,
-        pricing_packages=pricing_page_packages(user_id=user_id),
+        pricing_packages=packages,
         pricing_cost_rows=pricing_cost_rows(),
         paddle_configured=paddle_configured(),
         paddle_client_token=paddle_client_token(),

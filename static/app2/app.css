@@ -1409,7 +1409,54 @@ table.hist { width: 100%; border-collapse: collapse; min-width: 780px; font-size
 .lf-top { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, 168px) 175px; }
 .lf-brand { display: flex; flex-direction: column; gap: var(--space-4); }
 .lf-brand p { margin: 0; max-width: 300px; font-size: 14px; }
-.lf-brand .if-socials { justify-content: flex-start; flex-wrap: wrap; gap: 4px; max-width: 180px; }
+.lf-brand .if-socials { justify-content: flex-start; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 180px; }
+
+/* Google Preferred Sources */
+.preferred-source-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+}
+.preferred-source-btn:hover {
+  background: var(--default);
+  color: var(--text);
+  text-decoration: none;
+}
+.preferred-source-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.preferred-source-btn__icon { flex-shrink: 0; width: 18px; height: 18px; display: block; }
+.preferred-source-note {
+  margin: var(--space-6) 0 var(--space-4);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+.preferred-source-note__text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 42rem;
+}
 /* Socials as app icons (footer, Earn share): brand-coloured rounded tiles with a white mark */
 .lf-brand .if-socials { gap: 6px; max-width: none; }
 .app-tile { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; color: #fff; background: var(--tile, #3f3f46);

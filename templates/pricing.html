@@ -3,7 +3,7 @@
 {% block page_header %}
       <header class="top pricing-hero">
         <h1>Simple credit pricing</h1>
-        <p class="lede">No subscription. Buy credits when you need them.</p>
+        <p class="lede">No subscription. Buy credits when you need them — formatting stays free.</p>
       </header>
 {% endblock %}
 {% block content %}
@@ -32,34 +32,12 @@
             <li class="pricing-plan-usage-ref">{{ pkg.credits_per_usd_display }} credits per $1</li>
           </ul>
           <div class="pricing-plan-actions">
-            {% if current_user and pkg.lemon_checkout_url %}
             <a
               class="pricing-plan-btn pricing-plan-btn--primary"
-              href="{{ pkg.lemon_checkout_url }}"
-              target="_blank"
-              rel="noopener noreferrer"
+              href="/app#/pricing"
             >
-              Buy {{ pkg.name }}
+              Open pricing in app · {{ pkg.name }}
             </a>
-            {% elif current_user %}
-            <span class="pricing-plan-btn pricing-plan-btn--primary pricing-plan-btn--disabled" aria-disabled="true">
-              Buy {{ pkg.name }}
-            </span>
-            {% else %}
-            <a
-              class="pricing-plan-btn pricing-plan-btn--primary"
-              href="{{ url_for('login', next=url_for('pricing')) }}"
-            >
-              Sign in · Buy {{ pkg.name }}
-            </a>
-            {% endif %}
-            <button
-              type="button"
-              class="pricing-plan-alt-pay"
-              data-topup="{{ pkg.id }}"
-            >
-              or pay with crypto
-            </button>
           </div>
         </article>
         {% endfor %}
@@ -86,8 +64,6 @@
         </article>
       </section>
 
-      <p class="pricing-status" data-topup-status role="status" aria-live="polite"></p>
-
       <section class="pricing-explainer" aria-label="What credits pay for">
         <h2 class="pricing-explainer-title">What credits pay for</h2>
         <dl class="pricing-costs">
@@ -97,9 +73,10 @@
         </dl>
         <p class="pricing-note">
           New accounts get <strong>{{ "{:,}".format(welcome_bonus|int) }} welcome credits</strong> to try Workspace before buying.
+          See <a href="{{ url_for('credits') }}">how credits work</a> and the <a href="{{ url_for('faq') }}">FAQ</a>.
+        </p>
+        <p class="pricing-note">
+          <a class="pricing-plan-btn pricing-plan-btn--primary" href="/app#/pricing">Continue in the app</a>
         </p>
       </section>
-{% endblock %}
-{% block scripts %}
-    <script src="{{ url_for('static', filename='pricing.js') }}?v=20260813-pricing-dynamic"></script>
 {% endblock %}

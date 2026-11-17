@@ -120,6 +120,20 @@ def test_empty_blog_index_is_200_but_noindex(tmp_path, monkeypatch):
     assert f"<loc>{SITE_URL}/blog</loc>" not in sitemap_xml()
 
 
+def test_published_blog_index_and_posts_are_indexable():
+    client = _client()
+    html = client.get("/blog").get_data(as_text=True)
+    assert '<meta name="robots" content="index, follow" />' in html
+    assert 'rel="canonical"' in html
+    assert "preferred-source-note" in html
+    xml = sitemap_xml()
+    assert f"<loc>{SITE_URL}/blog</loc>" in xml
+    post = blog.published_posts()[0]
+    post_html = client.get(post.path).get_data(as_text=True)
+    assert '<meta name="robots" content="index, follow" />' in post_html
+    assert post.path in xml
+
+
 # --- parsing --------------------------------------------------------------------
 
 
@@ -189,14 +203,26 @@ def test_post_page_meta_and_article_json_ld(posts):
     assert f'<link rel="alternate" hreflang="ru" href="{SITE_URL}/ru/blog/detektory" />' in html
     assert re.search(r"<h1[^>]*>How detectors work</h1>", html)
     assert '<a href="/humanizer">link</a>' in html
+    assert "DocMaxxing" in html.split("lp-post-meta", 1)[1].split("</p>", 1)[0]
+    assert 'itemprop="datePublished"' in html
     graph = _graph(html)
     article = next(n for n in graph if n["@type"] == "BlogPosting")
     assert article["headline"] == "How detectors work"
     assert article["datePublished"] == "2026-10-01"
     assert article["dateModified"] == "2026-10-20"
+    assert article["author"]["name"] == "DocMaxxing"
     assert article["mainEntityOfPage"] == f"{SITE_URL}/blog/detectors"
     crumbs = next(n for n in graph if n["@type"] == "BreadcrumbList")["itemListElement"]
     assert [c["name"] for c in crumbs] == ["Home", "Blog", "How detectors work"]
+
+
+def test_rss_feed_lists_published_posts_only(posts):
+    xml = _client().get("/blog/rss.xml").get_data(as_text=True)
+    assert "<rss version=" in xml
+    assert f"<link>{SITE_URL}/blog/detectors</link>" in xml
+    assert f"<link>{SITE_URL}/ru/blog/detektory</link>" in xml
+    assert "Unfinished post" not in xml
+    assert "secret" not in xml
 
 
 def test_russian_post(posts):

@@ -101,18 +101,14 @@ def test_post_is_not_redirected(client):
     assert "#/" not in resp.headers.get("Location", "")
 
 
-@pytest.mark.parametrize(
-    ("path", "target"),
-    [
-        ("/pricing", "/app#/pricing"),
-        ("/formatter", "/app#/format"),
-    ],
-)
-def test_without_landing_pages_guests_go_to_the_app(client, monkeypatch, path, target):
+def test_without_landing_pages_pricing_stays_ssr_for_guests(client, monkeypatch):
     monkeypatch.setenv("GUEST_LANDING_PAGES", "0")
-    resp = client.get(path)
-    assert resp.status_code == 302
-    assert resp.headers["Location"] == target
+    resp = client.get("/pricing")
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Simple credit pricing" in html
+    assert 'href="/app#/pricing"' in html
+    assert '"@type": "Product"' in html
 
 
 @pytest.mark.parametrize(
@@ -121,6 +117,7 @@ def test_without_landing_pages_guests_go_to_the_app(client, monkeypatch, path, t
         ("/", "detect", "Check your text for AI"),
         ("/ai-detector", "detect", "Free AI Detector"),
         ("/humanizer", "humanize", "Free AI Humanizer"),
+        ("/formatter", "format", "Free Essay Formatter for APA, MLA, Harvard and Chicago"),
     ],
 )
 def test_without_landing_pages_guests_get_the_app_landing_in_place(client, monkeypatch, path, tab, h1):
@@ -137,6 +134,7 @@ def test_without_landing_pages_guests_get_the_app_landing_in_place(client, monke
     assert '<meta name="robots" content="index, follow"' in html
     assert f'<link rel="canonical" href="{canonical_url(path)}" />' in html
     assert '"@type": "FAQPage"' in html
+    assert '"@type": "SoftwareApplication"' in html
     assert '<details class="card">' in html
 
 
@@ -155,7 +153,5 @@ def test_without_landing_pages_the_app_is_indexed_under_the_root(client, monkeyp
     assert f'<link rel="canonical" href="{SITE_URL}" />' in html
     assert '"landing":' not in html
     xml = sitemap_xml()
-    for path in ("", "/ai-detector", "/humanizer", "/faq"):
+    for path in ("", "/ai-detector", "/humanizer", "/formatter", "/faq", "/pricing"):
         assert f"<loc>{SITE_URL}{path}</loc>" in xml
-    for path in ("/pricing", "/formatter"):
-        assert f"<loc>{SITE_URL}{path}</loc>" not in xml

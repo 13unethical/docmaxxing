@@ -404,10 +404,66 @@ h3 a:visited {
 
 .site-footer-social {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 0.55rem;
   margin-top: 0.25rem;
+}
+
+/* Preferred Sources — base (also in components.css; duplicated for pages that only load style.css) */
+.preferred-source-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--border, #E2E6EC);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text, #111827);
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.preferred-source-btn:hover {
+  background: var(--surface-2, #F1F3F6);
+  border-color: var(--border-strong, #C7CED8);
+  color: var(--text, #111827);
+  text-decoration: none;
+}
+.preferred-source-btn:focus-visible {
+  outline: 2px solid var(--accent, #2563EB);
+  outline-offset: 2px;
+}
+.preferred-source-btn__icon {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.site-footer .preferred-source-btn {
+  min-height: 2.1rem;
+  padding: 0 0.9rem;
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #d5dae0;
+  font-size: 0.82rem;
+}
+.site-footer .preferred-source-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: #fff;
+}
+.site-footer .preferred-source-btn:focus-visible {
+  outline: 2px solid #8fb4ff;
+  outline-offset: 2px;
 }
 
 .site-footer-social-link {

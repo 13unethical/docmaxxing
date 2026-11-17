@@ -346,3 +346,42 @@ def pricing_cost_rows() -> list[dict[str, str]]:
         },
         {"label": "Failed paid action", "value": "Refunded"},
     ]
+
+
+def pricing_schema_nodes(*, packages: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Product + Offer JSON-LD nodes from the live credit catalog (no hardcoded prices)."""
+    from services.seo import SITE_NAME, SITE_URL
+
+    rows = packages if packages is not None else pricing_page_packages()
+    offers: list[dict[str, Any]] = []
+    for pkg in rows:
+        usd = float(pkg["usd"])
+        coins = int(pkg["coins"])
+        price = str(int(usd)) if usd == int(usd) else f"{usd:.2f}"
+        offers.append(
+            {
+                "@type": "Offer",
+                "name": str(pkg["name"]),
+                "price": price,
+                "priceCurrency": "USD",
+                "url": f"{SITE_URL}/pricing",
+                "availability": "https://schema.org/InStock",
+                "category": "Credits",
+                "description": f"{coins} DocMaxxing credits",
+            }
+        )
+    if not offers:
+        return []
+    return [
+        {
+            "@type": "Product",
+            "name": f"{SITE_NAME} credit packs",
+            "description": (
+                "One-time DocMaxxing credit packs for paid tools (humanizer, Turnitin checks, "
+                "slides and related features). Formatting stays free."
+            ),
+            "brand": {"@type": "Brand", "name": SITE_NAME},
+            "url": f"{SITE_URL}/pricing",
+            "offers": offers,
+        }
+    ]

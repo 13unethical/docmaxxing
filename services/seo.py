@@ -22,6 +22,21 @@ SITE_URL = "https://docmaxxing.com"
 SITE_NAME = "DocMaxxing"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# Public social / profile links — single source for Organization.sameAs and site footers.
+# TODO: add Knowledge Graph profiles (Wikipedia, Wikidata, LinkedIn, Crunchbase) when available.
+SOCIAL_LINKS: tuple[dict[str, str], ...] = (
+    {"label": "Telegram", "url": "https://t.me/docmaxxing", "icon": "telegram"},
+    {"label": "Instagram", "url": "https://www.instagram.com/doc.maxxing", "icon": "instagram"},
+    {"label": "YouTube", "url": "https://www.youtube.com/@docmaxxing", "icon": "youtube"},
+    {"label": "X", "url": "https://x.com/docmaxxing", "icon": "xlogo"},
+    {"label": "TikTok", "url": "https://www.tiktok.com/@docmaxxing", "icon": "tiktok"},
+)
+
+
+def organization_same_as() -> list[str]:
+    """https profile URLs for Organization.sameAs (skips mailto: and empty entries)."""
+    return [item["url"] for item in SOCIAL_LINKS if str(item.get("url") or "").startswith("http")]
+
 TITLE_MAX = 60
 DESCRIPTION_MAX = 155
 
@@ -268,10 +283,13 @@ _PAGES: tuple[PublicPage, ...] = (
 PUBLIC_PAGES: dict[str, PublicPage] = {page.path: page for page in _PAGES}
 
 # Public pages served to guests instead of the app (signed-in users go to /app#/<screen>).
-GUEST_LANDING_PATHS = frozenset({"/", "/humanizer", "/ru/humanizer", "/pricing", "/formatter"})
+# /pricing is always SSR for guests/bots (see ALWAYS_SSR_PATHS) — not gated on this flag.
+GUEST_LANDING_PATHS = frozenset({"/", "/humanizer", "/ru/humanizer", "/formatter"})
 # Without those pages, guests get the app's own landing at these URLs (no redirect), opened on
 # the matching tool and with the page's text already in the HTML for crawlers.
-APP_LANDING_PATHS = frozenset({"/", "/ai-detector", "/humanizer"})
+APP_LANDING_PATHS = frozenset({"/", "/ai-detector", "/humanizer", "/formatter"})
+# Always server-rendered for anonymous visitors and crawlers (never redirect to /app#/...).
+ALWAYS_SSR_PATHS = frozenset({"/pricing"})
 
 
 def normalize_path(path: str | None) -> str:
@@ -433,13 +451,15 @@ def build_json_ld(
             "name": SITE_NAME,
             "url": SITE_URL,
             "logo": {"@type": "ImageObject", "url": f"{SITE_URL}/icon.png"},
-            "sameAs": [
-                "https://t.me/docmaxxing",
-                "https://www.instagram.com/doc.maxxing",
-                "https://www.youtube.com/@docmaxxing",
-                "https://x.com/docmaxxing",
-                "https://www.tiktok.com/@docmaxxing",
-            ],
+            "email": "support@docmaxxing.com",
+            "contactPoint": {
+                "@type": "ContactPoint",
+                "contactType": "customer support",
+                "email": "support@docmaxxing.com",
+                "telephone": "+998990779909",
+                "availableLanguage": ["en", "ru"],
+            },
+            "sameAs": organization_same_as(),
         },
         {
             "@type": "WebSite",
@@ -453,6 +473,17 @@ def build_json_ld(
     ]
     if page is not None:
         url = canonical_url(page.path)
+        if page.path == "/about":
+            graph.append(
+                {
+                    "@type": "AboutPage",
+                    "name": page.h1 or page.title,
+                    "url": url,
+                    "description": page.description,
+                    "isPartOf": {"@id": website_id},
+                    "about": {"@id": org_id},
+                }
+            )
         if page.software_app:
             graph.append(
                 {
@@ -551,7 +582,12 @@ def sitemap_entries() -> list[SitemapEntry]:
         SitemapEntry(page.path, page_lastmod(page), dict(page.alternates))
         for page in _PAGES
         if page.in_sitemap
-        and (page.path in APP_LANDING_PATHS or landings or page.path not in GUEST_LANDING_PATHS)
+        and (
+            page.path in APP_LANDING_PATHS
+            or page.path in ALWAYS_SSR_PATHS
+            or landings
+            or page.path not in GUEST_LANDING_PATHS
+        )
     ]
     for post_page, lastmod in blog.sitemap_pages():
         entries.append(SitemapEntry(post_page.path, lastmod, dict(post_page.alternates)))
@@ -582,14 +618,109 @@ def sitemap_xml() -> str:
     return "\n".join(lines) + "\n"
 
 
+# Paths blocked for every crawler group. Named User-agent blocks ignore ``*``, so
+# these Disallow lines must be repeated in each group (RFC 9309 / robots.txt).
+DISALLOW_PATHS: tuple[str, ...] = ("/api/",)
+
+# AI / answer-engine crawlers that should explicitly be allowed to read public pages.
+# ``User-agent: *`` already allows them; these blocks make the policy visible to auditors
+# (GEO / ChatGPT / Perplexity / Claude / Google AI Overviews).
+# Citation bots that GEO scores as "explicit" (not merely via User-agent: *):
+# OAI-SearchBot, Claude-SearchBot, PerplexityBot, Googlebot, Applebot.
+_AI_CRAWLER_USER_AGENTS = (
+    "GPTBot",
+    "OAI-SearchBot",
+    "ChatGPT-User",
+    "ClaudeBot",
+    "Claude-SearchBot",
+    "Claude-User",
+    "PerplexityBot",
+    "Perplexity-User",
+    "Googlebot",
+    "Google-Extended",
+    "Google-CloudVertexBot",
+    "Applebot-Extended",
+    "Applebot",
+    "Bingbot",
+    "cohere-ai",
+    "DuckAssistBot",
+    "Bytespider",
+    "meta-externalagent",
+    "Meta-ExternalFetcher",
+    "facebookexternalhit",
+    "Amazonbot",
+    "AI2Bot",
+    "AI2Bot-Dolma",
+    "xAI-Bot",
+    "YouBot",
+    "CCBot",
+    "PetalBot",
+)
+
+
+def _robots_group_rules() -> list[str]:
+    """Private Disallows then Allow — shared by every User-agent group.
+
+    Disallow lines come first so first-match parsers (urllib.robotparser) still
+    block ``/api/`` when ``Allow: /`` is also present. Longest-match parsers
+    (Google) prefer the longer ``/api/`` path either way.
+    """
+    return [*[f"Disallow: {path}" for path in DISALLOW_PATHS], "Allow: /"]
+
+
 def robots_txt() -> str:
+    lines: list[str] = [
+        "# DocMaxxing robots.txt — public pages are open to search and AI crawlers.",
+        "# API routes stay private; everything else may be crawled and cited.",
+        "# Named bot groups repeat Disallow (they do not inherit the wildcard group).",
+        "",
+    ]
+    rules = _robots_group_rules()
+    for agent in _AI_CRAWLER_USER_AGENTS:
+        lines.append(f"User-agent: {agent}")
+        lines.extend(rules)
+        lines.append("")
+    lines.append("User-agent: *")
+    lines.extend(rules)
+    lines.extend(["", f"Sitemap: {SITE_URL}/sitemap.xml", ""])
+    return "\n".join(lines)
+
+
+def llms_txt() -> str:
+    """Machine-readable site summary for AI agents (https://llmstxt.org/)."""
     return "\n".join(
         [
-            "User-agent: *",
-            "Allow: /",
-            "Disallow: /api/",
+            "# DocMaxxing",
             "",
-            f"Sitemap: {SITE_URL}/sitemap.xml",
+            f"> {DEFAULT_DESCRIPTION}",
+            "",
+            "DocMaxxing is a set of academic writing tools for students: a free AI detector,",
+            "an AI humanizer, a free essay formatter (APA, MLA, Harvard, Chicago, IEEE),",
+            "credit-based Turnitin checks, a document workspace, slides, and assignment help.",
+            "",
+            "## Primary tools",
+            "",
+            f"- [Free AI Detector]({SITE_URL}/ai-detector): paste an essay, get an AI score and",
+            "  sentence-level highlights. Tuned on real Turnitin reports. No sign-up for short checks.",
+            f"- [AI Humanizer]({SITE_URL}/humanizer): rewrite stiff AI-sounding drafts into natural",
+            "  student writing while keeping meaning, numbers and citations. Free runs for short texts.",
+            f"- [Essay Formatter]({SITE_URL}/formatter): format DOCX/paste text for APA 7, MLA 9,",
+            "  Harvard, Chicago or IEEE — free.",
+            "",
+            "## Plans and help",
+            "",
+            f"- [Pricing]({SITE_URL}/pricing): free tools, monthly plans and one-time credit packs.",
+            f"- [FAQ]({SITE_URL}/faq): humanizer limits, credits, formatting, plans and refunds.",
+            f"- [How credits work]({SITE_URL}/credits): welcome bonus and cost per paid action.",
+            f"- [Blog]({SITE_URL}/blog): guides on AI detectors, Turnitin scores and citing AI tools.",
+            f"- [Blog RSS]({SITE_URL}/blog/rss.xml): feed of published posts.",
+            "",
+            "## About",
+            "",
+            f"- [About DocMaxxing]({SITE_URL}/about)",
+            f"- [Contact support]({SITE_URL}/contact): support@docmaxxing.com",
+            f"- Site: {SITE_URL}",
+            f"- Sitemap: {SITE_URL}/sitemap.xml",
             "",
         ]
     )

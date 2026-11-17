@@ -1,9 +1,11 @@
 {% extends "landing/base.html" %}
 {% block content %}
+{% import "macros/ui.html" as ui with context %}
 <section class="lp-section lp-wrap">
   <nav class="lp-breadcrumbs" aria-label="Breadcrumbs"><a href="/">Home</a> / Blog</nav>
   <h1>Blog</h1>
   <p class="lp-lede">Plain-English guides on AI writing, AI detectors, Turnitin reports and citing AI tools — written for students.</p>
+  {{ ui.preferred_source_note(lang=seo.lang, classes='preferred-source-note--compact') }}
   {% if posts %}
   <ul class="lp-post-list">
     {% for post in posts %}

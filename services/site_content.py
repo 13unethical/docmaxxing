@@ -464,11 +464,34 @@ def ai_detector_faq() -> list[FaqItem]:
     ]
 
 
+def formatter_faq() -> list[FaqItem]:
+    return [
+        (
+            "Which citation styles does the formatter support?",
+            "APA 7, MLA 9, Harvard, Chicago and IEEE, with control over fonts, spacing, margins, "
+            "the cover page and the reference list.",
+        ),
+        (
+            "Does formatting cost credits?",
+            "No. Essay formatting is free.",
+        ),
+        (
+            "What can I upload?",
+            "Paste text or upload a DOCX (and related academic files shown on the Format page).",
+        ),
+        (
+            "Do I need an account?",
+            "Not to format. An account keeps history and unlocks paid tools like Turnitin checks.",
+        ),
+    ]
+
+
 _LANDING_FAQS = {
     "/": home_faq,
     "/ai-detector": ai_detector_faq,
     "/humanizer": humanizer_en_faq,
     "/ru/humanizer": humanizer_ru_faq,
+    "/formatter": formatter_faq,
 }
 
 # Free tries on the app landing's detector / humanizer box for visitors without an account
@@ -528,6 +551,19 @@ _TOOL_LANDINGS: dict[str, dict[str, Any]] = {
              "Numbers, in-text citations, headings and reference lists stay as they are."),
             ("Check the result right away",
              "Switch to the AI detector tab and see how the new version scores."),
+        ),
+    },
+    "/formatter": {
+        "tab": "format",
+        "hero": "Free Essay Formatter for APA, MLA, Harvard and Chicago",
+        "about_title": "Submission-ready formatting, free",
+        "about": (
+            ("Style profiles that match the brief",
+             "APA 7, MLA 9, Harvard, Chicago and IEEE presets set fonts, margins, headings and the reference list."),
+            ("Paste or upload a draft",
+             "Bring a DOCX or paste text; the formatter applies the profile so you are not hunting for settings."),
+            ("Pair with AI checks",
+             "After formatting, use the free AI detector and humanizer before you submit."),
         ),
     },
 }

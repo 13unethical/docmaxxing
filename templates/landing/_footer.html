@@ -1,4 +1,5 @@
 {% set ru = seo.lang == 'ru' %}
+{% import "macros/ui.html" as ui with context %}
 <footer class="lp-footer">
   <div class="lp-wrap lp-footer-grid">
     <div>
@@ -18,6 +19,16 @@
       <a href="/faq">FAQ</a>
       <a href="/about">{{ 'О нас' if ru else 'About' }}</a>
       <a href="/contact">{{ 'Контакты' if ru else 'Contact' }}</a>
+      <div class="lp-footer-preferred">
+        {{ ui.preferred_source_button(lang=seo.lang, classes='preferred-source-btn--sm') }}
+      </div>
+      {% if social_links %}
+      <div class="lp-footer-social" aria-label="{{ 'Соцсети' if ru else 'Social' }}">
+        {% for link in social_links %}
+        <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" aria-label="{{ link.label }}">{{ link.label }}</a>
+        {% endfor %}
+      </div>
+      {% endif %}
     </nav>
     <nav aria-label="{{ 'Документы' if ru else 'Legal' }}">
       <p class="lp-footer-h">{{ 'Документы' if ru else 'Legal' }}</p>

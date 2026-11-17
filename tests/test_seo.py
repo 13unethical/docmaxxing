@@ -171,11 +171,12 @@ def test_faq_page_json_ld_matches_visible_text():
 def test_faq_and_about_are_current():
     faq = _visible_text(_client().get("/faq").get_data(as_text=True))
     about = _visible_text(_client().get("/about").get_data(as_text=True))
-    for text in (faq, about):
-        assert "Soon page" not in text
-        assert "Coming soon" not in text
-        assert "Workspace" in text
-        assert "Slides" in text
+    assert "Soon page" not in faq and "Coming soon" not in faq
+    assert "Workspace" in faq and "Slides" in faq
+    assert "Soon page" not in about and "Coming soon" not in about
+    assert "Who we are" in about
+    assert "support@docmaxxing.com" in about
+    assert "TODO" in about
 
 
 def test_breadcrumbs_on_inner_pages():
@@ -228,14 +229,85 @@ def test_lastmod_falls_back_to_mtime_without_git(monkeypatch):
         file_lastmod.cache_clear()
 
 
+def _robots_groups(text: str) -> dict[str, list[str]]:
+    """Map each User-agent name to the directive lines in its group (comments ignored)."""
+    groups: dict[str, list[str]] = {}
+    current: list[str] | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.lower().startswith("user-agent:"):
+            agent = line.split(":", 1)[1].strip()
+            current = groups.setdefault(agent, [])
+            continue
+        if current is not None and line.lower().startswith("sitemap:"):
+            current = None
+            continue
+        if current is not None:
+            current.append(line)
+    return groups
+
+
 def test_robots_txt():
+    from services.seo import DISALLOW_PATHS, _AI_CRAWLER_USER_AGENTS
+
     text = robots_txt()
-    assert "User-agent: *" in text
-    assert "Allow: /" in text
-    assert "Disallow: /api/" in text
+    assert DISALLOW_PATHS == ("/api/",)
+    groups = _robots_groups(text)
+    assert set(groups) == set(_AI_CRAWLER_USER_AGENTS) | {"*"}
+    for agent, directives in groups.items():
+        assert "Allow: /" in directives, agent
+        for path in DISALLOW_PATHS:
+            assert f"Disallow: {path}" in directives, agent
+        # Disallow before Allow so first-match parsers still block /api/
+        assert directives.index(f"Disallow: {DISALLOW_PATHS[0]}") < directives.index("Allow: /")
     for path in ("/app", "/login", "/register", "/account", "/admin"):
-        assert f"Disallow: {path}\n" not in text
+        assert f"Disallow: {path}" not in text
     assert f"Sitemap: {SITE_URL}/sitemap.xml" in text
+
+
+def test_robots_txt_blocks_api_for_every_user_agent():
+    """Each User-agent group allows ``/`` and forbids ``/api/...`` (no reliance on ``*``)."""
+    from urllib.robotparser import RobotFileParser
+
+    from services.seo import DISALLOW_PATHS, _AI_CRAWLER_USER_AGENTS
+
+    text = robots_txt()
+    parser = RobotFileParser()
+    parser.parse(text.splitlines())
+    for agent in (*_AI_CRAWLER_USER_AGENTS, "*"):
+        assert parser.can_fetch(agent, f"{SITE_URL}/"), agent
+        assert parser.can_fetch(agent, f"{SITE_URL}/pricing"), agent
+        for path in DISALLOW_PATHS:
+            sample = f"{SITE_URL}{path.rstrip('/')}/version"
+            assert not parser.can_fetch(agent, sample), (agent, sample)
+
+
+def test_homepage_ssr_includes_about_link(monkeypatch):
+    monkeypatch.setenv("GUEST_LANDING_PAGES", "0")
+    html = _client().get("/").get_data(as_text=True)
+    # Present in the server-rendered public block (before JS replaces the main column).
+    assert 'href="/about"' in html
+
+
+def test_llms_txt_lists_core_tools():
+    from services.seo import llms_txt
+
+    text = llms_txt()
+    assert text.startswith("# DocMaxxing")
+    for path in (
+        "/ai-detector",
+        "/humanizer",
+        "/formatter",
+        "/pricing",
+        "/faq",
+        "/credits",
+        "/blog",
+        "/about",
+        "/blog/rss.xml",
+    ):
+        assert f"{SITE_URL}{path}" in text
 
 
 def test_sitemap_and_robots_routes():
@@ -246,6 +318,10 @@ def test_sitemap_and_robots_routes():
     res = client.get("/robots.txt")
     assert res.status_code == 200
     assert "text/plain" in (res.mimetype or "")
+    res = client.get("/llms.txt")
+    assert res.status_code == 200
+    assert "text/plain" in (res.mimetype or "")
+    assert b"# DocMaxxing" in res.data
 
 
 # ------------------------------------------------------------------ 404, slashes, icons
@@ -345,3 +421,87 @@ def test_formatter_landing_page():
     html = res.get_data(as_text=True)
     assert PUBLIC_PAGES["/formatter"].title.replace("&", "&amp;") in html
     assert "data-format-v2" in html
+
+
+# ------------------------------------------------------------------ pricing / about / social / RSS
+
+
+def test_pricing_ssr_independent_of_guest_landing_flag(monkeypatch):
+    from services.economy.pricing import pricing_page_packages
+
+    monkeypatch.setenv("GUEST_LANDING_PAGES", "0")
+    res = _client().get("/pricing")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "Simple credit pricing" in html
+    assert "/credits" in html and "/faq" in html
+    assert html.count('href="/app#/pricing"') >= 1
+    product = next(n for n in _json_ld(html) if n["@type"] == "Product")
+    offers = product["offers"]
+    packages = pricing_page_packages()
+    assert len(offers) == len(packages) >= 1
+    for offer, pkg in zip(offers, packages):
+        assert offer["@type"] == "Offer"
+        assert offer["priceCurrency"] == "USD"
+        assert float(offer["price"]) == float(pkg["usd"])
+        assert offer["name"] == pkg["name"]
+
+
+def test_organization_same_as_uses_social_links():
+    from services.seo import SOCIAL_LINKS, organization_same_as
+
+    same = organization_same_as()
+    assert same == [item["url"] for item in SOCIAL_LINKS]
+    html = _client().get("/about").get_data(as_text=True)
+    org = next(n for n in _json_ld(html) if n["@type"] == "Organization")
+    assert org["sameAs"] == same
+    footer = html.split('<footer class="site-footer"', 1)[1]
+    for url in same:
+        assert url in footer
+
+
+def test_about_page_has_aboutpage_json_ld_and_placeholders():
+    html = _client().get("/about").get_data(as_text=True)
+    assert "AboutPage" in _types(html)
+    about = next(n for n in _json_ld(html) if n["@type"] == "AboutPage")
+    assert about["url"] == f"{SITE_URL}/about"
+    visible = _visible_text(html)
+    assert "Who we are" in visible
+    assert "Who DocMaxxing is for" in visible
+    assert "How we handle texts and privacy" in visible
+    assert "support@docmaxxing.com" in visible
+    assert "TODO" in visible
+
+
+def test_blog_rss_feed_and_head_alternate():
+    from services import blog
+
+    res = _client().get("/blog/rss.xml")
+    assert res.status_code == 200
+    assert "rss" in (res.mimetype or "")
+    xml = res.get_data(as_text=True)
+    assert "<rss version=" in xml
+    posts = blog.published_posts()
+    assert posts
+    assert f"<link>{SITE_URL}{posts[0].path}</link>" in xml
+    assert "<lastmod>" not in xml  # RSS uses pubDate, not lastmod
+    html = _client().get("/blog").get_data(as_text=True)
+    assert 'rel="alternate" type="application/rss+xml"' in html
+    assert 'href="/blog/rss.xml"' in html
+
+
+def test_blog_post_shows_author_and_dates_in_html_and_json_ld():
+    from services import blog
+
+    post = blog.published_posts("en")[0]
+    html = _client().get(post.path).get_data(as_text=True)
+    assert post.author_name in html
+    assert f'datetime="{post.date}"' in html
+    article = next(n for n in _json_ld(html) if n["@type"] == "BlogPosting")
+    assert article["datePublished"] == post.date
+    assert article["dateModified"] == post.lastmod
+    assert article["author"]["@type"] == "Organization"
+    assert article["author"]["name"] == post.author_name
+    crumbs = next(n for n in _json_ld(html) if n["@type"] == "BreadcrumbList")
+    names = [c["name"] for c in crumbs["itemListElement"]]
+    assert names[0] == "Home" and names[1] == "Blog"

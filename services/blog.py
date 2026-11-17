@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from xml.sax.saxutils import escape as xml_escape
+
 from services.seo import (
     DESCRIPTION_MAX,
     OG_IMAGE_DEFAULT,
@@ -66,6 +68,11 @@ class Post:
     def lastmod(self) -> str:
         return self.updated or self.date
 
+    @property
+    def author_name(self) -> str:
+        """Visible + JSON-LD author (Organization until individual bylines exist)."""
+        return SITE_NAME
+
     def page(self) -> PublicPage:
         return PublicPage(
             path=self.path,
@@ -79,7 +86,7 @@ class Post:
         )
 
     def article_node(self) -> dict[str, Any]:
-        org = {"@type": "Organization", "name": SITE_NAME, "url": SITE_URL}
+        org = {"@type": "Organization", "name": self.author_name, "url": SITE_URL}
         return {
             "@type": "BlogPosting",
             "headline": _short(self.title, 110),
@@ -395,3 +402,41 @@ def display_date(date: str, lang: str) -> str:
     year, month, day = (int(part) for part in date.split("-"))
     months = _RU_MONTHS if lang == "ru" else _EN_MONTHS
     return f"{day} {months[month - 1]} {year}"
+
+
+def _rss_pub_date(date: str) -> str:
+    """RFC 822 date from YYYY-MM-DD (midnight UTC)."""
+    from email.utils import formatdate
+    from datetime import datetime, timezone
+
+    year, month, day = (int(part) for part in date.split("-"))
+    dt = datetime(year, month, day, tzinfo=timezone.utc)
+    return formatdate(dt.timestamp(), usegmt=True)
+
+
+def rss_xml() -> str:
+    """RSS 2.0 feed of published posts (newest first)."""
+    posts = published_posts()
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<rss version="2.0">',
+        "<channel>",
+        f"<title>{xml_escape(SITE_NAME)} Blog</title>",
+        f"<link>{xml_escape(SITE_URL)}/blog</link>",
+        f"<description>{xml_escape(index_page().description)}</description>",
+        f"<language>en</language>",
+    ]
+    for post in posts:
+        lines.extend(
+            [
+                "<item>",
+                f"<title>{xml_escape(post.title)}</title>",
+                f"<link>{xml_escape(canonical_url(post.path))}</link>",
+                f'<guid isPermaLink="true">{xml_escape(canonical_url(post.path))}</guid>',
+                f"<pubDate>{_rss_pub_date(post.date)}</pubDate>",
+                f"<description>{xml_escape(post.description)}</description>",
+                "</item>",
+            ]
+        )
+    lines.extend(["</channel>", "</rss>", ""])
+    return "\n".join(lines)

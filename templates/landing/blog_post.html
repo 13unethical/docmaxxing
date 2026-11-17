@@ -1,5 +1,6 @@
 {% extends "landing/base.html" %}
 {% block content %}
+{% import "macros/ui.html" as ui with context %}
 <article class="lp-section lp-wrap">
   <div class="lp-prose">
     <nav class="lp-breadcrumbs" aria-label="{{ 'Навигация' if ru else 'Breadcrumbs' }}">
@@ -8,10 +9,15 @@
     {% if post.draft %}<p class="lp-tool-msg is-cta">{{ 'Черновик — виден только администраторам и не индексируется.' if ru else 'Draft — visible to admins only and not indexed.' }}</p>{% endif %}
     <h1>{{ post.title }}</h1>
     <p class="lp-post-meta">
-      <time datetime="{{ post.date }}">{{ display_date(post.date, post.lang) }}</time>
-      {% if post.updated and post.updated != post.date %} · {{ 'обновлено' if ru else 'updated' }} <time datetime="{{ post.updated }}">{{ display_date(post.updated, post.lang) }}</time>{% endif %}
+      <span class="lp-post-author">{{ 'Автор' if ru else 'By' }}
+        <span itemprop="author">{{ post.author_name }}</span>
+      </span>
+      · <time datetime="{{ post.date }}" itemprop="datePublished">{{ display_date(post.date, post.lang) }}</time>
+      {% if post.updated and post.updated != post.date %} · {{ 'обновлено' if ru else 'updated' }} <time datetime="{{ post.updated }}" itemprop="dateModified">{{ display_date(post.updated, post.lang) }}</time>{% endif %}
     </p>
     {{ post.html|safe }}
+
+    {{ ui.preferred_source_note(lang=post.lang or seo.lang) }}
 
     <aside class="lp-cta">
       {% if ru %}
