@@ -948,7 +948,8 @@ def try_student_humanize_rich(
         if not text or len(text) < MIN_HUMANIZE_CHARS:
             return line
         try:
-            return engine._rewrite_chunk(line, False)
+            # Each rich block is one source paragraph — collapse model soft wraps / blank splits.
+            return engine._rewrite_chunk(line, True)
         except StudentHumanizerError:
             return line
 

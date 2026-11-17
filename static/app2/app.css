@@ -868,6 +868,9 @@ button.earn-chip:hover { background: var(--default-hover); }
 @media (prefers-reduced-motion: reduce) { .dl-menu, .dl-menu button { transition: none; } }
 /* normal (not pre-wrap): model soft-wraps must not become visible line breaks; paragraphs come from <p>/<br>. */
 .result-text { white-space: normal; background: var(--surface-2); border-radius: var(--radius); padding: var(--space-4); margin: 0; line-height: 1.7; font-family: var(--font); font-size: 15px; }
+.result-text > p { margin: 0 0 0.75em; }
+.result-text > p:last-child { margin-bottom: 0; }
+.result-text > div { margin: 0; }
 .rich-input { min-height: 180px; overflow: auto; white-space: pre-wrap; }
 .rich-input:empty::before { content: attr(data-placeholder); color: var(--muted, #888); pointer-events: none; }
 .rich-input table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }

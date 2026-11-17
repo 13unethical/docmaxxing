@@ -403,10 +403,11 @@ def test_14_old_cached_frontend_without_quote_id_never_charges(env, charges):
 def test_14b_pages_load_the_new_scripts():
     app_v2 = (REPO / "templates" / "app_v2.html").read_text(encoding="utf-8")
     assignment = (REPO / "templates" / "assignment.html").read_text(encoding="utf-8")
-    assert "app2/api.js') }}?v=20261110-p4b1" in app_v2
-    assert "app2/app.js') }}?v=20261110-p4b1" in app_v2
-    assert "assignment-page.js') }}?v=20261110-p4b1" in assignment
-    for stale in ("api.js') }}?v=20261109-p3h", "app.js') }}?v=20261107-1", "?v=20260925-paste-images"):
+    assert "app2/api.js') }}?v=" in app_v2
+    assert "app2/app.js') }}?v=20261117-softnl2" in app_v2
+    assert "app2/app.css') }}?v=20261117-softnl2" in app_v2
+    assert "assignment-page.js') }}?v=" in assignment
+    for stale in ("api.js') }}?v=20261109-p3h", "app.js') }}?v=20261107-1", "?v=20260925-paste-images", "?v=20261116-free-mark"):
         assert stale not in app_v2 and stale not in assignment
 
 

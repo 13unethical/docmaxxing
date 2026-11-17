@@ -28,6 +28,13 @@ _ORDINAL_WORD = re.compile(
 )
 # Soft wraps from Word/PDF must not become <br> / fake paragraphs.
 _SENTENCE_END_PROSE = re.compile(r"[.!?…][\"'”’)\]]*\s*$")
+# "... study is" / "... based on" — incomplete phrase before a Capitalized continuation.
+_TRAILING_FUNCTION_WORD = re.compile(
+    r"\b(a|an|the|and|or|but|if|as|at|by|for|from|in|into|of|on|to|with|without|"
+    r"is|are|was|were|be|been|being|have|has|had|do|does|did|will|would|"
+    r"my|our|your|their|its|this|that|these|those|need|needs|needed)\s*$",
+    re.I,
+)
 _PH_OPEN = "⟦F{i}⟧"
 _PH_CLOSE = "⟦/F{i}⟧"
 _TABLE_TOKEN = "⟦TABLE{i}⟧"
@@ -128,7 +135,38 @@ def _filter_style(style: str) -> str:
 
 
 def html_to_plaintext(html_doc: str) -> str:
-    return BeautifulSoup(html_doc or "", "html.parser").get_text("\n", strip=True)
+    """Block tags become paragraph breaks; inline tags (bold/italic) must not insert newlines.
+
+    BeautifulSoup ``get_text("\\n")`` puts a newline around every tag — including
+    ``<strong>Economics</strong>`` — which the UI then showed as fake paragraph gaps.
+    """
+    soup = BeautifulSoup(html_doc or "", "html.parser")
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    pieces: list[str] = []
+
+    def walk(node: object) -> None:
+        if isinstance(node, NavigableString):
+            pieces.append(str(node))
+            return
+        if not isinstance(node, Tag):
+            return
+        if node.name in _DROP_TAGS:
+            return
+        block = node.name in _BLOCK_TAGS or node.name in _HEADING_TAGS or node.name == "tr"
+        if block and pieces and not pieces[-1].endswith("\n"):
+            pieces.append("\n")
+        for child in node.children:
+            walk(child)
+        if block:
+            pieces.append("\n")
+
+    walk(soup.body or soup)
+    text = "".join(pieces)
+    text = re.sub(r"[^\S\n]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def split_list_marker(text: str) -> tuple[str, str]:
@@ -265,8 +303,36 @@ def _should_merge_prose(cur: BlockJob, nxt: BlockJob) -> bool:
         return False
     if is_sentence_start_fragment(cur.plain):
         return True
-    nxt_start = unwrap_prose_newlines(nxt.plain).lstrip()[:1]
-    return _prose_runs_on(cur.plain) and bool(re.match(r"[a-z]", nxt_start or ""))
+    if not _prose_runs_on(cur.plain):
+        return False
+    nxt_flat = unwrap_prose_newlines(nxt.plain).lstrip()
+    if not nxt_flat:
+        return False
+    nxt_start = nxt_flat[:1]
+    # Lowercase / punctuation continuations are always soft wraps.
+    if nxt_start.islower() or nxt_start in ".,;:)]}'\"”’":
+        return True
+    # Capitalized noun after a trailing function word: "study is" + "Economics".
+    cur_flat = unwrap_prose_newlines(cur.plain).rstrip()
+    return bool(_TRAILING_FUNCTION_WORD.search(cur_flat))
+
+
+def _demote_mid_sentence_bold_heading(job: BlockJob) -> BlockJob | None:
+    """Paste often wraps one bold word in its own ``<p>``; do not freeze it as a title mid-sentence."""
+    if job.kind != "opaque" or job.tag in _HEADING_TAGS:
+        return None
+    soup = BeautifulSoup(job.html or "", "html.parser")
+    root = None
+    for name in ("p", "div", "blockquote"):
+        root = soup.find(name)
+        if root is not None:
+            break
+    if root is None or not _is_marked_heading_el(root):
+        return None
+    text = root.get_text(" ", strip=True)
+    if _is_refs_heading(text):
+        return None
+    return _prose_from_element(root)
 
 
 def _coalesce_prose_fragments(stash: RichStash) -> None:
@@ -284,6 +350,16 @@ def _coalesce_prose_fragments(stash: RichStash) -> None:
                 spans=cur.spans,
                 ordered_list=cur.ordered_list,
             )
+        # ``<p>My field is </p><p><strong>Economics</strong></p><p>. Body…</p>``
+        if (
+            out
+            and out[-1].kind == "prose"
+            and _prose_runs_on(out[-1].plain)
+            and cur.kind == "opaque"
+        ):
+            demoted = _demote_mid_sentence_bold_heading(cur)
+            if demoted is not None:
+                cur = demoted
         if out and _should_merge_prose(out[-1], cur):
             out[-1] = _merge_prose_jobs(out[-1], cur)
         else:

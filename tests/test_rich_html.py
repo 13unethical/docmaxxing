@@ -174,6 +174,31 @@ def test_lone_article_paragraph_is_prose_not_heading():
     assert "The comparison" in rich.replace("\n", " ")
 
 
+def test_mid_sentence_bold_word_is_not_a_heading_block():
+    """Regression: bold field name split into its own <p> must stay one prose paragraph."""
+    html = (
+        "<p>My field of study is </p>"
+        "<p><strong>Economics</strong></p>"
+        "<p>. Economics is the study of how individuals allocate resources and make decisions.</p>"
+    )
+    plain, stash = rh.prepare_rich(html)
+    assert len(stash.blocks) == 1 and stash.blocks[0].kind == "prose"
+    assert "Economics" in stash.blocks[0].plain
+    assert "⟦OPAQUE" not in plain
+    rich, text = rh.humanize_rich(html, lambda t: t)
+    assert rich.count("<p>") == 1
+    assert "<strong>Economics</strong>" in rich or "<b>Economics</b>" in rich
+    assert "\n" not in text
+    assert "study is Economics" in text.replace("  ", " ")
+
+
+def test_html_to_plaintext_keeps_inline_bold_on_one_line():
+    html = "<p>My field of study is <strong>Economics</strong>. Economics deals with markets.</p>"
+    text = rh.html_to_plaintext(html)
+    assert "\n" not in text
+    assert "is Economics." in text
+
+
 def test_soft_wrap_br_and_split_p_join_into_one_paragraph():
     """Word paste often splits 'It is based' / 'on three theories' across lines or <p>s."""
     html = (
