@@ -189,7 +189,8 @@ def test_mid_sentence_bold_word_is_not_a_heading_block():
     assert rich.count("<p>") == 1
     assert "<strong>Economics</strong>" in rich or "<b>Economics</b>" in rich
     assert "\n" not in text
-    assert "study is Economics" in text.replace("  ", " ")
+    assert "study is Economics." in text.replace("  ", " ")
+    assert "Economics ." not in text
 
 
 def test_html_to_plaintext_keeps_inline_bold_on_one_line():

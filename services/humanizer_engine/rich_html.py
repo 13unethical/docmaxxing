@@ -284,12 +284,16 @@ def _merge_prose_jobs(cur: BlockJob, nxt: BlockJob) -> BlockJob:
                 inner_text=sp.inner_text,
             )
         )
-    glue = " " if nxt_plain and not nxt_plain[:1].isspace() else ""
+    nxt_body = nxt_plain.lstrip()
+    # No space before ", ." etc. when Word split mid-sentence around bold.
+    glue = ""
+    if nxt_body and not nxt_body[:1].isspace() and nxt_body[:1] not in ".,;:)]}'\"”’":
+        glue = " "
     return BlockJob(
         kind="prose",
         tag=nxt.tag if nxt.tag in _BLOCK_TAGS else cur.tag,
         attrs=dict(nxt.attrs or cur.attrs),
-        plain=unwrap_prose_newlines(cur.plain.rstrip() + glue + nxt_plain.lstrip()),
+        plain=unwrap_prose_newlines(cur.plain.rstrip() + glue + nxt_body),
         html="",
         spans=list(cur.spans) + nxt_spans,
         ordered_list=nxt.ordered_list,
