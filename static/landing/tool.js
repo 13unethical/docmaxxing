@@ -160,7 +160,13 @@
     }).then(function (r) {
       var data = r.data || {};
       if (r.res.ok && data.success !== false && data.humanized_text) {
-        output.textContent = String(data.humanized_text).trim();
+        // Collapse model soft wraps (single newlines); keep blank lines as paragraph breaks.
+        output.textContent = String(data.humanized_text).trim()
+          .replace(/\r\n/g, '\n')
+          .split(/\n\s*\n/)
+          .map(function (p) { return p.replace(/\s*\n\s*/g, ' ').replace(/[ \t]{2,}/g, ' ').trim(); })
+          .filter(Boolean)
+          .join('\n\n');
         copyBtn.disabled = false;
         track('landing_humanize_run', { lang: lang, outcome: 'ok', words: words });
         return;

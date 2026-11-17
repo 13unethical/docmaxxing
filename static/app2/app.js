@@ -3775,17 +3775,23 @@ function resultHtml(id) {
   </div>`;
 }
 
-/** Show **bold** / ## headings as real bold in the humanizer result (copy still gets plain words). */
-function formatResultText(text) {
-  const md = markdownLiteToHtml(text);
-  if (md) return md;
-  // Soft wraps (Word/PDF) must not become visual line breaks — only blank lines split paragraphs.
+/** Collapse Word/PDF/model soft wraps; keep blank lines as real paragraph breaks. */
+function collapseSoftNewlines(text) {
   return String(text || '')
     .replace(/\r\n/g, '\n')
     .split(/\n\s*\n/)
-    .map((p) => esc(p.replace(/\s*\n\s*/g, ' ').trim()))
+    .map((p) => p.replace(/\s*\n\s*/g, ' ').replace(/[^\S\n]{2,}/g, ' ').trim())
     .filter(Boolean)
-    .join('<br><br>');
+    .join('\n\n');
+}
+
+/** Show **bold** / ## headings as real bold in the humanizer result (copy still gets plain words). */
+function formatResultText(text) {
+  // Must run before markdownLiteToHtml — that helper used to turn soft wraps into <br>.
+  const cleaned = collapseSoftNewlines(text);
+  const md = markdownLiteToHtml(cleaned);
+  if (md) return md;
+  return cleaned.split(/\n\s*\n/).map((p) => esc(p)).join('<br><br>');
 }
 
 const RICH_PASTE_TAGS = new Set(['P','BR','DIV','SPAN','B','STRONG','I','EM','U','S','STRIKE','DEL','SUP','SUB',
@@ -3868,7 +3874,8 @@ function markdownLiteToHtml(raw) {
         continue;
       }
     }
-    out.push(`<p>${lines.map(inline).join('<br>')}</p>`);
+    // Soft wraps inside a prose block → spaces, never <br> (humanizer model often inserts them).
+    out.push(`<p>${inline(lines.map((l) => l.trim()).filter(Boolean).join(' '))}</p>`);
   }
   return out.join('');
 }
