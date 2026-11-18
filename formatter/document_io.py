@@ -14,14 +14,23 @@ UPLOAD_DOCUMENT_EXTENSIONS = frozenset({".docx", ".pdf"})
 
 
 def upload_extension(filename: str, mimetype: str | None = None) -> str:
-    """Resolve .docx / .pdf from filename or MIME type."""
+    """Resolve .docx / .pdf from filename or MIME type.
+
+    Legacy ``.doc`` / ``application/msword`` is *not* treated as ``.docx`` —
+    python-docx cannot open OLE Word 97 files, and mapping them caused 500s.
+    """
     ext = os.path.splitext((filename or "").lower())[1]
     if ext in UPLOAD_DOCUMENT_EXTENSIONS:
+        return ext
+    if ext in {".doc", ".dot"}:
         return ext
     mt = (mimetype or "").lower()
     if "pdf" in mt:
         return ".pdf"
-    if "wordprocessingml" in mt or mt == "application/msword":
+    # OOXML Word only — never map legacy application/msword to .docx.
+    if "wordprocessingml" in mt or mt in {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    }:
         return ".docx"
     return ext
 
@@ -206,7 +215,17 @@ def build_document_from_inputs(
     or per-paragraph after load for .docx uploads.
     """
     if file_bytes is not None:
-        doc = Document(io.BytesIO(file_bytes))
+        # Reject legacy OLE .doc masquerading as zip/docx early.
+        if not file_bytes.startswith(b"PK"):
+            raise ValueError(
+                "This file is not a valid .docx. Save or export as .docx (Word) or .pdf and try again."
+            )
+        try:
+            doc = Document(io.BytesIO(file_bytes))
+        except Exception as exc:  # noqa: BLE001 — python-docx raises KeyError/BadZipFile/etc.
+            raise ValueError(
+                "Could not read this Word file. Re-save it as .docx or upload a .pdf instead."
+            ) from exc
         if cleaning_spaces or cleaning_breaks:
             paragraphs_snapshot_apply_cleaning(
                 doc,
@@ -235,6 +254,10 @@ def build_document_from_upload(
 ) -> Document:
     """Load .docx directly; convert PDF text into a new Word document."""
     ext = upload_extension(filename, mimetype)
+    if ext in {".doc", ".dot"}:
+        raise ValueError(
+            "Legacy .doc files are not supported. Save as .docx or PDF in Word/Google Docs and upload again."
+        )
     if ext == ".docx":
         return build_document_from_inputs(
             pasted_raw=None,
