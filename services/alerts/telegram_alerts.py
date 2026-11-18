@@ -214,3 +214,56 @@ def notify_site_error(
     key = f"site_error:{status}:{(path or '/')[:80]}"
     return send_telegram_alert("\n".join(lines), key=key, cooldown_sec=cooldown)
 
+_HUMANIZE_FIX = {
+    "FREE_ENGINE_UNAVAILABLE": (
+        "Student model returned None (cold, UNCHANGED, or Modal down). "
+        "Warm via /api/browser/humanizer/warm, check Modal GPU, retry once."
+    ),
+    "UNAVAILABLE": (
+        "Paid humanize path got no student result. Same as cold/Modal — warm + check Modal logs."
+    ),
+    "HUMANIZE_FAILED": (
+        "Unhandled exception in humanize. Check gunicorn / journalctl for the traceback."
+    ),
+    "TIMEOUT": "Request timed out waiting for the model. Check Modal latency and keep-warm.",
+    "LOGIN_REQUIRED": "Legacy StealthWriter session — usually unused now; ignore unless browser jobs run.",
+}
+
+
+def notify_humanize_failure(
+    *,
+    code: str,
+    message: str | None = None,
+    user_id: int | None = None,
+    guest: bool = False,
+    free_run: bool = False,
+    words: int | None = None,
+    path: str | None = None,
+    source: str | None = None,
+) -> bool:
+    """Alert when a user-facing humanize request fails (not rate limits / auth)."""
+    cooldown = _env_int("TELEGRAM_HUMANIZE_ALERT_COOLDOWN_SEC", 180)
+    err = (code or "UNKNOWN").strip().upper() or "UNKNOWN"
+    safe_message = (message or "").strip().replace("\n", " ")
+    if len(safe_message) > 240:
+        safe_message = safe_message[:240] + "…"
+    who = f"user:{int(user_id)}" if user_id is not None else ("guest" if guest else "unknown")
+    lines = [
+        f"Humanizer failed: {err}",
+        f"Host: {_host_label()}",
+        f"Who: {who}",
+        f"Free run: {'yes' if free_run else 'no'}",
+        f"Path: {path or '/'}",
+    ]
+    if source:
+        lines.append(f"Source: {source}")
+    if words is not None:
+        lines.append(f"Words: {int(words)}")
+    if safe_message:
+        lines.append(f"Message: {safe_message}")
+    fix = _HUMANIZE_FIX.get(err)
+    if fix:
+        lines.append(f"Fix: {fix}")
+    key = f"humanize_failure:{err}:{who}"
+    return send_telegram_alert("\n".join(lines), key=key, cooldown_sec=cooldown)
+

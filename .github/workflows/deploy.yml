@@ -41,6 +41,15 @@ jobs:
             else
               echo 'FORMATTER_V2_ENABLED=1' >> .env
             fi
+            if grep -q '^APP_ENV=' .env 2>/dev/null; then
+              sed -i 's/^APP_ENV=.*/APP_ENV=production/' .env
+            else
+              echo 'APP_ENV=production' >> .env
+            fi
+            # Cite pilot pages require these files next to the /cite route.
+            test -f services/cite_guides.py
+            test -f templates/landing/cite_guide.html
+            test -f seo/keyword-map.csv
             source venv/bin/activate
             pip install -r requirements.txt
             install -m 644 deploy/docmaxxing.service /etc/systemd/system/docmaxxing.service
@@ -71,5 +80,17 @@ jobs:
               echo "WARNING: TURNITIN_USE_BROWSER=1 — forcing Chrome fallback"
             fi
             ls -la /root/docmaxxing/data/assignment-trace.log || true
+            echo "=== Recent Format V2 / cite failures ==="
+            journalctl -u docmaxxing --since "14 days ago" --no-pager 2>/dev/null \
+              | grep -E "Format V2 failed|cite_guides|Traceback|/cite/|/api/format-v2" \
+              | tail -120 || true
+            journalctl -u docmaxxing --since "14 days ago" --no-pager -o short-iso 2>/dev/null \
+              | grep -A25 "Format V2 failed" \
+              | tail -200 || true
+            echo "=== Cite smoke ==="
+            cite_code=$(curl -sS -o /tmp/cite_smoke.html -w "%{http_code}" --max-time 30 \
+              "https://docmaxxing.com/cite/apa7-website" || echo "000")
+            echo "GET /cite/apa7-website -> ${cite_code}"
+            test "${cite_code}" = "200"
             # Post-deploy SEO smoke (Googlebot UA): locales, canonical, hreflang, robots.
             python scripts/prod_seo_smoke.py --base https://docmaxxing.com

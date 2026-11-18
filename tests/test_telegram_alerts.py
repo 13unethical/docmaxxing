@@ -59,3 +59,40 @@ def test_send_telegram_alert_without_config_returns_false(monkeypatch):
 
     assert alerts.send_telegram_alert("x", key="k2", cooldown_sec=0) is False
 
+def test_notify_humanize_failure_includes_fix_hint(monkeypatch):
+    sent: list[dict] = []
+
+    class _Resp:
+        ok = True
+        status_code = 200
+        text = "ok"
+
+    monkeypatch.setenv("TELEGRAM_TOKEN", "token")
+    monkeypatch.setenv("CHAT_ID", "99")
+    monkeypatch.setenv("TELEGRAM_HUMANIZE_ALERT_COOLDOWN_SEC", "0")
+    monkeypatch.setattr(
+        alerts.requests,
+        "post",
+        lambda url, json, timeout: (sent.append(json), _Resp())[1],
+    )
+    monkeypatch.setattr(alerts, "_LAST_SENT", {})
+
+    assert (
+        alerts.notify_humanize_failure(
+            code="FREE_ENGINE_UNAVAILABLE",
+            message="student model returned None",
+            user_id=42,
+            free_run=True,
+            words=120,
+            path="/api/browser/providers/stealthwriter/humanize",
+            source="landing",
+        )
+        is True
+    )
+    text = sent[0]["text"]
+    assert "Humanizer failed: FREE_ENGINE_UNAVAILABLE" in text
+    assert "user:42" in text
+    assert "Words: 120" in text
+    assert "Fix:" in text
+    assert "Modal" in text
+

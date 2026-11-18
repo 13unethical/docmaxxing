@@ -1,0 +1,90 @@
+{% extends "landing/base.html" %}
+{% block content %}
+<article class="lp-section lp-wrap cite-guide" data-cite-style="{{ guide.api_style }}" data-cite-mode="{{ guide.form_mode }}">
+  <div class="lp-prose">
+    <nav class="lp-breadcrumbs" aria-label="Breadcrumbs">
+      <a href="/">Home</a> /
+      <a href="/formatter">Essay Formatter</a> /
+      <span>{{ guide.h1 }}</span>
+    </nav>
+
+    <p class="lp-tool-msg is-cta">Pilot page — <strong>noindex</strong> until editorial review. Volume rank from <code>seo/keyword-map.csv</code>: {{ guide.volume }} US searches/mo (est.).</p>
+
+    <h1>{{ guide.h1 }}</h1>
+    <p class="lp-lede">{{ guide.lede }}</p>
+    <p>{{ guide.intro }}</p>
+    <p class="lp-muted">Rendered with vendored CSL <code>{{ guide.csl_file }}</code> via Formatter V2. List heading: <strong>{{ guide.list_name }}</strong>.</p>
+
+    <h2 id="formula">Reference formula</h2>
+    <pre class="cite-formula" aria-label="Citation formula">{{ guide.formula }}</pre>
+    <p>{{ guide.formula_note }}</p>
+
+    <h2 id="examples">Examples from our formatter</h2>
+    {% for ex in guide.examples %}
+    <h3>{{ ex.label }}</h3>
+    <p class="lp-muted">{{ guide.list_name }} entry</p>
+    <blockquote class="cite-example"><p>{{ ex.bibliography }}</p></blockquote>
+    <p class="lp-muted">In-text / note</p>
+    <blockquote class="cite-example"><p>{{ ex.in_text }}</p></blockquote>
+    {% endfor %}
+
+    <h2 id="in-text">In-text citation</h2>
+    <p>{{ guide.in_text_note }}</p>
+
+    <h2 id="mistakes">Three frequent mistakes</h2>
+    <ol class="cite-mistakes">
+      {% for title, body in guide.mistakes %}
+      <li><strong>{{ title }}.</strong> {{ body }}</li>
+      {% endfor %}
+    </ol>
+
+    <h2 id="generator">Generate a {{ guide.style_label }} reference</h2>
+    <p>{{ guide.form_hint }} Powered by the same <code>/api/reference</code> endpoint the formatter uses.</p>
+    <form class="cite-gen-form" id="cite-gen-form" novalidate>
+      <label class="cite-gen-label" for="cite-gen-input">
+        {% if guide.form_mode == 'url' %}URL
+        {% elif guide.form_mode == 'doi' %}DOI
+        {% elif guide.form_mode == 'isbn' %}ISBN
+        {% else %}Input{% endif %}
+      </label>
+      <div class="cite-gen-row">
+        <input class="cite-gen-input" id="cite-gen-input" name="value" type="text" autocomplete="off"
+               placeholder="{{ guide.form_placeholder }}" required>
+        <button class="lp-btn lp-btn-primary" type="submit">Generate</button>
+      </div>
+      <p class="lp-muted cite-gen-status" id="cite-gen-status" role="status" aria-live="polite"></p>
+      <pre class="cite-gen-out" id="cite-gen-out" hidden></pre>
+    </form>
+    <p><a class="lp-btn lp-btn-ghost" href="/formatter">Open full essay formatter</a></p>
+
+    <h2 id="neighbors">Neighboring styles for this source</h2>
+    <ul>
+      {% for href, label in guide.neighbor_paths %}
+      <li><a href="{{ href }}">{{ label }}</a></li>
+      {% endfor %}
+    </ul>
+
+    <h2 id="related">Related on DocMaxxing</h2>
+    <ul>
+      {% for href, label in guide.related_articles %}
+      <li><a href="{{ href }}">{{ label }}</a></li>
+      {% endfor %}
+      <li><a href="/formatter">Essay formatter (APA, MLA, Harvard, Chicago, IEEE)</a></li>
+    </ul>
+
+    <h2 id="faq">FAQ</h2>
+    <dl class="lp-faq">
+      {% for question, answer in guide.faq %}
+      <div class="lp-faq-item">
+        <dt>{{ question }}</dt>
+        <dd>{{ answer }}</dd>
+      </div>
+      {% endfor %}
+    </dl>
+  </div>
+</article>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='landing/cite-guide.js') }}?v=20261118" defer></script>
+{% endblock %}

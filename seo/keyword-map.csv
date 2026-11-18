@@ -1,0 +1,25 @@
+keyword,source_slug,style_slug,source_label,style_label,monthly_volume_us,intent,notes
+how to cite a website in APA,website,apa7,website,APA 7,18100,informational,head term
+how to cite a youtube video in APA,youtube-video,apa7,YouTube video,APA 7,9900,informational,
+how to cite a website in MLA,website,mla9,website,MLA 9,8100,informational,
+how to cite a book in APA,book,apa7,book,APA 7,6600,informational,
+how to cite a journal article in APA,journal-article,apa7,journal article,APA 7,5400,informational,
+how to cite a youtube video in MLA,youtube-video,mla9,YouTube video,MLA 9,4400,informational,
+how to cite a website in Chicago,website,chicago17,website,Chicago 17,3600,informational,
+how to cite a book in MLA,book,mla9,book,MLA 9,2900,informational,
+how to cite a website in Harvard,website,harvard,website,Harvard,2400,informational,
+how to cite a book in Harvard,book,harvard,book,Harvard,1900,informational,
+how to cite a journal article in MLA,journal-article,mla9,journal article,MLA 9,1600,informational,pilot deferred — below top 10
+how to cite an image in APA,image,apa7,image,APA 7,1300,informational,no CSL type in formatter; deferred
+how to cite a PDF in APA,pdf,apa7,PDF,APA 7,1200,informational,maps to webpage/report; deferred
+how to cite a newspaper article in APA,newspaper,apa7,newspaper article,APA 7,1000,informational,deferred
+how to cite ChatGPT in APA,chatgpt,apa7,ChatGPT,APA 7,880,informational,covered by blog post; deferred
+how to cite a journal article in Harvard,journal-article,harvard,journal article,Harvard,720,informational,deferred
+how to cite a youtube video in Harvard,youtube-video,harvard,YouTube video,Harvard,590,informational,deferred
+how to cite a website in IEEE,website,ieee,website,IEEE,480,informational,deferred
+how to cite a book in Chicago,book,chicago17,book,Chicago 17,390,informational,deferred
+how to cite a journal article in Chicago,journal-article,chicago17,journal article,Chicago 17,320,informational,deferred
+how to cite a youtube video in Chicago,youtube-video,chicago17,YouTube video,Chicago 17,260,informational,deferred
+how to cite a book in IEEE,book,ieee,book,IEEE,210,informational,deferred
+how to cite a journal article in IEEE,journal-article,ieee,journal article,IEEE,170,informational,deferred
+how to cite a youtube video in IEEE,youtube-video,ieee,YouTube video,IEEE,110,informational,deferred

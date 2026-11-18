@@ -1010,10 +1010,16 @@ def _activity_ledger_hook(response):
                     uid = int(user["id"])
             except Exception:  # noqa: BLE001
                 uid = None
+            api_err = None
+            try:
+                api_err = g.get("_api_error")
+            except Exception:  # noqa: BLE001
+                api_err = None
             notify_site_error(
                 path=path,
                 method=request.method,
                 status_code=status,
+                error=str(api_err)[:240] if api_err else None,
                 user_id=uid,
             )
     except Exception:  # noqa: BLE001
@@ -3480,11 +3486,13 @@ def internal_error(_error):
             user = _auth_for_alert.current_user()
         except Exception:  # noqa: BLE001
             user = None
+        original = getattr(_error, "original_exception", None) or _error
+        err_text = f"{type(original).__name__}: {original}"
         notify_site_error(
             path=request.path,
             method=request.method,
             status_code=500,
-            error=str(getattr(_error, "description", None) or _error or "INTERNAL_ERROR")[:240],
+            error=err_text[:240],
             user_id=int(user["id"]) if user and user.get("id") is not None else None,
         )
     except Exception:  # noqa: BLE001
@@ -4377,6 +4385,35 @@ def _free_engine_unavailable():
     )
 
 
+
+def _notify_humanize_failure(
+    *,
+    code: str,
+    message: str | None = None,
+    user: dict | None = None,
+    free_run: bool = False,
+    text: str | None = None,
+    source: str | None = None,
+) -> None:
+    """Best-effort Telegram alert when a humanize request fails for a user."""
+    try:
+        from services import free_humanize
+        from services.alerts.telegram_alerts import notify_humanize_failure
+
+        notify_humanize_failure(
+            code=code,
+            message=message,
+            user_id=int(user["id"]) if user and user.get("id") is not None else None,
+            guest=user is None,
+            free_run=free_run,
+            words=free_humanize.count_words(text) if isinstance(text, str) and text.strip() else None,
+            path=request.path,
+            source=source,
+        )
+    except Exception:  # noqa: BLE001
+        app.logger.exception("humanize telegram alert failed")
+
+
 def _free_humanize_boot(user: dict | None) -> dict[str, Any]:
     """Free allowance for the app's first render."""
     from services import free_humanize
@@ -5067,7 +5104,11 @@ def cite_guide(style_slug: str, source_slug: str):
     """Pilot programmatic pages: How to cite [source] in [style]. Always noindex."""
     from flask import abort
 
-    from services.cite_guides import get_guide, howto_json_ld, public_page_for
+    try:
+        from services.cite_guides import get_guide, howto_json_ld, public_page_for
+    except Exception:
+        app.logger.exception("cite_guides import failed for /cite/%s-%s", style_slug, source_slug)
+        raise
     from services.seo import ROBOTS_NOINDEX, page_seo_for_path
 
     guide = get_guide(style_slug, source_slug)
@@ -6639,7 +6680,23 @@ def api_browser_stealthwriter_humanize():
             _refund_humanize()
             _release_guest_trial()
             if free_run:
+                _notify_humanize_failure(
+                    code="FREE_ENGINE_UNAVAILABLE",
+                    message="student model returned None",
+                    user=user,
+                    free_run=True,
+                    text=text,
+                    source=str(raw_source or "standalone"),
+                )
                 return _free_engine_unavailable()
+            _notify_humanize_failure(
+                code="UNAVAILABLE",
+                message=_HUMANIZE_FAILED_MESSAGE,
+                user=user,
+                free_run=False,
+                text=text,
+                source=str(raw_source or "standalone"),
+            )
             return jsonify(
                 {
                     "success": False,
@@ -6648,10 +6705,18 @@ def api_browser_stealthwriter_humanize():
                 }
             ), 503
         return _humanize_success(student, student["request_id"])
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         app.logger.exception("humanize request failed")
         _refund_humanize()
         _release_guest_trial()
+        _notify_humanize_failure(
+            code="HUMANIZE_FAILED",
+            message=str(exc)[:240],
+            user=user,
+            free_run=free_run,
+            text=text,
+            source=str(raw_source or "standalone"),
+        )
         return jsonify({"success": False, "error": "HUMANIZE_FAILED", "message": _HUMANIZE_FAILED_MESSAGE}), 500
 
 
@@ -10740,8 +10805,32 @@ def format_document_v2_route():
                 notices=result.notices,
             )
         )
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         app.logger.exception("Format V2 failed")
+        try:
+            g._api_error = f"{type(exc).__name__}: {exc}"
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from services.alerts.telegram_alerts import notify_site_error
+            from services.economy import auth as _auth_for_alert
+
+            uid = None
+            try:
+                u = _auth_for_alert.current_user()
+                if u and u.get("id") is not None:
+                    uid = int(u["id"])
+            except Exception:  # noqa: BLE001
+                uid = None
+            notify_site_error(
+                path=request.path,
+                method=request.method,
+                status_code=500,
+                error=f"{type(exc).__name__}: {exc}"[:240],
+                user_id=uid,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         return jsonify({"error": "Could not format document. Please try again."}), 500
 
 
