@@ -4013,31 +4013,47 @@ def _mark_stealthwriter_down() -> None:
     _stealthwriter_down_until = time.monotonic() + _STEALTHWRITER_DOWN_SECONDS
 
 
-def _student_humanize(text: str, *, rescue: bool = False) -> dict[str, Any] | None:
+def _student_humanize(
+    text: str,
+    *,
+    rescue: bool = False,
+    on_chunk: Any = None,
+    quality: str | None = None,
+) -> dict[str, Any] | None:
     """Run our student humanizer. StealthWriter is never used.
 
     ``rescue`` keeps the old kwarg for callers/tests; both paths force the student
-    model and wait for a cold boot.
+    model and wait for a cold boot. ``quality="fast"`` is opt-in lighter sampling.
     """
     del rescue  # always student-only
     try:
         from services.humanizer_engine.student_humanizer import try_student_humanize
 
         return try_student_humanize(
-            text, force=True, wait_for_boot=STUDENT_RESCUE_WAIT_SECONDS
+            text,
+            force=True,
+            wait_for_boot=STUDENT_RESCUE_WAIT_SECONDS,
+            on_chunk=on_chunk,
+            mode=quality,
         )
     except Exception:  # noqa: BLE001
         app.logger.exception("student humanizer routing failed")
         return None
 
 
-def _student_humanize_rich(html_in: str) -> dict[str, Any] | None:
+def _student_humanize_rich(
+    html_in: str, *, on_chunk: Any = None, quality: str | None = None
+) -> dict[str, Any] | None:
     """Block-wise rich HTML humanize: opaque/table tokens never reach the model."""
     try:
         from services.humanizer_engine.student_humanizer import try_student_humanize_rich
 
         return try_student_humanize_rich(
-            html_in, force=True, wait_for_boot=STUDENT_RESCUE_WAIT_SECONDS
+            html_in,
+            force=True,
+            wait_for_boot=STUDENT_RESCUE_WAIT_SECONDS,
+            on_chunk=on_chunk,
+            mode=quality,
         )
     except Exception:  # noqa: BLE001
         app.logger.exception("student rich humanizer routing failed")
@@ -4378,7 +4394,10 @@ def _free_engine_unavailable():
             {
                 "success": False,
                 "error": "FREE_ENGINE_UNAVAILABLE",
-                "message": "The free humanizer is busy right now. Try again in a minute — this run wasn’t counted.",
+                "message": (
+                    "The humanizer is starting up. Wait a few seconds and try again — "
+                    "this run wasn’t counted."
+                ),
             }
         ),
         503,
@@ -5016,39 +5035,53 @@ def editor():
 @app.route("/humanizer")
 @economy_auth.email_verified_required(allow_guest_preview=True)
 def humanizer():
-    # Guests/crawlers always get the unique SSR landing — the SPA twin of "/" caused Google to
-    # pick the homepage as canonical for /humanizer. LEGACY_UI only affects signed-in users.
+    """Guests: same SPA try-it shell as ``/`` (humanize tab). Optional SSR when
+    ``GUEST_LANDING_PAGES`` is on. Signed-in users are redirected to ``/app#/humanizer``.
+    """
     if economy_auth.current_user() is None and request.args.get("classic") != "1":
-        return _render_landing("landing/humanizer_en.html", signup_next="/humanizer")
-    from services.economy.pricing import FEATURE_COSTS
-    from services.economy.site_settings import humanize_credit_cost
+        from services.seo import guest_landings_enabled
 
-    pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
-    base_cost = int(pricing["original_price"])
-    discount_percent = int(pricing["discount_percent"] or 0)
-    is_discount_active = bool(pricing["discount_active"]) and discount_percent > 0
-    discounted_cost = int(pricing["charged"])
-    from services.site_content import free_limits_context
+        if guest_landings_enabled():
+            return _render_landing("landing/humanizer_en.html", signup_next="/humanizer")
+        if _serve_app_landing():
+            return _render_app_landing()
+    if request.args.get("classic") == "1" or (
+        (os.environ.get("LEGACY_UI") or "").strip().lower() in {"1", "true", "yes"}
+    ):
+        from services.economy.pricing import FEATURE_COSTS
+        from services.economy.site_settings import humanize_credit_cost
+        from services.site_content import free_limits_context
 
-    return render_template(
-        "humanizer.html",
-        nav_active="humanizer",
-        free=free_limits_context(),
-        humanize_cost=discounted_cost if is_discount_active else base_cost,
-        base_cost=base_cost,
-        is_discount_active=is_discount_active,
-        discount_percent=discount_percent,
-        discounted_cost=discounted_cost,
-    )
+        pricing = humanize_credit_cost(FEATURE_COSTS["humanize"])
+        base_cost = int(pricing["original_price"])
+        discount_percent = int(pricing["discount_percent"] or 0)
+        is_discount_active = bool(pricing["discount_active"]) and discount_percent > 0
+        discounted_cost = int(pricing["charged"])
+        return render_template(
+            "humanizer.html",
+            nav_active="humanizer",
+            free=free_limits_context(),
+            humanize_cost=discounted_cost if is_discount_active else base_cost,
+            base_cost=base_cost,
+            is_discount_active=is_discount_active,
+            discount_percent=discount_percent,
+            discounted_cost=discounted_cost,
+        )
+    return redirect("/app#/humanizer")
 
 
 @app.route("/ai-detector")
 def ai_detector_page():
-    """Guests: SSR marketing page with detector screenshots; signed-in users go to the app."""
+    """Guests: same SPA try-it shell as ``/`` (detect tab). Optional SSR when
+    ``GUEST_LANDING_PAGES`` is on. Signed-in users go to the dashboard.
+    """
     if economy_auth.current_user() is None and request.args.get("classic") != "1":
-        return _render_landing("landing/ai_detector_en.html", signup_next="/ai-detector")
-    if economy_auth.current_user() is None:
-        return _render_app_landing()
+        from services.seo import guest_landings_enabled
+
+        if guest_landings_enabled():
+            return _render_landing("landing/ai_detector_en.html", signup_next="/ai-detector")
+        if _serve_app_landing():
+            return _render_app_landing()
     return redirect("/app#/home")
 
 
@@ -6524,6 +6557,20 @@ def api_humanizer_ru():
     )
 
 
+@app.get("/api/browser/humanizer/warm")
+def api_humanizer_warm():
+    """Wake the student model (+ AI detector) while the user pastes text.
+
+    Lives under ``/api/browser/…`` so guests on the landing can ping without the
+    email-verification wall that covers ``/api/humanizer/*``.
+    Cheap GET — no CSRF. At most once per minute per process (see ``warm_up``).
+    """
+    from services.humanizer_engine.student_humanizer import warm_up
+
+    sent = warm_up(force=True)
+    return jsonify({"success": True, "waking": bool(sent)})
+
+
 @app.post("/api/browser/providers/stealthwriter/humanize")
 def api_browser_stealthwriter_humanize():
     """Humanize via the production job engine (retries, timeout, recovery, logs).
@@ -6670,11 +6717,125 @@ def api_browser_stealthwriter_humanize():
 
     # Free and paid runs both use our student model only — never StealthWriter.
     # HTML: rewrite prose blocks only so ⟦OPAQUE⟧/⟦TABLE⟧ never reach the model.
+    want_stream = bool(payload.get("stream"))
+    quality = str(payload.get("quality") or "").strip().lower() or None
+    if quality not in (None, "fast", "quality"):
+        quality = None
+
+    if want_stream:
+        import queue as _queue
+
+        from flask import copy_current_request_context, stream_with_context
+
+        events: _queue.Queue = _queue.Queue()
+        ttfb_holder: dict[str, float | None] = {"s": None}
+        wall0 = time.monotonic()
+
+        def _on_chunk(evt: dict[str, Any]) -> None:
+            if evt.get("status") == "ready" and ttfb_holder["s"] is None:
+                ttfb_holder["s"] = round(time.monotonic() - wall0, 2)
+            events.put(("paragraph", evt))
+
+        @copy_current_request_context
+        def _run_stream() -> None:
+            # Must keep request/app context: billing + jsonify side effects need the session.
+            try:
+                student = (
+                    _student_humanize_rich(str(html_in), on_chunk=_on_chunk, quality=quality)
+                    if use_rich
+                    else _student_humanize(text, rescue=True, on_chunk=_on_chunk, quality=quality)
+                )
+                if student is None:
+                    _refund_humanize()
+                    _release_guest_trial()
+                    err_code = "FREE_ENGINE_UNAVAILABLE" if free_run else "UNAVAILABLE"
+                    err_message = (
+                        "The humanizer is starting up. Wait a few seconds and try again — "
+                        "this run wasn’t counted."
+                        if free_run
+                        else _HUMANIZE_FAILED_MESSAGE
+                    )
+                    _notify_humanize_failure(
+                        code=err_code,
+                        message=err_message,
+                        user=user,
+                        free_run=free_run,
+                        text=text,
+                        source=str(raw_source or "stream"),
+                    )
+                    events.put(
+                        (
+                            "error",
+                            {
+                                "success": False,
+                                "error": err_code,
+                                "message": err_message,
+                            },
+                        )
+                    )
+                    return
+                # Side effects (usage, strip tokens) via the same success path, then SSE done.
+                success_resp = _humanize_success(student, student["request_id"])
+                done_body = success_resp.get_json() or {}
+                if ttfb_holder["s"] is not None:
+                    done_body["ttfb_chunk_seconds"] = ttfb_holder["s"]
+                events.put(("done", done_body))
+            except Exception as exc:  # noqa: BLE001
+                app.logger.exception("humanize stream failed")
+                _refund_humanize()
+                _release_guest_trial()
+                _notify_humanize_failure(
+                    code="HUMANIZE_FAILED",
+                    message=str(exc)[:240],
+                    user=user,
+                    free_run=free_run,
+                    text=text,
+                    source="stream",
+                )
+                events.put(
+                    (
+                        "error",
+                        {
+                            "success": False,
+                            "error": "HUMANIZE_FAILED",
+                            "message": _HUMANIZE_FAILED_MESSAGE,
+                        },
+                    )
+                )
+            finally:
+                events.put(None)
+
+        threading.Thread(target=_run_stream, daemon=True, name="humanize-sse").start()
+
+        def _sse() -> Any:
+            # Immediate meta + pad so proxies flush (cold boots can sit silent for a minute).
+            yield f"event: meta\ndata: {json.dumps({'success': True, 'streaming': True})}\n\n"
+            yield f": {' ' * 2048}\n\n"
+            while True:
+                try:
+                    item = events.get(timeout=12)
+                except _queue.Empty:
+                    yield f": keepalive {int(time.time())}\n\n"
+                    continue
+                if item is None:
+                    break
+                name, data = item
+                yield f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        return Response(
+            stream_with_context(_sse()),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     try:
         student = (
-            _student_humanize_rich(str(html_in))
+            _student_humanize_rich(str(html_in), quality=quality)
             if use_rich
-            else _student_humanize(text, rescue=True)
+            else _student_humanize(text, rescue=True, quality=quality)
         )
         if student is None:
             _refund_humanize()

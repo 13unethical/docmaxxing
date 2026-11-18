@@ -3743,9 +3743,113 @@ const FORMATS = {
 // One menu row: app tile, title + description, trailing download arrow
 const formatItemHtml = (ext, act) => `<button role="menuitem" data-act="${act}" data-value="${ext}"><b class="dl-tile" aria-hidden="true">${FORMATS[ext][2]}</b><span class="dl-txt">${FORMATS[ext][0]}<small>${FORMATS[ext][1]}</small></span>${icon('download')}</button>`;
 
+function humStripProtectTokens(text) {
+  // Backend protect markers must never show in the live stream (⟦OPAQUE0⟧ / 【OPAQUE0】).
+  return String(text || '')
+    .replace(/[\[⟦【]\s*\/?(?:OPAQUE|TABLE|F)\d*\s*[\]⟧】]/gi, '')
+    .replace(/[^\S\n]{2,}/g, ' ')
+    .trim();
+}
+
+/** Seed the result pane with the user's paragraphs so they morph in place as chunks finish. */
+function humSeedPendingSlots(text) {
+  const parts = String(text || '').trim().split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  if (!parts.length) return [{ text: '', pending: true }];
+  return parts.map((p) => ({ text: p, pending: true }));
+}
+
+function humSlotIsTitle(cleaned) {
+  return cleaned.length <= 80 && !/[.!?]\s/.test(cleaned) && !cleaned.includes('\n');
+}
+
+function humStreamSlotHtml(s) {
+  const cleaned = humStripProtectTokens(collapseSoftNewlines(s && s.text));
+  const pending = !s || s.pending;
+  if (!cleaned && pending) {
+    return `<p class="hum-slot is-pending" aria-busy="true"><span class="spinner" aria-hidden="true"></span></p>`;
+  }
+  if (!cleaned) return '';
+  const body = esc(cleaned).replace(/\n/g, '<br>');
+  if (humSlotIsTitle(cleaned)) {
+    return `<h3 class="hum-slot-title${pending ? ' is-pending' : ' is-ready'}">${body}</h3>`;
+  }
+  if (pending) {
+    return `<p class="hum-slot is-pending" aria-busy="true"><span class="hum-slot-spin" aria-hidden="true"><span class="spinner"></span></span><span class="hum-slot-body">${body}</span></p>`;
+  }
+  return `<p class="hum-slot is-ready${s.fresh ? ' is-fresh' : ''}">${body}</p>`;
+}
+
+function humStreamSlotsHtml(slots, rewriteDone, rewriteTotal) {
+  const parts = (slots || []).map(humStreamSlotHtml).join('');
+  const meta = rewriteTotal
+    ? `<p class="muted hum-stream-meta">${rewriteDone || 0} of ${rewriteTotal} paragraphs ready</p>`
+    : '';
+  return `${meta}<div class="result-text is-streaming" id="result-text" aria-live="polite">${parts}</div>`;
+}
+
+function humApplyStreamEvent(stream, evt) {
+  const text = humStripProtectTokens(evt.text || '');
+  if (!text && evt.status === 'passthrough') return false;
+  const pieces = Number(evt.pieces) || 0;
+  const n = Math.max(pieces, (Number(evt.index) || 0) + 1);
+  if (pieces > 0 && stream.slots.length !== pieces) {
+    stream.slots = Array.from({ length: pieces }, (_, i) => stream.slots[i] || { text: '', pending: true });
+  } else {
+    while (stream.slots.length < n) stream.slots.push({ text: '', pending: true });
+  }
+  const pending = evt.status === 'pending';
+  const fresh = evt.status === 'ready' || evt.status === 'final';
+  stream.slots[evt.index] = {
+    text: text || String(evt.text || ''),
+    pending,
+    fresh: fresh || undefined,
+  };
+  stream.rewriteDone = Number(evt.rewrite_done) || stream.rewriteDone;
+  stream.rewriteTotal = Number(evt.rewrite_total) || stream.rewriteTotal;
+  return true;
+}
+
+/** Soft green sentence chips on finished humanizer output (same family as detector marks). */
+function humMarkDoneHtml(html) {
+  const root = document.createElement('div');
+  root.innerHTML = html;
+  const blocks = root.querySelectorAll('p, li, td, th, blockquote');
+  const targets = blocks.length ? [...blocks] : [root];
+  targets.forEach((el) => {
+    if (el.querySelector('p, li, table, ul, ol, h1, h2, h3, h4, h5, h6')) return;
+    const raw = String(el.textContent || '');
+    if (!raw.trim()) return;
+    const bits = raw.match(/[^.!?]+(?:[.!?]+(?:["”']+)?\s*|$)/g);
+    if (!bits || bits.length < 2) {
+      el.innerHTML = `<mark class="hum-ok">${esc(raw.trim())}</mark>`;
+      return;
+    }
+    el.innerHTML = bits.map((s) => {
+      const t = s.replace(/\s+/g, ' ').trim();
+      return t ? `<mark class="hum-ok">${esc(t)}</mark>` : '';
+    }).filter(Boolean).join(' ');
+  });
+  // Headings stay unmarked but keep size; wrap lone text roots without block tags.
+  if (!blocks.length && root.childNodes.length && ![...root.childNodes].some((n) => n.nodeType === 1)) {
+    root.innerHTML = `<mark class="hum-ok">${esc(String(root.textContent || '').trim())}</mark>`;
+  }
+  return root.innerHTML;
+}
+
+function humResultBodyHtml(html, text) {
+  const body = html ? sanitizePasteHtml(html) : formatResultText(text);
+  return humMarkDoneHtml(body);
+}
+
 function resultHtml(id) {
   const t = toolState(id), flow = CONFIG.flows[id];
-  if (t.status === 'loading') return `<div class="card hum-result loading"><span class="spinner" aria-hidden="true"></span>${esc(flow.loadingLabel)}</div>`;
+  if (t.status === 'loading' && t.stream) {
+    return `<div class="card hum-result is-streaming">${humStreamSlotsHtml(t.stream.slots, t.stream.rewriteDone, t.stream.rewriteTotal)}</div>`;
+  }
+  if (t.status === 'loading') {
+    // Never show the old “Humanizing…” card — seed one Rewriting row immediately.
+    return `<div class="card hum-result is-streaming">${humStreamSlotsHtml(humSeedPendingSlots(t.text), 0, 0)}</div>`;
+  }
   if (t.status === 'error') return `<div class="card hum-result" role="alert">
     <div class="result-head">
       <h2>Couldn’t humanize the text</h2>
@@ -3771,7 +3875,7 @@ function resultHtml(id) {
       </div>`}
       <button class="btn btn-sm btn-primary" data-act="next">${esc(flow.next.label)}</button>
     </div>
-    <div class="result-text" id="result-text">${t.result.html ? sanitizePasteHtml(t.result.html) : formatResultText(t.result.text)}</div>
+    <div class="result-text hum-done" id="result-text">${humResultBodyHtml(t.result.html, t.result.text)}</div>
   </div>`;
 }
 
@@ -3799,6 +3903,36 @@ const RICH_PASTE_TAGS = new Set(['P','BR','DIV','SPAN','B','STRONG','I','EM','U'
 /** Word/Outlook paste: unwrap would dump CSS into the text — drop these entirely. */
 const RICH_DROP_TAGS = new Set(['STYLE','SCRIPT','HEAD','META','LINK','TITLE','XML','NOSCRIPT','IFRAME','OBJECT','EMBED','SVG']);
 
+/** Word "select all → Bold" wraps whole paragraphs; those are body, not emphasis. */
+function isBlanketBoldText(text) {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  if (t.length > 80) return true;
+  return t.length > 40 && /[.!?]\s/.test(t);
+}
+
+function isHeadingLikeBold(el) {
+  const text = String(el?.textContent || '').trim();
+  if (!text || text.length > 80 || /[.!?]/.test(text)) return false;
+  const parent = el.parentElement;
+  if (!parent || !/^(P|DIV|H[1-6]|LI|BLOCKQUOTE)$/i.test(parent.tagName)) return false;
+  return String(parent.textContent || '').trim() === text;
+}
+
+/** If ≥85% of characters sit in <b>/<strong>, Word split-bolded the body — unwrap. */
+function demoteDenseBold(root) {
+  const total = String(root.textContent || '').trim().length;
+  if (total < 40) return;
+  const bolds = [...root.querySelectorAll('b, strong')];
+  if (!bolds.length) return;
+  const boldLen = bolds.reduce((n, el) => n + String(el.textContent || '').trim().length, 0);
+  if (boldLen / total < 0.85) return;
+  bolds.forEach((el) => {
+    if (isHeadingLikeBold(el)) return;
+    el.replaceWith(...el.childNodes);
+  });
+}
+
 /** Whitelist paste HTML from Word/Google Docs so bold/tables survive. */
 function sanitizePasteHtml(raw) {
   let src = String(raw || '');
@@ -3814,10 +3948,14 @@ function sanitizePasteHtml(raw) {
       if (child.nodeType === 1) {
         if (RICH_DROP_TAGS.has(child.tagName)) { child.remove(); return; }
         if (!RICH_PASTE_TAGS.has(child.tagName)) { child.replaceWith(...child.childNodes); return; }
+        // Google Docs wraps paste in <b style="font-weight:normal"> — not real emphasis.
+        const docsNormalBold = (child.tagName === 'B' || child.tagName === 'STRONG')
+          && /font-weight\s*:\s*(normal|400)\b/i.test(child.getAttribute('style') || '');
         [...child.attributes].forEach((a) => {
           if (a.name === 'style') {
+            // Drop font-weight: Word/Docs often bold the whole body via style.
             const kept = String(a.value).split(';').map(s => s.trim()).filter(s =>
-              /^(color|font-family|font-size|font-weight|font-style|text-decoration)\s*:/i.test(s));
+              /^(color|font-family|font-size|font-style|text-decoration)\s*:/i.test(s));
             if (kept.length) child.setAttribute('style', kept.join('; '));
             else child.removeAttribute('style');
           } else if (!(child.tagName === 'TD' || child.tagName === 'TH') || !/^(col|row)span$/i.test(a.name)) {
@@ -3825,10 +3963,16 @@ function sanitizePasteHtml(raw) {
           }
         });
         walk(child);
+        // Unwrap after children are cleaned (Docs normal-weight wrapper or blanket body bold).
+        if ((child.tagName === 'B' || child.tagName === 'STRONG')
+            && (docsNormalBold || isBlanketBoldText(child.textContent))) {
+          child.replaceWith(...child.childNodes);
+        }
       }
     });
   };
   walk(root);
+  demoteDenseBold(root);
   return root.innerHTML.trim();
 }
 
@@ -8697,10 +8841,48 @@ function rerenderDocs() {
   $('#doc-filter')?.addEventListener('change', (e) => { state.docFilter = e.target.value; rerenderDocs(); });
 }
 
+/** Wake Modal (model + detector) while the user opens the page / focuses the field. */
+let _humWarmAt = 0;
+function warmHumanizerPage() {
+  const now = Date.now();
+  if (now - _humWarmAt < 45_000) return;
+  _humWarmAt = now;
+  API.warmHumanizer?.();
+}
+
+function humProgressStages(words) {
+  const paras = Math.max(1, Math.ceil(Number(words || 0) / 80));
+  return [
+    { after: 0, label: 'Starting the model…' },
+    { after: 5, label: 'Starting the model…' },
+    { after: 12, label: paras > 1 ? `Rewriting paragraph 1 of ${paras}…` : 'Rewriting your text…' },
+    { after: 22, label: paras > 2 ? `Rewriting paragraph ${Math.min(2, paras)} of ${paras}…` : 'Picking the most natural rewrite…' },
+    { after: 35, label: 'Checking AI score and refining…' },
+    { after: 55, label: 'Almost done…' },
+  ];
+}
+
+function startHumProgress(setLabel, words) {
+  const stages = humProgressStages(words);
+  const t0 = Date.now();
+  let i = 0;
+  setLabel(stages[0].label);
+  const timer = setInterval(() => {
+    const elapsed = (Date.now() - t0) / 1000;
+    while (i + 1 < stages.length && elapsed >= stages[i + 1].after) i += 1;
+    setLabel(stages[i].label);
+  }, 900);
+  return () => clearInterval(timer);
+}
+
 function bindTextTool(id) {
   const t = toolState(id), item = ITEMS[id];
   const ta = $('#tool-text'), runBtn = $('#run-btn'), counter = $('#counter');
   if (!ta) return;
+  if (id === 'humanizer') {
+    warmHumanizerPage();
+    ta.addEventListener('focus', warmHumanizerPage);
+  }
 
   function syncFromInput() {
     t.text = richInputPlain(ta);
@@ -8791,14 +8973,33 @@ async function runTool(id, paid = false) {
   const live = $('#tool-text');
   if (live) { t.text = richInputPlain(live); t.html = richInputHtml(live); }
   t.status = 'loading'; t.result = null; t.error = null;
+  t.stream = id === 'humanizer'
+    ? { slots: humSeedPendingSlots(t.text), rewriteDone: 0, rewriteTotal: 0 }
+    : null;
+  if (id === 'humanizer') warmHumanizerPage();
   if (onPage()) { $('#result').innerHTML = resultHtml(id); $('#run-btn').disabled = true; }
   const source = t.text, sourceHtml = t.html || '';
+  const paintStream = () => {
+    if (!onPage() || id !== 'humanizer') return;
+    const el = $('#result');
+    if (el) el.innerHTML = resultHtml(id);
+  };
   try {
     const mode = id === 'humanizer' ? humMode(t) : null;
-    const data = await API.humanize(source, 'standalone', sourceHtml || null, mode ? { mode } : {});
+    const humOpts = mode ? { mode } : {};
+    if (id === 'humanizer') {
+      humOpts.stream = true;
+      humOpts.timeoutMs = 180000;
+      humOpts.onParagraph = (evt) => {
+        if (!humApplyStreamEvent(t.stream, evt)) return;
+        paintStream();
+      };
+    }
+    const data = await API.humanize(source, 'standalone', sourceHtml || null, humOpts);
     const out = String(data.humanized_text || data.text || '').trim();
     if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
     t.status = 'done';
+    t.stream = null;
     t.result = { text: out, html: data.humanized_html || '', file: t.fileName || '' };
     if (!state.signedIn) state.guestRunsUsed = data.free_runs_left === 0 ? 1 : 0;
     if (id === 'humanizer') {
@@ -8814,6 +9015,7 @@ async function runTool(id, paid = false) {
     if (err.code === 'REGISTER_REQUIRED') state.guestRunsUsed = 1;
     t.status = e.handled ? 'idle' : 'error';
     t.error = e;
+    t.stream = null;
   }
   if (onPage()) { render(); $('#result .btn-primary')?.focus(); }
 }
@@ -8852,6 +9054,16 @@ function apiErrorInfo(err, { intent } = {}) {
       return { message: 'The humanizer service is temporarily unavailable. Your credits weren’t charged. Try again in a few minutes.' };
     case 'NO_CHANGE':
       return { message: 'The text came back unchanged, often because of a daily limit. Try again later.' };
+    case 'FREE_ENGINE_UNAVAILABLE':
+    case 'UNAVAILABLE':
+      warmHumanizerPage();
+      return {
+        message: err.message
+          || 'The humanizer is starting up. Wait a few seconds and try again — this run wasn’t counted.',
+      };
+    case 'TIMEOUT':
+      warmHumanizerPage();
+      return { message: err.message || 'This is taking too long. Try again in a moment — this run wasn’t counted.' };
     default:
       return { message: (err && err.message) || 'Something went wrong. Try again.' };
   }
@@ -9173,8 +9385,12 @@ function landNavHtml() {
 
 // Policies, About, FAQ… for visitors without an account: the landing header and footer around the document
 
-// Links into the app from the landing: every tool opens directly, guests included
-const appLinkAttrs = (item) => `href="${esc(itemHref(item))}" ${itemLinkAttrs(item)}`;
+// Guests stay on the shared try-it landings; signed-in users open the in-app tool.
+const GUEST_TOOL_PATH = { humanizer: '/humanizer', turnitin: '/ai-detector', format: '/formatter' };
+const appLinkAttrs = (item) => {
+  if (!state.signedIn && GUEST_TOOL_PATH[item.id]) return `href="${GUEST_TOOL_PATH[item.id]}"`;
+  return `href="${esc(itemHref(item))}" ${itemLinkAttrs(item)}`;
+};
 
 /* ---------- Detector / humanizer box: landing-try hero (3 free tries per tool) and the dashboard's Start here (credits) ---------- */
 const lt = { tab: BOOT.landing?.tab || 'humanize', pro: false, text: '', html: '', status: 'idle', result: null, error: null, animate: false };
@@ -9277,8 +9493,22 @@ function landTryHtml({ intro = false } = {}) {
 
 function ltResultHtml() {
   const S = CONFIG.scan, det = lt.tab === 'detect';
-  if (lt.status === 'loading') return `<div class="qd-gauge is-loading" aria-hidden="true"></div>
-    <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">${det ? 'Analyzing your text…' : 'Humanizing your text…'}</h2><p class="muted">${det ? 'This takes a few seconds.' : 'This can take up to a minute.'}</p>`;
+  if (lt.status === 'loading' && !det && lt.stream) {
+    return `<div class="lt-out is-streaming">
+      <div class="visually-hidden" id="lt-result-h" tabindex="-1">Rewriting your text</div>
+      ${humStreamSlotsHtml(lt.stream.slots, lt.stream.rewriteDone, lt.stream.rewriteTotal)}
+    </div>`;
+  }
+  if (lt.status === 'loading') {
+    if (!det) {
+      return `<div class="lt-out is-streaming">
+        <div class="visually-hidden" id="lt-result-h" tabindex="-1">Rewriting your text</div>
+        ${humStreamSlotsHtml(humSeedPendingSlots(lt.text), 0, 0)}
+      </div>`;
+    }
+    return `<div class="qd-gauge is-loading" aria-hidden="true"></div>
+    <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">Analyzing your text…</h2><p class="muted">This takes a few seconds.</p>`;
+  }
   if (lt.status === 'limit') return `<span class="lt-lock" aria-hidden="true">${icon('lock')}</span>
     <h2 class="qd-verdict" id="lt-result-h" tabindex="-1">You’ve used your free tries</h2>
     <p class="muted qd-sub">Sign up free to keep going.</p>
@@ -9306,7 +9536,7 @@ function ltResultHtml() {
         <button class="btn btn-sm" data-act="lt-copy">${icon('copy')} Copy</button>
         <button class="btn btn-sm btn-primary" data-act="lt-check-out">${icon('scan')} Check it for AI</button>
       </div>
-      <div class="lt-out-text result-text" id="lt-out-text">${r.html ? sanitizePasteHtml(r.html) : formatResultText(r.out)}</div>
+      <div class="lt-out-text result-text hum-done" id="lt-out-text">${humResultBodyHtml(r.html, r.out)}</div>
     </div>`;
   const lv = scanLevel('ai', r.ai).toLowerCase();
   const scored = r.sents.filter(x => x.ai_prob != null), flagged = scored.filter(x => x.flagged).length;
@@ -9345,6 +9575,8 @@ function ltSyncFromInput() {
 function bindLandTry() {
   const ta = $('#lt-text');
   if (!ta) return;
+  if (lt.tab !== 'detect') warmHumanizerPage();
+  ta.addEventListener('focus', () => { if (lt.tab !== 'detect') warmHumanizerPage(); });
   const back = $('#lt-backdrop');
   const refreshMeta = () => {
     $('#lt-count').textContent = ltCountText();
@@ -9422,7 +9654,13 @@ async function runLandTry() {
     if (mode === 'pro' && !humHasPlan()) return openProDialog();
     if (!q.left) return q.pool === 'plan' ? openLimitDialog() : openProDialog();
   }
-  Object.assign(lt, { status: 'loading', result: null, error: null });
+  Object.assign(lt, {
+    status: 'loading',
+    result: null,
+    error: null,
+    stream: det ? null : { slots: humSeedPendingSlots(text), rewriteDone: 0, rewriteTotal: 0 },
+  });
+  if (!det) warmHumanizerPage();
   rerenderLandTry('#lt-result-h');
   try {
     if (det) {
@@ -9431,9 +9669,18 @@ async function runLandTry() {
       if (app) addDoc(text, 'turnitin', { title: 'Pasted text', ai: lt.result.ai, text });
     } else {
       const mode = app ? ltHumMode() : 'free';
-      const data = await API.humanize(text, 'standalone', htmlIn || null, { mode });
+      const data = await API.humanize(text, 'standalone', htmlIn || null, {
+        mode,
+        stream: true,
+        timeoutMs: 180000,
+        onParagraph: (evt) => {
+          if (!humApplyStreamEvent(lt.stream, evt)) return;
+          if (lt.tab === tab) rerenderLandTry('#lt-result-h');
+        },
+      });
       const out = String(data.humanized_text || data.text || '').trim();
       if (!out) throw new API.ApiError('The humanizer returned an empty result. Try again.', { code: 'EMPTY' });
+      lt.stream = null;
       lt.result = { kind: 'humanize', out, html: data.humanized_html || '', text };
       if (data.free_run) humBumpUse(data.free_runs_left);
       else if (app && state.signedIn && !Number(data.coins_charged)) humBumpUse();
@@ -9441,6 +9688,7 @@ async function runLandTry() {
       else if (data.free_runs_left === 0) state.guestRunsUsed = 1;
     }
   } catch (err) {
+    lt.stream = null;
     if (lt.tab !== tab) return;
     if (!app && err.code === 'REGISTER_REQUIRED') {
       ltSpendTry(tab, CONFIG.landing.tryIt.freeRuns);
@@ -9455,6 +9703,7 @@ async function runLandTry() {
   if (lt.tab !== tab) return;
   if (!app) ltSpendTry(tab);
   lt.status = 'done'; lt.animate = det && !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  lt.stream = null;
   rerenderLandTry('#lt-result-h');
   if (app) rerenderDocs();
 }

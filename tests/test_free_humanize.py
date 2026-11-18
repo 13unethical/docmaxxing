@@ -47,7 +47,8 @@ def engine(monkeypatch):
     calls: list[bool] = []
     state = {"result": STUDENT}
 
-    def fake_student(_text, *, rescue=False):
+    def fake_student(_text, *, rescue=False, on_chunk=None, quality=None):
+        del on_chunk, quality
         calls.append(rescue)
         return state["result"]
 
@@ -258,7 +259,8 @@ def test_guest_word_limit(economy, engine):
     res = _client().post(URL, json={"text": _words(1001)})
     assert res.status_code == 403
     body = res.get_json()
-    assert body["error"] == "FREE_WORD_LIMIT"
+    # Shared Free|Pro word cap runs before the free-gate FREE_WORD_LIMIT path.
+    assert body["error"] == "WORD_LIMIT"
     assert body["max_words"] == 1000
     assert engine["calls"] == []
     assert _client().post(URL, json={"text": _words(1000)}).status_code == 200
@@ -272,7 +274,7 @@ def test_guest_free_run_failure_is_not_counted(economy, engine, monkeypatch):
     assert res.status_code == 503
     body = res.get_json()
     assert body["error"] == "FREE_ENGINE_UNAVAILABLE"
-    assert "Try again" in body["message"]
+    assert "try again" in body["message"].lower()
     engine["state"]["result"] = STUDENT
     assert client.post(URL, json={"text": EN}).status_code == 200
 
@@ -345,13 +347,15 @@ def test_user_over_daily_limit_pays_with_the_usual_routing(economy, engine, monk
     assert engine["calls"] == [True, True]
 
 
-def test_user_over_word_limit_pays(economy, engine):
+def test_user_over_word_limit_is_blocked(economy, engine):
+    """Free-tier users share one hard word cap; overage needs a plan, not coin top-up."""
     client, user = _user_client("long-user@example.com")
     res = client.post(URL, json={"text": _words(1501)})
     body = res.get_json()
-    assert res.status_code == 200, body
-    assert body["free_run"] is False
-    assert body["coins_charged"] > 0
+    assert res.status_code == 403, body
+    assert body["error"] == "WORD_LIMIT"
+    assert body["max_words"] == 1500
+    assert engine["calls"] == []
     assert free_humanize.used_today(free_humanize.user_subject(user["id"])) == 0
 
 

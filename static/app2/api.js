@@ -53,6 +53,25 @@
     return cyr / letters.length > 0.5;
   };
 
+  /** UTF-8 Cyrillic mis-read as Latin-1 shows as Ð/Ñ… — try to undo before send. */
+  const repairMojibake = (text) => {
+    const src = String(text || '');
+    const markers = (src.match(/[ÐÑÂ]/g) || []).length;
+    if (markers < 3) return src;
+    try {
+      const bytes = Uint8Array.from(src, (ch) => {
+        const code = ch.charCodeAt(0);
+        if (code > 255) throw new Error('not-latin1');
+        return code;
+      });
+      const fixed = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+      const fixedMarkers = (fixed.match(/[ÐÑÂ]/g) || []).length;
+      return fixedMarkers < markers ? fixed : src;
+    } catch {
+      return src;
+    }
+  };
+
   async function fingerprint() {
     try { return global.DMDeviceFingerprint ? await global.DMDeviceFingerprint() : ''; } catch { return ''; }
   }
@@ -92,7 +111,13 @@
     },
     async extractDocument(file) {
       if (/\.txt$/i.test(file.name) || (file.type || '').startsWith('text/')) {
-        const text = await file.text();
+        const buf = await file.arrayBuffer();
+        let text = new TextDecoder('utf-8').decode(buf);
+        // CP1251/Windows Cyrillic .txt often lands as � under UTF-8; prefer 1251 then.
+        if (text.includes('\uFFFD')) {
+          try { text = new TextDecoder('windows-1251').decode(buf); } catch { /* keep utf-8 */ }
+        }
+        text = repairMojibake(text);
         return { text, html: text.split(/\n\s*\n/).map(p => `<p>${p.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>')}</p>`).join('') };
       }
       const form = new FormData();
@@ -102,15 +127,132 @@
     },
 
     async humanize(text, source = 'standalone', html = null, opts = {}) {
-      const plain = String(text || '');
+      let plain = repairMojibake(String(text || ''));
+      let rich = html && String(html).trim() ? repairMojibake(String(html)) : null;
       if (isCyrillic(plain)) {
         throw new ApiError("Russian text isn't supported yet. Paste English text to humanize it.", { code: 'RU_NOT_SUPPORTED' });
       }
       const body = { text: plain, source };
-      if (html && String(html).trim()) body.html = String(html);
+      if (rich) body.html = rich;
       // Free and Pro are separate counters + word caps — always send which one the UI selected.
       if (opts && opts.mode) body.mode = opts.mode;
-      return request('POST', '/api/browser/providers/stealthwriter/humanize', { json: body });
+      // Opt-in sampling profile: "fast" | "quality" (default). Not the Free/Pro billing mode.
+      if (opts && opts.quality) body.quality = opts.quality;
+      const run = () => (opts && opts.stream && typeof opts.onParagraph === 'function')
+        ? this.humanizeStream(body, opts)
+        : request('POST', '/api/browser/providers/stealthwriter/humanize', { json: body, timeoutMs: opts && opts.timeoutMs });
+      try {
+        return await run();
+      } catch (err) {
+        // Cold Modal often fails the first attempt — wake it and retry once.
+        if (!(err instanceof ApiError) || !['FREE_ENGINE_UNAVAILABLE', 'UNAVAILABLE', 'TIMEOUT'].includes(err.code)) {
+          throw err;
+        }
+        await this.warmHumanizer();
+        await new Promise((r) => setTimeout(r, 2500));
+        return run();
+      }
+    },
+    /** SSE: paragraphs arrive as each chunk finishes. opts.onParagraph(evt) / onMeta / onDone. */
+    async humanizeStream(body, opts = {}) {
+      const payload = Object.assign({}, body, { stream: true });
+      if (opts.mode) payload.mode = opts.mode;
+      if (opts.quality) payload.quality = opts.quality;
+      const timeoutMs = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 180000;
+      const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : null;
+      const abortErr = () => new ApiError(
+        'This is taking too long. Try again in a moment — this run wasn’t counted.',
+        { code: 'TIMEOUT', status: 0, data: null },
+      );
+      try {
+        let res;
+        try {
+          res = await fetch('/api/browser/providers/stealthwriter/humanize', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: ctl ? ctl.signal : undefined,
+          });
+        } catch (err) {
+          if (err && err.name === 'AbortError') throw abortErr();
+          throw new ApiError('Network error. Check your connection and try again.', { code: 'NETWORK' });
+        }
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          const raw = data.error || '';
+          const code = CODE_RE.test(raw) ? raw : (res.status === 402 ? 'INSUFFICIENT_COINS' : '');
+          throw new ApiError(data.message || (code ? '' : raw) || `Request failed (HTTP ${res.status})`, {
+            code, status: res.status, data,
+          });
+        }
+        const ctype = res.headers.get('content-type') || '';
+        if (!ctype.includes('text/event-stream') || !res.body) {
+          // Proxy buffered a JSON body — fall back.
+          const data = await res.json().catch(() => ({}));
+          if (data.success === false) {
+            throw new ApiError(data.message || data.error || 'Humanize failed', {
+              code: CODE_RE.test(data.error || '') ? data.error : '', status: res.status, data,
+            });
+          }
+          if (opts.onDone) opts.onDone(data);
+          return data;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let donePayload = null;
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            let split;
+            while ((split = buf.indexOf('\n\n')) >= 0) {
+              const rawEvent = buf.slice(0, split);
+              buf = buf.slice(split + 2);
+              let eventName = 'message';
+              const dataLines = [];
+              for (const line of rawEvent.split('\n')) {
+                if (line.startsWith('event:')) eventName = line.slice(6).trim();
+                else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+              }
+              if (!dataLines.length) continue;
+              let data;
+              try { data = JSON.parse(dataLines.join('\n')); } catch { continue; }
+              if (eventName === 'meta' && opts.onMeta) opts.onMeta(data);
+              else if (eventName === 'paragraph' && opts.onParagraph) opts.onParagraph(data);
+              else if (eventName === 'done') {
+                donePayload = data;
+                if (opts.onDone) opts.onDone(data);
+              } else if (eventName === 'error') {
+                const raw = data.error || '';
+                throw new ApiError(data.message || raw || 'Humanize failed', {
+                  code: CODE_RE.test(raw) ? raw : '', status: 0, data,
+                });
+              }
+            }
+          }
+        } catch (err) {
+          try { reader.cancel(); } catch { /* ignore */ }
+          if (err instanceof ApiError) throw err;
+          if (err && err.name === 'AbortError') throw abortErr();
+          throw new ApiError('Network error. Check your connection and try again.', { code: 'NETWORK' });
+        }
+        if (!donePayload || donePayload.success === false) {
+          throw new ApiError((donePayload && donePayload.message) || 'Humanize stream ended early.', {
+            code: (donePayload && donePayload.error) || 'EMPTY', status: 0, data: donePayload,
+          });
+        }
+        return donePayload;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    },
+    /** Fire-and-forget: wake Modal containers while the user pastes. */
+    warmHumanizer() {
+      return request('GET', '/api/browser/humanizer/warm', { timeoutMs: 8000 }).catch(() => null);
     },
     editor: {
       detect: (text) => request('POST', '/api/workspace/detect', { json: { text }, timeoutMs: 180000 }),

@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import html
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 
@@ -55,7 +55,8 @@ _LEAKED_RICH_TOKEN = re.compile(
 
 _BLOCK_TAGS = frozenset({"p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "div", "blockquote", "pre"})
 _INLINE_FORMAT = frozenset({"b", "strong", "i", "em", "u", "s", "strike", "del", "span", "sup", "sub"})
-_STYLE_KEEP = ("color", "font-family", "font-size", "font-weight", "font-style", "text-decoration")
+# Drop font-weight: Word/Docs often mark the whole body bold; keep real emphasis via <b>/<strong>.
+_STYLE_KEEP = ("color", "font-family", "font-size", "font-style", "text-decoration")
 _ALLOWED_TAGS = frozenset(
     {
         "p", "br", "div", "span", "b", "strong", "i", "em", "u", "s", "strike", "del", "sup", "sub",
@@ -108,6 +109,13 @@ def sanitize_html(raw: str) -> str:
             if tag.parent is not None:
                 tag.unwrap()
             continue
+        # Google Docs wraps paste in <b style="font-weight:normal"> — not real emphasis.
+        if tag.name in ("b", "strong") and re.search(
+            r"font-weight\s*:\s*(normal|400)\b", (tag.get("style") or ""), flags=re.I
+        ):
+            if tag.parent is not None:
+                tag.unwrap()
+            continue
         allowed: dict[str, str] = {}
         if tag.name == "span" or tag.name in _BLOCK_TAGS:
             style = _filter_style(tag.get("style") or "")
@@ -118,6 +126,11 @@ def sanitize_html(raw: str) -> str:
                 if tag.get(key):
                     allowed[key] = str(tag.get(key))
         tag.attrs = allowed
+    # Unwrap Word "select all → Bold" so body prose is not stored as <b>/<strong>.
+    for tag in list(soup.find_all(["b", "strong"])):
+        if tag.parent is not None and _is_blanket_bold(tag.get_text(" ", strip=True)):
+            tag.unwrap()
+    _demote_dense_bold(soup)
     body = soup.body or soup
     return "".join(str(c) for c in body.children).strip()
 
@@ -429,10 +442,12 @@ def humanize_rich(
     rewrite_plain: Callable[[str], str],
     *,
     max_workers: int = 16,
+    on_chunk: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[str, str]:
     """Rewrite prose blocks only; tables/headings stay opaque (never sent to the model).
 
     Returns (humanized_html, humanized_plaintext).
+    ``on_chunk`` receives each finished line as soon as it is ready.
     """
     plain, stash = prepare_rich(html_doc)
     if not plain.strip():
@@ -442,7 +457,7 @@ def humanize_rich(
     lines = plain.split(stash.separator)
     # Indices that need a model rewrite (skip opaque/table token lines).
     todo: list[int] = []
-    for i, line in enumerate(lines):
+    for i, _line in enumerate(lines):
         job = stash.blocks[i] if i < len(stash.blocks) else None
         if job and job.kind in ("table", "opaque"):
             continue
@@ -467,22 +482,63 @@ def humanize_rich(
         return rewritten
 
     rewritten_map: dict[int, str] = {}
+    rewrite_total = len(todo)
+    rewrite_done = 0
+
+    def _stream_visible(index: int, text_out: str) -> str:
+        """Never leak ⟦OPAQUE⟧ / ⟦TABLE⟧ / ⟦F⟧ protect markers into the live UI."""
+        job = stash.blocks[index] if index < len(stash.blocks) else None
+        if job and job.kind in ("table", "opaque"):
+            if job.html:
+                return BeautifulSoup(job.html, "html.parser").get_text(" ", strip=True) or (job.plain or "")
+            return job.plain or ""
+        return strip_rich_tokens(text_out)
+
+    def _emit(index: int, text_out: str, status: str) -> None:
+        if on_chunk is None:
+            return
+        visible = _stream_visible(index, text_out)
+        if not visible.strip() and status == "passthrough":
+            # Empty heading/table shells — skip rather than flash a blank slot.
+            return
+        on_chunk(
+            {
+                "index": index,
+                "text": visible,
+                "status": status,
+                "rewrite_total": rewrite_total,
+                "rewrite_done": rewrite_done,
+                "pieces": len(lines),
+            }
+        )
+
+    todo_set = set(todo)
+    for i, line in enumerate(lines):
+        if i in todo_set:
+            # Original line while this block rewrites — UI morphs it when ready.
+            _emit(i, line, "pending")
+        else:
+            _emit(i, line, "passthrough")
+
     if todo:
         workers = max(1, min(max_workers, len(todo)))
         if workers == 1:
             for i in todo:
                 rewritten_map[i] = _rewrite_one(i)
+                rewrite_done += 1
+                _emit(i, rewritten_map[i], "ready")
         else:
             with ThreadPoolExecutor(max_workers=workers) as pool:
-                for i, text in zip(todo, pool.map(_rewrite_one, todo)):
-                    rewritten_map[i] = text
+                futures = {pool.submit(_rewrite_one, i): i for i in todo}
+                for fut in as_completed(futures):
+                    i = futures[fut]
+                    rewritten_map[i] = fut.result()
+                    rewrite_done += 1
+                    _emit(i, rewritten_map[i], "ready")
 
     out_lines: list[str] = []
     for i, line in enumerate(lines):
-        if i in rewritten_map:
-            out_lines.append(rewritten_map[i])
-        else:
-            out_lines.append(line)
+        out_lines.append(rewritten_map[i] if i in rewritten_map else line)
     humanized = stash.separator.join(out_lines)
     rich = reassemble_rich(humanized, stash)
     # Final safety: never return protect markers to the client.
@@ -658,8 +714,51 @@ def _prose_from_fragment(
     )
 
 
+def _is_blanket_bold(text: str) -> bool:
+    """Word 'select all → Bold' wraps whole paragraphs; those are body, not emphasis."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    if len(t) > 80:
+        return True
+    # A sentence-bearing run is prose even when short enough to look like a title.
+    return len(t) > 40 and bool(re.search(r"[.!?]\s", t))
+
+
+def _is_heading_like_bold(tag: Tag) -> bool:
+    """Short bold that is the whole block — keep as a title, not dense-body noise."""
+    text = tag.get_text(" ", strip=True)
+    if not text or len(text) > 80 or re.search(r"[.!?]", text):
+        return False
+    parent = tag.parent
+    if not isinstance(parent, Tag) or parent.name not in _BLOCK_TAGS:
+        return False
+    return parent.get_text(" ", strip=True) == text
+
+
+def _demote_dense_bold(soup: BeautifulSoup) -> None:
+    """If almost every character is inside <b>/<strong>, Word split-bolded the body — unwrap."""
+    root = soup.body or soup
+    total = len(root.get_text(" ", strip=True))
+    if total < 40:
+        return
+    bolds = list(root.find_all(["b", "strong"]))
+    if not bolds:
+        return
+    bold_len = sum(len(t.get_text(" ", strip=True)) for t in bolds)
+    if bold_len / total < 0.85:
+        return
+    for tag in bolds:
+        if tag.parent is None or _is_heading_like_bold(tag):
+            continue
+        tag.unwrap()
+
+
 def _worth_protecting(node: Tag) -> bool:
-    if node.name in ("b", "strong", "i", "em", "u", "s", "strike", "del", "sup", "sub"):
+    if node.name in ("b", "strong"):
+        text = node.get_text(strip=True)
+        return bool(text) and not _is_blanket_bold(text)
+    if node.name in ("i", "em", "u", "s", "strike", "del", "sup", "sub"):
         return bool(node.get_text(strip=True))
     if node.name == "span":
         return bool(_filter_style(node.get("style") or ""))

@@ -130,27 +130,24 @@ def test_without_landing_pages_guests_get_the_app_landing_in_place(client, monke
     assert '<details class="card">' in html
 
 
-def test_humanizer_and_formatter_stay_unique_ssr_without_guest_landing_flag(client, monkeypatch):
-    from services.seo import PUBLIC_PAGES, canonical_url
+def test_humanizer_and_detector_use_app_landing_without_guest_landing_flag(client, monkeypatch):
+    from services.seo import canonical_url
 
     monkeypatch.setenv("GUEST_LANDING_PAGES", "0")
     hum = client.get("/humanizer").get_data(as_text=True)
-    assert 'id="app"' not in hum
-    assert PUBLIC_PAGES["/humanizer"].h1 in hum
+    assert 'id="app"' in hum
+    assert '"tab": "humanize"' in hum
+    assert 'id="hero-h">Free AI Humanizer</h1>' in hum
     assert f'<link rel="canonical" href="{canonical_url("/humanizer")}" />' in hum
-    assert "How the AI humanizer works" in hum
 
     det = client.get("/ai-detector").get_data(as_text=True)
-    assert 'id="app"' not in det
-    assert PUBLIC_PAGES["/ai-detector"].h1 in det
+    assert 'id="app"' in det
+    assert '"tab": "detect"' in det
+    assert 'id="hero-h">Free AI Detector</h1>' in det
     assert f'<link rel="canonical" href="{canonical_url("/ai-detector")}" />' in det
-    assert "How the free AI detector works" in det
-    assert "ai-detector-sentence-highlights.webp" in det
 
     fmt = client.get("/formatter").get_data(as_text=True)
     assert "data-format-v2" in fmt
-    assert PUBLIC_PAGES["/formatter"].h1 in fmt
-    assert "What the essay formatter applies" in fmt
     assert f'<link rel="canonical" href="{canonical_url("/formatter")}" />' in fmt
 
 

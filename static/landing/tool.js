@@ -28,6 +28,8 @@
       limit: 'You have used today’s free runs. Create a free account to get more — it takes a minute.',
       signup: 'Create a free account', rate: 'Too many requests. Wait a minute and try again.',
       retry: 'The humanizer could not finish this time. Nothing was counted — please try again.',
+      waking: 'The humanizer is starting up. Wait a few seconds and try again — this run wasn’t counted.',
+      timeout: 'This is taking too long. Try again in a moment — this run wasn’t counted.',
       network: 'Network error. Check your connection and try again.',
       hardMax: function (n) { return 'Texts up to ' + n + ' words can be humanized at once. Split it into parts.'; },
       englishOnly: 'The humanizer works with English text for now. Paste an English draft and try again.'
@@ -39,12 +41,23 @@
       limit: 'Бесплатные запуски на сегодня закончились. Создайте бесплатный аккаунт — это займёт минуту.',
       signup: 'Создать аккаунт бесплатно', rate: 'Слишком много запросов. Подождите минуту и попробуйте снова.',
       retry: 'Не получилось обработать текст. Запуск не засчитан — попробуйте ещё раз.',
+      waking: 'Хуманайзер запускается. Подождите несколько секунд и попробуйте снова — запуск не засчитан.',
+      timeout: 'Слишком долго. Попробуйте ещё раз через минуту — запуск не засчитан.',
       network: 'Ошибка сети. Проверьте подключение и попробуйте снова.',
       hardMax: function (n) { return 'За раз можно обработать до ' + n + ' слов. Разделите текст на части.'; },
       cyrillic: 'Русскоязычный движок пока в разработке, поэтому русский текст мы не отправляем. Сейчас хуманайзер работает с английскими текстами — вставьте английский текст или откройте ',
       enLink: 'англоязычную версию'
     }
   }[lang];
+
+  /** Wake Modal before the first Humanize click — cold starts used to look like a broken widget. */
+  function warmEngine() {
+    try {
+      fetch('/api/browser/humanizer/warm', { method: 'GET', credentials: 'same-origin', cache: 'no-store' }).catch(function () {});
+    } catch (e) { /* warm is best-effort */ }
+  }
+  warmEngine();
+  input.addEventListener('focus', warmEngine);
 
   var fmt = function (n) { return lang === 'ru' ? String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0') : n.toLocaleString('en-US'); };
   var countWords = function (text) { var m = text.match(/\S+/g); return m ? m.length : 0; };
@@ -150,28 +163,49 @@
     setBusy(true);
     output.textContent = '';
     copyBtn.disabled = true;
-    fetch(endpoint, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ text: text, source: 'landing' })
-    }).then(function (res) {
-      return res.json().catch(function () { return {}; }).then(function (data) { return { res: res, data: data }; });
-    }).then(function (r) {
-      var data = r.data || {};
-      if (r.res.ok && data.success !== false && data.humanized_text) {
-        // Collapse model soft wraps (single newlines); keep blank lines as paragraph breaks.
-        output.textContent = String(data.humanized_text).trim()
-          .replace(/\r\n/g, '\n')
-          .split(/\n\s*\n/)
-          .map(function (p) { return p.replace(/\s*\n\s*/g, ' ').replace(/[ \t]{2,}/g, ' ').trim(); })
-          .filter(Boolean)
-          .join('\n\n');
-        copyBtn.disabled = false;
-        track('landing_humanize_run', { lang: lang, outcome: 'ok', words: words });
-        return;
-      }
+    warmEngine();
+
+    function postOnce(ms) {
+      var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var timer = ctl ? setTimeout(function () { ctl.abort(); }, ms) : null;
+      return fetch(endpoint, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ text: text, source: 'landing', mode: 'free' }),
+        signal: ctl ? ctl.signal : undefined
+      }).then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          return { res: res, data: data };
+        });
+      }).finally(function () { if (timer) clearTimeout(timer); });
+    }
+
+    function applyOk(data) {
+      // Collapse model soft wraps (single newlines); keep blank lines as paragraph breaks.
+      output.textContent = String(data.humanized_text).trim()
+        .replace(/\r\n/g, '\n')
+        .split(/\n\s*\n/)
+        .map(function (p) { return p.replace(/\s*\n\s*/g, ' ').replace(/[ \t]{2,}/g, ' ').trim(); })
+        .filter(Boolean)
+        .join('\n\n');
+      copyBtn.disabled = false;
+      track('landing_humanize_run', { lang: lang, outcome: 'ok', words: words });
+    }
+
+    function handleFail(r, retried) {
+      var data = (r && r.data) || {};
       var code = data.error || '';
+      if (r && r.res && r.res.ok && data.success !== false && data.humanized_text) {
+        applyOk(data);
+        return Promise.resolve();
+      }
+      if (!retried && (code === 'FREE_ENGINE_UNAVAILABLE' || code === 'UNAVAILABLE' || (r && r.res && r.res.status === 503))) {
+        warmEngine();
+        return new Promise(function (resolve) { setTimeout(resolve, 2500); })
+          .then(function () { return postOnce(180000); })
+          .then(function (r2) { return handleFail(r2, true); });
+      }
       if (code === 'REGISTER_REQUIRED' || code === 'FREE_LIMIT_REACHED' || code === 'AUTH_REQUIRED') {
         showMessage(T.limit, 'cta', { signup: 'limit' });
       } else if (code === 'FREE_WORD_LIMIT') {
@@ -181,13 +215,27 @@
       } else if (code === 'FREE_ENGLISH_ONLY') {
         if (lang === 'ru') showMessage(T.cyrillic, 'cta', { link: { href: enPage, text: T.enLink } });
         else showMessage(T.englishOnly, 'error');
-      } else if (r.res.status === 429 || code === 'RATE_LIMITED') {
+      } else if ((r && r.res && r.res.status === 429) || code === 'RATE_LIMITED') {
         showMessage(T.rate, 'error');
+      } else if (code === 'FREE_ENGINE_UNAVAILABLE' || code === 'UNAVAILABLE' || (r && r.res && r.res.status === 503)) {
+        warmEngine();
+        showMessage(data.message || T.waking, 'error');
       } else {
         showMessage(T.retry, 'error');
       }
-      track('landing_humanize_run', { lang: lang, outcome: code || ('http_' + r.res.status), words: words });
-    }).catch(function () {
+      track('landing_humanize_run', { lang: lang, outcome: code || ('http_' + ((r && r.res && r.res.status) || 0)), words: words });
+      return Promise.resolve();
+    }
+
+    postOnce(180000).then(function (r) {
+      return handleFail(r, false);
+    }).catch(function (err) {
+      if (err && err.name === 'AbortError') {
+        warmEngine();
+        showMessage(T.timeout, 'error');
+        track('landing_humanize_run', { lang: lang, outcome: 'timeout', words: words });
+        return;
+      }
       showMessage(T.network, 'error');
       track('landing_humanize_run', { lang: lang, outcome: 'network', words: words });
     }).then(function () { setBusy(false); });

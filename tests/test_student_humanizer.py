@@ -638,18 +638,23 @@ def test_try_student_humanize_rich_keeps_opaque_and_skips_tokens():
     assert seen and all("⟦" not in s for s in seen)
 
 
-def test_cold_model_falls_back_without_waiting(monkeypatch):
+def test_cold_model_attempts_request_anyway(monkeypatch):
+    """StealthWriter is gone — a cold probe still tries the chat call (which boots Modal)."""
     probes, posts = [], []
 
     def slow_boot(url, *, headers, timeout):
         probes.append((url, timeout))
         raise sh.requests.Timeout("booting")
 
+    def still_cold(*a, **k):
+        posts.append(a)
+        raise sh.requests.Timeout("still cold")
+
     monkeypatch.setattr(sh.requests, "get", slow_boot)
-    monkeypatch.setattr(sh.requests, "post", lambda *a, **k: posts.append(a))
+    monkeypatch.setattr(sh.requests, "post", still_cold)
     assert try_student_humanize(PARA, humanizer=StudentTextHumanizer(_config())) is None
     assert probes == [("https://student.test/v1/models", 3.0)]
-    assert posts == []
+    assert posts  # attempted despite cold probe
 
 
 def test_requests_use_the_trained_prompt_and_sampling(monkeypatch):
@@ -685,12 +690,21 @@ def test_routed_requests_are_logged_with_outcome_and_speed(tmp_path, monkeypatch
     try_student_humanize(PARA, humanizer=StudentTextHumanizer(cfg, complete_fn=_rewrite))
     try_student_humanize(PARA, humanizer=StudentTextHumanizer(cfg, complete_fn=lambda _c: ""))
     monkeypatch.setattr(sh.requests, "get", lambda *a, **k: (_ for _ in ()).throw(sh.requests.Timeout("boot")))
+    monkeypatch.setattr(sh.requests, "post", lambda *a, **k: (_ for _ in ()).throw(sh.requests.Timeout("cold")))
     try_student_humanize(PARA, humanizer=StudentTextHumanizer(cfg))
 
     rows = [json.loads(line) for line in log_path.read_text().splitlines()]
-    assert [r["outcome"] for r in rows] == ["served", "failed", "cold"]
+    assert [r["outcome"] for r in rows] == ["served", "failed", "cold_attempt", "failed"]
     assert rows[0]["words"] == len(PARA.split()) and rows[0]["elapsed"] >= 0
     assert "Chunk rejected" in rows[1]["error"]
+
+
+def test_repair_mojibake_restores_utf8_cyrillic():
+    # "Привет" UTF-8 bytes mis-decoded as Latin-1 → classic Ð/Ñ mojibake.
+    broken = "Привет".encode("utf-8").decode("latin-1")
+    assert "Ð" in broken or "Ñ" in broken
+    assert sh.repair_mojibake(broken) == "Привет"
+    assert sh.repair_mojibake("plain english") == "plain english"
 
 
 def test_warm_up_wakes_the_model_at_most_once_a_minute(monkeypatch):
@@ -725,7 +739,8 @@ def test_rescue_waits_for_a_sleeping_model_to_boot(monkeypatch):
     result = try_student_humanize(PARA, humanizer=engine, force=True, wait_for_boot=150, sleep=slept.append)
     assert result["provider"] == PROVIDER
     assert woken == [True]
-    assert slept == [sh.BOOT_POLL_SECONDS, sh.BOOT_POLL_SECONDS]
+    # probes: cold → cold → warm  ⇒ one poll sleep between the two cold checks
+    assert slept == [sh.BOOT_POLL_SECONDS]
 
 
 def test_unconfigured_model_never_waits(monkeypatch):
@@ -905,4 +920,6 @@ def test_student_requests_force_model_and_wait_for_boot(monkeypatch):
 
     monkeypatch.setattr(sh, "try_student_humanize", fake_try)
     assert app_mod._student_humanize("Some text.") is None
-    assert seen == {"force": True, "wait_for_boot": app_mod.STUDENT_RESCUE_WAIT_SECONDS}
+    assert seen["force"] is True
+    assert seen["wait_for_boot"] == app_mod.STUDENT_RESCUE_WAIT_SECONDS
+    assert seen.get("on_chunk") is None

@@ -14,6 +14,63 @@ def test_sanitize_keeps_formatting_drops_scripts():
     assert "position" not in out
 
 
+def test_sanitize_drops_font_weight_and_unwraps_blanket_bold():
+    """Word paste often bolds the whole body; UI looked bold while plain copy was normal."""
+    long = (
+        "Artificial Intelligence (AI) has become one of the most important technological "
+        "developments of the modern world. It refers to systems that perform tasks."
+    )
+    raw = (
+        f'<p style="font-weight: bold"><b>{long}</b></p>'
+        '<p><b>Introduction</b></p>'
+        '<p>Hello <b>world</b> and more.</p>'
+        '<p><span style="font-weight: 700; color: #c00">alert</span></p>'
+    )
+    out = rh.sanitize_html(raw)
+    assert "font-weight" not in out.lower()
+    assert f"<b>{long}</b>" not in out
+    assert long in out
+    assert "<b>Introduction</b>" in out
+    assert "<b>world</b>" in out
+    assert "color: #c00" in out or "color:#c00" in out.replace(" ", "")
+
+
+def test_prepare_skips_blanket_bold_spans():
+    long = (
+        "Artificial Intelligence (AI) has become one of the most important technological "
+        "developments of the modern world across many sectors today."
+    )
+    plain, stash = rh.prepare_rich(f"<p><b>{long}</b></p><p>Hello <b>world</b>.</p>")
+    assert "⟦F" in plain and "world" in plain
+    assert long.replace(" ", "") in plain.replace(" ", "") or long.split()[0] in plain
+    # Long body bold must not be frozen as a format span; short "world" still is.
+    assert all(s.inner_text != long for b in stash.blocks for s in b.spans)
+    assert any(s.inner_text == "world" for b in stash.blocks for s in b.spans)
+
+
+def test_sanitize_unwraps_docs_normal_weight_bold_wrapper():
+    raw = (
+        '<b style="font-weight:normal" id="docs-internal-guid-x">'
+        "<p>Short Docs paste.</p>"
+        "</b>"
+    )
+    out = rh.sanitize_html(raw)
+    assert "<b>" not in out.lower() and "<strong>" not in out.lower()
+    assert "Short Docs paste." in out
+
+
+def test_sanitize_demotes_dense_per_word_bold():
+    words = (
+        "Artificial Intelligence has become one of the most important technological "
+        "developments of the modern world today across sectors"
+    ).split()
+    raw = "<p>" + " ".join(f"<b>{w}</b>" for w in words) + "</p><p><b>Introduction</b></p>"
+    out = rh.sanitize_html(raw)
+    assert out.lower().count("<b>") == 1
+    assert "<b>Introduction</b>" in out
+    assert "Artificial Intelligence has become" in out.replace("<b>", "").replace("</b>", "")
+
+
 def test_sanitize_drops_word_style_block_not_into_text():
     raw = (
         "<html><head><style><!--\n"

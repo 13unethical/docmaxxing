@@ -22,8 +22,8 @@ import re
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -68,6 +68,12 @@ MAX_CANDIDATES = 16
 # pick="detector": a chunk whose best variant the AI detector still scores above this gets
 # ``refine_sampling`` more variants before the final choice.
 REFINE_ABOVE = 0.3
+# Fast mode (opt-in): fewer candidates, refine only when the chunk still looks AI.
+FAST_SAMPLING = ((1.2, 4),)
+FAST_REFINE_SAMPLING = ((1.2, 12),)
+FAST_REFINE_ABOVE = 0.35
+# Cap parallel chunk rewrites so vLLM is not flooded (n candidates × chunks).
+DEFAULT_MAX_WORKERS = 8
 # pick="document": rounds of "score the whole text, rewrite the flagged chunks", within this many seconds.
 DOC_ROUNDS = 3
 DOC_BUDGET_SECONDS = 45.0
@@ -169,6 +175,26 @@ def student_config() -> StudentConfig:
     )
 
 
+def student_config_for_mode(mode: str | None = None) -> StudentConfig:
+    """Return config for ``quality`` (default) or opt-in ``fast`` sampling."""
+    cfg = student_config()
+    if (mode or "").strip().lower() != "fast":
+        return cfg
+    return replace(
+        cfg,
+        sampling=FAST_SAMPLING,
+        refine_sampling=FAST_REFINE_SAMPLING,
+        refine_above=FAST_REFINE_ABOVE,
+    )
+
+
+def student_max_workers() -> int:
+    try:
+        return max(1, min(32, int(os.environ.get("HUMANIZER_STUDENT_MAX_WORKERS") or DEFAULT_MAX_WORKERS)))
+    except ValueError:
+        return DEFAULT_MAX_WORKERS
+
+
 def system_prompt(level: int) -> str:
     """Must match the prompt the model was trained with (services/humanizer_training/section_sft.py)."""
     return (
@@ -181,6 +207,22 @@ def system_prompt(level: int) -> str:
 def is_english(text: str) -> bool:
     letters = len(_LETTER.findall(text))
     return letters > 0 and len(_CYRILLIC.findall(text)) / letters < 0.2
+
+
+def repair_mojibake(text: str) -> str:
+    """Undo UTF-8→Latin-1 mojibake (Ð/Ñ… from Cyrillic). No-op when text is clean."""
+    if not text:
+        return text
+    markers = text.count("Ð") + text.count("Ñ") + text.count("Â")
+    if markers < 3:
+        return text
+    try:
+        fixed = text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+    if fixed.count("Ð") + fixed.count("Ñ") + fixed.count("Â") < markers:
+        return fixed
+    return text
 
 
 def _wc(text: str) -> int:
@@ -522,15 +564,27 @@ class StudentTextHumanizer:
         *,
         complete_fn: Callable[[str], str] | None = None,
         score_fn: Callable[[list[str]], list[float]] | None = None,
-        max_workers: int = 32,
+        max_workers: int | None = None,
     ) -> None:
         self.config = config or student_config()
         self._complete_fn = complete_fn
         self._score_fn = score_fn or _detector_score
-        self.max_workers = max_workers
+        self.max_workers = student_max_workers() if max_workers is None else max_workers
         self._fallback_scorer = MockTextHumanizer()
 
-    def humanize(self, text: str, *, academic_tone: str = "formal") -> str:
+    def humanize(
+        self,
+        text: str,
+        *,
+        academic_tone: str = "formal",
+        on_chunk: Callable[[dict[str, Any]], None] | None = None,
+    ) -> str:
+        """Rewrite prose. ``on_chunk`` is called as each piece is ready (passthrough or rewrite).
+
+        Chunk event: ``{index, text, status, rewrite_total, rewrite_done, pieces}`` where
+        ``status`` is ``pending`` (source text shown while rewriting), ``passthrough``,
+        ``ready``, or ``final``.
+        """
         del academic_tone
         if not text.strip():
             return text
@@ -543,20 +597,74 @@ class StudentTextHumanizer:
         pieces = plan_chunks(before, separator, self.config.chunk_words)
         if plain_refs:
             pieces += [(plain_refs, False), *plan_chunks(after, separator, self.config.chunk_words)]
-        todo = [piece for piece, rewrite in pieces if rewrite]
-        if not todo:
-            raise StudentHumanizerError("No prose to rewrite")
         conclusions = conclusion_pieces(pieces) if self.config.conclusion_sampling else set()
-        flags = [i in conclusions for i, (_, rewrite) in enumerate(pieces) if rewrite]
+        rewrite_jobs: list[tuple[int, str, bool]] = [
+            (i, piece, i in conclusions)
+            for i, (piece, rewrite) in enumerate(pieces)
+            if rewrite
+        ]
+        if not rewrite_jobs:
+            raise StudentHumanizerError("No prose to rewrite")
 
-        with ThreadPoolExecutor(max_workers=max(1, min(self.max_workers, len(todo)))) as pool:
-            rewritten = iter(pool.map(self._rewrite_chunk, todo, flags))
-        out = [next(rewritten) if rewrite else piece for piece, rewrite in pieces]
+        out: list[str | None] = [None] * len(pieces)
+        rewrite_total = len(rewrite_jobs)
+        rewrite_done = 0
+
+        def _emit(index: int, text_out: str, status: str) -> None:
+            if on_chunk is None:
+                return
+            on_chunk(
+                {
+                    "index": index,
+                    "text": text_out,
+                    "status": status,
+                    "rewrite_total": rewrite_total,
+                    "rewrite_done": rewrite_done,
+                    "pieces": len(pieces),
+                }
+            )
+
+        # Show the whole document immediately: originals for rewrite slots, passthrough as-is.
+        for i, (piece, rewrite) in enumerate(pieces):
+            if rewrite:
+                _emit(i, piece, "pending")
+            else:
+                out[i] = piece
+                _emit(i, piece, "passthrough")
+
+        workers = max(1, min(self.max_workers, len(rewrite_jobs)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(self._rewrite_chunk, piece, conclusion): piece_i
+                for piece_i, piece, conclusion in rewrite_jobs
+            }
+            for fut in as_completed(futures):
+                piece_i = futures[fut]
+                text_out = fut.result()
+                out[piece_i] = text_out
+                rewrite_done += 1
+                _emit(piece_i, text_out, "ready")
+
+        if any(part is None for part in out):
+            raise StudentHumanizerError("Missing rewritten chunk")
+        final = [part or "" for part in out]
         if self.config.pick == "document":
-            out = self._fix_flagged(pieces, out, separator)
+            final = self._fix_flagged(pieces, final, separator)
+            if on_chunk is not None:
+                for i, text_out in enumerate(final):
+                    on_chunk(
+                        {
+                            "index": i,
+                            "text": text_out,
+                            "status": "final",
+                            "rewrite_total": rewrite_total,
+                            "rewrite_done": rewrite_total,
+                            "pieces": len(pieces),
+                        }
+                    )
         if separator == "\n":
-            out = [p.replace("\n\n", "\n") for p in out]
-        return join_body_and_references(separator.join(out), refs)
+            final = [p.replace("\n\n", "\n") for p in final]
+        return join_body_and_references(separator.join(final), refs)
 
     def _rewrite_chunk(self, chunk: str, conclusion: bool = False) -> str:
         problem = "NOT_RUN"
@@ -826,6 +934,13 @@ def _ping(cfg: StudentConfig) -> None:
         )
     except requests.RequestException as exc:
         log.info("student humanizer wake-up failed: %s", exc)
+    # Detector pick path cold-starts ~11 s; wake it with the model.
+    try:
+        from services import ai_detector
+
+        ai_detector.score_texts(["Warm-up probe for the student humanizer."])
+    except Exception as exc:  # noqa: BLE001
+        log.info("AI detector wake-up failed: %s", exc)
 
 
 def record_event(cfg: StudentConfig, outcome: str, **fields: Any) -> None:
@@ -848,12 +963,21 @@ def _wait_until_warm(engine: StudentTextHumanizer, budget: float, sleep: Callabl
     if budget <= 0:
         return False
     warm_up(engine.config, force=True)
-    deadline = time.monotonic() + budget
-    while time.monotonic() < deadline:
-        sleep(BOOT_POLL_SECONDS)
-        if engine.is_warm():
-            return True
-    return False
+    # Cold Modal boots often take 20–40s; a 3s probe can miss a mid-boot server.
+    # Temporarily lengthen the engine's probe while we poll via ``is_warm`` (testable).
+    original = engine.config
+    cold_probe = max(float(original.probe_timeout), 20.0)
+    if cold_probe > original.probe_timeout:
+        engine.config = replace(original, probe_timeout=cold_probe)
+    try:
+        deadline = time.monotonic() + budget
+        while time.monotonic() < deadline:
+            if engine.is_warm():
+                return True
+            sleep(BOOT_POLL_SECONDS)
+        return engine.is_warm()
+    finally:
+        engine.config = original
 
 
 def try_student_humanize(
@@ -863,33 +987,47 @@ def try_student_humanize(
     force: bool = False,
     wait_for_boot: float = 0.0,
     sleep: Callable[[float], None] = time.sleep,
+    on_chunk: Callable[[dict[str, Any]], None] | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any] | None:
     """Humanize with the student model when this request falls into its share.
 
     ``force`` skips the share draw; ``wait_for_boot`` waits up to that many seconds for a
     sleeping model instead of giving up at once.
+    ``on_chunk`` receives each finished piece as soon as it is ready (for SSE).
+    ``mode="fast"`` uses fewer candidates (not the default).
     Returns a job-like result dict, or None when the caller should use StealthWriter.
     """
-    engine = humanizer or StudentTextHumanizer()
+    engine = humanizer or StudentTextHumanizer(student_config_for_mode(mode))
     cfg = engine.config
     if not cfg.configured and engine._complete_fn is None:
         return None
     if not force and not pick_student(cfg):
         return None
+    text = repair_mojibake(text)
     if not is_english(text):
         return None
     words = _wc(text)
     started = time.monotonic()
-    if not _wait_until_warm(engine, wait_for_boot, sleep):
-        log.info("student humanizer is cold; using StealthWriter while it boots")
-        record_event(cfg, "cold", words=words, waited=round(time.monotonic() - started, 1))
-        return None
+    warmed = _wait_until_warm(engine, wait_for_boot, sleep)
     waited = round(time.monotonic() - started, 1)
+    if not warmed:
+        # StealthWriter is gone — still try once; the chat call itself boots Modal.
+        log.info("student humanizer still cold after %.1fs; attempting request anyway", waited)
+        record_event(cfg, "cold_attempt", words=words, waited=waited)
     started = time.monotonic()
+    ttfb: list[float] = []
+
+    def _wrap_chunk(evt: dict[str, Any]) -> None:
+        if evt.get("status") == "ready" and not ttfb:
+            ttfb.append(round(time.monotonic() - started, 2))
+        if on_chunk is not None:
+            on_chunk(evt)
+
     try:
-        output = engine.humanize(text)
+        output = engine.humanize(text, on_chunk=_wrap_chunk)
     except Exception as exc:  # noqa: BLE001
-        log.warning("student humanizer failed, falling back to StealthWriter: %s", exc)
+        log.warning("student humanizer failed: %s", exc)
         record_event(
             cfg, "failed", words=words, elapsed=round(time.monotonic() - started, 2), error=str(exc)[:200]
         )
@@ -898,10 +1036,18 @@ def try_student_humanize(
     if not output.strip() or output.strip() == text.strip():
         record_event(cfg, "failed", words=words, elapsed=elapsed, error="UNCHANGED")
         return None
-    record_event(cfg, "served", words=words, elapsed=elapsed, **({"waited": waited} if waited >= 1 else {}))
+    record_event(
+        cfg,
+        "served",
+        words=words,
+        elapsed=elapsed,
+        **({"waited": waited} if waited >= 1 else {}),
+        **({"ttfb_chunk": ttfb[0]} if ttfb else {}),
+    )
     return {
         "humanized_text": output,
         "elapsed_seconds": elapsed,
+        "ttfb_chunk_seconds": ttfb[0] if ttfb else None,
         "provider": PROVIDER,
         "engine": engine.VERSION,
         "request_id": f"student-{uuid.uuid4().hex[:12]}",
@@ -915,6 +1061,8 @@ def try_student_humanize_rich(
     force: bool = False,
     wait_for_boot: float = 0.0,
     sleep: Callable[[float], None] = time.sleep,
+    on_chunk: Callable[[dict[str, Any]], None] | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any] | None:
     """Humanize HTML by rewriting prose blocks only (tables/headings never go to the model).
 
@@ -923,25 +1071,28 @@ def try_student_humanize_rich(
     """
     from services.humanizer_engine.rich_html import html_to_plaintext, humanize_rich
 
-    engine = humanizer or StudentTextHumanizer()
+    engine = humanizer or StudentTextHumanizer(student_config_for_mode(mode))
     cfg = engine.config
     if not cfg.configured and engine._complete_fn is None:
         return None
     if not force and not pick_student(cfg):
         return None
-    plain_check = html_to_plaintext(html_doc)
+    plain_check = repair_mojibake(html_to_plaintext(html_doc))
     if not plain_check.strip():
         return None
     if not is_english(plain_check):
         return None
+    # Keep HTML in sync when plaintext was mojibake-repaired.
+    html_doc = repair_mojibake(html_doc)
     words = _wc(plain_check)
     started = time.monotonic()
-    if not _wait_until_warm(engine, wait_for_boot, sleep):
-        log.info("student humanizer is cold; skipping rich humanize while it boots")
-        record_event(cfg, "cold", words=words, waited=round(time.monotonic() - started, 1))
-        return None
+    warmed = _wait_until_warm(engine, wait_for_boot, sleep)
     waited = round(time.monotonic() - started, 1)
+    if not warmed:
+        log.info("student rich humanizer still cold after %.1fs; attempting anyway", waited)
+        record_event(cfg, "cold_attempt", words=words, waited=waited)
     started = time.monotonic()
+    ttfb: list[float] = []
 
     def rewrite(line: str) -> str:
         text = (line or "").strip()
@@ -953,8 +1104,16 @@ def try_student_humanize_rich(
         except StudentHumanizerError:
             return line
 
+    def _wrap_chunk(evt: dict[str, Any]) -> None:
+        if evt.get("status") == "ready" and not ttfb:
+            ttfb.append(round(time.monotonic() - started, 2))
+        if on_chunk is not None:
+            on_chunk(evt)
+
     try:
-        rich, text = humanize_rich(html_doc, rewrite, max_workers=engine.max_workers)
+        rich, text = humanize_rich(
+            html_doc, rewrite, max_workers=engine.max_workers, on_chunk=_wrap_chunk
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("student rich humanizer failed: %s", exc)
         record_event(
@@ -972,11 +1131,19 @@ def try_student_humanize_rich(
     if text.strip() == plain_check.strip():
         record_event(cfg, "failed", words=words, elapsed=elapsed, error="UNCHANGED")
         return None
-    record_event(cfg, "served", words=words, elapsed=elapsed, **({"waited": waited} if waited >= 1 else {}))
+    record_event(
+        cfg,
+        "served",
+        words=words,
+        elapsed=elapsed,
+        **({"waited": waited} if waited >= 1 else {}),
+        **({"ttfb_chunk": ttfb[0]} if ttfb else {}),
+    )
     return {
         "humanized_text": text,
         "humanized_html": rich,
         "elapsed_seconds": elapsed,
+        "ttfb_chunk_seconds": ttfb[0] if ttfb else None,
         "provider": PROVIDER,
         "engine": engine.VERSION,
         "request_id": f"student-{uuid.uuid4().hex[:12]}",
