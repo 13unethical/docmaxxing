@@ -703,9 +703,22 @@ class StudentTextHumanizer:
                     problem = "NO_VARIANTS"
                     continue
                 # pick=document: one write per chunk; extra variants only when _fix_flagged/_refit runs.
+                # If that one-shot DRIFTED/UNCHANGED, immediately pull a small pool (same attempt)
+                # so the whole request does not fail the way n=1 + ATTEMPTS used to.
                 if self.config.pick == "document":
                     temperature = (self.config.sampling_plan or ((self.config.temperature, 1),))[0][0]
                     variants = self._candidates(source, ((temperature, 1),))
+                    usable, problem, light = self._usable(source, variants)
+                    if light is not None and (lightest is None or light[0] < lightest[0]):
+                        lightest = (light[0], _with_marker(light[1]))
+                    if not usable:
+                        rescue = self.config.refine_sampling or ((temperature, 4),)
+                        log.info(
+                            "student humanizer document one-shot %s; rescuing with %s",
+                            problem,
+                            rescue,
+                        )
+                        variants = self._candidates(source, rescue)
                 else:
                     variants = self._candidates(source)
             except (requests.RequestException, StudentHumanizerError, KeyError, ValueError, IndexError) as exc:

@@ -493,6 +493,36 @@ def test_document_pick_first_pass_requests_one_candidate(monkeypatch):
     assert sent == [(1.2, 1)]
 
 
+def test_document_pick_rescues_drifted_oneshot_with_refine_pool(monkeypatch):
+    sent = []
+    drift = "Completely unrelated astronomy essay about quasars and nebulae only."
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, n):
+            self.n = n
+
+        def json(self):
+            # First one-shot drifts; rescue pool returns a valid rewrite.
+            texts = [drift] if self.n == 1 else [_rewrite(PARA) for _ in range(self.n)]
+            return {"choices": [{"message": {"content": t}} for t in texts]}
+
+    def fake_post(url, headers, json, timeout):
+        sent.append((json["temperature"], json["n"]))
+        return _Resp(json["n"])
+
+    monkeypatch.setattr(sh.requests, "post", fake_post)
+    engine = StudentTextHumanizer(
+        _config(pick="document", sampling=((1.2, 1),), refine_sampling=((1.2, 3),)),
+        score_fn=lambda texts: [0.05] * len(texts),
+    )
+    out = engine.humanize(PARA)
+    assert sent == [(1.2, 1), (1.2, 3)]
+    assert sh.chunk_problem(PARA, out) is None
+    assert out == _rewrite(PARA)
+
+
 def test_document_pick_rewrites_only_the_chunks_the_whole_text_check_flags(monkeypatch):
     from services import ai_detector
 
