@@ -711,11 +711,15 @@ class StudentTextHumanizer:
                     usable, problem, light = self._usable(source, variants)
                     if light is not None and (lightest is None or light[0] < lightest[0]):
                         lightest = (light[0], _with_marker(light[1]))
-                    if not usable:
-                        rescue = self.config.refine_sampling or ((temperature, 4),)
+                    rescue = self.config.refine_sampling or ((temperature, 4),)
+                    # Rescue when unusable OR when the only hit barely rewrote (echo).
+                    need_rescue = not usable or (
+                        usable and _jaccard(source, pick_candidate(source, usable, "changed").text) > 0.92
+                    )
+                    if need_rescue:
                         log.info(
                             "student humanizer document one-shot %s; rescuing with %s",
-                            problem,
+                            problem if not usable else "NEAR_ECHO",
                             rescue,
                         )
                         variants = self._candidates(source, rescue)
@@ -1200,14 +1204,19 @@ def try_student_humanize_rich(
     ttfb: list[float] = []
 
     failures: list[str] = []
+    model_blocks = 0
 
     def rewrite(line: str) -> str:
+        nonlocal model_blocks
         text = (line or "").strip()
         if not text or len(text) < MIN_HUMANIZE_CHARS:
             return line
         try:
-            # Each rich block is one source paragraph — collapse model soft wraps / blank splits.
-            return engine._rewrite_chunk(line, True)
+            # Per-block rewrite; conclusion extras only for real closers (not every line).
+            conclusion = bool(_CONCLUSION_OPENER.match(text))
+            out = engine._rewrite_chunk(line, conclusion)
+            model_blocks += 1
+            return out
         except StudentHumanizerError as exc:
             failures.append(str(exc)[:160])
             raise
@@ -1236,12 +1245,27 @@ def try_student_humanize_rich(
     if not text.strip():
         record_event(cfg, "failed", words=words, elapsed=elapsed, error="EMPTY")
         return None
-    if text.strip() == plain_check.strip():
-        record_event(cfg, "failed", words=words, elapsed=elapsed, error="UNCHANGED")
-        return None
-    if _jaccard(plain_check, text) > 0.92:
-        record_event(cfg, "failed", words=words, elapsed=elapsed, error="NEAR_UNCHANGED")
-        return None
+    unchanged = text.strip() == plain_check.strip()
+    near = (not unchanged) and _jaccard(plain_check, text) > 0.92
+    # Contenteditable HTML often splits into tiny lines that skip the model (0.01s
+    # NEAR_UNCHANGED). Fall back to a real plaintext document rewrite.
+    if unchanged or near or model_blocks == 0:
+        reason = "UNCHANGED" if unchanged else ("NEAR_UNCHANGED" if near else "NO_MODEL_BLOCKS")
+        record_event(cfg, "failed", words=words, elapsed=elapsed, error=f"{reason}_FALLBACK")
+        log.info(
+            "student rich humanizer %s (model_blocks=%s); plaintext fallback",
+            reason,
+            model_blocks,
+        )
+        return try_student_humanize(
+            plain_check,
+            humanizer=engine,
+            force=True,
+            wait_for_boot=0.0,
+            sleep=sleep,
+            on_chunk=on_chunk,
+            mode=None,
+        )
     record_event(
         cfg,
         "served",

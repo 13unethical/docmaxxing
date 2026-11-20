@@ -523,6 +523,36 @@ def test_document_pick_rescues_drifted_oneshot_with_refine_pool(monkeypatch):
     assert out == _rewrite(PARA)
 
 
+def test_document_pick_rescues_near_echo_oneshot(monkeypatch):
+    sent = []
+    # Tiny edit — passes chunk_problem but jaccard with source stays > 0.92.
+    echo = PARA.replace("study", "Study", 1)
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, n):
+            self.n = n
+
+        def json(self):
+            texts = [echo] if self.n == 1 else [_rewrite(PARA) for _ in range(self.n)]
+            return {"choices": [{"message": {"content": t}} for t in texts]}
+
+    def fake_post(url, headers, json, timeout):
+        sent.append((json["temperature"], json["n"]))
+        return _Resp(json["n"])
+
+    monkeypatch.setattr(sh.requests, "post", fake_post)
+    engine = StudentTextHumanizer(
+        _config(pick="document", sampling=((1.2, 1),), refine_sampling=((1.2, 2),)),
+        score_fn=lambda texts: [0.05] * len(texts),
+    )
+    out = engine.humanize(PARA)
+    assert sent == [(1.2, 1), (1.2, 2)]
+    assert out == _rewrite(PARA)
+    assert sh._jaccard(PARA, echo) > 0.92
+
+
 def test_document_pick_rewrites_only_the_chunks_the_whole_text_check_flags(monkeypatch):
     from services import ai_detector
 
