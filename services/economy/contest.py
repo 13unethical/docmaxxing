@@ -309,7 +309,11 @@ def on_humanize_success(user_id: int, *, email_verified: bool = True) -> dict[st
 
 
 def _has_humanize_history_sql() -> str:
-    """SQL fragment: user id alias must be `u`."""
+    """SQL fragment: user id alias must be `u`.
+
+    Usage rows are labeled ``Humanizer`` (see usage.FEATURE_HUMANIZER); wallet
+    debits and plan_usage use ``humanize``. Match both.
+    """
     return """
               (
                 EXISTS (
@@ -319,7 +323,7 @@ def _has_humanize_history_sql() -> str:
                 OR EXISTS (
                   SELECT 1 FROM usage_events ue
                   WHERE ue.user_id = u.id
-                    AND (ue.feature = 'humanize' OR ue.feature LIKE 'humanize%')
+                    AND lower(ue.feature) LIKE 'humaniz%'
                 )
                 OR EXISTS (
                   SELECT 1 FROM humanizer_dataset_logs h
@@ -328,8 +332,14 @@ def _has_humanize_history_sql() -> str:
                 OR EXISTS (
                   SELECT 1 FROM transactions t
                   WHERE t.user_id = u.id
-                    AND (t.feature = 'humanize' OR t.feature LIKE 'humanize%')
+                    AND lower(t.feature) LIKE 'humaniz%'
                     AND t.kind = 'debit'
+                )
+                OR EXISTS (
+                  SELECT 1 FROM plan_usage pu
+                  WHERE pu.user_id = u.id
+                    AND pu.feature = 'humanize'
+                    AND pu.used > 0
                 )
               )
     """
@@ -383,15 +393,16 @@ def backfill_friend_humanize_points(*, force: bool = False) -> int:
 
     Also opens eligibility for historical humanizers and for hosts who already
     hold race points. Idempotent via contest_hum_{friend_id}. Uses meta key
-    friend_hum_backfill_v2 so DBs that ran the first pass still re-sync.
+    friend_hum_backfill_v3 so DBs that ran earlier passes still re-sync after
+    the Humanizer/plan_usage detection fix.
     """
     phase = contest_phase()
     if phase not in ("live", "verify", "results") and not force:
         return 0
     with connect() as conn:
         ensure_contest_schema(conn)
-        if not force and _meta_get(conn, "friend_hum_backfill_v2") == "1":
-            # Still heal eligibility if points exist without eligible rows.
+        if not force and _meta_get(conn, "friend_hum_backfill_v3") == "1":
+            # Still heal eligibility if points/history exist without eligible rows.
             _backfill_eligibility_from_history(conn)
             return 0
         _backfill_eligibility_from_history(conn)
@@ -432,6 +443,7 @@ def backfill_friend_humanize_points(*, force: bool = False) -> int:
             )
         _meta_set(conn, "friend_hum_backfill", "1")
         _meta_set(conn, "friend_hum_backfill_v2", "1")
+        _meta_set(conn, "friend_hum_backfill_v3", "1")
         return awarded
 
 

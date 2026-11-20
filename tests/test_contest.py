@@ -118,6 +118,26 @@ def test_backfill_marks_host_eligible_from_wallet_debit(monkeypatch, economy):
     assert board[0]["pts"] == 1
 
 
+def test_backfill_detects_usage_feature_humanizer_label(monkeypatch, economy):
+    """usage_events store FEATURE_HUMANIZER='Humanizer', not lowercase humanize."""
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    host = _user("humlabel@example.com")
+    friend = _user("humfriend@example.com")
+    with economy_db.connect() as conn:
+        conn.execute(
+            "INSERT INTO usage_events (user_id, feature, credits_used) VALUES (?, 'Humanizer', 0)",
+            (host["id"],),
+        )
+        conn.execute(
+            "INSERT INTO plan_usage (user_id, feature, period_key, used) "
+            "VALUES (?, 'humanize', 'day:2026-11-20', 3)",
+            (friend["id"],),
+        )
+    C.backfill_friend_humanize_points(force=True)
+    assert C.profile_for_user(host, public_origin="")["state"] != "need_humanize"
+    assert C.profile_for_user(friend, public_origin="")["state"] != "need_humanize"
+
+
 def test_deposit_pending_then_confirm(monkeypatch, economy):
     monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
     user = _user("spender@example.com")
