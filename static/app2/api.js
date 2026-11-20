@@ -478,8 +478,20 @@
         datasetStats: () => request('GET', '/api/admin/dataset-stats'),
         blogList: () => request('GET', `${P}/blog`),
         blogSave: (posts) => request('PUT', `${P}/blog`, { json: { posts } }),
+        contest: () => request('GET', '/api/admin/contest'),
+        contestFlag: (userId, status, reason) =>
+          request('POST', '/api/admin/contest/flag', {
+            json: { user_id: userId, status, reason: reason || '' },
+          }),
+        contestPublish: () => request('POST', '/api/admin/contest/publish', { json: {} }),
       };
     })(),
+
+    contest: {
+      me: () => request('GET', '/api/contest/me'),
+      leaderboard: (limit = 30) =>
+        request('GET', `/api/contest/leaderboard?limit=${encodeURIComponent(limit)}`),
+    },
 
     referral: {
       me: () => request('GET', '/api/referral/me'),

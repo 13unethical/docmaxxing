@@ -3501,14 +3501,21 @@ const raceState = () => (state._race ||= { loaded: false, data: null, busy: fals
 async function raceLoad(force = false) {
   const s = raceState();
   if (s.busy) return s.data;
+  const topLen = Array.isArray(s.data?.top) ? s.data.top.length : 0;
   // Refetch guest/empty payloads after sign-in, or when the board never filled.
   const guestWhileSignedIn = s.loaded && state.signedIn && (!s.data?.me || s.data.state === 'guest');
-  const staleEmpty = s.loaded && Array.isArray(s.data?.top) && s.data.top.length === 0
-    && (!s.data?.me || s.data.me.kind === 'nohum' || s.data.state === 'need_humanize');
+  const staleEmpty = s.loaded && topLen === 0;
   if (s.loaded && !force && !guestWhileSignedIn && !staleEmpty) return s.data;
   s.busy = true;
   try {
     const data = await API.contest.me();
+    // If /me somehow returns an empty board, fall back to the public leaderboard.
+    if (!Array.isArray(data?.top) || data.top.length === 0) {
+      try {
+        const board = await API.contest.leaderboard(30);
+        data.top = board.leaders || board.top || [];
+      } catch (_) { /* keep me payload */ }
+    }
     s.data = data;
     s.loaded = true;
     if (data?.referral_code) CONFIG.earn.code = data.referral_code;
@@ -3774,8 +3781,10 @@ function renderRaceBar() {
 
 function renderHome() {
   const signed = state.signedIn;
+  const topLen = Array.isArray(raceState().data?.top) ? raceState().data.top.length : 0;
   const needRace = !raceState().busy && (
     !raceState().loaded
+    || topLen === 0
     || (signed && (!raceState().data?.me || !raceInviteLink().includes('ref=')))
   );
   if (needRace) {
