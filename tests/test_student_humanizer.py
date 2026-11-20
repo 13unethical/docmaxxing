@@ -467,7 +467,7 @@ def _ai_if_moreover(texts):
     return [0.95 if "Moreover" in t else 0.05 for t in texts]
 
 
-def test_document_pick_first_pass_requests_one_candidate(monkeypatch):
+def test_document_pick_first_pass_uses_sampling_plan(monkeypatch):
     sent = []
 
     class _Resp:
@@ -484,16 +484,21 @@ def test_document_pick_first_pass_requests_one_candidate(monkeypatch):
         return _Resp(json["n"])
 
     monkeypatch.setattr(sh.requests, "post", fake_post)
-    # Even with a wide sampling plan, document mode must one-shot the first pass.
     engine = StudentTextHumanizer(
-        _config(pick="document", sampling=((1.2, 8),), refine_sampling=((1.2, 4),)),
+        _config(
+            pick="document",
+            sampling=((1.2, 4),),
+            refine_sampling=((1.2, 4),),
+            doc_flag_above=0.99,
+            doc_rounds=0,
+        ),
         score_fn=lambda texts: [0.05] * len(texts),
     )
     engine.humanize(PARA)
-    assert sent == [(1.2, 1)]
+    assert sent == [(1.2, 4)]
 
 
-def test_document_pick_rescues_drifted_oneshot_with_refine_pool(monkeypatch):
+def test_document_pick_rescues_drifted_first_pass_with_refine_pool(monkeypatch):
     sent = []
     drift = "Completely unrelated astronomy essay about quasars and nebulae only."
 
@@ -504,8 +509,7 @@ def test_document_pick_rescues_drifted_oneshot_with_refine_pool(monkeypatch):
             self.n = n
 
         def json(self):
-            # First one-shot drifts; rescue pool returns a valid rewrite.
-            texts = [drift] if self.n == 1 else [_rewrite(PARA) for _ in range(self.n)]
+            texts = [drift] * self.n if self.n == 2 else [_rewrite(PARA) for _ in range(self.n)]
             return {"choices": [{"message": {"content": t}} for t in texts]}
 
     def fake_post(url, headers, json, timeout):
@@ -514,43 +518,45 @@ def test_document_pick_rescues_drifted_oneshot_with_refine_pool(monkeypatch):
 
     monkeypatch.setattr(sh.requests, "post", fake_post)
     engine = StudentTextHumanizer(
-        _config(pick="document", sampling=((1.2, 1),), refine_sampling=((1.2, 3),)),
+        _config(
+            pick="document",
+            sampling=((1.2, 2),),
+            refine_sampling=((1.2, 3),),
+            doc_flag_above=0.99,
+            doc_rounds=0,
+        ),
         score_fn=lambda texts: [0.05] * len(texts),
     )
     out = engine.humanize(PARA)
-    assert sent == [(1.2, 1), (1.2, 3)]
+    assert sent == [(1.2, 2), (1.2, 3)]
     assert sh.chunk_problem(PARA, out) is None
     assert out == _rewrite(PARA)
 
 
-def test_document_pick_rescues_near_echo_oneshot(monkeypatch):
-    sent = []
-    # Tiny edit — passes chunk_problem but jaccard with source stays > 0.92.
+def test_document_pick_rescues_near_echo_first_pass():
     echo = PARA.replace("study", "Study", 1)
+    assert sh._jaccard(PARA, echo) > 0.92
+    calls = {"n": 0}
 
-    class _Resp:
-        status_code = 200
+    def complete(_chunk: str) -> str:
+        calls["n"] += 1
+        # First-pass pool (2) echoes; rescue pool (2) rewrites.
+        return echo if calls["n"] <= 2 else _rewrite(PARA)
 
-        def __init__(self, n):
-            self.n = n
-
-        def json(self):
-            texts = [echo] if self.n == 1 else [_rewrite(PARA) for _ in range(self.n)]
-            return {"choices": [{"message": {"content": t}} for t in texts]}
-
-    def fake_post(url, headers, json, timeout):
-        sent.append((json["temperature"], json["n"]))
-        return _Resp(json["n"])
-
-    monkeypatch.setattr(sh.requests, "post", fake_post)
     engine = StudentTextHumanizer(
-        _config(pick="document", sampling=((1.2, 1),), refine_sampling=((1.2, 2),)),
+        _config(
+            pick="document",
+            sampling=((1.2, 2),),
+            refine_sampling=((1.2, 2),),
+            doc_flag_above=0.99,
+            doc_rounds=0,
+        ),
+        complete_fn=complete,
         score_fn=lambda texts: [0.05] * len(texts),
     )
     out = engine.humanize(PARA)
-    assert sent == [(1.2, 1), (1.2, 2)]
+    assert calls["n"] == 4
     assert out == _rewrite(PARA)
-    assert sh._jaccard(PARA, echo) > 0.92
 
 
 def test_document_pick_rewrites_only_the_chunks_the_whole_text_check_flags(monkeypatch):
@@ -565,7 +571,20 @@ def test_document_pick_rewrites_only_the_chunks_the_whole_text_check_flags(monke
         seen.append(chunk)
         return ("Moreover, " if "57" in chunk and seen.count(chunk) == 1 else "") + _rewrite(chunk)
 
-    engine = StudentTextHumanizer(_config(chunk_words=1, pick="document"), complete_fn=complete, score_fn=_ai_if_moreover)
+    engine = StudentTextHumanizer(
+        _config(
+            chunk_words=1,
+            pick="document",
+            sampling=((1.0, 1),),
+            refine_sampling=((1.0, 1),),
+            refine_above=0.5,
+            doc_flag_above=0.5,
+            doc_rounds=3,
+            conclusion_sampling=(),
+        ),
+        complete_fn=complete,
+        score_fn=_ai_if_moreover,
+    )
     out = engine.humanize("\n\n".join(paras))
     assert out.split("\n\n") == [_rewrite(p) for p in paras]
     assert sorted(seen) == sorted([paras[0], paras[1], paras[1], paras[2]])
@@ -650,17 +669,26 @@ def test_student_config_reads_detector_settings(monkeypatch):
     assert (cfg.doc_rounds, cfg.doc_budget) == (2, 30.0)
 
 
-def test_student_config_defaults_document_one_shot(monkeypatch):
+def test_student_config_defaults_document_strict_pool(monkeypatch):
     for key in (
         "HUMANIZER_STUDENT_PICK",
         "HUMANIZER_STUDENT_SAMPLING",
+        "HUMANIZER_STUDENT_REFINE_SAMPLING",
+        "HUMANIZER_STUDENT_REFINE_ABOVE",
         "HUMANIZER_STUDENT_CONCLUSION_SAMPLING",
         "HUMANIZER_STUDENT_EARLY_STOP",
+        "HUMANIZER_STUDENT_DOC_FLAG_ABOVE",
+        "HUMANIZER_STUDENT_DOC_ROUNDS",
+        "HUMANIZER_STUDENT_DOC_BUDGET",
     ):
         monkeypatch.delenv(key, raising=False)
     cfg = sh.student_config()
     assert cfg.pick == "document"
-    assert cfg.sampling_plan == ((1.2, 1),)
+    assert cfg.sampling_plan == sh.DOCUMENT_SAMPLING
+    assert cfg.refine_sampling == sh.DOCUMENT_REFINE_SAMPLING
+    assert cfg.refine_above == 0.22
+    assert cfg.doc_flag_above == sh.DOC_FLAG_ABOVE
+    assert cfg.doc_rounds == sh.DOC_ROUNDS
     assert cfg.conclusion_sampling == sh.DEFAULT_CONCLUSION_SAMPLING
     assert cfg.early_stop_below == sh.EARLY_STOP_BELOW
 

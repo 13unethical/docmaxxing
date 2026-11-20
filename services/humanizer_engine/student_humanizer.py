@@ -82,8 +82,13 @@ FAST_REFINE_ABOVE = 0.35
 # Cap parallel chunk rewrites so vLLM is not flooded (n candidates × chunks).
 DEFAULT_MAX_WORKERS = 8
 # pick="document": rounds of "score the whole text, rewrite the flagged chunks", within this many seconds.
-DOC_ROUNDS = 3
-DOC_BUDGET_SECONDS = 45.0
+DOC_ROUNDS = 5
+DOC_BUDGET_SECONDS = 90.0
+# Stricter than the detector's default cut: rewrite a chunk if any sentence is above this.
+DOC_FLAG_ABOVE = 0.22
+# First-pass pool for document mode (still cheaper than full detector pick).
+DOCUMENT_SAMPLING = ((1.2, 4),)
+DOCUMENT_REFINE_SAMPLING = ((1.2, 16),)
 
 _WORD = re.compile(r"[a-z0-9']+")
 _CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
@@ -133,6 +138,8 @@ class StudentConfig:
     early_stop_below: float = EARLY_STOP_BELOW
     doc_rounds: int = DOC_ROUNDS
     doc_budget: float = DOC_BUDGET_SECONDS
+    # pick=document: treat a sentence as flagged above this AI prob (lower = more rewrites).
+    doc_flag_above: float = DOC_FLAG_ABOVE
 
     @property
     def configured(self) -> bool:
@@ -175,20 +182,30 @@ def student_config() -> StudentConfig:
         temperature=max(0.1, min(2.0, _float("HUMANIZER_STUDENT_TEMPERATURE", TEMPERATURE))),
         candidates=max(1, min(MAX_CANDIDATES, int(_float("HUMANIZER_STUDENT_CANDIDATES", 1)))),
         pick=(os.environ.get("HUMANIZER_STUDENT_PICK") or "document").strip().lower(),
-        # document mode one-shots regardless; detector mode defaults to a diverse 1.2 pool.
         sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_SAMPLING") or "")
         or (
-            ((1.2, 1),)
+            DOCUMENT_SAMPLING
             if (os.environ.get("HUMANIZER_STUDENT_PICK") or "document").strip().lower() == "document"
             else DEFAULT_SAMPLING
         ),
-        refine_above=_float("HUMANIZER_STUDENT_REFINE_ABOVE", REFINE_ABOVE),
-        refine_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_REFINE_SAMPLING") or ""),
+        refine_above=_float(
+            "HUMANIZER_STUDENT_REFINE_ABOVE",
+            0.22
+            if (os.environ.get("HUMANIZER_STUDENT_PICK") or "document").strip().lower() == "document"
+            else REFINE_ABOVE,
+        ),
+        refine_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_REFINE_SAMPLING") or "")
+        or (
+            DOCUMENT_REFINE_SAMPLING
+            if (os.environ.get("HUMANIZER_STUDENT_PICK") or "document").strip().lower() == "document"
+            else ()
+        ),
         conclusion_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_CONCLUSION_SAMPLING") or "")
         or DEFAULT_CONCLUSION_SAMPLING,
         early_stop_below=max(0.0, _float("HUMANIZER_STUDENT_EARLY_STOP", EARLY_STOP_BELOW)),
         doc_rounds=max(0, int(_float("HUMANIZER_STUDENT_DOC_ROUNDS", DOC_ROUNDS))),
         doc_budget=max(0.0, _float("HUMANIZER_STUDENT_DOC_BUDGET", DOC_BUDGET_SECONDS)),
+        doc_flag_above=max(0.05, _float("HUMANIZER_STUDENT_DOC_FLAG_ABOVE", DOC_FLAG_ABOVE)),
     )
 
 
@@ -702,23 +719,22 @@ class StudentTextHumanizer:
                         return _with_marker(text)
                     problem = "NO_VARIANTS"
                     continue
-                # pick=document: one write per chunk; extra variants only when _fix_flagged/_refit runs.
-                # If that one-shot DRIFTED/UNCHANGED, immediately pull a small pool (same attempt)
-                # so the whole request does not fail the way n=1 + ATTEMPTS used to.
+                # pick=document: first-pass pool (default 1.2:4), then _fix_flagged/_refit.
+                # If the pool DRIFTED/echoes, pull refine_sampling in the same attempt.
                 if self.config.pick == "document":
-                    temperature = (self.config.sampling_plan or ((self.config.temperature, 1),))[0][0]
-                    variants = self._candidates(source, ((temperature, 1),))
+                    plan = self.config.sampling_plan or DOCUMENT_SAMPLING
+                    temperature = plan[0][0]
+                    variants = self._candidates(source, plan)
                     usable, problem, light = self._usable(source, variants)
                     if light is not None and (lightest is None or light[0] < lightest[0]):
                         lightest = (light[0], _with_marker(light[1]))
-                    rescue = self.config.refine_sampling or ((temperature, 4),)
-                    # Rescue when unusable OR when the only hit barely rewrote (echo).
+                    rescue = self.config.refine_sampling or DOCUMENT_REFINE_SAMPLING
                     need_rescue = not usable or (
                         usable and _jaccard(source, pick_candidate(source, usable, "changed").text) > 0.92
                     )
                     if need_rescue:
                         log.info(
-                            "student humanizer document one-shot %s; rescuing with %s",
+                            "student humanizer document first-pass %s; rescuing with %s",
                             problem if not usable else "NEAR_ECHO",
                             rescue,
                         )
@@ -882,14 +898,21 @@ class StudentTextHumanizer:
         for piece in out:
             starts.append(pos)
             pos += len(piece) + len(separator)
-        hit = {bisect.bisect_right(starts, s["start"]) - 1 for s in result["sentences"] if s["flagged"]}
+        cut = self.config.doc_flag_above
+        hit = {
+            bisect.bisect_right(starts, s["start"]) - 1
+            for s in result["sentences"]
+            if s.get("ai_prob") is not None and float(s["ai_prob"]) > cut
+        }
         return sorted(i for i in hit if rewrite[i])
 
     def _refit(self, i: int, source: str, out: list[str], separator: str) -> str:
         """Best of the current text and fresh variants of chunk ``i``, scored with its neighbours around it."""
         current = out[i]
+        cfg = self.config
+        plan = cfg.refine_sampling or DOCUMENT_REFINE_SAMPLING
         try:
-            fresh, _, _ = self._usable(source, self._candidates(source, self.config.refine_sampling))
+            fresh, _, _ = self._usable(source, self._candidates(source, plan))
         except (requests.RequestException, StudentHumanizerError, KeyError, ValueError, IndexError) as exc:
             log.info("student humanizer rewrite of a flagged chunk failed: %s", exc)
             return current
@@ -901,7 +924,22 @@ class StudentTextHumanizer:
         except Exception as exc:  # noqa: BLE001
             log.info("AI detector unavailable for a flagged chunk: %s", exc)
             return current
-        return pick_least_ai(source, scored)[0].text
+        best = pick_least_ai(source, scored)
+        # Still hot after refine — one more higher-temp burst before giving up.
+        if best[1] > cfg.refine_above:
+            extra_plan = cfg.conclusion_sampling or ((1.3, 12),)
+            try:
+                more, _, _ = self._usable(source, self._candidates(source, extra_plan))
+                if more:
+                    with ThreadPoolExecutor(max_workers=len(more)) as pool:
+                        more_scores = list(
+                            pool.map(lambda c: self._context_score(i, c.text, out, separator), more)
+                        )
+                    scored += list(zip(more, more_scores))
+                    best = pick_least_ai(source, scored)
+            except Exception as exc:  # noqa: BLE001
+                log.info("student humanizer extra refit failed: %s", exc)
+        return best[0].text
 
     def _context_score(self, i: int, text: str, out: list[str], separator: str) -> float:
         """Word-weighted AI probability of ``text``'s sentences, read between its neighbouring chunks."""

@@ -52,27 +52,46 @@ jobs:
             else
               echo 'HUMANIZER_STUDENT_CHUNK_WORDS=600' >> .env
             fi
-            # document: one rewrite per chunk, then only re-sample flagged spans (refine).
+            # document (strict): first-pass pool, aggressive sentence flag cut, multi-round refine.
             if grep -q '^HUMANIZER_STUDENT_PICK=' .env 2>/dev/null; then
               sed -i 's/^HUMANIZER_STUDENT_PICK=.*/HUMANIZER_STUDENT_PICK=document/' .env
             else
               echo 'HUMANIZER_STUDENT_PICK=document' >> .env
             fi
             if grep -q '^HUMANIZER_STUDENT_SAMPLING=' .env 2>/dev/null; then
-              sed -i 's/^HUMANIZER_STUDENT_SAMPLING=.*/HUMANIZER_STUDENT_SAMPLING=1.2:1/' .env
+              sed -i 's/^HUMANIZER_STUDENT_SAMPLING=.*/HUMANIZER_STUDENT_SAMPLING=1.2:4/' .env
             else
-              echo 'HUMANIZER_STUDENT_SAMPLING=1.2:1' >> .env
+              echo 'HUMANIZER_STUDENT_SAMPLING=1.2:4' >> .env
             fi
-            # Extra variants only for whole-doc flagged chunks.
             if grep -q '^HUMANIZER_STUDENT_REFINE_SAMPLING=' .env 2>/dev/null; then
-              sed -i 's/^HUMANIZER_STUDENT_REFINE_SAMPLING=.*/HUMANIZER_STUDENT_REFINE_SAMPLING=1.2:12/' .env
+              sed -i 's/^HUMANIZER_STUDENT_REFINE_SAMPLING=.*/HUMANIZER_STUDENT_REFINE_SAMPLING=1.2:16/' .env
             else
-              echo 'HUMANIZER_STUDENT_REFINE_SAMPLING=1.2:12' >> .env
+              echo 'HUMANIZER_STUDENT_REFINE_SAMPLING=1.2:16' >> .env
             fi
             if grep -q '^HUMANIZER_STUDENT_CONCLUSION_SAMPLING=' .env 2>/dev/null; then
-              sed -i 's/^HUMANIZER_STUDENT_CONCLUSION_SAMPLING=.*/HUMANIZER_STUDENT_CONCLUSION_SAMPLING=1.2:16/' .env
+              sed -i 's/^HUMANIZER_STUDENT_CONCLUSION_SAMPLING=.*/HUMANIZER_STUDENT_CONCLUSION_SAMPLING=1.3:12/' .env
             else
-              echo 'HUMANIZER_STUDENT_CONCLUSION_SAMPLING=1.2:16' >> .env
+              echo 'HUMANIZER_STUDENT_CONCLUSION_SAMPLING=1.3:12' >> .env
+            fi
+            if grep -q '^HUMANIZER_STUDENT_REFINE_ABOVE=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_REFINE_ABOVE=.*/HUMANIZER_STUDENT_REFINE_ABOVE=0.22/' .env
+            else
+              echo 'HUMANIZER_STUDENT_REFINE_ABOVE=0.22' >> .env
+            fi
+            if grep -q '^HUMANIZER_STUDENT_DOC_FLAG_ABOVE=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_DOC_FLAG_ABOVE=.*/HUMANIZER_STUDENT_DOC_FLAG_ABOVE=0.22/' .env
+            else
+              echo 'HUMANIZER_STUDENT_DOC_FLAG_ABOVE=0.22' >> .env
+            fi
+            if grep -q '^HUMANIZER_STUDENT_DOC_ROUNDS=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_DOC_ROUNDS=.*/HUMANIZER_STUDENT_DOC_ROUNDS=5/' .env
+            else
+              echo 'HUMANIZER_STUDENT_DOC_ROUNDS=5' >> .env
+            fi
+            if grep -q '^HUMANIZER_STUDENT_DOC_BUDGET=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_DOC_BUDGET=.*/HUMANIZER_STUDENT_DOC_BUDGET=90/' .env
+            else
+              echo 'HUMANIZER_STUDENT_DOC_BUDGET=90' >> .env
             fi
             if grep -q '^HUMANIZER_STUDENT_EARLY_STOP=' .env 2>/dev/null; then
               sed -i 's/^HUMANIZER_STUDENT_EARLY_STOP=.*/HUMANIZER_STUDENT_EARLY_STOP=0.15/' .env
