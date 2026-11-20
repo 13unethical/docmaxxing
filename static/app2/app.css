@@ -3304,6 +3304,7 @@ p.race-hint { color: var(--text-muted); }
 }
 .rd-more[open] .rd-more-ico  { transform: rotate(180deg); }
 .rd-list-more  { margin-top: 4px; }
+.rd-list-me  { margin-top: 2px; }
 
 .rd-row  { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto minmax(104px, auto); align-items: center; gap: var(--space-3); min-height: 42px; padding: 0 10px; margin: 0 -10px; border-radius: 10px; font-size: 15px; }
 

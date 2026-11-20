@@ -60,6 +60,23 @@ def test_profile_never_asks_for_humanize(monkeypatch, economy):
     assert prof["me"]["kind"] != "nohum"
 
 
+def test_all_registered_users_are_ranked(monkeypatch, economy):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    early = _user("early@example.com")
+    late = _user("late@example.com")
+    with economy_db.connect() as conn:
+        conn.execute("UPDATE users SET created_at = ? WHERE id = ?", ("2025-01-01 00:00:00", early["id"]))
+        conn.execute("UPDATE users SET created_at = ? WHERE id = ?", ("2026-01-01 00:00:00", late["id"]))
+    board = {r["user_id"]: r for r in C.leaderboard(limit=50)}
+    assert early["id"] in board and late["id"] in board
+    # Same points (0): earlier signup ranks higher.
+    assert board[early["id"]]["rank"] < board[late["id"]]["rank"]
+    assert board[early["id"]]["pts"] == 0
+    prof = C.profile_for_user(late, public_origin="")
+    assert prof["me"]["kind"] == "ranked"
+    assert prof["me"]["rank"] == board[late["id"]]["rank"]
+
+
 def test_pre_contest_referral_still_counts(monkeypatch, economy):
     """Friends who signed up before Nov 20 still award +1 when they verify."""
     monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
@@ -237,7 +254,9 @@ def test_reverse_deposit(monkeypatch, economy):
             ("pay_x",),
         )
     C.confirm_pending_points()
-    assert C.leaderboard() == []
+    board = C.leaderboard()
+    assert board and board[0]["user_id"] == user["id"]
+    assert board[0]["pts"] == 0
 
 
 def test_api_contest_me(economy, monkeypatch):

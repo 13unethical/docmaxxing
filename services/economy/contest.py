@@ -615,28 +615,43 @@ def resolve_prize(rank: int, pts: int) -> dict[str, Any]:
     return {"label": "—", "group": "", "plan": None, "cash_usd": None, "kind": "none"}
 
 
+def _enroll_all_registered(conn) -> int:
+    """Every registered account is a race participant (eligible row)."""
+    marked = 0
+    for row in conn.execute("SELECT id FROM users").fetchall():
+        uid = int(row["id"])
+        if _insert_ledger(
+            conn,
+            user_id=uid,
+            kind=KIND_ELIGIBLE,
+            points=0,
+            ref_id=f"contest_eligible_{uid}",
+        ):
+            marked += 1
+    return marked
+
+
 def _scores(conn) -> list[dict[str, Any]]:
-    """Eligible, non-DQ users with confirmed points, earliest first for ties."""
+    """All registered, non-DQ users. More points first; earlier signup wins ties."""
     confirm_pending_points()
+    _enroll_all_registered(conn)
     rows = conn.execute(
         """
-        SELECT l.user_id AS user_id,
-               SUM(CASE WHEN l.status = ? AND l.kind != ? THEN l.points ELSE 0 END) AS pts,
-               MIN(l.created_at) AS first_at
-        FROM contest_ledger l
-        WHERE EXISTS (
-            SELECT 1 FROM contest_ledger e
-            WHERE e.user_id = l.user_id AND e.kind = ? AND e.status != ?
-        )
-        AND NOT EXISTS (
+        SELECT u.id AS user_id,
+               COALESCE(SUM(
+                 CASE WHEN l.status = ? AND l.kind != ? THEN l.points ELSE 0 END
+               ), 0) AS pts,
+               u.created_at AS registered_at
+        FROM users u
+        LEFT JOIN contest_ledger l ON l.user_id = u.id
+        WHERE NOT EXISTS (
             SELECT 1 FROM contest_flags f
-            WHERE f.user_id = l.user_id AND f.status = ?
+            WHERE f.user_id = u.id AND f.status = ?
         )
-        GROUP BY l.user_id
-        HAVING pts > 0
-        ORDER BY pts DESC, first_at ASC, user_id ASC
+        GROUP BY u.id
+        ORDER BY pts DESC, datetime(u.created_at) ASC, u.id ASC
         """,
-        (STATUS_CONFIRMED, KIND_ELIGIBLE, KIND_ELIGIBLE, STATUS_REVERSED, FLAG_DQ),
+        (STATUS_CONFIRMED, KIND_ELIGIBLE, FLAG_DQ),
     ).fetchall()
     out = []
     for i, r in enumerate(rows, start=1):
@@ -645,7 +660,7 @@ def _scores(conn) -> list[dict[str, Any]]:
                 "user_id": int(r["user_id"]),
                 "rank": i,
                 "pts": int(r["pts"] or 0),
-                "first_at": r["first_at"],
+                "first_at": r["registered_at"],
             }
         )
     return out
@@ -666,11 +681,19 @@ def _credits_share(pts: int, pool_pts: int) -> int:
     return min(CREDITS_CAP, int(round(pts / pool_pts * CREDITS_POOL)))
 
 
+def _tier_prize_label(rank: int) -> str | None:
+    for t in TIERS:
+        if int(t["from"]) <= int(rank) <= int(t["to"]):
+            return str(t["prize"])
+    return None
+
+
 def leaderboard(*, limit: int = 30) -> list[dict[str, Any]]:
     backfill_friend_humanize_points()
     with connect() as conn:
         ensure_contest_schema(conn)
-        scores = _scores(conn)[: max(1, int(limit))]
+        all_scores = _scores(conn)
+        scores = all_scores[: max(1, int(limit))]
         if not scores:
             return []
         ids = [s["user_id"] for s in scores]
@@ -682,7 +705,6 @@ def leaderboard(*, limit: int = 30) -> list[dict[str, Any]]:
                 ids,
             ).fetchall()
         }
-        all_scores = _scores(conn)
         pool_pts = sum(s["pts"] for s in all_scores if s["rank"] > 30 and s["pts"] >= CREDITS_MIN_PTS)
         phase = contest_phase()
         out = []
@@ -693,6 +715,9 @@ def leaderboard(*, limit: int = 30) -> list[dict[str, Any]]:
             if prize["kind"] == "credits":
                 share = _credits_share(s["pts"], pool_pts or 1)
                 label = f"{'' if phase == 'results' else '~'}{share:,} credits"
+            elif prize["kind"] == "none":
+                # Prize slots 1–30 always show the tier prize on the board.
+                label = _tier_prize_label(s["rank"]) or "—"
             out.append(
                 {
                     "rank": s["rank"],
@@ -770,27 +795,31 @@ def profile_for_user(
             ).fetchone()
             pts = int(row["n"] or 0)
 
+        rank = int(mine["rank"]) if mine else None
+
         if flag == FLAG_DQ:
             state = "excluded"
             kind = "dq"
         elif phase == "before":
             state = "before"
             kind = "ready"
-        elif pts <= 0:
-            state = "zero"
-            kind = "zero"
-        else:
+        elif rank is not None:
+            # Every registered account has a place; 0 pts still shows on the board.
             state = "ranked"
             kind = "ranked"
+        else:
+            state = "zero"
+            kind = "zero"
 
-        rank = int(mine["rank"]) if mine else None
-        prize_meta = resolve_prize(rank or 999, pts) if pts else resolve_prize(999, 0)
+        prize_meta = resolve_prize(rank or 999, pts)
         all_scores = scores
         pool_pts = sum(s["pts"] for s in all_scores if s["rank"] > 30 and s["pts"] >= CREDITS_MIN_PTS)
         prize_label = prize_meta["label"]
         if prize_meta["kind"] == "credits" and pts >= CREDITS_MIN_PTS:
             share = _credits_share(pts, pool_pts or 1)
             prize_label = f"{'' if phase == 'results' else '~'}{share:,} credits"
+        elif prize_meta["kind"] == "none" and rank and rank <= 30:
+            prize_label = _tier_prize_label(rank) or "—"
 
         # Rough credits estimate for non-top-30
         credits_hint = _credits_share(pts, pool_pts or max(pts, 1)) if pts >= CREDITS_MIN_PTS else 0

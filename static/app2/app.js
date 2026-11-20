@@ -3571,22 +3571,21 @@ function raceRows() {
   const rows = [];
   for (let rank = 1; rank <= 30; rank++) {
     const L = byRank.get(rank);
-    const isMe = !!(me.kind === 'ranked' && me.rank === rank);
+    const isMe = !!(me.kind === 'ranked' && Number(me.rank) === rank);
+    const prize = rdPrizeForRank(rank);
     if (L) {
+      const pts = Number(L.pts || 0);
       rows.push({
         rank,
         name: isMe ? 'You' : (L.name || '—'),
-        pts: L.pts,
-        prize: (L.prize && L.prize !== '—') ? L.prize : rdPrizeForRank(rank),
+        pts: pts > 0 ? pts : null,
+        prize: (L.prize && L.prize !== '—') ? L.prize : prize,
         me: isMe,
         empty: false,
       });
     } else {
-      rows.push({ rank, name: '—', pts: null, prize: '—', me: false, empty: true });
+      rows.push({ rank, name: '—', pts: null, prize, me: false, empty: true });
     }
-  }
-  if (me.kind === 'ranked' && me.rank && me.rank > 30) {
-    rows.push({ rank: me.rank, name: 'You', pts: me.pts, prize: me.prize || '—', me: true, empty: false });
   }
   return rows;
 }
@@ -3613,13 +3612,15 @@ function rdRow(r) {
   const empty = !!r.empty;
   const medal = r.rank === 1 ? 'm1' : r.rank === 2 ? 'm2' : r.rank === 3 ? 'm3' : '';
   const me = r.me ? ' is-me' : '';
-  const pts = empty || r.pts == null ? '—' : `${Number(r.pts || 0).toLocaleString()}<small> pts</small>`;
+  const pts = (empty || r.pts == null || Number(r.pts) <= 0)
+    ? '—'
+    : `${Number(r.pts).toLocaleString()}<small> pts</small>`;
   const name = empty ? '<span class="muted">—</span>' : esc(r.name || '—');
   return `<li class="rd-row ${medal}${me}"${r.me ? ' aria-current="true"' : ''}>
       <span class="rd-pl">${r.rank}</span>
       <span class="rd-name">${name}</span>
       <span class="rd-pts">${pts}</span>
-      ${rdReward(empty ? '—' : (r.prize || '—'))}
+      ${rdReward(r.prize || rdPrizeForRank(r.rank) || '—')}
     </li>`;
 }
 
@@ -3636,8 +3637,7 @@ function rdStateHtml(me) {
   if (ph === 'before' || me.kind === 'ready') {
     return `<div class="rd-state"><p><b>You're in</b> The race starts ${esc(CONFIG.race.startShort)}. Share your link to get ready.</p></div>`;
   }
-  // nohum / need_humanize: no banner — prize rule lives only on #/contest-rules
-  if (me.kind === 'nohum' || me.kind === 'need_humanize' || me.kind === 'zero' || !me.pts) {
+  if (me.kind === 'nohum' || me.kind === 'need_humanize' || me.kind === 'zero') {
     return `<div class="rd-state"><p><b>0 points so far</b> Invite a friend who signs up, or buy credits.</p></div>`;
   }
   return '';
@@ -3645,15 +3645,20 @@ function rdStateHtml(me) {
 
 function rdGoalHtml(me) {
   const ph = racePhase();
+  const ptsLabel = me.pts > 0 ? raceFmtPts(me.pts) : '—';
   if (ph === 'results') {
-    return `<div class="rd-goal"><p>Final place <b>#${me.rank}</b> · ${raceFmtPts(me.pts)} · ${esc(me.prize)}</p></div>`;
+    return `<div class="rd-goal"><p>Final place <b>#${me.rank}</b> · ${ptsLabel} · ${esc(me.prize)}</p></div>`;
   }
   if (ph === 'verify') {
-    return `<div class="rd-goal"><p>Checking results · you're <b>#${me.rank}</b> with ${raceFmtPts(me.pts)}${me.pending ? ` · ${me.pending} pending` : ''}</p></div>`;
+    return `<div class="rd-goal"><p>Checking results · you're <b>#${me.rank}</b> with ${ptsLabel}${me.pending ? ` · ${me.pending} pending` : ''}</p></div>`;
   }
-  return me.pending
-    ? `<div class="rd-goal"><p>${me.pending} pending points confirm in up to 7 days</p></div>`
-    : '';
+  if (me.pending) {
+    return `<div class="rd-goal"><p>${me.pending} pending points confirm in up to 7 days</p></div>`;
+  }
+  if (!me.pts) {
+    return `<div class="rd-goal"><p>You're <b>#${me.rank}</b> · — · invite friends to climb</p></div>`;
+  }
+  return `<div class="rd-goal"><p>You're <b>#${me.rank}</b> · ${ptsLabel}</p></div>`;
 }
 
 function rdTopHtml(plain = false) {
@@ -3668,10 +3673,25 @@ function rdTopHtml(plain = false) {
 function rdBoardHtml() {
   const ph = racePhase(), me = raceMe(), rows = raceRows();
   const ranked = me.kind === 'ranked' && ph !== 'before';
+  const myRank = ranked ? Number(me.rank || 0) : 0;
   const head = rows.slice(0, 3).map(rdRow).join('');
-  const rest = rows.slice(3).map(rdRow).join('');
+  // Outside top 3: pin your place under the top (also drop duplicate from 4–30 list).
+  let mePin = '';
+  if (ranked && myRank > 3) {
+    const inBoard = rows.find(r => r.me);
+    mePin = rdRow(inBoard || {
+      rank: myRank,
+      name: 'You',
+      pts: me.pts > 0 ? me.pts : null,
+      prize: (myRank <= 30 ? (me.prize && me.prize !== '—' ? me.prize : rdPrizeForRank(myRank)) : (me.prize || '—')),
+      me: true,
+      empty: false,
+    });
+  }
+  const rest = rows.slice(3).filter(r => !r.me).map(rdRow).join('');
   return `<div class="rd-board">
         <ol class="rd-list" aria-label="Top 3">${head}</ol>
+        ${mePin ? `<ol class="rd-list rd-list-me" aria-label="Your place">${mePin}</ol>` : ''}
         <details class="rd-more">
           <summary class="rd-more-sum"><span>Places 4–30</span><span class="rd-more-ico" aria-hidden="true"></span></summary>
           <ol class="rd-list rd-list-more" aria-label="Places 4 to 30">${rest}</ol>
