@@ -53,14 +53,20 @@ jobs:
               echo 'HUMANIZER_STUDENT_CHUNK_WORDS=600' >> .env
             fi
             if grep -q '^HUMANIZER_STUDENT_PICK=' .env 2>/dev/null; then
-              sed -i 's/^HUMANIZER_STUDENT_PICK=.*/HUMANIZER_STUDENT_PICK=changed/' .env
+              sed -i 's/^HUMANIZER_STUDENT_PICK=.*/HUMANIZER_STUDENT_PICK=detector/' .env
             else
-              echo 'HUMANIZER_STUDENT_PICK=changed' >> .env
+              echo 'HUMANIZER_STUDENT_PICK=detector' >> .env
             fi
             if grep -q '^HUMANIZER_STUDENT_SAMPLING=' .env 2>/dev/null; then
               sed -i 's/^HUMANIZER_STUDENT_SAMPLING=.*/HUMANIZER_STUDENT_SAMPLING=1.0:4,1.2:4/' .env
             else
               echo 'HUMANIZER_STUDENT_SAMPLING=1.0:4,1.2:4' >> .env
+            fi
+            # Extra variants when the best pick is still above refine_above (0.3).
+            if grep -q '^HUMANIZER_STUDENT_REFINE_SAMPLING=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_REFINE_SAMPLING=.*/HUMANIZER_STUDENT_REFINE_SAMPLING=1.2:12/' .env
+            else
+              echo 'HUMANIZER_STUDENT_REFINE_SAMPLING=1.2:12' >> .env
             fi
             # Cite pilot pages require these files next to the /cite route.
             test -f services/cite_guides.py

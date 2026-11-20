@@ -165,7 +165,7 @@ def student_config() -> StudentConfig:
         events_log=(os.environ.get("HUMANIZER_STUDENT_EVENTS_LOG") or "").strip(),
         temperature=max(0.1, min(2.0, _float("HUMANIZER_STUDENT_TEMPERATURE", TEMPERATURE))),
         candidates=max(1, min(MAX_CANDIDATES, int(_float("HUMANIZER_STUDENT_CANDIDATES", 1)))),
-        pick=(os.environ.get("HUMANIZER_STUDENT_PICK") or "changed").strip().lower(),
+        pick=(os.environ.get("HUMANIZER_STUDENT_PICK") or "detector").strip().lower(),
         # Empty SAMPLING + candidates=1 often echoes the source; default to a small diverse pool.
         sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_SAMPLING") or "")
         or ((1.0, 4), (1.2, 4)),
