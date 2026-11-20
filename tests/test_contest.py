@@ -103,16 +103,13 @@ def test_backfill_historical_humanized_friends(monkeypatch, economy):
 
 
 def test_backfill_verified_referral_without_humanize(monkeypatch, economy):
-    """Historical hosts get +1 for every verified invitee (verify hook or backfill)."""
+    """Historical hosts get +1 for attributed invitees, including unverified legacy rows."""
     monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
     host = _user("refonly@example.com")
     from services.economy.referral import ensure_referral_code
 
     code = ensure_referral_code(host["id"])
-    # Create verified friend without going through mark_email_verified (legacy rows).
-    friend = _user("verifiedonly@example.com", referrer_code=code, verified=False)
-    with economy_db.connect() as conn:
-        conn.execute("UPDATE users SET is_verified = 1 WHERE id = ?", (friend["id"],))
+    _user("legacyref@example.com", referrer_code=code, verified=False)
     assert C.backfill_friend_humanize_points(force=True) == 1
     assert C.leaderboard(limit=5)[0]["user_id"] == host["id"]
 

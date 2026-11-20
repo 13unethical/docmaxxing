@@ -3559,15 +3559,36 @@ function raceMe() {
   };
 }
 
+function rdPrizeForRank(rank) {
+  const t = (CONFIG.race.tiers || []).find(x => rank >= x.from && rank <= x.to);
+  return t ? t.prize : '—';
+}
+
 function raceRows() {
   const top = raceState().data?.top || [];
-  return top.map(r => ({
-    rank: r.rank,
-    name: r.name,
-    pts: r.pts,
-    prize: r.prize,
-    me: false,
-  }));
+  const byRank = new Map(top.map(r => [Number(r.rank), r]));
+  const me = raceMe();
+  const rows = [];
+  for (let rank = 1; rank <= 30; rank++) {
+    const L = byRank.get(rank);
+    const isMe = !!(me.kind === 'ranked' && me.rank === rank);
+    if (L) {
+      rows.push({
+        rank,
+        name: isMe ? 'You' : (L.name || '—'),
+        pts: L.pts,
+        prize: (L.prize && L.prize !== '—') ? L.prize : rdPrizeForRank(rank),
+        me: isMe,
+        empty: false,
+      });
+    } else {
+      rows.push({ rank, name: '—', pts: null, prize: '—', me: false, empty: true });
+    }
+  }
+  if (me.kind === 'ranked' && me.rank && me.rank > 30) {
+    rows.push({ rank: me.rank, name: 'You', pts: me.pts, prize: me.prize || '—', me: true, empty: false });
+  }
+  return rows;
 }
 
 function raceInviteLink() {
@@ -3588,13 +3609,15 @@ function rdReward(p) {
   return `<span class="rd-rw is-cr">${esc(s)}</span>`;
 }
 
-function rdRow(r, empty) {
+function rdRow(r) {
+  const empty = !!r.empty;
   const medal = r.rank === 1 ? 'm1' : r.rank === 2 ? 'm2' : r.rank === 3 ? 'm3' : '';
   const me = r.me ? ' is-me' : '';
-  const pts = empty ? '—' : `${Number(r.pts || 0).toLocaleString()}<small> pts</small>`;
+  const pts = empty || r.pts == null ? '—' : `${Number(r.pts || 0).toLocaleString()}<small> pts</small>`;
+  const name = empty ? '<span class="muted">—</span>' : esc(r.name || '—');
   return `<li class="rd-row ${medal}${me}"${r.me ? ' aria-current="true"' : ''}>
       <span class="rd-pl">${r.rank}</span>
-      <span class="rd-name">${empty ? '<span class="muted">Open spot</span>' : esc(r.me ? 'You' : (r.name || ''))}</span>
+      <span class="rd-name">${name}</span>
       <span class="rd-pts">${pts}</span>
       ${rdReward(empty ? '—' : (r.prize || '—'))}
     </li>`;
@@ -3643,14 +3666,16 @@ function rdTopHtml(plain = false) {
 }
 
 function rdBoardHtml() {
-  const ph = racePhase(), me = raceMe(), rows = raceRows(), empty = ph === 'before';
-  const ranked = me.kind === 'ranked' && !empty, top3 = ranked && me.rank && me.rank <= 3;
-  const list = (empty
-    ? [1, 2, 3].map(n => rdRow({ rank: n }, true))
-    : rows.slice(0, 3).map(r => rdRow(r, false))
-  ).join('') + (ranked && !top3 ? rdRow({ rank: me.rank, pts: me.pts, prize: me.prize, me: true }, false) : '');
+  const ph = racePhase(), me = raceMe(), rows = raceRows();
+  const ranked = me.kind === 'ranked' && ph !== 'before';
+  const head = rows.slice(0, 3).map(rdRow).join('');
+  const rest = rows.slice(3).map(rdRow).join('');
   return `<div class="rd-board">
-        <ol class="rd-list" aria-label="Top 3 and your place">${list || '<li class="rd-row"><span class="rd-name muted">Be the first on the board</span></li>'}</ol>
+        <ol class="rd-list" aria-label="Top 3">${head}</ol>
+        <details class="rd-more">
+          <summary class="rd-more-sum"><span>Places 4–30</span><span class="rd-more-ico" aria-hidden="true"></span></summary>
+          <ol class="rd-list rd-list-more" aria-label="Places 4 to 30">${rest}</ol>
+        </details>
         ${ranked ? rdGoalHtml(me) : rdStateHtml(me)}
       </div>`;
 }

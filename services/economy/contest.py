@@ -406,32 +406,31 @@ def _backfill_eligibility_from_history(conn) -> int:
 
 
 def backfill_friend_humanize_points(*, force: bool = False) -> int:
-    """Award +1 for every historical verified invitee (all-time referrers).
+    """Award +1 for every historical invitee with a referrer (all-time).
 
     Opens eligibility for historical humanizers and for hosts who already hold
     race points. Idempotent via contest_hum_{friend_id}. Meta key
-    friend_hum_backfill_v4 re-runs after earlier passes that missed plan Max
-    usage labels or required a humanize trail for historical referrals.
+    friend_hum_backfill_v5 re-runs to also count older unverified invitees so
+    the public board is not empty.
     """
     phase = contest_phase()
     if phase not in ("live", "verify", "results") and not force:
         return 0
     with connect() as conn:
         ensure_contest_schema(conn)
-        if not force and _meta_get(conn, "friend_hum_backfill_v4") == "1":
+        if not force and _meta_get(conn, "friend_hum_backfill_v5") == "1":
             # Still heal eligibility if points/history exist without eligible rows.
             _backfill_eligibility_from_history(conn)
             return 0
         _backfill_eligibility_from_history(conn)
-        # Historical race: every verified invitee counts for the host who brought them.
-        # Live scoring still also awards via on_humanize_success (same ref_id → no double count).
+        # Historical race: every attributed invitee counts for the host.
+        # Live scoring still awards on verify (same ref_id → no double count).
         rows = conn.execute(
             """
             SELECT u.id AS friend_id, u.referrer_id AS referrer_id
             FROM users u
             WHERE u.referrer_id IS NOT NULL
               AND u.referrer_id != u.id
-              AND COALESCE(u.is_verified, 0) = 1
             """
         ).fetchall()
         awarded = 0
@@ -462,6 +461,7 @@ def backfill_friend_humanize_points(*, force: bool = False) -> int:
         _meta_set(conn, "friend_hum_backfill_v2", "1")
         _meta_set(conn, "friend_hum_backfill_v3", "1")
         _meta_set(conn, "friend_hum_backfill_v4", "1")
+        _meta_set(conn, "friend_hum_backfill_v5", "1")
         return awarded
 
 
@@ -732,7 +732,7 @@ def profile_for_user(
     """Payload for GET /api/contest/me and SPA race card."""
     confirm_pending_points()
     phase = contest_phase()
-    top = leaderboard(limit=3)
+    top = leaderboard(limit=30)
     cfg = public_config()
     base = {
         "success": True,
