@@ -44,17 +44,53 @@ def test_friend_humanize_awards_once(monkeypatch, economy):
     code = ensure_referral_code(host["id"])
     C.mark_eligible(host["id"])
     friend = _user("friend@example.com", referrer_code=code)
-    # Force created_at into contest window
-    with economy_db.connect() as conn:
-        conn.execute(
-            "UPDATE users SET created_at = ? WHERE id = ?",
-            ("2026-11-21 12:00:00", friend["id"]),
-        )
     first = C.on_humanize_success(friend["id"], email_verified=True)
     second = C.on_humanize_success(friend["id"], email_verified=True)
     assert first["friend_point"] is True
     assert second["friend_point"] is False
     board = C.leaderboard(limit=10)
+    assert board[0]["user_id"] == host["id"]
+    assert board[0]["pts"] == 1
+
+
+def test_pre_contest_referral_still_counts(monkeypatch, economy):
+    """Friends who signed up before Nov 20 still award +1 when they humanize."""
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    host = _user("oldhost@example.com")
+    from services.economy.referral import ensure_referral_code
+
+    code = ensure_referral_code(host["id"])
+    C.mark_eligible(host["id"])
+    friend = _user("oldfriend@example.com", referrer_code=code)
+    with economy_db.connect() as conn:
+        conn.execute(
+            "UPDATE users SET created_at = ? WHERE id = ?",
+            ("2026-01-15 12:00:00", friend["id"]),
+        )
+    out = C.on_humanize_success(friend["id"], email_verified=True)
+    assert out["friend_point"] is True
+    assert C.leaderboard(limit=5)[0]["pts"] == 1
+
+
+def test_backfill_historical_humanized_friends(monkeypatch, economy):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    host = _user("backhost@example.com")
+    from services.economy.referral import ensure_referral_code
+
+    code = ensure_referral_code(host["id"])
+    C.mark_eligible(host["id"])
+    friend = _user("backfriend@example.com", referrer_code=code)
+    # Friend already humanized before the race (eligible row), but host never got a point.
+    C.mark_eligible(friend["id"])
+    with economy_db.connect() as conn:
+        conn.execute(
+            "UPDATE users SET created_at = ? WHERE id = ?",
+            ("2025-06-01 00:00:00", friend["id"]),
+        )
+    n = C.backfill_friend_humanize_points(force=True)
+    assert n == 1
+    assert C.backfill_friend_humanize_points(force=True) == 0  # idempotent
+    board = C.leaderboard(limit=5)
     assert board[0]["user_id"] == host["id"]
     assert board[0]["pts"] == 1
 
@@ -98,7 +134,8 @@ def test_deposit_also_awards_referrer(monkeypatch, economy):
     C.confirm_pending_points()
     board = {r["user_id"]: r["pts"] for r in C.leaderboard(limit=10)}
     assert board[friend["id"]] == 10
-    assert board[host["id"]] == 10
+    # 10 from friend's spend + 1 from friend_humanize backfill (friend is already eligible)
+    assert board[host["id"]] == 11
 
 
 def test_dq_removes_from_leaderboard(monkeypatch, economy):

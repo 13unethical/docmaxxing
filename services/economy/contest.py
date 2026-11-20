@@ -275,7 +275,7 @@ def on_humanize_success(user_id: int, *, email_verified: bool = True) -> dict[st
     with connect() as conn:
         ensure_contest_schema(conn)
         user = conn.execute(
-            "SELECT id, referrer_id, is_verified, created_at FROM users WHERE id = ?",
+            "SELECT id, referrer_id, is_verified FROM users WHERE id = ?",
             (uid,),
         ).fetchone()
         if user is None:
@@ -294,12 +294,7 @@ def on_humanize_success(user_id: int, *, email_verified: bool = True) -> dict[st
             return out
         if _flag_status(conn, referrer_id) == FLAG_REJECT:
             return out
-        # Friend must have signed up during contest for the +1 (created_at in window).
-        created = _parse_utc(user["created_at"] if "created_at" in keys else None)
-        start_utc = CONTEST_START.astimezone(timezone.utc)
-        end_utc = CONTEST_END.astimezone(timezone.utc)
-        if created is not None and (created < start_utc or created >= end_utc):
-            return out
+        # Any verified invitee who humanizes counts — including friends who signed up before the race.
         awarded = _insert_ledger(
             conn,
             user_id=referrer_id,
@@ -311,6 +306,63 @@ def on_humanize_success(user_id: int, *, email_verified: bool = True) -> dict[st
         )
         out["friend_point"] = awarded
     return out
+
+
+def backfill_friend_humanize_points(*, force: bool = False) -> int:
+    """Award +1 for every historical verified invitee who already ran Humanizer.
+
+    Idempotent via contest_hum_{friend_id}. Runs once per DB unless force=True.
+    """
+    phase = contest_phase()
+    if phase not in ("live", "verify", "results") and not force:
+        return 0
+    with connect() as conn:
+        ensure_contest_schema(conn)
+        if not force and _meta_get(conn, "friend_hum_backfill") == "1":
+            return 0
+        rows = conn.execute(
+            """
+            SELECT u.id AS friend_id, u.referrer_id AS referrer_id
+            FROM users u
+            WHERE u.referrer_id IS NOT NULL
+              AND u.referrer_id != u.id
+              AND COALESCE(u.is_verified, 0) = 1
+              AND (
+                EXISTS (
+                  SELECT 1 FROM contest_ledger e
+                  WHERE e.user_id = u.id AND e.kind = ? AND e.status != ?
+                )
+                OR EXISTS (
+                  SELECT 1 FROM usage_events ue
+                  WHERE ue.user_id = u.id
+                    AND (ue.feature = 'humanize' OR ue.feature LIKE 'humanize%')
+                )
+                OR EXISTS (
+                  SELECT 1 FROM humanizer_dataset_logs h
+                  WHERE h.user_id = u.id
+                )
+              )
+            """,
+            (KIND_ELIGIBLE, STATUS_REVERSED),
+        ).fetchall()
+        awarded = 0
+        for row in rows:
+            friend_id = int(row["friend_id"])
+            referrer_id = int(row["referrer_id"])
+            if _flag_status(conn, referrer_id) in (FLAG_DQ, FLAG_REJECT):
+                continue
+            if _insert_ledger(
+                conn,
+                user_id=referrer_id,
+                kind=KIND_FRIEND_HUM,
+                points=1,
+                ref_id=f"contest_hum_{friend_id}",
+                source_user_id=friend_id,
+                status=STATUS_CONFIRMED,
+            ):
+                awarded += 1
+        _meta_set(conn, "friend_hum_backfill", "1")
+        return awarded
 
 
 def on_contest_deposit(
@@ -515,6 +567,7 @@ def _credits_share(pts: int, pool_pts: int) -> int:
 
 
 def leaderboard(*, limit: int = 30) -> list[dict[str, Any]]:
+    backfill_friend_humanize_points()
     with connect() as conn:
         ensure_contest_schema(conn)
         scores = _scores(conn)[: max(1, int(limit))]

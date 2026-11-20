@@ -208,8 +208,8 @@ const CONFIG = {
         { "h": "Period", "p": ["November 20, 2026, 12:00 AM ET – December 31, 2026, 12:00 AM ET."] },
         { "h": "Who can take part", "p": ["Registered DocMaxxing users aged 18 or older who have run Humanizer at least once. Points start counting after your first Humanizer run. One person may hold one account. DocMaxxing team members and their families cannot win. Void where prohibited by law, including countries under international sanctions."] },
         { "h": "No purchase necessary", "p": ["Joining is free. You can earn points by inviting friends without buying anything."] },
-        { "h": "How to take part", "p": ["Copy your personal referral link from your dashboard and share it. Friends must sign up through your link during the contest period."] },
-        { "h": "Points", "list": ["Friend signs up — 1 point when an invited friend verifies their email and runs Humanizer at least once.", "Every $1 spent — 1 point for every $1 spent on DocMaxxing during the contest, by an invited friend or by you. Amounts are rounded down to the dollar, after discounts.", "Confirmation — purchase points are confirmed 7 days after payment. Refunded or charged-back purchases lose their points."] },
+        { "h": "How to take part", "p": ["Copy your personal referral link from your dashboard and share it. Friends who signed up through your link at any time count — including people you invited before the contest."] },
+        { "h": "Points", "list": ["Friend runs Humanizer — 1 point when an invited friend verifies their email and runs Humanizer at least once (new or existing invitees).", "Every $1 spent — 1 point for every $1 spent on DocMaxxing during the contest, by an invited friend or by you. Amounts are rounded down to the dollar, after discounts.", "Confirmation — purchase points are confirmed 7 days after payment. Refunded or charged-back purchases lose their points."] },
         { "h": "Ranking", "p": ["Participants are ranked by confirmed points at the end of the contest. Ties are broken by who reached the score first."] },
         { "h": "Prizes: $2,500 in total", "list": ["1st place — $700, minimum 500 points.", "2nd place — $200, minimum 250 points.", "3rd place — $100, minimum 150 points.", "4th–10th — one month of DocMaxxing Max, minimum 50 points.", "11th–20th — one month of DocMaxxing Pro, minimum 25 points.", "21st–30th — one month of DocMaxxing Basic, minimum 10 points."],
           "after": ["Cash prizes go to the top 3 only. If a participant is below the minimum for their place, they receive the highest prize whose minimum they meet."] },
@@ -3686,7 +3686,7 @@ function raceLandHtml() {
         <h2 id="race-land-h">Invite friends. Win $700.</h2>
         <p class="muted">Nov 20 – Dec 31. Cash for the top 3, plans for places 4–30, credits for everyone with 3+ points.</p>
         <ul class="race-how">
-          <li><b>1 point</b><span>per friend who signs up and runs Humanizer</span></li>
+          <li><b>1 point</b><span>per friend who runs Humanizer (including friends you invited before)</span></li>
           <li><b>1 point</b><span>for every $1 a friend spends</span></li>
         </ul>
         <div class="race-ctas">${state.signedIn
