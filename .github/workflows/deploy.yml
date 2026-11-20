@@ -84,7 +84,10 @@ jobs:
             bash scripts/patch_nginx_timeouts.sh || true
             # Peak-hours Modal keep-warm (Tashkent 09–01). Idempotent crontab line.
             chmod +x scripts/keep_humanizer_warm_peak.sh || true
-            (crontab -l 2>/dev/null | grep -v 'keep_humanizer_warm_peak.sh'; echo '*/1 * * * * /root/docmaxxing/scripts/keep_humanizer_warm_peak.sh') | crontab -
+            {
+              crontab -l 2>/dev/null | grep -v 'keep_humanizer_warm_peak.sh' || true
+              echo '*/1 * * * * /root/docmaxxing/scripts/keep_humanizer_warm_peak.sh'
+            } | crontab - || true
             echo "Deployed $(git rev-parse --short HEAD)"
             echo "Storage: $(grep PROJECT_STORAGE_DIR .env || true)"
             if grep -qE '^TURNITIN_API_KEY=.+' .env && grep -qE '^TURNITIN_API_SECRET=.+' .env; then

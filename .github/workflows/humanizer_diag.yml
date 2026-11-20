@@ -1,6 +1,8 @@
 name: Humanizer diag
+
 on:
   workflow_dispatch:
+
 jobs:
   diag:
     runs-on: ubuntu-latest
@@ -17,46 +19,37 @@ jobs:
             set -euo pipefail
             cd /root/docmaxxing
             echo "=== HUMANIZER ENV (no secrets) ==="
-            grep -E '^HUMANIZER_STUDENT_(URL|MODEL|SHARE|LEVEL|TIMEOUT|CHUNK_WORDS|PROBE_TIMEOUT|TEMPERATURE|CANDIDATES|PICK|SAMPLING|REFINE|CONCLUSION|DOC_|MAX_WORKERS|EVENTS)=' .env 2>/dev/null | sed 's/KEY=.*/KEY=***/' || true
-            grep -E '^HUMANIZER_STUDENT_KEY=' .env >/dev/null && echo "HUMANIZER_STUDENT_KEY=set" || echo "HUMANIZER_STUDENT_KEY=missing"
+            grep -E '^HUMANIZER_STUDENT_(URL|MODEL|SHARE|LEVEL|TIMEOUT|CHUNK_WORDS|PROBE_TIMEOUT|TEMPERATURE|CANDIDATES|PICK|SAMPLING|REFINE|CONCLUSION|DOC_|MAX_WORKERS|EVENTS)=' .env 2>/dev/null || true
+            if grep -qE '^HUMANIZER_STUDENT_KEY=.+' .env 2>/dev/null; then echo "HUMANIZER_STUDENT_KEY=set"; else echo "HUMANIZER_STUDENT_KEY=missing"; fi
             echo "=== keep-warm cron ==="
             crontab -l 2>/dev/null | grep -i humanizer || echo "(no crontab match)"
-            systemctl list-timers --all 2>/dev/null | grep -i humanizer || true
-            ls -la scripts/keep_humanizer_warm_peak.sh 2>/dev/null || true
             echo "=== warm endpoint ==="
-            curl -sS -m 20 "http://127.0.0.1:8000/api/browser/humanizer/warm" || curl -sS -m 20 "https://docmaxxing.com/api/browser/humanizer/warm" || true
+            curl -sS -m 20 "https://docmaxxing.com/api/browser/humanizer/warm" || true
             echo
             echo "=== Modal ping ==="
             URL=$(grep -E '^HUMANIZER_STUDENT_URL=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
             KEY=$(grep -E '^HUMANIZER_STUDENT_KEY=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
+            MODEL=$(grep -E '^HUMANIZER_STUDENT_MODEL=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")
             if [ -n "$URL" ] && [ -n "$KEY" ]; then
               echo "URL host: $(echo "$URL" | sed -E 's#https?://([^/]+).*#\1#')"
               curl -sS -m 30 -o /tmp/models.json -w "models_http:%{http_code} t:%{time_total}\n" \
                 -H "Authorization: Bearer $KEY" "$URL/v1/models" || echo models_fail
               head -c 300 /tmp/models.json; echo
-              # Tiny rewrite probe
               curl -sS -m 120 -o /tmp/hum_probe.json -w "chat_http:%{http_code} t:%{time_total}\n" \
                 -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-                -d '{"model":"'"$(grep -E '^HUMANIZER_STUDENT_MODEL=' .env | cut -d= -f2- | tr -d '"' | tr -d "'")"'","messages":[{"role":"system","content":"Rewrite the users text so it reads like natural writing by a student. Keep the meaning. Rewrite strength: 8/10."},{"role":"user","content":"Climate policy shapes our future in important ways that governments must address carefully."}],"temperature":1.2,"n":1,"max_tokens":120,"seed":42,"chat_template_kwargs":{"enable_thinking":false}}' \
+                -d "{\"model\":\"${MODEL}\",\"messages\":[{\"role\":\"system\",\"content\":\"Rewrite the users text so it reads like natural writing by a student. Keep the meaning. Rewrite strength: 8/10.\"},{\"role\":\"user\",\"content\":\"Climate policy shapes our future in important ways that governments must address carefully.\"}],\"temperature\":1.2,\"n\":1,\"max_tokens\":120,\"seed\":42,\"chat_template_kwargs\":{\"enable_thinking\":false}}" \
                 "$URL/v1/chat/completions" || echo chat_fail
               python3 - <<'PY'
-import json
-try:
-  d=json.load(open("/tmp/hum_probe.json"))
-  print("OUT:", (d["choices"][0]["message"]["content"] or "")[:300])
-except Exception as e:
-  print("parse fail", e, open("/tmp/hum_probe.json").read()[:400])
-PY
-            fi
-            echo "=== recent student events ==="
-            EV=$(grep -E '^HUMANIZER_STUDENT_EVENTS_LOG=' .env | cut -d= -f2- | tr -d '"' || true)
-            if [ -n "$EV" ] && [ -f "$EV" ]; then
-              tail -n 40 "$EV"
-            else
-              ls -la data/*human* 2>/dev/null || true
-              find . -name '*student*events*' 2>/dev/null | head
+            import json
+            try:
+              d=json.load(open("/tmp/hum_probe.json"))
+              print("OUT:", (d["choices"][0]["message"]["content"] or "")[:300])
+            except Exception as e:
+              print("parse fail", e)
+              print(open("/tmp/hum_probe.json").read()[:400])
+            PY
             fi
             echo "=== journal humanizer ==="
             journalctl -u docmaxxing --since "48 hours ago" --no-pager 2>/dev/null \
-              | grep -iE "student humanizer|UNCHANGED|FREE_ENGINE|cold_attempt|humanize stream|HUMANIZE_FAILED|Modal|chunk rejected" \
+              | grep -iE "student humanizer|UNCHANGED|NEAR_UNCHANGED|FREE_ENGINE|cold_attempt|HUMANIZE_FAILED|chunk rejected" \
               | tail -80 || true
