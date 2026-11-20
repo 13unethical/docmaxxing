@@ -201,10 +201,10 @@ const CONFIG = {
       "sections": [
         { "h": "Organizer", "p": ["The contest is run by DocMaxxing."], "contact": "Questions:" },
         { "h": "Period", "p": ["November 20, 2026, 12:00 AM ET – December 31, 2026, 12:00 AM ET."] },
-        { "h": "Who can take part", "p": ["Registered DocMaxxing users aged 18 or older who have run Humanizer at least once. Points start counting after your first Humanizer run. One person may hold one account. DocMaxxing team members and their families cannot win. Void where prohibited by law, including countries under international sanctions."] },
+        { "h": "Who can take part", "p": ["Registered DocMaxxing users aged 18 or older. One person may hold one account. DocMaxxing team members and their families cannot win. Void where prohibited by law, including countries under international sanctions."] },
         { "h": "No purchase necessary", "p": ["Joining is free. You can earn points by inviting friends without buying anything."] },
         { "h": "How to take part", "p": ["Copy your personal referral link from your dashboard and share it. Friends who signed up through your link at any time count — including people you invited before the contest."] },
-        { "h": "Points", "list": ["Friend runs Humanizer — 1 point when an invited friend verifies their email and runs Humanizer at least once (new or existing invitees).", "Every $1 spent — 1 point for every $1 spent on DocMaxxing during the contest, by an invited friend or by you. Amounts are rounded down to the dollar, after discounts.", "Confirmation — purchase points are confirmed 7 days after payment. Refunded or charged-back purchases lose their points."] },
+        { "h": "Points", "list": ["Qualified referral — 1 point when an invited friend verifies their email (new or existing invitees).", "Every $1 spent — 1 point for every $1 spent on DocMaxxing during the contest, by an invited friend or by you. Amounts are rounded down to the dollar, after discounts.", "Confirmation — purchase points are confirmed 7 days after payment. Refunded or charged-back purchases lose their points."] },
         { "h": "Ranking", "p": ["Participants are ranked by confirmed points at the end of the contest. Ties are broken by who reached the score first."] },
         { "h": "Prizes: $2,500 in total", "list": ["1st place — $700, minimum 500 points.", "2nd place — $200, minimum 250 points.", "3rd place — $100, minimum 150 points.", "4th–10th — one month of DocMaxxing Max, minimum 50 points.", "11th–20th — one month of DocMaxxing Pro, minimum 25 points.", "21st–30th — one month of DocMaxxing Basic, minimum 10 points."],
           "after": ["Cash prizes go to the top 3 only. If a participant is below the minimum for their place, they receive the highest prize whose minimum they meet."] },
@@ -214,7 +214,8 @@ const CONFIG = {
           "after": ["Disqualification removes all points and prizes and may lead to account suspension. We may review any account and ask winners to confirm their identity. Our decisions on fair play are final."] },
         { "h": "Winners and payouts", "p": ["Results are verified December 31, 2026 – January 7, 2027 and announced on January 8, 2027. Winners are contacted by email and must reply within 7 days with payout details, otherwise the prize passes to the next eligible participant. Cash prizes are paid by January 15, 2027 via PayPal, Wise or USDT. Subscriptions and credits are added to the account automatically. Winners are responsible for any taxes on their prizes."] },
         { "h": "Public leaderboard", "p": ["By taking part you agree that your display name (first name and last initial, or a nickname) and your points may be shown on the public leaderboard."] },
-        { "h": "Changes", "p": ["DocMaxxing may change or end the contest if it cannot run as planned (fraud, technical failure). Any change will be posted on this page."] }
+        { "h": "Changes", "p": ["DocMaxxing may change or end the contest if it cannot run as planned (fraud, technical failure). Any change will be posted on this page."] },
+        { "h": "Prize eligibility", "p": ["Not eligible for prizes if your account never ran Humanizer. Points can still appear on the leaderboard from referrals and spend; prize payouts require at least one Humanizer run on the winner’s account."] }
       ]
     },
     {
@@ -3601,12 +3602,8 @@ function rdRow(r, empty) {
 function rdStateHtml(me) {
   const ph = racePhase();
   if (me.kind === 'guest') {
-    return `<div class="rd-state"><p><b>Join the race</b> Create a free account, run Humanizer once, then share your link.</p>
+    return `<div class="rd-state"><p><b>Join the race</b> Create a free account, then share your invite link.</p>
       <button class="btn btn-sm btn-primary" data-act="signup">Sign up</button></div>`;
-  }
-  if (me.kind === 'nohum' || me.kind === 'need_humanize') {
-    return `<div class="rd-state"><p><b>Run Humanizer once</b> Points start counting after your first run.</p>
-      <a class="btn btn-sm btn-primary" href="#/home">Open Humanizer</a></div>`;
   }
   if (me.kind === 'dq' || me.kind === 'excluded') {
     return `<div class="rd-state is-dq"><p><b>Excluded</b> Your account was removed from the race for fair-play rules.</p>
@@ -3615,8 +3612,9 @@ function rdStateHtml(me) {
   if (ph === 'before' || me.kind === 'ready') {
     return `<div class="rd-state"><p><b>You're in</b> The race starts ${esc(CONFIG.race.startShort)}. Share your link to get ready.</p></div>`;
   }
-  if (me.kind === 'zero' || !me.pts) {
-    return `<div class="rd-state"><p><b>0 points so far</b> Invite a friend who signs up and runs Humanizer, or buy credits.</p></div>`;
+  // nohum / need_humanize: no banner — prize rule lives only on #/contest-rules
+  if (me.kind === 'nohum' || me.kind === 'need_humanize' || me.kind === 'zero' || !me.pts) {
+    return `<div class="rd-state"><p><b>0 points so far</b> Invite a friend who signs up, or buy credits.</p></div>`;
   }
   return '';
 }
@@ -3667,7 +3665,7 @@ function raceHomeHtml() {
       ${rdTopHtml()}
       ${rdBoardHtml()}
       <div class="rd-invite">
-        <p class="rd-inv-h"><b>Invite friends, earn rewards</b><span>+1 point per qualified referral · +1 point for every $1 spent</span></p>
+        <p class="rd-inv-h"><b>Invite friends, earn rewards</b><span>+1 point per verified signup · +1 point for every $1 spent</span></p>
         <div class="rd-field"><label class="visually-hidden" for="race-link">Your referral link</label>
           <input id="race-link" readonly value="${esc(short)}">
           <button class="btn btn-sm" type="button" data-act="race-copy">${icon('copy')} Copy</button></div>
@@ -3687,7 +3685,7 @@ function raceLandHtml() {
         <h2 id="race-land-h">Invite friends. Win $700.</h2>
         <p class="muted">Nov 20 – Dec 31. Cash for the top 3, plans for places 4–30, credits for everyone with 3+ points.</p>
         <ul class="race-how">
-          <li><b>1 point</b><span>per friend who runs Humanizer (including friends you invited before)</span></li>
+          <li><b>1 point</b><span>per friend who signs up (including friends you invited before)</span></li>
           <li><b>1 point</b><span>for every $1 a friend spends</span></li>
         </ul>
         <div class="race-ctas">${state.signedIn
@@ -3709,8 +3707,8 @@ function raceStripHtml() {
     : `<a class="race-strip-cta" href="#/landing" data-act="scroll-to" data-target="race">Join the race</a>`;
   const see = (t) => `<a class="race-strip-cta" href="#/landing" data-act="scroll-to" data-target="race">${t}</a>`;
   const [text, cta] = {
-    live: ['Win $2,500 using Humanizer with friends', join],
-    before: [`From ${R.startShort}: win $2,500 using Humanizer with friends`, join],
+    live: ['Win $2,500 — invite friends to DocMaxxing', join],
+    before: [`From ${R.startShort}: win $2,500 — invite friends to DocMaxxing`, join],
     verify: [`The $2,500 Challenge is over. Winners on ${R.winners}`, see('See leaderboard')],
     results: ['The $2,500 Challenge winners are announced', see('See winners')],
   }[ph];

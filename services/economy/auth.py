@@ -275,6 +275,12 @@ def mark_email_verified(user_id: int, email: str | None = None) -> dict[str, Any
     user = get_user(user_id)
     if user is None:
         raise AuthError("User not found.")
+    try:
+        from .contest import on_referral_verified
+
+        on_referral_verified(int(user_id))
+    except Exception:
+        pass
     return user
 
 
@@ -446,6 +452,12 @@ def verify_email_otp(user_id: int, code: str) -> dict[str, Any]:
             session=flask_session if has_request_context() else None,
             dedupe_key=f"email_verified:u:{int(user_id)}",
         )
+    except Exception:
+        pass
+    try:
+        from .contest import on_referral_verified
+
+        on_referral_verified(int(user_id))
     except Exception:
         pass
     return user

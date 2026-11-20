@@ -255,56 +255,73 @@ def mark_eligible(user_id: int) -> bool:
         )
 
 
-def on_humanize_success(user_id: int, *, email_verified: bool = True) -> dict[str, Any]:
-    """After a signed-in humanize: mark eligible + award referrer +1 once."""
+def _award_referrer_for_verified_friend(conn, friend_id: int) -> bool:
+    """+1 to referrer once per verified invitee (contest_hum_{friend_id})."""
+    user = conn.execute(
+        "SELECT id, referrer_id, is_verified FROM users WHERE id = ?",
+        (int(friend_id),),
+    ).fetchone()
+    if user is None:
+        return False
+    keys = set(user.keys())
+    if "is_verified" in keys and not bool(user["is_verified"]):
+        return False
+    referrer_id = user["referrer_id"]
+    if referrer_id is None:
+        return False
+    referrer_id = int(referrer_id)
+    uid = int(friend_id)
+    if referrer_id == uid:
+        return False
+    if _flag_status(conn, referrer_id) in (FLAG_DQ, FLAG_REJECT):
+        return False
+    awarded = _insert_ledger(
+        conn,
+        user_id=referrer_id,
+        kind=KIND_FRIEND_HUM,
+        points=1,
+        ref_id=f"contest_hum_{uid}",
+        source_user_id=uid,
+        status=STATUS_CONFIRMED,
+    )
+    if awarded:
+        _insert_ledger(
+            conn,
+            user_id=referrer_id,
+            kind=KIND_ELIGIBLE,
+            points=0,
+            ref_id=f"contest_eligible_{referrer_id}",
+        )
+    return awarded
+
+
+def on_referral_verified(user_id: int) -> dict[str, Any]:
+    """After invitee verifies email: mark them eligible + award referrer +1 once."""
     uid = int(user_id)
     out: dict[str, Any] = {"eligible": False, "friend_point": False}
     phase = contest_phase()
-    if phase == "before":
-        # Still mark eligibility so points start counting at open.
-        out["eligible"] = mark_eligible(uid)
-        return out
-    if phase not in ("live", "verify"):
-        out["eligible"] = mark_eligible(uid)
-        return out
-
     out["eligible"] = mark_eligible(uid)
-    if not email_verified:
+    if phase not in ("live", "verify"):
         return out
-
     with connect() as conn:
         ensure_contest_schema(conn)
-        user = conn.execute(
-            "SELECT id, referrer_id, is_verified FROM users WHERE id = ?",
-            (uid,),
-        ).fetchone()
-        if user is None:
-            return out
-        keys = set(user.keys())
-        verified = bool(user["is_verified"]) if "is_verified" in keys else email_verified
-        if not verified:
-            return out
-        referrer_id = user["referrer_id"]
-        if referrer_id is None:
-            return out
-        referrer_id = int(referrer_id)
-        if referrer_id == uid:
-            return out
-        if _flag_status(conn, referrer_id) == FLAG_DQ:
-            return out
-        if _flag_status(conn, referrer_id) == FLAG_REJECT:
-            return out
-        # Any verified invitee who humanizes counts — including friends who signed up before the race.
-        awarded = _insert_ledger(
-            conn,
-            user_id=referrer_id,
-            kind=KIND_FRIEND_HUM,
-            points=1,
-            ref_id=f"contest_hum_{uid}",
-            source_user_id=uid,
-            status=STATUS_CONFIRMED,
-        )
-        out["friend_point"] = awarded
+        out["friend_point"] = _award_referrer_for_verified_friend(conn, uid)
+    return out
+
+
+def on_humanize_success(user_id: int, *, email_verified: bool = True) -> dict[str, Any]:
+    """After a signed-in humanize: mark eligible + award referrer +1 once (idempotent)."""
+    uid = int(user_id)
+    out: dict[str, Any] = {"eligible": False, "friend_point": False}
+    phase = contest_phase()
+    out["eligible"] = mark_eligible(uid)
+    if phase == "before" or phase not in ("live", "verify"):
+        return out
+    if not email_verified:
+        return out
+    with connect() as conn:
+        ensure_contest_schema(conn)
+        out["friend_point"] = _award_referrer_for_verified_friend(conn, uid)
     return out
 
 
@@ -733,24 +750,8 @@ def profile_for_user(
     code = ensure_referral_code(uid)
     origin = (public_origin or "").rstrip("/")
     link = f"{origin}/register?ref={code}" if origin else f"/register?ref={code}"
-    # Heal this account immediately (plan Max / Humanizer usage) before reading state.
-    with connect() as conn:
-        ensure_contest_schema(conn)
-        row = conn.execute(
-            f"""
-            SELECT u.id FROM users u
-            WHERE u.id = ? AND {_has_humanize_history_sql()}
-            """,
-            (uid, KIND_ELIGIBLE, STATUS_REVERSED),
-        ).fetchone()
-        if row is not None:
-            _insert_ledger(
-                conn,
-                user_id=uid,
-                kind=KIND_ELIGIBLE,
-                points=0,
-                ref_id=f"contest_eligible_{uid}",
-            )
+    # Signed-in users are on the board for scoring; prize Humanizer gate is rules-only.
+    mark_eligible(uid)
 
     with connect() as conn:
         ensure_contest_schema(conn)
@@ -772,9 +773,6 @@ def profile_for_user(
         if flag == FLAG_DQ:
             state = "excluded"
             kind = "dq"
-        elif not eligible:
-            state = "need_humanize"
-            kind = "nohum"
         elif phase == "before":
             state = "before"
             kind = "ready"

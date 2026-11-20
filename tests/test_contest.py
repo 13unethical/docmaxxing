@@ -36,38 +36,45 @@ def test_phase_boundaries(monkeypatch, economy):
     assert C.contest_phase() == "results"
 
 
-def test_friend_humanize_awards_once(monkeypatch, economy):
+def test_friend_verify_awards_once(monkeypatch, economy):
     monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
     host = _user("host@example.com")
     from services.economy.referral import ensure_referral_code
 
     code = ensure_referral_code(host["id"])
     C.mark_eligible(host["id"])
-    friend = _user("friend@example.com", referrer_code=code)
-    first = C.on_humanize_success(friend["id"], email_verified=True)
-    second = C.on_humanize_success(friend["id"], email_verified=True)
-    assert first["friend_point"] is True
-    assert second["friend_point"] is False
+    # Verifying email awards the host +1; humanize later is idempotent.
+    friend = _user("friend@example.com", referrer_code=code, verified=True)
+    again = C.on_humanize_success(friend["id"], email_verified=True)
+    assert again["friend_point"] is False
     board = C.leaderboard(limit=10)
     assert board[0]["user_id"] == host["id"]
     assert board[0]["pts"] == 1
 
 
+def test_profile_never_asks_for_humanize(monkeypatch, economy):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    user = _user("ready@example.com")
+    prof = C.profile_for_user(user, public_origin="")
+    assert prof["state"] != "need_humanize"
+    assert prof["me"]["kind"] != "nohum"
+
+
 def test_pre_contest_referral_still_counts(monkeypatch, economy):
-    """Friends who signed up before Nov 20 still award +1 when they humanize."""
+    """Friends who signed up before Nov 20 still award +1 when they verify."""
     monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
     host = _user("oldhost@example.com")
     from services.economy.referral import ensure_referral_code
 
     code = ensure_referral_code(host["id"])
     C.mark_eligible(host["id"])
-    friend = _user("oldfriend@example.com", referrer_code=code)
+    friend = _user("oldfriend@example.com", referrer_code=code, verified=False)
     with economy_db.connect() as conn:
         conn.execute(
-            "UPDATE users SET created_at = ? WHERE id = ?",
+            "UPDATE users SET is_verified = 1, created_at = ? WHERE id = ?",
             ("2026-01-15 12:00:00", friend["id"]),
         )
-    out = C.on_humanize_success(friend["id"], email_verified=True)
+    out = C.on_referral_verified(friend["id"])
     assert out["friend_point"] is True
     assert C.leaderboard(limit=5)[0]["pts"] == 1
 
@@ -78,11 +85,11 @@ def test_backfill_historical_humanized_friends(monkeypatch, economy):
     from services.economy.referral import ensure_referral_code
 
     code = ensure_referral_code(host["id"])
-    # Host never humanized after the race started — backfill must still open eligibility.
-    friend = _user("backfriend@example.com", referrer_code=code)
+    # Legacy verified friend (no verify-hook award yet).
+    friend = _user("backfriend@example.com", referrer_code=code, verified=False)
     with economy_db.connect() as conn:
         conn.execute(
-            "UPDATE users SET created_at = ? WHERE id = ?",
+            "UPDATE users SET is_verified = 1, created_at = ? WHERE id = ?",
             ("2025-06-01 00:00:00", friend["id"]),
         )
     n = C.backfill_friend_humanize_points(force=True)
@@ -96,13 +103,16 @@ def test_backfill_historical_humanized_friends(monkeypatch, economy):
 
 
 def test_backfill_verified_referral_without_humanize(monkeypatch, economy):
-    """Historical hosts get +1 for every verified invitee, even before friend humanizes."""
+    """Historical hosts get +1 for every verified invitee (verify hook or backfill)."""
     monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
     host = _user("refonly@example.com")
     from services.economy.referral import ensure_referral_code
 
     code = ensure_referral_code(host["id"])
-    _user("verifiedonly@example.com", referrer_code=code)
+    # Create verified friend without going through mark_email_verified (legacy rows).
+    friend = _user("verifiedonly@example.com", referrer_code=code, verified=False)
+    with economy_db.connect() as conn:
+        conn.execute("UPDATE users SET is_verified = 1 WHERE id = ?", (friend["id"],))
     assert C.backfill_friend_humanize_points(force=True) == 1
     assert C.leaderboard(limit=5)[0]["user_id"] == host["id"]
 
@@ -114,8 +124,9 @@ def test_backfill_marks_host_eligible_from_wallet_debit(monkeypatch, economy):
     from services.economy.referral import ensure_referral_code
 
     code = ensure_referral_code(host["id"])
-    friend = _user("txfriend@example.com", referrer_code=code)
+    friend = _user("txfriend@example.com", referrer_code=code, verified=False)
     with economy_db.connect() as conn:
+        conn.execute("UPDATE users SET is_verified = 1 WHERE id = ?", (friend["id"],))
         conn.execute(
             "INSERT INTO transactions "
             "(user_id, kind, feature, amount, balance_after, type, status) "
