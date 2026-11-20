@@ -1737,6 +1737,7 @@ const SERVER_TITLE = document.title;
   }
   CONFIG.billing.plan = BOOT.plan ? BOOT.plan.plan_id : null;
   if (BOOT.user) {
+    if (BOOT.user.referralCode) CONFIG.earn.code = BOOT.user.referralCode;
     Object.assign(CONFIG.user, { name: BOOT.user.name, email: BOOT.user.email, id: '#' + BOOT.user.id, balance: BOOT.balance,
       isAdmin: !!BOOT.user.isAdmin });
   }
@@ -3571,10 +3572,10 @@ function raceRows() {
 
 function raceInviteLink() {
   const d = raceState().data;
-  if (d?.invite_link) return d.invite_link;
-  const code = (d?.referral_code || CONFIG.earn.code || '').trim();
+  if (d?.invite_link && /[?&]ref=/.test(d.invite_link)) return d.invite_link;
+  const code = (d?.referral_code || CONFIG.earn.code || BOOT.user?.referralCode || '').trim();
   if (!code) return `${location.origin}/register`;
-  return `${location.origin}/register?ref=${code}`;
+  return `${location.origin}/register?ref=${encodeURIComponent(code)}`;
 }
 
 function raceFmtPts(n) {
@@ -3728,8 +3729,13 @@ function renderRaceBar() {
 
 function renderHome() {
   const signed = state.signedIn;
-  if (!raceState().loaded && !raceState().busy) {
-    raceLoad().then(() => {
+  const needRace = !raceState().busy && (
+    !raceState().loaded
+    || (signed && (!raceState().data?.me || !raceInviteLink().includes('ref=')))
+  );
+  if (needRace) {
+    if (signed) loadEarn();
+    raceLoad(true).then(() => {
       if (currentRoute() !== 'home') return;
       const slot = document.querySelector('#main .rd-sec');
       if (slot) slot.outerHTML = raceHomeHtml();

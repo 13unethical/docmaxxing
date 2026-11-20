@@ -5357,6 +5357,8 @@ def _app_v2_boot() -> dict[str, Any]:
     if user:
         avatar = user.get("avatar_file")
         meta = economy_auth.auth_meta(int(user["id"]))
+        from services.economy.referral import ensure_referral_code
+
         boot["user"] = {
             "id": user["id"],
             "email": user["email"],
@@ -5366,6 +5368,7 @@ def _app_v2_boot() -> dict[str, Any]:
             "isAdmin": bool(economy_auth.is_admin(user)),
             "hasPassword": bool(meta.get("hasPassword", True)),
             "linkedProviders": list(meta.get("linkedProviders") or []),
+            "referralCode": ensure_referral_code(int(user["id"])),
         }
         boot["balance"] = wallet.get_balance(user["id"])
         if boot["user"].get("isAdmin"):
