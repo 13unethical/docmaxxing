@@ -4931,6 +4931,80 @@ def api_referral_me():
     return jsonify({"success": True, **profile})
 
 
+@app.get("/api/contest/me")
+def api_contest_me():
+    """Public race card: guests get phase + top3; signed-in users get rank/link."""
+    from services.economy.contest import profile_for_user
+
+    user = economy_auth.current_user()
+    origin = _public_origin() or ""
+    return jsonify(profile_for_user(user, public_origin=origin))
+
+
+@app.get("/api/contest/leaderboard")
+def api_contest_leaderboard():
+    from services.economy.contest import contest_phase, leaderboard
+
+    try:
+        limit = min(100, max(1, int(request.args.get("limit", "30"))))
+    except ValueError:
+        limit = 30
+    return jsonify(
+        {
+            "success": True,
+            "phase": contest_phase(),
+            "leaders": leaderboard(limit=limit),
+        }
+    )
+
+
+@app.get("/api/admin/contest")
+@economy_auth.admin_required
+def api_admin_contest():
+    from services.economy.contest import admin_snapshot
+
+    return jsonify(admin_snapshot())
+
+
+@app.post("/api/admin/contest/flag")
+@economy_auth.admin_required
+def api_admin_contest_flag():
+    from services.economy.contest import ContestError, set_flag
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        user_id = int(payload.get("user_id") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "user_id required."}), 400
+    status = str(payload.get("status") or "clear").strip().lower()
+    reason = str(payload.get("reason") or "")
+    admin = economy_auth.current_user()
+    try:
+        set_flag(
+            user_id,
+            status,
+            reason=reason,
+            admin_id=int(admin["id"]) if admin and admin.get("id") else None,
+        )
+    except ContestError as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+    from services.economy.contest import admin_snapshot
+
+    return jsonify(admin_snapshot())
+
+
+@app.post("/api/admin/contest/publish")
+@economy_auth.admin_required
+def api_admin_contest_publish():
+    from services.economy.contest import publish_results
+
+    admin = economy_auth.current_user()
+    result = publish_results(
+        admin_id=int(admin["id"]) if admin and admin.get("id") else None
+    )
+    return jsonify(result)
+
+
 @app.post("/api/referral/convert")
 @economy_auth.login_required
 def api_referral_convert():
@@ -6681,6 +6755,13 @@ def api_browser_stealthwriter_humanize():
                 latency=latency_ms,
                 request_id=request_id,
             )
+            try:
+                from services.economy.contest import on_humanize_success
+
+                verified = bool(user and user.get("is_verified"))
+                on_humanize_success(int(user_id), email_verified=verified)
+            except Exception:
+                app.logger.exception("contest humanize hook failed")
         try:
             from services.economy.site_settings import record_humanizer_success
 

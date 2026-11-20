@@ -286,17 +286,28 @@ def on_successful_deposit(
     if amount_usd <= 0:
         return {"handled": False, "reason": "zero_amount"}
 
+    contest_info: dict[str, Any] = {"handled": False}
+    try:
+        from .contest import on_contest_deposit
+
+        contest_info = on_contest_deposit(
+            int(user_id), amount_usd, payment_ref=payment_ref
+        )
+    except Exception:
+        contest_info = {"handled": False, "reason": "contest_error"}
+
     credit_awards: list[dict[str, Any]] = []
+    referrer_id: int | None = None
     with connect() as conn:
         user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if user is None:
-            return {"handled": False, "reason": "user_missing"}
+            return {"handled": False, "reason": "user_missing", "contest": contest_info}
         referrer_id = user["referrer_id"]
         if not referrer_id:
-            return {"handled": False, "reason": "no_referrer"}
+            return {"handled": False, "reason": "no_referrer", "contest": contest_info}
         referrer_id = int(referrer_id)
         if referrer_id == int(user_id):
-            return {"handled": False, "reason": "self_referral"}
+            return {"handled": False, "reason": "self_referral", "contest": contest_info}
 
         cashback = round(amount_usd * CASHBACK_RATE, 2)
         conn.execute(
@@ -328,12 +339,13 @@ def on_successful_deposit(
             "qualified_now": qualified_now,
             "milestone_awards": credit_awards,
             "payment_ref": payment_ref,
+            "contest": contest_info,
         }
 
     for award in credit_awards:
         if award["type"] == "credits":
             _wallet.credit(
-                referrer_id,
+                int(referrer_id),
                 int(award["amount"]),
                 "referral_milestone",
                 ref_id=f"milestone_{award['threshold']}_{referrer_id}",

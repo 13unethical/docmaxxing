@@ -549,6 +549,13 @@ def _migrate_cryptomus_payments(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_contest_tables(conn: sqlite3.Connection) -> None:
+    """The $2,500 Challenge ledger, flags, and meta."""
+    from .contest import ensure_contest_schema
+
+    ensure_contest_schema(conn)
+
+
 def _migrate_referral_columns(conn: sqlite3.Connection) -> None:
     """Add referral/cashback columns + backfill referral_code for existing users."""
     exists = conn.execute(
@@ -886,6 +893,7 @@ def init_db() -> None:
         _migrate_gumroad_payments(conn)
         _migrate_lemon_squeezy_payments(conn)
         _migrate_referral_columns(conn)
+        _migrate_contest_tables(conn)
         _migrate_daily_stats_and_settings(conn)
         _migrate_security_columns(conn)
         _migrate_extension_tokens(conn)

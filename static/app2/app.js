@@ -175,12 +175,53 @@ const CONFIG = {
     ],
   },
 
+
+  // The $2,500 Challenge (Nov 20 – Dec 31, 2026). Rules: #/contest-rules
+  race: {
+    name: 'The $2,500 Challenge', pool: '$2,500 in prizes', poolExact: '$2,500',
+    start: '2026-11-20T00:00:00-05:00', end: '2026-12-31T00:00:00-05:00',
+    winners: 'Jan 8', startShort: 'Nov 20',
+    tiers: [
+      { from: 1, to: 1, prize: '$700', min: 500, group: 'Cash' },
+      { from: 2, to: 2, prize: '$200', min: 250, group: 'Cash' },
+      { from: 3, to: 3, prize: '$100', min: 150, group: 'Cash' },
+      { from: 4, to: 10, prize: 'Max', min: 50, group: 'Max · 1 month' },
+      { from: 11, to: 20, prize: 'Pro', min: 25, group: 'Pro · 1 month' },
+      { from: 21, to: 30, prize: 'Basic', min: 10, group: 'Basic · 1 month' },
+    ],
+    credits: { pool: 100000, min: 3, cap: 10000 },
+  },
+
   // Information pages (linked from the Help footer): policies, Credits, About, FAQ, Changelog.
   // Text copied from docmaxxing.com. Sections: p (paragraphs), list, after, qa ([question, answer]), related (page ids).
   // Side menu order; 'account' and 'contact' open the Account and Help pages.
-  infoNav: ['account', 'credits', 'about', 'privacy', 'terms', 'disclaimer', 'payment-policy', 'delivery-policy', 'refund-policy', 'contact', 'faq', 'changelog'],
+  infoNav: ['account', 'credits', 'about', 'privacy', 'terms', 'disclaimer', 'payment-policy', 'delivery-policy', 'refund-policy', 'contest-rules', 'contact', 'faq', 'changelog'],
   // A list item "Term — text" shows the term in bold.
   legal: [
+    {
+      "id": "contest-rules",
+      "title": "Referral Race — Official Rules",
+      "lead": "Dates, points, prizes and fair play for the DocMaxxing referral race.",
+      "updated": "Last updated: November 19, 2026",
+      "sections": [
+        { "h": "Organizer", "p": ["The contest is run by DocMaxxing."], "contact": "Questions:" },
+        { "h": "Period", "p": ["November 20, 2026, 12:00 AM ET – December 31, 2026, 12:00 AM ET."] },
+        { "h": "Who can take part", "p": ["Registered DocMaxxing users aged 18 or older who have run Humanizer at least once. Points start counting after your first Humanizer run. One person may hold one account. DocMaxxing team members and their families cannot win. Void where prohibited by law, including countries under international sanctions."] },
+        { "h": "No purchase necessary", "p": ["Joining is free. You can earn points by inviting friends without buying anything."] },
+        { "h": "How to take part", "p": ["Copy your personal referral link from your dashboard and share it. Friends must sign up through your link during the contest period."] },
+        { "h": "Points", "list": ["Friend signs up — 1 point when an invited friend verifies their email and runs Humanizer at least once.", "Every $1 spent — 1 point for every $1 spent on DocMaxxing during the contest, by an invited friend or by you. Amounts are rounded down to the dollar, after discounts.", "Confirmation — purchase points are confirmed 7 days after payment. Refunded or charged-back purchases lose their points."] },
+        { "h": "Ranking", "p": ["Participants are ranked by confirmed points at the end of the contest. Ties are broken by who reached the score first."] },
+        { "h": "Prizes: $2,500 in total", "list": ["1st place — $700, minimum 500 points.", "2nd place — $200, minimum 250 points.", "3rd place — $100, minimum 150 points.", "4th–10th — one month of DocMaxxing Max, minimum 50 points.", "11th–20th — one month of DocMaxxing Pro, minimum 25 points.", "21st–30th — one month of DocMaxxing Basic, minimum 10 points."],
+          "after": ["Cash prizes go to the top 3 only. If a participant is below the minimum for their place, they receive the highest prize whose minimum they meet."] },
+        { "h": "Credits pool", "p": ["100,000 credits are shared among all eligible participants outside places 1–30 who have at least 3 points, in proportion to their points. No participant receives more than 10,000 credits; any excess is shared among the others."] },
+        { "h": "Fair play", "p": ["We reject referrals and may disqualify participants for:"],
+          "list": ["multiple accounts or self-referrals;", "sign-ups that share an IP address, network, device, browser or payment method with the referrer;", "disposable or patterned email addresses;", "VPNs, proxies, Tor, data-center IPs, emulators or bots;", "buying, selling or paying for sign-ups; spam; posing as official DocMaxxing;", "bidding on “DocMaxxing” in search ads;", "refunds or chargebacks used to gain points."],
+          "after": ["Disqualification removes all points and prizes and may lead to account suspension. We may review any account and ask winners to confirm their identity. Our decisions on fair play are final."] },
+        { "h": "Winners and payouts", "p": ["Results are verified December 31, 2026 – January 7, 2027 and announced on January 8, 2027. Winners are contacted by email and must reply within 7 days with payout details, otherwise the prize passes to the next eligible participant. Cash prizes are paid by January 15, 2027 via PayPal, Wise or USDT. Subscriptions and credits are added to the account automatically. Winners are responsible for any taxes on their prizes."] },
+        { "h": "Public leaderboard", "p": ["By taking part you agree that your display name (first name and last initial, or a nickname) and your points may be shown on the public leaderboard."] },
+        { "h": "Changes", "p": ["DocMaxxing may change or end the contest if it cannot run as planned (fraud, technical failure). Any change will be posted on this page."] }
+      ]
+    },
     {
       "id": "privacy",
       "title": "Privacy Policy",
@@ -903,7 +944,7 @@ const CONFIG = {
       description: 'Your profile details and password' },
     { id: 'billing', label: 'Billing', route: 'billing', icon: 'card', hidden: true,
       description: 'Your plan, payment method and payments' },
-    ...['privacy', 'terms', 'disclaimer', 'payment-policy', 'delivery-policy', 'refund-policy', 'credits', 'about', 'faq', 'changelog'].map(id => ({
+    ...['privacy', 'terms', 'disclaimer', 'payment-policy', 'delivery-policy', 'refund-policy', 'contest-rules', 'credits', 'about', 'faq', 'changelog'].map(id => ({
       id, route: id, legal: true, hidden: true, icon: 'file', label: '', description: '' })),
     { id: 'pricing', label: 'Pricing', route: 'pricing', icon: 'flash', hidden: true,
       description: 'Pick a plan or buy credits once' },
@@ -913,6 +954,7 @@ const CONFIG = {
     { id: 'admin-blog', label: 'Blog · Admin', route: 'admin-blog', icon: 'book', hidden: true, description: 'Write and publish blog articles' },
     { id: 'admin-blog-edit', label: 'Edit article · Admin', route: 'admin-blog-edit', icon: 'book', hidden: true, description: '' },
     { id: 'admin-settings', label: 'Settings · Admin', route: 'admin-settings', icon: 'sliders', hidden: true, description: '' },
+    { id: 'admin-race', label: 'Referral race · Admin', route: 'admin-race', icon: 'gift', hidden: true, description: '' },
   ],
 
   // Pricing page. Feature rows: [tool name, how much you get]. Icons: Solar Bold Duotone paths in planRowHtml.
@@ -2109,7 +2151,7 @@ function currentRoute() {
    app menu: Overview, Users, Activity, Settings, Back to app.
    Data comes from /api/admin/*; every change is recorded in Activity.
    ========================================================= */
-const ADMIN_ROUTES = ['admin', 'admin-users', 'admin-activity', 'admin-blog', 'admin-blog-edit', 'admin-settings'];
+const ADMIN_ROUTES = ['admin', 'admin-users', 'admin-activity', 'admin-blog', 'admin-blog-edit', 'admin-settings', 'admin-race'];
 const isAdminRoute = (r = currentRoute()) => ADMIN_ROUTES.includes(r);
 const canAdmin = () => state.signedIn && CONFIG.user.isAdmin;
 const ADM_PAGE = 50;
@@ -2209,6 +2251,7 @@ function adminNavHtml() {
         ${item('admin', 'grid', 'Overview', alerts ? `<span class="nav-meta"><span class="adm-count" aria-label="${alerts} alerts">${alerts}</span></span>` : '')}
         ${item('admin-users', 'users', 'Users', s.ov ? `<span class="nav-meta small muted">${admFmt(s.ov.totals.all)}</span>` : '')}
         ${item('admin-activity', 'pulse', 'Activity')}
+        ${item('admin-race', 'gift', 'Referral race', s.race && s.race.open_flags?.length ? `<span class="nav-meta"><span class="adm-count">${s.race.open_flags.length}</span></span>` : '')}
         ${item('admin-blog', 'book', 'Blog')}
         ${item('admin-settings', 'sliders', 'Settings')}
       </ul>
@@ -2751,6 +2794,70 @@ async function abPersist(next, { toastOk } = {}) {
   }
 }
 
+function renderAdminRace() {
+  const s = adminState();
+  if (!s.race && !s.raceBusy) {
+    s.raceBusy = true;
+    API.admin.contest().then((data) => {
+      s.race = data; s.raceBusy = false;
+      if (currentRoute() === 'admin-race') rerenderAdmin();
+    }).catch((err) => {
+      s.raceBusy = false; s.raceErr = err.message || 'Failed to load';
+      if (currentRoute() === 'admin-race') rerenderAdmin();
+    });
+  }
+  const R = s.race;
+  if (!R) {
+    return `<div class="page adm-page adm-race">${adminHead('Referral race', s.raceErr || 'Loading…')}</div>`;
+  }
+  const T = R.totals || {};
+  const open = R.open_flags || [];
+  const flags = R.flags || [];
+  const top = R.top || [];
+  const openRows = open.map((f) => `<tr>
+      <td><div class="adm-user"><span class="avatar" aria-hidden="true">${esc((f.name || '?')[0])}</span><div><b>${esc(f.name)}</b><span class="small muted">#${f.user_id}</span></div></div></td>
+      <td class="adm-r-why">${esc(f.why || '')}</td><td class="adm-right">${f.refs ?? '—'}</td><td class="adm-right">${f.pts ?? '—'}</td>
+      <td class="adm-right"><span class="adm-r-acts">
+        <button class="btn btn-sm" data-act="adm-r-flag" data-id="${f.user_id}" data-v="clear">Clear</button>
+        <button class="btn btn-sm" data-act="adm-r-flag" data-id="${f.user_id}" data-v="reject_signups">Reject sign-ups</button>
+        <button class="btn btn-sm btn-warn" data-act="adm-r-flag" data-id="${f.user_id}" data-v="dq">Disqualify</button>
+      </span></td></tr>`).join('') || `<tr><td colspan="5" class="muted">No open flags</td></tr>`;
+  const decidedRows = flags.map((f) => `<tr>
+      <td><b>${esc(f.name)}</b> <span class="small muted">#${f.user_id}</span></td>
+      <td>${esc(f.status)}</td><td>${esc(f.reason || '')}</td>
+      <td class="adm-right"><button class="link-btn small" data-act="adm-r-flag" data-id="${f.user_id}" data-v="clear">Undo</button></td></tr>`).join('');
+  const topRows = top.map((r) => `<tr>
+      <td class="adm-time">#${r.rank}</td><td><b>${esc(r.name)}</b></td><td class="adm-right">${r.pts}</td>
+      <td>${esc(r.prize)}</td>
+      <td class="adm-right"><button class="btn btn-sm btn-warn" data-act="adm-r-flag" data-id="${r.user_id}" data-v="dq">Disqualify</button></td></tr>`).join('')
+    || `<tr><td colspan="5" class="muted">No ranked participants yet</td></tr>`;
+  return `<div class="page adm-page adm-race">
+    ${adminHead('Referral race', `${esc(R.phase || 'live')} · ends Dec 31 · winners Jan 8`,
+      `<a class="btn" href="#/contest-rules">${icon('file')} Rules</a>
+       ${R.published ? '<span class="lvl lvl-low">Results published</span>'
+         : '<button class="btn btn-primary" type="button" data-act="adm-r-publish">Publish results</button>'}`)}
+    <div class="adm-kpis adm-kpis-4">
+      <div class="card adm-kpi"><p class="small muted">Participants</p><p class="adm-kpi-v">${admFmt(T.participants || 0)}</p></div>
+      <div class="card adm-kpi"><p class="small muted">Confirmed points</p><p class="adm-kpi-v">${admFmt(T.confirmed_points || 0)}</p></div>
+      <div class="card adm-kpi"><p class="small muted">Pending points</p><p class="adm-kpi-v">${admFmt(T.pending_points || 0)}</p></div>
+      <div class="card adm-kpi"><p class="small muted">Ranked</p><p class="adm-kpi-v">${admFmt(T.ranked || 0)}</p></div>
+    </div>
+    <section class="card adm-card" aria-labelledby="adm-r-flags-h">
+      <div class="adm-card-head"><div><h2 id="adm-r-flags-h">Flags to check${open.length ? ` <span class="adm-count">${open.length}</span>` : ''}</h2>
+        <p class="small muted">High referral velocity and prior decisions. Reject sign-ups voids friend points; Disqualify removes them from the board.</p></div></div>
+      <div class="table-wrap adm-flat"><table class="adm-table"><thead><tr><th scope="col">Participant</th><th scope="col">Why</th><th scope="col" class="adm-right">Sign-ups</th><th scope="col" class="adm-right">Points</th><th scope="col" class="adm-right">Decision</th></tr></thead>
+        <tbody>${openRows}</tbody></table></div>
+      ${decidedRows ? `<div class="table-wrap adm-flat" style="margin-top:12px"><table class="adm-table"><thead><tr><th>Decided</th><th>Status</th><th>Reason</th><th></th></tr></thead><tbody>${decidedRows}</tbody></table></div>` : ''}
+    </section>
+    <section class="card adm-card" aria-labelledby="adm-r-top-h">
+      <div class="adm-card-head"><div><h2 id="adm-r-top-h">Leaderboard</h2>
+        <p class="small muted">Live confirmed points. Cash for top 3 is paid manually after Jan 8.</p></div></div>
+      <div class="table-wrap adm-flat"><table class="adm-table adm-r-top"><thead><tr><th scope="col">Place</th><th scope="col">Participant</th><th scope="col" class="adm-right">Points</th><th scope="col">Prize</th><th scope="col" class="adm-right">Actions</th></tr></thead>
+        <tbody>${topRows}</tbody></table></div>
+    </section>
+  </div>`;
+}
+
 function renderAdminSettings() {
   const s = adminState();
   admNeed('ov', 'pre', 'data');
@@ -3041,6 +3148,24 @@ function adminAction(act, el) {
   switch (act) {
     case 'adm-period': s.period = v; keep(`[data-act="adm-period"][data-v="${v}"]`); break;
     case 'adm-excl': s.excl = !s.excl; keep('[data-act="adm-excl"]'); break;
+    case 'adm-r-flag': {
+      const uid = +el.dataset.id;
+      const status = el.dataset.v || 'clear';
+      API.admin.contestFlag(uid, status).then((data) => {
+        s.race = data; toast(status === 'clear' ? 'Flag cleared' : `Marked ${status}`);
+        keep();
+      }).catch((err) => toast(err.message || 'Could not update flag'));
+      break;
+    }
+    case 'adm-r-publish': {
+      if (!confirm('Publish contest results? This grants plans and the credits pool.')) break;
+      API.admin.contestPublish().then((res) => {
+        s.race = null;
+        toast(res.already ? 'Already published' : `Published · ${res.cash?.length || 0} cash · ${res.plans?.length || 0} plans`);
+        keep();
+      }).catch((err) => toast(err.message || 'Publish failed'));
+      break;
+    }
     case 'adm-refresh': admLoad(v || 'ov'); if (!v) admLoad('pre'); break;
     case 'adm-retry': s.err[v] = null; admLoad(v); keep(); break;
     case 'adm-go':
@@ -3266,19 +3391,23 @@ const PAGES = {
   'admin-blog': adminPage(renderAdminBlog),
   'admin-blog-edit': adminPage(renderAdminBlogEdit),
   'admin-settings': adminPage(renderAdminSettings),
+  'admin-race': adminPage(renderAdminRace),
 };
 CONFIG.legal.forEach(d => { PAGES[d.id] = () => renderLegal(d.id); });
 
+let renderedRoute = null;
 function render() {
   hideTip();
   if (tour.name) { tour.name = null; $('#tour').hidden = true; }
   const route = currentRoute();
+  const samePage = renderedRoute === route;
   const main = $('#main');
   const isPublic = PUBLIC_ROUTES.includes(route);
   $('#app').classList.toggle('is-public', isPublic);
   syncProto();
   if (isPublic) {
     document.body.classList.remove('on-editor', 'on-format', 'on-assign');
+    renderRaceBar();
     const post = (CONFIG.blog?.posts || []).find(p => route === 'blog/' + p.slug);
     // Landing matches the prototype's #/landing-try: detector/humanizer hero, not the marketing hero.
     main.innerHTML = route === 'blog' ? renderBlog()
@@ -3287,7 +3416,8 @@ function render() {
     document.title = route === 'blog' ? `${CONFIG.blog.title} — ${CONFIG.brand}`
       : post ? `${post.title} — ${CONFIG.brand}`
       : (BOOT.landing ? SERVER_TITLE : CONFIG.brand);
-    window.scrollTo(0, 0);
+    if (!samePage) window.scrollTo(0, 0);
+    renderedRoute = route;
     if (route === 'blog') { /* list */ }
     else if (post) { bindLandTry(); }
     else { bindLanding(); bindLandTry(); }
@@ -3305,6 +3435,7 @@ function render() {
   if (isCollapsed() !== state.lastCollapsed) { renderSidebar(); applyLayout(); }
   else if (isAdminRoute(route) !== !!state.admMode) renderSidebar();
   state.admMode = isAdminRoute(route);
+  renderRaceBar();
   main.innerHTML = (PAGES[item.id] || (() => renderStub(item)))();
   document.title = `${item.label} — ${CONFIG.brand}`;
   markActive();
@@ -3315,7 +3446,11 @@ function render() {
     setTimeout(() => { if (currentRoute() === CONFIG.tours[tourName].route) startTour(tourName); }, 50);
   }
   if (state.drawerOpen) { state.drawerOpen = false; applyLayout(); main.focus(); }
-  window.scrollTo(0, 0);
+  if (!samePage) {
+    window.scrollTo(0, 0);
+    document.documentElement.classList.remove('hdr-hidden');
+  }
+  renderedRoute = route;
 }
 
 function go(route) { location.hash = '#/' + route; }
@@ -3348,11 +3483,264 @@ const H = () => CONFIG.homePage;
 const estCredits = (tool) => H().estimates[tool];
 const estLabel = (tool) => (estCredits(tool) != null ? `~${estCredits(tool)} credits` : CONFIG.pricePlaceholder);
 
+
+/* ---------- The $2,500 Challenge ---------- */
+const GIFT3D = `<svg viewBox="0 0 100 100" aria-hidden="true"><defs>
+  <linearGradient id="g3-box" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4fc3ff"/><stop offset=".5" stop-color="#6b7dff"/><stop offset="1" stop-color="#b56bff"/></linearGradient>
+  <linearGradient id="g3-rib" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#bfeaff"/><stop offset=".5" stop-color="#e6f6ff"/><stop offset="1" stop-color="#cdb8ff"/></linearGradient>
+  <linearGradient id="g3-bow" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6fdcff"/><stop offset=".55" stop-color="#7c8cff"/><stop offset="1" stop-color="#c681ff"/></linearGradient>
+  <linearGradient id="g3-shine" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
+  <g id="g3-loop"><path fill-rule="evenodd" fill="url(#g3-bow)" d="M50 50C34 18 6 10 8 34C10 54 34 58 50 50ZM45 48C34 34 20 27 18.500 35C17.500 43 32 49 45 48Z"/>
+  <path d="M14 22C22 17 32 22 41 36" fill="none" stroke="url(#g3-shine)" stroke-width="3" stroke-linecap="round"/></g>
+  <use href="#g3-loop" transform="translate(100 0) scale(-1 1)"/>
+  <rect x="8" y="52" width="84" height="22" rx="9" fill="url(#g3-box)"/>
+  <rect x="8" y="52" width="84" height="8" rx="4" fill="url(#g3-shine)" opacity=".7"/>
+  <rect x="41" y="52" width="18" height="48" fill="url(#g3-rib)" opacity=".95"/>
+  <rect x="41" y="44" width="18" height="14" rx="6" fill="url(#g3-bow)"/>
+  <rect x="14" y="76" width="72" height="30" rx="8" fill="url(#g3-box)" opacity=".9"/></svg>`;
+
+const raceState = () => (state._race ||= { loaded: false, data: null, busy: false });
+
+async function raceLoad(force = false) {
+  const s = raceState();
+  if (s.busy) return s.data;
+  if (s.loaded && !force) return s.data;
+  s.busy = true;
+  try {
+    const data = await API.contest.me();
+    s.data = data;
+    s.loaded = true;
+    if (data?.config) Object.assign(CONFIG.race, {
+      poolExact: data.config.poolExact || CONFIG.race.poolExact,
+      start: data.config.start || CONFIG.race.start,
+      end: data.config.end || CONFIG.race.end,
+      winners: data.config.winners || CONFIG.race.winners,
+      startShort: data.config.startShort || CONFIG.race.startShort,
+      tiers: data.config.tiers || CONFIG.race.tiers,
+      credits: { ...CONFIG.race.credits, ...(data.config.credits || {}) },
+    });
+  } catch (err) {
+    console.warn('contest load failed', err);
+    s.data = s.data || { phase: 'live', top: [], me: null, state: state.signedIn ? 'zero' : 'guest', invite_link: '' };
+  } finally {
+    s.busy = false;
+    s.loaded = true;
+  }
+  return s.data;
+}
+
+function racePhase() {
+  const d = raceState().data;
+  if (d?.phase) return d.phase;
+  const now = Date.now();
+  const start = Date.parse(CONFIG.race.start);
+  const end = Date.parse(CONFIG.race.end);
+  if (now < start) return 'before';
+  if (now < end) return 'live';
+  // verify until Jan 8 approx
+  if (now < Date.parse('2027-01-08T00:00:00-05:00')) return 'verify';
+  return 'results';
+}
+
+function raceMe() {
+  const d = raceState().data;
+  const me = d?.me;
+  if (!state.signedIn) return { kind: 'guest', rank: null, pts: 0, pending: 0, prize: '—' };
+  if (!me) return { kind: 'nohum', rank: null, pts: 0, pending: 0, prize: '—' };
+  return {
+    kind: me.kind || 'zero',
+    rank: me.rank,
+    pts: me.pts || 0,
+    pending: me.pending || 0,
+    prize: me.prize || '—',
+    credits_hint: me.credits_hint || 0,
+  };
+}
+
+function raceRows() {
+  const top = raceState().data?.top || [];
+  return top.map(r => ({
+    rank: r.rank,
+    name: r.name,
+    pts: r.pts,
+    prize: r.prize,
+    me: false,
+  }));
+}
+
+function raceInviteLink() {
+  const d = raceState().data;
+  if (d?.invite_link) return d.invite_link;
+  const code = d?.referral_code || CONFIG.earn.code;
+  return `${location.origin}/register?ref=${code}`;
+}
+
+function raceFmtPts(n) {
+  return `${Number(n || 0).toLocaleString()} pts`;
+}
+
+function rdReward(p) {
+  const s = String(p || '—');
+  if (s.startsWith('$')) return `<span class="rd-rw is-cash">${esc(s)}</span>`;
+  return `<span class="rd-rw is-cr">${esc(s)}</span>`;
+}
+
+function rdRow(r, empty) {
+  const medal = r.rank === 1 ? 'm1' : r.rank === 2 ? 'm2' : r.rank === 3 ? 'm3' : '';
+  const me = r.me ? ' is-me' : '';
+  const pts = empty ? '—' : `${Number(r.pts || 0).toLocaleString()}<small> pts</small>`;
+  return `<li class="rd-row ${medal}${me}"${r.me ? ' aria-current="true"' : ''}>
+      <span class="rd-pl">${r.rank}</span>
+      <span class="rd-name">${empty ? '<span class="muted">Open spot</span>' : esc(r.me ? 'You' : (r.name || ''))}</span>
+      <span class="rd-pts">${pts}</span>
+      ${rdReward(empty ? '—' : (r.prize || '—'))}
+    </li>`;
+}
+
+function rdStateHtml(me) {
+  const ph = racePhase();
+  if (me.kind === 'guest') {
+    return `<div class="rd-state"><p><b>Join the race</b> Create a free account, run Humanizer once, then share your link.</p>
+      <button class="btn btn-sm btn-primary" data-act="signup">Sign up</button></div>`;
+  }
+  if (me.kind === 'nohum' || me.kind === 'need_humanize') {
+    return `<div class="rd-state"><p><b>Run Humanizer once</b> Points start counting after your first run.</p>
+      <a class="btn btn-sm btn-primary" href="#/home">Open Humanizer</a></div>`;
+  }
+  if (me.kind === 'dq' || me.kind === 'excluded') {
+    return `<div class="rd-state is-dq"><p><b>Excluded</b> Your account was removed from the race for fair-play rules.</p>
+      <a class="btn btn-sm" href="#/contest-rules">Rules</a></div>`;
+  }
+  if (ph === 'before' || me.kind === 'ready') {
+    return `<div class="rd-state"><p><b>You're in</b> The race starts ${esc(CONFIG.race.startShort)}. Share your link to get ready.</p></div>`;
+  }
+  if (me.kind === 'zero' || !me.pts) {
+    return `<div class="rd-state"><p><b>0 points so far</b> Invite a friend who signs up and runs Humanizer, or buy credits.</p></div>`;
+  }
+  return '';
+}
+
+function rdGoalHtml(me) {
+  const ph = racePhase();
+  if (ph === 'results') {
+    return `<div class="rd-goal"><p>Final place <b>#${me.rank}</b> · ${raceFmtPts(me.pts)} · ${esc(me.prize)}</p></div>`;
+  }
+  if (ph === 'verify') {
+    return `<div class="rd-goal"><p>Checking results · you're <b>#${me.rank}</b> with ${raceFmtPts(me.pts)}${me.pending ? ` · ${me.pending} pending` : ''}</p></div>`;
+  }
+  return me.pending
+    ? `<div class="rd-goal"><p>${me.pending} pending points confirm in up to 7 days</p></div>`
+    : '';
+}
+
+function rdTopHtml(plain = false) {
+  const R = CONFIG.race, ph = racePhase();
+  const when = { live: 'Ends on 31 December', before: 'Starts on 20 November', verify: 'Winners on 8 January', results: 'Winners announced' }[ph];
+  return `<div class="rd-top"><div class="rd-prizes">
+        <p><b>${esc(R.poolExact)}</b> in prizes</p><span class="rd-dot" aria-hidden="true"></span><p><b class="rd-cash">$700</b> for 1st place</p>
+        ${plain ? '' : `<div class="rd-side"><p class="rd-when">${when}</p><a class="rd-rules" href="#/contest-rules">Rules</a></div>`}
+      </div></div>`;
+}
+
+function rdBoardHtml() {
+  const ph = racePhase(), me = raceMe(), rows = raceRows(), empty = ph === 'before';
+  const ranked = me.kind === 'ranked' && !empty, top3 = ranked && me.rank && me.rank <= 3;
+  const list = (empty
+    ? [1, 2, 3].map(n => rdRow({ rank: n }, true))
+    : rows.slice(0, 3).map(r => rdRow(r, false))
+  ).join('') + (ranked && !top3 ? rdRow({ rank: me.rank, pts: me.pts, prize: me.prize, me: true }, false) : '');
+  return `<div class="rd-board">
+        <ol class="rd-list" aria-label="Top 3 and your place">${list || '<li class="rd-row"><span class="rd-name muted">Be the first on the board</span></li>'}</ol>
+        ${ranked ? rdGoalHtml(me) : rdStateHtml(me)}
+      </div>`;
+}
+
+function raceHomeHtml() {
+  const E = CONFIG.earn;
+  const link = raceInviteLink();
+  const shareUrl = (t) => t.url.replace('{link}', encodeURIComponent(link)).replace('{text}', encodeURIComponent(E.shareText));
+  const short = link.replace(/^https?:\/\//, '');
+  return `<section class="rd-sec" id="rd" aria-labelledby="rd-h">
+    <div class="home-col-head"><h2 id="rd-h" class="home-h">The $2,500 Challenge</h2></div>
+    <div class="card rd">
+      ${rdTopHtml()}
+      ${rdBoardHtml()}
+      <div class="rd-invite">
+        <p class="rd-inv-h"><b>Invite friends, earn rewards</b><span>+1 point per qualified referral · +1 point for every $1 spent</span></p>
+        <div class="rd-field"><label class="visually-hidden" for="race-link">Your referral link</label>
+          <input id="race-link" readonly value="${esc(short)}">
+          <button class="btn btn-sm" type="button" data-act="race-copy">${icon('copy')} Copy</button></div>
+        <details class="rd-share">
+          <summary class="btn btn-primary btn-block">${icon('share')} Share invite link</summary>
+          <div class="rd-share-menu" role="menu" aria-label="Share on">${E.share.map(t => `<a role="menuitem" href="${esc(shareUrl(t))}" ${t.url.startsWith('mailto') ? '' : 'target="_blank" rel="noopener"'}><span class="app-tile app-${t.icon}" aria-hidden="true">${appIcon(t.icon)}</span>${esc(t.label)}</a>`).join('')}</div>
+        </details>
+      </div>
+    </div>
+  </section>`;
+}
+
+function raceLandHtml() {
+  return `<section class="pub-sec land-race" id="race" aria-labelledby="race-land-h">
+      <div class="land-race-text">
+        <span class="blog-pill">${icon('gift')}The $2,500 Challenge</span>
+        <h2 id="race-land-h">Invite friends. Win $700.</h2>
+        <p class="muted">Nov 20 – Dec 31. Cash for the top 3, plans for places 4–30, credits for everyone with 3+ points.</p>
+        <ul class="race-how">
+          <li><b>1 point</b><span>per friend who signs up and runs Humanizer</span></li>
+          <li><b>1 point</b><span>for every $1 a friend spends</span></li>
+        </ul>
+        <div class="race-ctas">${state.signedIn
+          ? `<a class="btn btn-primary" href="${esc(itemHref(ITEMS.home))}" data-act="scroll-to" data-target="rd">Get my link</a>`
+          : `<button class="btn btn-primary" type="button" data-act="signup">Join the race</button>`}
+          <a class="btn btn-ghost" href="#/contest-rules">Full rules</a></div>
+      </div>
+      <div class="card rd">
+        ${rdTopHtml(true)}
+        ${rdBoardHtml()}
+      </div>
+    </section>`;
+}
+
+function raceStripHtml() {
+  const R = CONFIG.race, ph = racePhase();
+  const join = state.signedIn
+    ? `<a class="race-strip-cta" href="${esc(itemHref(ITEMS.home))}" data-act="scroll-to" data-target="rd">Get my link</a>`
+    : `<a class="race-strip-cta" href="#/landing" data-act="scroll-to" data-target="race">Join the race</a>`;
+  const see = (t) => `<a class="race-strip-cta" href="#/landing" data-act="scroll-to" data-target="race">${t}</a>`;
+  const [text, cta] = {
+    live: ['Win $2,500 using Humanizer with friends', join],
+    before: [`From ${R.startShort}: win $2,500 using Humanizer with friends`, join],
+    verify: [`The $2,500 Challenge is over. Winners on ${R.winners}`, see('See leaderboard')],
+    results: ['The $2,500 Challenge winners are announced', see('See winners')],
+  }[ph];
+  return `<div class="race-strip" role="region" aria-label="Announcement">
+      <div class="race-strip-in"><span class="race-strip-3d">${GIFT3D}</span><p>${text}</p>${cta}</div>
+    </div>`;
+}
+
+function renderRaceBar() {
+  const bar = $('#race-strip-slot');
+  if (!bar) return;
+  const isPublic = PUBLIC_ROUTES.includes(currentRoute());
+  // Landing embeds the strip inside itself; app chrome hosts the same strip above the sidebar.
+  bar.innerHTML = isPublic ? '' : raceStripHtml();
+  bar.hidden = !bar.innerHTML;
+}
+
 function renderHome() {
   const signed = state.signedIn;
+  if (!raceState().loaded && !raceState().busy) {
+    raceLoad().then(() => {
+      if (currentRoute() !== 'home') return;
+      const slot = document.querySelector('#main .rd-sec');
+      if (slot) slot.outerHTML = raceHomeHtml();
+      renderRaceBar();
+    });
+  }
   return `<div class="page home">
     ${introVideoHtml()}
     ${quickStartHtml()}
+    ${raceHomeHtml()}
     <div class="home-cols">
       ${signed ? homeCreditsHtml() : promoHtml()}
       ${homeHistoryHtml()}
@@ -3400,8 +3788,9 @@ function promoHtml() {
 /* Start here: the same detector / humanizer box as on the landing (no free-try limit, costs credits) */
 function quickStartHtml() {
   if (!lt.text && workDoc.text) lt.text = workDoc.text;
-  const title = lt.tab === 'detect' ? (CONFIG.landing.tryIt.detectTitle || 'Check your text for AI')
-    : (CONFIG.landing.tryIt.title || H().startTitle);
+  const title = lt.tab === 'detect'
+    ? (CONFIG.landing.tryIt.detectTitle || 'Check your text for AI')
+    : (H().startTitle || 'Start here');
   return `<section class="qs" id="qs" aria-labelledby="qs-h">
     <h1 id="qs-h" class="qs-title" tabindex="-1">${esc(title)}</h1>
     ${landTryHtml()}
@@ -3679,10 +4068,10 @@ function humQuotaLine() {
   const cost = estLabel('humanizer');
   if (q.pool === 'plan') {
     if (!q.left) return `Daily limit reached · ${cost} a run`;
-    return `${q.left} of ${q.runs} runs left today`;
+    return `${q.left} of ${q.runs} left`;
   }
   if (!q.left) return 'Free runs used up today';
-  return `${q.left} of ${q.runs} free runs left today`;
+  return `${q.left} of ${q.runs} left`;
 }
 function humQuotaHtml() {
   return `<span class="hum-quota" title="${esc(humQuotaLine())}">${esc(humQuotaLine())}</span>`;
@@ -3691,44 +4080,52 @@ function humWordLimit() {
   return humQuota().words || 500;
 }
 
+function humIdleResultHtml() {
+  return `<span class="lt-hum-ic" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor">
+        <path d="M10 4.5c.75 5.1 3.4 7.75 8.5 8.5-5.1.75-7.75 3.4-8.5 8.5-.75-5.1-3.4-7.75-8.5-8.5 5.1-.75 7.75-3.4 8.5-8.5z"/>
+        <path class="hum-tw" opacity=".6" d="M18.5 2.5c.3 2.1.9 2.7 3 3-2.1.3-2.7.9-3 3-.3-2.1-.9-2.7-3-3 2.1-.3 2.7-.9 3-3z"/>
+        <circle class="hum-tw hum-tw2" opacity=".6" cx="19" cy="18.5" r="1.5"/></svg></span>
+      <h2 class="qd-verdict">Your humanized text appears here</h2>
+      <p class="muted qd-sub">We rewrite stiff, AI-sounding phrases so the text reads like you wrote it.</p>`;
+}
+
 function renderHumanizerPage(item, t, flow, tourName) {
   if (!t.humMode) t.humMode = humMode(t);
   const mode = t.humMode;
   const needPro = mode === 'pro' && !humHasPlan();
   return `<div class="page page-hum">
     ${pageHead(item, '', tourName ? `<button class="btn btn-sm" data-act="start-tour" data-tour-name="${tourName}">${icon('help')} Take the tour</button>` : '')}
-    <section class="card hum-card" aria-label="Input">
-      ${t.note ? `<p class="note">${esc(t.note)}</p>` : ''}
-      <div class="qd-label-row hum-label-row">
-        <label class="qd-label" for="tool-text">Text to humanize</label>
-        <fieldset class="seg-radios hum-mode lt-ver"><legend class="visually-hidden">Humanizer version</legend>
-          <label class="seg-radio"><input type="radio" name="hum-mode" value="free" ${mode === 'free' ? 'checked' : ''}>Free</label>
-          <label class="seg-radio"><input type="radio" name="hum-mode" value="pro" ${mode === 'pro' ? 'checked' : ''}>${needPro ? icon('lock') : icon('sparkles')} Pro</label>
-        </fieldset>
-      </div>
-      <div class="hum-field" id="hum-field">
-        <button type="button" class="hum-add" id="hum-add" aria-label="Add a file" title="Paste your text here, or add a file">${icon('plus')}</button>
-        <div class="hum-main">
-          <div class="input rich-input" id="tool-text" contenteditable="true" role="textbox" aria-multiline="true"
-            data-placeholder="Paste your text here, or add a file">${t.html ? sanitizePasteHtml(t.html) : esc(t.text).replace(/\n/g, '<br>')}</div>
-          ${t.fileName ? `<span class="hum-file">${icon('file')}<span>${esc(t.fileName)}</span></span>` : ''}
+    <section class="card qd lt-hum hum-split" aria-label="Humanizer">
+      <div class="qd-input">
+        ${t.note ? `<p class="note">${esc(t.note)}</p>` : ''}
+        <div class="qd-label-row hum-label-row">
+          <label class="qd-label" for="tool-text">Text to humanize</label>
+          <fieldset class="seg-radios hum-mode lt-ver"><legend class="visually-hidden">Humanizer version</legend>
+            <label class="seg-radio"><input type="radio" name="hum-mode" value="free" ${mode === 'free' ? 'checked' : ''}>Free</label>
+            <label class="seg-radio"><input type="radio" name="hum-mode" value="pro" ${mode === 'pro' ? 'checked' : ''}>${needPro ? icon('lock') : icon('sparkles')} Pro</label>
+          </fieldset>
         </div>
-        <input type="file" id="file-input" accept=".txt,.doc,.docx,.pdf" hidden>
+        <div class="qd-field">
+          <div class="input qd-text rich-input" id="tool-text" contenteditable="true" role="textbox" aria-multiline="true"
+            data-placeholder="Paste your text here, or add a file">${t.html ? sanitizePasteHtml(t.html) : esc(t.text).replace(/\n/g, '<br>')}</div>
+        </div>
+        ${t.fileName ? `<span class="hum-file">${icon('file')}<span>${esc(t.fileName)}</span></span>` : ''}
+        <div class="tool-bar">
+          <span class="tool-meta" id="hum-meta">
+            <span class="counter" id="counter" aria-live="polite"></span>
+            ${needPro ? '<span class="cost" id="cost">Get Pro to unlock</span>' : '<span class="cost" id="cost" hidden></span>'}
+          </span>
+          <span class="spacer"></span>
+          <input type="file" id="file-input" accept=".txt,.doc,.docx,.pdf" hidden>
+          <span id="hum-quota">${humQuotaHtml()}</span>
+          <button class="btn btn-ghost lt-up-ic" type="button" id="hum-add" aria-label="Upload file" title="Upload file (.txt, .docx, .pdf)">${icon('upload')}</button>
+          ${needPro
+            ? `<button class="btn btn-primary" data-act="hum-plans">${icon('sparkles')} Get Pro</button>`
+            : `<button class="btn btn-primary" data-act="run" id="run-btn">${icon('sparkles')} ${esc(flow.runLabel)}</button>`}
+        </div>
       </div>
-      <p class="hum-quota-line muted small" id="hum-quota">${humQuotaHtml()}</p>
-      <div class="tool-bar">
-        <span class="tool-meta" id="hum-meta">
-          <span class="counter" id="counter" aria-live="polite"></span>
-          ${needPro ? '<span class="cost" id="cost">Get Pro to unlock</span>' : '<span class="cost" id="cost" hidden></span>'}
-        </span>
-        <span class="spacer"></span>
-        <button class="btn" data-act="clear-tool">Clear</button>
-        ${needPro
-          ? `<button class="btn btn-primary" data-act="hum-plans">${icon('sparkles')} Get Pro</button>`
-          : `<button class="btn btn-primary" data-act="run" id="run-btn">${icon('sparkles')} ${esc(flow.runLabel)}</button>`}
-      </div>
+      <div class="qd-result" id="result" aria-live="polite">${resultHtml('humanizer')}</div>
     </section>
-    <section class="result" id="result" aria-live="polite">${resultHtml('humanizer')}</section>
   </div>`;
 }
 
@@ -3779,12 +4176,61 @@ function humStreamSlotHtml(s) {
   return `<p class="hum-slot is-ready${s.fresh ? ' is-fresh' : ''}">${body}</p>`;
 }
 
+function humOutFieldHtml(inner) {
+  return `<div class="qd-field lt-out-field">${inner}</div>`;
+}
+
+function humProgressPct(done, total) {
+  const d = Number(done) || 0, t = Number(total) || 0;
+  if (t > 0) return Math.max(d > 0 ? 4 : 2, Math.min(99, Math.round((d / t) * 100)));
+  return 6;
+}
+
+function humOutCountHtml(words) {
+  return `<span class="counter lt-out-count" id="lt-out-count">${fmtNum(Number(words) || 0)} words</span>`;
+}
+
+function humProgressHtml(pct, { active = false, done = 0, total = 0 } = {}) {
+  const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  const label = total ? `${done} of ${total} paragraphs ready` : `${p}%`;
+  return `<div class="hum-pbar${active ? ' is-active' : ''}" role="progressbar" aria-label="Humanizing progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${p}" aria-valuetext="${esc(label)}">
+    <div class="hum-pbar-track"><span class="hum-pbar-fill" style="width:${p}%"></span></div>
+    <span class="hum-pbar-pct">${p}%</span>
+  </div>`;
+}
+
+function humOutHeadHtml(title, { pct = null, active = false, done = 0, total = 0, titleId = '' } = {}) {
+  const idAttr = titleId ? ` id="${titleId}" tabindex="-1"` : '';
+  return `<div class="lt-out-head"><b${idAttr}>${esc(title)}</b>${pct == null ? '' : humProgressHtml(pct, { active, done, total })}</div>`;
+}
+
+function humOutBarHtml({ words = 0, actions = '' } = {}) {
+  return `<div class="tool-bar lt-out-bar">${humOutCountHtml(words)}<span class="spacer"></span>${actions}</div>`;
+}
+
+function humCopyCheckHtml({ copyAct = 'copy', checkAct = 'next', copyBtn = '' } = {}) {
+  return `${copyBtn || `<button class="btn" data-act="${copyAct}">${icon('copy')} Copy</button>`}
+    <button class="btn btn-primary" data-act="${checkAct}">${icon('scan')} Check it for AI</button>`;
+}
+
+function humStreamProgress(slots, rewriteDone, rewriteTotal) {
+  const list = slots || [];
+  const ready = list.filter((s) => s && !s.pending).length;
+  const total = Number(rewriteTotal) || list.length;
+  const done = Number(rewriteDone) || ready;
+  return { pct: humProgressPct(done, total), done, total };
+}
+
+function humStreamWords(slots) {
+  return countWords((slots || []).map((s) => humStripProtectTokens(s && s.text)).filter(Boolean).join(' '));
+}
+
 function humStreamSlotsHtml(slots, rewriteDone, rewriteTotal) {
   const parts = (slots || []).map(humStreamSlotHtml).join('');
-  const meta = rewriteTotal
-    ? `<p class="muted hum-stream-meta">${rewriteDone || 0} of ${rewriteTotal} paragraphs ready</p>`
-    : '';
-  return `${meta}<div class="result-text is-streaming" id="result-text" aria-live="polite">${parts}</div>`;
+  const { pct, done, total } = humStreamProgress(slots, rewriteDone, rewriteTotal);
+  return `${humOutHeadHtml('Humanized text', { pct, active: true, done, total, titleId: 'lt-result-h' })}
+    ${humOutFieldHtml(`<div class="result-text is-streaming lt-out-text" id="result-text" aria-live="polite">${parts}</div>`)}
+    ${humOutBarHtml({ words: humStreamWords(slots) })}`;
 }
 
 function humApplyStreamEvent(stream, evt) {
@@ -3844,38 +4290,34 @@ function humResultBodyHtml(html, text) {
 function resultHtml(id) {
   const t = toolState(id), flow = CONFIG.flows[id];
   if (t.status === 'loading' && t.stream) {
-    return `<div class="card hum-result is-streaming">${humStreamSlotsHtml(t.stream.slots, t.stream.rewriteDone, t.stream.rewriteTotal)}</div>`;
+    return `<div class="lt-out is-streaming">${humStreamSlotsHtml(t.stream.slots, t.stream.rewriteDone, t.stream.rewriteTotal)}</div>`;
   }
   if (t.status === 'loading') {
-    // Never show the old “Humanizing…” card — seed one Rewriting row immediately.
-    return `<div class="card hum-result is-streaming">${humStreamSlotsHtml(humSeedPendingSlots(t.text), 0, 0)}</div>`;
+    return `<div class="lt-out is-streaming">${humStreamSlotsHtml(humSeedPendingSlots(t.text), 0, 0)}</div>`;
   }
-  if (t.status === 'error') return `<div class="card hum-result" role="alert">
-    <div class="result-head">
-      <h2>Couldn’t humanize the text</h2>
+  if (t.status === 'error') return `<div class="lt-out" role="alert">
+    <div class="lt-out-head">
+      <b>Couldn’t humanize the text</b>
       <span class="spacer"></span>
       ${t.error.action === 'topup' ? '<button class="btn btn-sm btn-primary" data-act="topup">Top up credits</button>' : '<button class="btn btn-sm" data-act="run">Try again</button>'}
     </div>
     <p class="muted" style="margin:0">${esc(t.error.message)}</p>
   </div>`;
-  if (t.status !== 'done') return '';
-  // Result actions: main = send the text to the AI Detector, secondary = Copy for pasted text,
-  // or a download menu (copy / pdf / docx / txt) when the text came from an uploaded file
-  return `<div class="card hum-result">
-    <div class="result-head">
-      <h2>${esc(flow.resultTitle)}</h2>
-      <span class="spacer"></span>
-      ${!t.result.file ? '<button class="btn btn-sm" data-act="copy">Copy</button>' : `<div class="dl-wrap">
-        <button class="btn btn-sm" data-act="dl-toggle" aria-haspopup="menu" aria-expanded="false">${icon('download')} Download ${icon('chevronDown')}</button>
+  if (t.status !== 'done') return id === 'humanizer' ? humIdleResultHtml() : '';
+  const copyBtn = !t.result.file
+    ? `<button class="btn" data-act="copy">${icon('copy')} Copy</button>`
+    : `<div class="dl-wrap">
+        <button class="btn" data-act="dl-toggle" aria-haspopup="menu" aria-expanded="false">${icon('download')} Download ${icon('chevronDown')}</button>
         <div class="dl-menu" role="menu">
           <button role="menuitem" data-act="copy"><b class="dl-tile">${icon('copy')}</b><span class="dl-txt">Copy text<small>Paste it anywhere</small></span></button>
           <hr>
           ${['docx', 'pdf', 'txt'].map(ext => formatItemHtml(ext, 'dl-as')).join('')}
         </div>
-      </div>`}
-      <button class="btn btn-sm btn-primary" data-act="next">${esc(flow.next.label)}</button>
-    </div>
-    <div class="result-text hum-done" id="result-text">${humResultBodyHtml(t.result.html, t.result.text)}</div>
+      </div>`;
+  return `<div class="lt-out">
+    ${humOutHeadHtml(flow.resultTitle)}
+    ${humOutFieldHtml(`<div class="lt-out-text result-text hum-done" id="result-text">${humResultBodyHtml(t.result.html, t.result.text)}</div>`)}
+    ${humOutBarHtml({ words: countWords(t.result.text || ''), actions: humCopyCheckHtml({ copyBtn }) })}
   </div>`;
 }
 
@@ -8949,11 +9391,11 @@ function bindTextTool(id) {
       Object.assign(t, { fileName: '', note: err.message || 'Could not read the uploaded file.' });
     }).finally(() => { if (currentRoute() === item.route) render(); });
   };
-  dz.addEventListener('click', () => input.click());
-  input.addEventListener('change', () => takeFile(input.files[0]));
-  dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
-  dz.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('drag'); takeFile(e.dataTransfer.files[0]); });
+  dz?.addEventListener('click', () => input?.click());
+  input?.addEventListener('change', () => takeFile(input.files[0]));
+  dz?.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag'); });
+  dz?.addEventListener('dragleave', () => dz.classList.remove('drag'));
+  dz?.addEventListener('drop', (e) => { e.preventDefault(); dz.classList.remove('drag'); takeFile(e.dataTransfer.files[0]); });
 }
 
 async function runTool(id, paid = false) {
@@ -9017,7 +9459,15 @@ async function runTool(id, paid = false) {
     t.error = e;
     t.stream = null;
   }
-  if (onPage()) { render(); $('#result .btn-primary')?.focus(); }
+  if (onPage()) {
+    const el = $('#result');
+    if (el) el.innerHTML = resultHtml(id);
+    const quota = $('#hum-quota');
+    if (quota) quota.innerHTML = humQuotaHtml();
+    const run = $('#run-btn');
+    if (run) run.disabled = false;
+    $('#result .btn-primary')?.focus();
+  }
 }
 
 function addDoc(text, tool, extra = {}) {
@@ -9427,7 +9877,9 @@ function ltRenewLabel() {
 }
 function ltHeroTitle() {
   const T = CONFIG.landing.tryIt;
-  return lt.tab === 'detect' ? (T.detectTitle || 'Check your text for AI') : (T.title || 'Humanize your AI text');
+  if (lt.tab === 'detect') return T.detectTitle || 'Check your text for AI';
+  if (currentRoute() === 'home') return H().startTitle || 'Start here';
+  return T.title || 'Humanize your AI text';
 }
 function ltSyncHeroTitle() {
   const h = $('#hero-h') || $('#qs-h');
@@ -9472,15 +9924,13 @@ function landTryHtml({ intro = false } = {}) {
             : `<div class="input qd-text rich-input" id="lt-text" contenteditable="true" role="textbox" aria-multiline="true"
                 data-placeholder="${esc(T.placeholder)}" spellcheck="false">${lt.html ? sanitizePasteHtml(lt.html) : (lt.text ? markdownLiteToHtml(lt.text) : '')}</div>`}
         </div>
-        ${!det && app ? `<p class="lt-quota muted small">${esc(humQuotaLine())}</p>` : ''}
         <div class="tool-bar">
           <span class="lt-meta"><span class="muted small" id="lt-count">${ltCountText()}</span></span>
           <span class="spacer"></span>
           <input type="file" id="lt-file" accept=".txt,.docx,.pdf" hidden>
-          ${app
-            ? `<button class="btn btn-ghost" data-act="lt-upload">${icon('upload')} Upload file</button>`
-            : `<button class="btn btn-ghost lt-up-ic" data-act="lt-upload" aria-label="Upload file" title="Upload file (.txt, .docx, .pdf)">${icon('upload')}</button>`}
-          <button class="btn" data-act="lt-clear" ${lt.text ? '' : 'hidden'} id="lt-clear">Clear</button>
+          ${!det && app ? `<span class="hum-quota" title="${esc(humQuotaLine())}">${esc(humQuotaLine())}</span>` : ''}
+          <button class="btn btn-ghost lt-up-ic" data-act="lt-upload" aria-label="Upload file" title="Upload file (.txt, .docx, .pdf)">${icon('upload')}</button>
+          ${app ? '' : `<button class="btn" data-act="lt-clear" ${lt.text ? '' : 'hidden'} id="lt-clear">Clear</button>`}
           ${needPro
             ? `<button class="btn btn-primary" data-act="hum-plans">${icon('sparkles')} Get Pro</button>`
             : `<button class="btn btn-primary" data-act="lt-run" id="lt-run" ${ltReady() ? '' : 'disabled'}>${det ? `${icon('scan')} Detect AI` : `${icon('sparkles')} Humanize`}</button>`}
@@ -9495,14 +9945,12 @@ function ltResultHtml() {
   const S = CONFIG.scan, det = lt.tab === 'detect';
   if (lt.status === 'loading' && !det && lt.stream) {
     return `<div class="lt-out is-streaming">
-      <div class="visually-hidden" id="lt-result-h" tabindex="-1">Rewriting your text</div>
       ${humStreamSlotsHtml(lt.stream.slots, lt.stream.rewriteDone, lt.stream.rewriteTotal)}
     </div>`;
   }
   if (lt.status === 'loading') {
     if (!det) {
       return `<div class="lt-out is-streaming">
-        <div class="visually-hidden" id="lt-result-h" tabindex="-1">Rewriting your text</div>
         ${humStreamSlotsHtml(humSeedPendingSlots(lt.text), 0, 0)}
       </div>`;
     }
@@ -9530,14 +9978,14 @@ function ltResultHtml() {
         ? 'Pro rewrites much better and gets regular upgrades. It comes with the Basic, Pro and Max plans.'
         : 'We rewrite stiff, AI-sounding phrases so the text reads like you wrote it.'}</p>`;
   const r = lt.result;
-  if (r.kind === 'humanize') return `<div class="lt-out">
-      <div class="lt-out-head"><b id="lt-result-h" tabindex="-1">Humanized text</b>
-        <span class="spacer"></span>
-        <button class="btn btn-sm" data-act="lt-copy">${icon('copy')} Copy</button>
-        <button class="btn btn-sm btn-primary" data-act="lt-check-out">${icon('scan')} Check it for AI</button>
-      </div>
-      <div class="lt-out-text result-text hum-done" id="lt-out-text">${humResultBodyHtml(r.html, r.out)}</div>
+  if (r.kind === 'humanize') {
+    const body = humOutFieldHtml(`<div class="lt-out-text result-text hum-done" id="lt-out-text">${humResultBodyHtml(r.html, r.out)}</div>`);
+    return `<div class="lt-out">
+      ${humOutHeadHtml('Humanized text', { titleId: 'lt-result-h' })}
+      ${body}
+      ${humOutBarHtml({ words: countWords(r.out || ''), actions: humCopyCheckHtml({ copyAct: 'lt-copy', checkAct: 'lt-check-out' }) })}
     </div>`;
+  }
   const lv = scanLevel('ai', r.ai).toLowerCase();
   const scored = r.sents.filter(x => x.ai_prob != null), flagged = scored.filter(x => x.flagged).length;
   return `<div class="qd-gauge lv-${lv}" data-v="${r.ai}" style="--v:${lt.animate ? 0 : r.ai};--vi:${lt.animate ? 0 : r.ai}"><span class="visually-hidden">${r.ai}% AI</span><b aria-hidden="true"></b><small aria-hidden="true">AI</small></div>
@@ -9581,7 +10029,7 @@ function bindLandTry() {
   const refreshMeta = () => {
     $('#lt-count').textContent = ltCountText();
     $('#lt-run').disabled = !ltReady();
-    $('#lt-clear').hidden = !lt.text;
+    if ($('#lt-clear')) $('#lt-clear').hidden = !lt.text;
     if (back.firstChild && !ltMarked()) { back.textContent = ''; $('#lt-legend')?.remove(); }
   };
   ta.addEventListener('input', () => { ltSyncFromInput(); refreshMeta(); });
@@ -9718,7 +10166,6 @@ function landTryAction(act, el) {
       Object.assign(lt, { tab: el.dataset.v, status: 'idle', result: null, error: null });
       rerenderLandTry(`#lt-tab-${lt.tab}`);
       ltSyncHeroTitle();
-      if (ltApp() && currentRoute() === 'home') { const h = $('#qs-h'); if (h) h.textContent = ltHeroTitle(); }
       break;
     case 'lt-clear': Object.assign(lt, { text: '', html: '', status: 'idle', result: null, error: null }); ltSyncWorkDoc(); rerenderLandTry('#lt-text'); break;
     // Dashboard: the text goes to the AI Detector page as a file for the official Turnitin report
@@ -9793,13 +10240,12 @@ function renderLanding({ tryIt = false } = {}) {
       <span class="bt-art" aria-hidden="true">${art}</span>
     </a>`;
   }).join('');
+  raceLoad();
   return `<div class="pub land">
+    ${raceStripHtml()}
     ${landNavHtml()}
 
-    ${tryIt ? `<section class="land-hero land-hero-try" aria-labelledby="hero-h">
-      <div class="land-hero-text">
-        <h1 class="hero-title" id="hero-h" data-try-title>${esc(ltHeroTitle())}</h1>
-      </div>
+    ${tryIt ? `<section class="land-hero land-hero-try" aria-label="Try Humanizer">
       ${landTryHtml({ intro: true })}
     </section>` : `<section class="land-hero" aria-labelledby="hero-h">
       <div class="land-hero-text">
@@ -9814,6 +10260,8 @@ function renderLanding({ tryIt = false } = {}) {
     </section>`}
 
     <ul class="land-stats" aria-label="DocMaxxing in numbers">${L.stats.map(([n, t, ic]) => `<li><i class="land-stat-ic" aria-hidden="true"><svg viewBox="-5 -5 34 34"><g class="stk-bg">${ICONS[ic]}</g><g class="stk-fg">${ICONS[ic]}</g></svg></i><b>${esc(n)}</b><span>${esc(t)}</span></li>`).join('')}</ul>
+
+    ${raceLandHtml()}
 
     ${page ? sec('about', page.aboutTitle, '', `<div class="land-about">${page.about.map(([t, x]) => `<div class="card"><h3>${esc(t)}</h3><p class="muted">${esc(x)}</p></div>`).join('')}</div>`) : ''}
 
@@ -10451,6 +10899,17 @@ document.addEventListener('click', (e) => {
     }
     case 'pricing': go('pricing'); break;
     case 'earn-copy': case 'earn-ref': case 'earn-convert': case 'earn-withdraw': case 'withdraw-close': earnAction(act, el); break;
+    case 'race-copy': {
+      e.preventDefault();
+      const link = raceInviteLink();
+      const btn = el;
+      navigator.clipboard?.writeText(link).then(() => {
+        const prev = btn.innerHTML;
+        btn.innerHTML = `${icon('check')} Copied`;
+        setTimeout(() => { btn.innerHTML = prev; }, 1200);
+      }).catch(() => toast('Could not copy'));
+      break;
+    }
     case 'plan-pick': {
       const plan = CONFIG.pricing.plans.find(x => x.id === el.dataset.plan);
       if (!state.signedIn) openSignup({ title: `Sign up to get ${plan.name}` });
@@ -10511,9 +10970,17 @@ document.addEventListener('click', (e) => {
     case 'close-signup': signupDlg.close(); break;
     case 'scroll-to': {
       e.preventDefault();
-      const t = $('#' + el.dataset.target);
-      if (t) t.scrollIntoView({ behavior: 'smooth' });
-      else { go('landing'); setTimeout(() => $('#' + el.dataset.target)?.scrollIntoView(), 60); }
+      const id = el.dataset.target;
+      const hit = () => {
+        const t = id ? $('#' + id) : null;
+        if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+      if (id && $('#' + id)) { hit(); break; }
+      // Follow the link's route (#/home, #/landing, …), then scroll once the page is in.
+      const href = el.getAttribute('href') || '';
+      const route = href.startsWith('#/') ? href.slice(2).split(/[?#]/)[0] : 'landing';
+      go(route || 'landing');
+      setTimeout(hit, 80);
       break;
     }
     case 'theme':
@@ -10651,6 +11118,38 @@ $('#topbar-logo').innerHTML = `<span class="logo-mark">${LOGO_SVG}</span><span>$
 renderSidebar();
 applyLayout();
 window.addEventListener('hashchange', render);
+// Nested overflow:hidden / overflow:auto boxes (humanizer field, nav labels, the
+// race strip) swallow the wheel on Chrome even when they cannot scroll, so the
+// dashboard looks frozen. If the box under the cursor has no room in this
+// direction, scroll the page instead.
+(function bindWheelPassthrough() {
+  addEventListener('wheel', (e) => {
+    if (e.defaultPrevented || e.ctrlKey || !e.deltaY || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    const start = e.target instanceof Element ? e.target : e.target?.parentElement;
+    if (!start) return;
+    let n = start;
+    while (n && n !== document.documentElement && n !== document.body) {
+      const oy = getComputedStyle(n).overflowY;
+      if (oy === 'auto' || oy === 'scroll') {
+        const max = n.scrollHeight - n.clientHeight;
+        const dy = e.deltaY;
+        const room = max > 1 && ((dy < 0 && n.scrollTop > 0) || (dy > 0 && n.scrollTop + n.clientHeight < n.scrollHeight - 1));
+        if (room) return;
+        break;
+      }
+      n = n.parentElement;
+    }
+    let trap = start, trapped = false;
+    while (trap && trap !== document.documentElement && trap !== document.body) {
+      const oy = getComputedStyle(trap).overflowY;
+      if (oy === 'auto' || oy === 'scroll' || oy === 'hidden') { trapped = true; break; }
+      trap = trap.parentElement;
+    }
+    if (!trapped || trap.closest('dialog, [role="dialog"], .menu, .pw-dialog')) return;
+    e.preventDefault();
+    window.scrollBy(0, e.deltaY);
+  }, { passive: false, capture: true });
+})();
 // App header auto-hide: hide after scrolling down past the top, show again on any scroll up
 (function bindHeaderAutoHide() {
   let lastY = scrollY;

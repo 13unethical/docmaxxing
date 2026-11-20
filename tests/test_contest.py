@@ -1,0 +1,157 @@
+"""The $2,500 Challenge — scoring, phases, flags, prizes."""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from services.economy import auth as economy_auth
+from services.economy import contest as C
+from services.economy import db as economy_db
+
+
+@pytest.fixture()
+def economy(tmp_path, monkeypatch):
+    db_path = tmp_path / "contest.db"
+    monkeypatch.setattr(economy_db, "DB_PATH", db_path)
+    economy_db.init_db()
+    monkeypatch.delenv("CONTEST_PHASE_OVERRIDE", raising=False)
+    return db_path
+
+
+def _user(email: str, *, referrer_code: str | None = None, verified: bool = True):
+    user = economy_auth.create_user(email, "secret123", referral_code=referrer_code or "")
+    if verified:
+        economy_auth.mark_email_verified(user["id"], user["email"])
+    return user
+
+
+def test_phase_boundaries(monkeypatch, economy):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "before")
+    assert C.contest_phase() == "before"
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    assert C.contest_phase() == "live"
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "results")
+    assert C.contest_phase() == "results"
+
+
+def test_friend_humanize_awards_once(monkeypatch, economy):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    host = _user("host@example.com")
+    from services.economy.referral import ensure_referral_code
+
+    code = ensure_referral_code(host["id"])
+    C.mark_eligible(host["id"])
+    friend = _user("friend@example.com", referrer_code=code)
+    # Force created_at into contest window
+    with economy_db.connect() as conn:
+        conn.execute(
+            "UPDATE users SET created_at = ? WHERE id = ?",
+            ("2026-11-21 12:00:00", friend["id"]),
+        )
+    first = C.on_humanize_success(friend["id"], email_verified=True)
+    second = C.on_humanize_success(friend["id"], email_verified=True)
+    assert first["friend_point"] is True
+    assert second["friend_point"] is False
+    board = C.leaderboard(limit=10)
+    assert board[0]["user_id"] == host["id"]
+    assert board[0]["pts"] == 1
+
+
+def test_deposit_pending_then_confirm(monkeypatch, economy):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    user = _user("spender@example.com")
+    C.mark_eligible(user["id"])
+    out = C.on_contest_deposit(user["id"], 19.9, payment_ref="pay_1")
+    assert out["self"] is True
+    assert out["points"] == 19
+    prof = C.profile_for_user(user, public_origin="https://docmaxxing.com")
+    assert prof["me"]["pts"] == 0
+    assert prof["me"]["pending"] == 19
+    # Confirm early
+    with economy_db.connect() as conn:
+        conn.execute(
+            "UPDATE contest_ledger SET pending_until = ? WHERE payment_ref = ?",
+            ("2000-01-01 00:00:00", "pay_1"),
+        )
+    assert C.confirm_pending_points() >= 1
+    prof2 = C.profile_for_user(user, public_origin="https://docmaxxing.com")
+    assert prof2["me"]["pts"] == 19
+
+
+def test_deposit_also_awards_referrer(monkeypatch, economy):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    host = _user("host2@example.com")
+    from services.economy.referral import ensure_referral_code
+
+    code = ensure_referral_code(host["id"])
+    C.mark_eligible(host["id"])
+    friend = _user("friend2@example.com", referrer_code=code)
+    C.mark_eligible(friend["id"])
+    C.on_contest_deposit(friend["id"], 10, payment_ref="pay_ref")
+    with economy_db.connect() as conn:
+        conn.execute(
+            "UPDATE contest_ledger SET pending_until = '2000-01-01 00:00:00' WHERE payment_ref = ?",
+            ("pay_ref",),
+        )
+    C.confirm_pending_points()
+    board = {r["user_id"]: r["pts"] for r in C.leaderboard(limit=10)}
+    assert board[friend["id"]] == 10
+    assert board[host["id"]] == 10
+
+
+def test_dq_removes_from_leaderboard(monkeypatch, economy):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    user = _user("dq@example.com")
+    C.mark_eligible(user["id"])
+    C.on_contest_deposit(user["id"], 50, payment_ref="pay_dq")
+    with economy_db.connect() as conn:
+        conn.execute(
+            "UPDATE contest_ledger SET status = 'confirmed', pending_until = NULL WHERE payment_ref = ?",
+            ("pay_dq",),
+        )
+    assert C.leaderboard()[0]["user_id"] == user["id"]
+    C.set_flag(user["id"], C.FLAG_DQ, reason="abuse")
+    assert C.leaderboard() == []
+    prof = C.profile_for_user(user, public_origin="")
+    assert prof["state"] == "excluded"
+
+
+def test_prize_tiers_and_mins():
+    assert C.resolve_prize(1, 500)["label"] == "$700"
+    assert C.resolve_prize(1, 200)["label"] == "$100"  # below $200 min → next cash tier met
+    assert C.resolve_prize(4, 50)["plan"] == "max"
+    assert C.resolve_prize(25, 10)["plan"] == "basic"
+    assert C.resolve_prize(40, 3)["kind"] == "credits"
+    assert C.resolve_prize(40, 2)["kind"] == "none"
+
+
+def test_reverse_deposit(monkeypatch, economy):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    user = _user("refund@example.com")
+    C.mark_eligible(user["id"])
+    C.on_contest_deposit(user["id"], 12, payment_ref="pay_x")
+    assert C.reverse_contest_deposit("pay_x") >= 1
+    with economy_db.connect() as conn:
+        conn.execute(
+            "UPDATE contest_ledger SET pending_until = '2000-01-01 00:00:00' WHERE payment_ref = ?",
+            ("pay_x",),
+        )
+    C.confirm_pending_points()
+    assert C.leaderboard() == []
+
+
+def test_api_contest_me(economy, monkeypatch):
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    from app import app
+
+    app.config["TESTING"] = True
+    client = app.test_client()
+    res = client.get("/api/contest/me")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["success"] is True
+    assert body["phase"] == "live"
+    assert body["state"] == "guest"
+    assert "top" in body
