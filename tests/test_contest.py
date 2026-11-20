@@ -78,7 +78,7 @@ def test_backfill_historical_humanized_friends(monkeypatch, economy):
     from services.economy.referral import ensure_referral_code
 
     code = ensure_referral_code(host["id"])
-    C.mark_eligible(host["id"])
+    # Host never humanized after the race started — backfill must still open eligibility.
     friend = _user("backfriend@example.com", referrer_code=code)
     # Friend already humanized before the race (eligible row), but host never got a point.
     C.mark_eligible(friend["id"])
@@ -90,6 +90,29 @@ def test_backfill_historical_humanized_friends(monkeypatch, economy):
     n = C.backfill_friend_humanize_points(force=True)
     assert n == 1
     assert C.backfill_friend_humanize_points(force=True) == 0  # idempotent
+    board = C.leaderboard(limit=5)
+    assert board[0]["user_id"] == host["id"]
+    assert board[0]["pts"] == 1
+    prof = C.profile_for_user(host, public_origin="")
+    assert prof["state"] != "need_humanize"
+
+
+def test_backfill_marks_host_eligible_from_wallet_debit(monkeypatch, economy):
+    """Friends who only left a humanize debit still count; host appears on the board."""
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    host = _user("txhost@example.com")
+    from services.economy.referral import ensure_referral_code
+
+    code = ensure_referral_code(host["id"])
+    friend = _user("txfriend@example.com", referrer_code=code)
+    with economy_db.connect() as conn:
+        conn.execute(
+            "INSERT INTO transactions "
+            "(user_id, kind, feature, amount, balance_after, type, status) "
+            "VALUES (?, 'debit', 'humanize', 25, 0, 'USAGE', 'completed')",
+            (friend["id"],),
+        )
+    assert C.backfill_friend_humanize_points(force=True) == 1
     board = C.leaderboard(limit=5)
     assert board[0]["user_id"] == host["id"]
     assert board[0]["pts"] == 1

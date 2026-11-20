@@ -308,26 +308,10 @@ def on_humanize_success(user_id: int, *, email_verified: bool = True) -> dict[st
     return out
 
 
-def backfill_friend_humanize_points(*, force: bool = False) -> int:
-    """Award +1 for every historical verified invitee who already ran Humanizer.
-
-    Idempotent via contest_hum_{friend_id}. Runs once per DB unless force=True.
-    """
-    phase = contest_phase()
-    if phase not in ("live", "verify", "results") and not force:
-        return 0
-    with connect() as conn:
-        ensure_contest_schema(conn)
-        if not force and _meta_get(conn, "friend_hum_backfill") == "1":
-            return 0
-        rows = conn.execute(
-            """
-            SELECT u.id AS friend_id, u.referrer_id AS referrer_id
-            FROM users u
-            WHERE u.referrer_id IS NOT NULL
-              AND u.referrer_id != u.id
-              AND COALESCE(u.is_verified, 0) = 1
-              AND (
+def _has_humanize_history_sql() -> str:
+    """SQL fragment: user id alias must be `u`."""
+    return """
+              (
                 EXISTS (
                   SELECT 1 FROM contest_ledger e
                   WHERE e.user_id = u.id AND e.kind = ? AND e.status != ?
@@ -341,7 +325,84 @@ def backfill_friend_humanize_points(*, force: bool = False) -> int:
                   SELECT 1 FROM humanizer_dataset_logs h
                   WHERE h.user_id = u.id
                 )
+                OR EXISTS (
+                  SELECT 1 FROM transactions t
+                  WHERE t.user_id = u.id
+                    AND (t.feature = 'humanize' OR t.feature LIKE 'humanize%')
+                    AND t.kind = 'debit'
+                )
               )
+    """
+
+
+def _backfill_eligibility_from_history(conn) -> int:
+    """Mark eligible: historical humanizers + anyone who already has race points."""
+    marked = 0
+    # Anyone who already humanized (so they leave "Run Humanizer once").
+    rows = conn.execute(
+        f"""
+        SELECT u.id AS user_id
+        FROM users u
+        WHERE {_has_humanize_history_sql()}
+        """,
+        (KIND_ELIGIBLE, STATUS_REVERSED),
+    ).fetchall()
+    for row in rows:
+        if _insert_ledger(
+            conn,
+            user_id=int(row["user_id"]),
+            kind=KIND_ELIGIBLE,
+            points=0,
+            ref_id=f"contest_eligible_{int(row['user_id'])}",
+        ):
+            marked += 1
+    # Hosts who already have confirmed race points but were never marked eligible
+    # (v1 backfill awarded friend_hum without opening eligibility).
+    hosts = conn.execute(
+        """
+        SELECT DISTINCT user_id FROM contest_ledger
+        WHERE status = ? AND kind != ? AND points > 0
+        """,
+        (STATUS_CONFIRMED, KIND_ELIGIBLE),
+    ).fetchall()
+    for row in hosts:
+        uid = int(row["user_id"])
+        if _insert_ledger(
+            conn,
+            user_id=uid,
+            kind=KIND_ELIGIBLE,
+            points=0,
+            ref_id=f"contest_eligible_{uid}",
+        ):
+            marked += 1
+    return marked
+
+
+def backfill_friend_humanize_points(*, force: bool = False) -> int:
+    """Award +1 for every historical verified invitee who already ran Humanizer.
+
+    Also opens eligibility for historical humanizers and for hosts who already
+    hold race points. Idempotent via contest_hum_{friend_id}. Uses meta key
+    friend_hum_backfill_v2 so DBs that ran the first pass still re-sync.
+    """
+    phase = contest_phase()
+    if phase not in ("live", "verify", "results") and not force:
+        return 0
+    with connect() as conn:
+        ensure_contest_schema(conn)
+        if not force and _meta_get(conn, "friend_hum_backfill_v2") == "1":
+            # Still heal eligibility if points exist without eligible rows.
+            _backfill_eligibility_from_history(conn)
+            return 0
+        _backfill_eligibility_from_history(conn)
+        rows = conn.execute(
+            f"""
+            SELECT u.id AS friend_id, u.referrer_id AS referrer_id
+            FROM users u
+            WHERE u.referrer_id IS NOT NULL
+              AND u.referrer_id != u.id
+              AND COALESCE(u.is_verified, 0) = 1
+              AND {_has_humanize_history_sql()}
             """,
             (KIND_ELIGIBLE, STATUS_REVERSED),
         ).fetchall()
@@ -361,7 +422,16 @@ def backfill_friend_humanize_points(*, force: bool = False) -> int:
                 status=STATUS_CONFIRMED,
             ):
                 awarded += 1
+            # Hosts with historical referrals must appear on the board.
+            _insert_ledger(
+                conn,
+                user_id=referrer_id,
+                kind=KIND_ELIGIBLE,
+                points=0,
+                ref_id=f"contest_eligible_{referrer_id}",
+            )
         _meta_set(conn, "friend_hum_backfill", "1")
+        _meta_set(conn, "friend_hum_backfill_v2", "1")
         return awarded
 
 
