@@ -80,8 +80,6 @@ def test_backfill_historical_humanized_friends(monkeypatch, economy):
     code = ensure_referral_code(host["id"])
     # Host never humanized after the race started — backfill must still open eligibility.
     friend = _user("backfriend@example.com", referrer_code=code)
-    # Friend already humanized before the race (eligible row), but host never got a point.
-    C.mark_eligible(friend["id"])
     with economy_db.connect() as conn:
         conn.execute(
             "UPDATE users SET created_at = ? WHERE id = ?",
@@ -95,6 +93,18 @@ def test_backfill_historical_humanized_friends(monkeypatch, economy):
     assert board[0]["pts"] == 1
     prof = C.profile_for_user(host, public_origin="")
     assert prof["state"] != "need_humanize"
+
+
+def test_backfill_verified_referral_without_humanize(monkeypatch, economy):
+    """Historical hosts get +1 for every verified invitee, even before friend humanizes."""
+    monkeypatch.setenv("CONTEST_PHASE_OVERRIDE", "live")
+    host = _user("refonly@example.com")
+    from services.economy.referral import ensure_referral_code
+
+    code = ensure_referral_code(host["id"])
+    _user("verifiedonly@example.com", referrer_code=code)
+    assert C.backfill_friend_humanize_points(force=True) == 1
+    assert C.leaderboard(limit=5)[0]["user_id"] == host["id"]
 
 
 def test_backfill_marks_host_eligible_from_wallet_debit(monkeypatch, economy):

@@ -3504,7 +3504,10 @@ const raceState = () => (state._race ||= { loaded: false, data: null, busy: fals
 async function raceLoad(force = false) {
   const s = raceState();
   if (s.busy) return s.data;
-  if (s.loaded && !force) return s.data;
+  // Refetch when we only have a failed/empty placeholder so the board can heal after deploy.
+  const staleEmpty = s.loaded && Array.isArray(s.data?.top) && s.data.top.length === 0
+    && (!s.data?.me || s.data.me.kind === 'nohum');
+  if (s.loaded && !force && !staleEmpty) return s.data;
   s.busy = true;
   try {
     const data = await API.contest.me();
@@ -3521,10 +3524,10 @@ async function raceLoad(force = false) {
     });
   } catch (err) {
     console.warn('contest load failed', err);
+    s.loaded = false;
     s.data = s.data || { phase: 'live', top: [], me: null, state: state.signedIn ? 'zero' : 'guest', invite_link: '' };
   } finally {
     s.busy = false;
-    s.loaded = true;
   }
   return s.data;
 }

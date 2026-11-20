@@ -389,33 +389,33 @@ def _backfill_eligibility_from_history(conn) -> int:
 
 
 def backfill_friend_humanize_points(*, force: bool = False) -> int:
-    """Award +1 for every historical verified invitee who already ran Humanizer.
+    """Award +1 for every historical verified invitee (all-time referrers).
 
-    Also opens eligibility for historical humanizers and for hosts who already
-    hold race points. Idempotent via contest_hum_{friend_id}. Uses meta key
-    friend_hum_backfill_v3 so DBs that ran earlier passes still re-sync after
-    the Humanizer/plan_usage detection fix.
+    Opens eligibility for historical humanizers and for hosts who already hold
+    race points. Idempotent via contest_hum_{friend_id}. Meta key
+    friend_hum_backfill_v4 re-runs after earlier passes that missed plan Max
+    usage labels or required a humanize trail for historical referrals.
     """
     phase = contest_phase()
     if phase not in ("live", "verify", "results") and not force:
         return 0
     with connect() as conn:
         ensure_contest_schema(conn)
-        if not force and _meta_get(conn, "friend_hum_backfill_v3") == "1":
+        if not force and _meta_get(conn, "friend_hum_backfill_v4") == "1":
             # Still heal eligibility if points/history exist without eligible rows.
             _backfill_eligibility_from_history(conn)
             return 0
         _backfill_eligibility_from_history(conn)
+        # Historical race: every verified invitee counts for the host who brought them.
+        # Live scoring still also awards via on_humanize_success (same ref_id → no double count).
         rows = conn.execute(
-            f"""
+            """
             SELECT u.id AS friend_id, u.referrer_id AS referrer_id
             FROM users u
             WHERE u.referrer_id IS NOT NULL
               AND u.referrer_id != u.id
               AND COALESCE(u.is_verified, 0) = 1
-              AND {_has_humanize_history_sql()}
-            """,
-            (KIND_ELIGIBLE, STATUS_REVERSED),
+            """
         ).fetchall()
         awarded = 0
         for row in rows:
@@ -444,6 +444,7 @@ def backfill_friend_humanize_points(*, force: bool = False) -> int:
         _meta_set(conn, "friend_hum_backfill", "1")
         _meta_set(conn, "friend_hum_backfill_v2", "1")
         _meta_set(conn, "friend_hum_backfill_v3", "1")
+        _meta_set(conn, "friend_hum_backfill_v4", "1")
         return awarded
 
 
@@ -732,6 +733,24 @@ def profile_for_user(
     code = ensure_referral_code(uid)
     origin = (public_origin or "").rstrip("/")
     link = f"{origin}/register?ref={code}" if origin else f"/register?ref={code}"
+    # Heal this account immediately (plan Max / Humanizer usage) before reading state.
+    with connect() as conn:
+        ensure_contest_schema(conn)
+        row = conn.execute(
+            f"""
+            SELECT u.id FROM users u
+            WHERE u.id = ? AND {_has_humanize_history_sql()}
+            """,
+            (uid, KIND_ELIGIBLE, STATUS_REVERSED),
+        ).fetchone()
+        if row is not None:
+            _insert_ledger(
+                conn,
+                user_id=uid,
+                kind=KIND_ELIGIBLE,
+                points=0,
+                ref_id=f"contest_eligible_{uid}",
+            )
 
     with connect() as conn:
         ensure_contest_schema(conn)
