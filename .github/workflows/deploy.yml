@@ -46,6 +46,22 @@ jobs:
             else
               echo 'APP_ENV=production' >> .env
             fi
+            # Humanizer: CHUNK_WORDS=1 made every paragraph its own request; short ones often stayed verbatim.
+            if grep -q '^HUMANIZER_STUDENT_CHUNK_WORDS=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_CHUNK_WORDS=.*/HUMANIZER_STUDENT_CHUNK_WORDS=600/' .env
+            else
+              echo 'HUMANIZER_STUDENT_CHUNK_WORDS=600' >> .env
+            fi
+            if grep -q '^HUMANIZER_STUDENT_PICK=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_PICK=.*/HUMANIZER_STUDENT_PICK=changed/' .env
+            else
+              echo 'HUMANIZER_STUDENT_PICK=changed' >> .env
+            fi
+            if grep -q '^HUMANIZER_STUDENT_SAMPLING=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_SAMPLING=.*/HUMANIZER_STUDENT_SAMPLING=1.0:4,1.2:4/' .env
+            else
+              echo 'HUMANIZER_STUDENT_SAMPLING=1.0:4,1.2:4' >> .env
+            fi
             # Cite pilot pages require these files next to the /cite route.
             test -f services/cite_guides.py
             test -f templates/landing/cite_guide.html
@@ -66,6 +82,9 @@ jobs:
             systemctl is-enabled --quiet docmaxxing-humanizer-training-export.timer
             systemctl is-enabled --quiet docmaxxing-tt-detector-labels.timer
             bash scripts/patch_nginx_timeouts.sh || true
+            # Peak-hours Modal keep-warm (Tashkent 09–01). Idempotent crontab line.
+            chmod +x scripts/keep_humanizer_warm_peak.sh || true
+            (crontab -l 2>/dev/null | grep -v 'keep_humanizer_warm_peak.sh'; echo '*/1 * * * * /root/docmaxxing/scripts/keep_humanizer_warm_peak.sh') | crontab -
             echo "Deployed $(git rev-parse --short HEAD)"
             echo "Storage: $(grep PROJECT_STORAGE_DIR .env || true)"
             if grep -qE '^TURNITIN_API_KEY=.+' .env && grep -qE '^TURNITIN_API_SECRET=.+' .env; then

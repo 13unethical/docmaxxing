@@ -160,13 +160,15 @@ def student_config() -> StudentConfig:
         share=min(1.0, max(0.0, _float("HUMANIZER_STUDENT_SHARE", 1.0))),
         level=max(1, min(10, int(_float("HUMANIZER_STUDENT_LEVEL", 8)))),
         timeout=max(10.0, _float("HUMANIZER_STUDENT_TIMEOUT", 90.0)),
-        chunk_words=max(1, int(_float("HUMANIZER_STUDENT_CHUNK_WORDS", CHUNK_WORDS))),
+        chunk_words=max(80, int(_float("HUMANIZER_STUDENT_CHUNK_WORDS", CHUNK_WORDS))),
         probe_timeout=max(0.5, _float("HUMANIZER_STUDENT_PROBE_TIMEOUT", 3.0)),
         events_log=(os.environ.get("HUMANIZER_STUDENT_EVENTS_LOG") or "").strip(),
         temperature=max(0.1, min(2.0, _float("HUMANIZER_STUDENT_TEMPERATURE", TEMPERATURE))),
         candidates=max(1, min(MAX_CANDIDATES, int(_float("HUMANIZER_STUDENT_CANDIDATES", 1)))),
         pick=(os.environ.get("HUMANIZER_STUDENT_PICK") or "changed").strip().lower(),
-        sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_SAMPLING") or ""),
+        # Empty SAMPLING + candidates=1 often echoes the source; default to a small diverse pool.
+        sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_SAMPLING") or "")
+        or ((1.0, 4), (1.2, 4)),
         refine_above=_float("HUMANIZER_STUDENT_REFINE_ABOVE", REFINE_ABOVE),
         refine_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_REFINE_SAMPLING") or ""),
         conclusion_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_CONCLUSION_SAMPLING") or ""),
@@ -694,7 +696,8 @@ class StudentTextHumanizer:
             log.info("student humanizer attempt %s failed: %s", attempt, problem)
         if lightest is not None:
             return lightest[1]
-        if problem == "UNCHANGED" and _wc(source) <= KEEP_UNCHANGED_MAX_WORDS:
+        # Tiny captions/labels may stay verbatim; real prose must not.
+        if problem == "UNCHANGED" and _wc(source) <= 12:
             return chunk
         raise StudentHumanizerError(f"Chunk rejected after {ATTEMPTS} attempts: {problem}")
 
@@ -1036,6 +1039,9 @@ def try_student_humanize(
     if not output.strip() or output.strip() == text.strip():
         record_event(cfg, "failed", words=words, elapsed=elapsed, error="UNCHANGED")
         return None
+    if _jaccard(text, output) > 0.92:
+        record_event(cfg, "failed", words=words, elapsed=elapsed, error="NEAR_UNCHANGED")
+        return None
     record_event(
         cfg,
         "served",
@@ -1094,6 +1100,8 @@ def try_student_humanize_rich(
     started = time.monotonic()
     ttfb: list[float] = []
 
+    failures: list[str] = []
+
     def rewrite(line: str) -> str:
         text = (line or "").strip()
         if not text or len(text) < MIN_HUMANIZE_CHARS:
@@ -1101,8 +1109,9 @@ def try_student_humanize_rich(
         try:
             # Each rich block is one source paragraph — collapse model soft wraps / blank splits.
             return engine._rewrite_chunk(line, True)
-        except StudentHumanizerError:
-            return line
+        except StudentHumanizerError as exc:
+            failures.append(str(exc)[:160])
+            raise
 
     def _wrap_chunk(evt: dict[str, Any]) -> None:
         if evt.get("status") == "ready" and not ttfb:
@@ -1130,6 +1139,9 @@ def try_student_humanize_rich(
         return None
     if text.strip() == plain_check.strip():
         record_event(cfg, "failed", words=words, elapsed=elapsed, error="UNCHANGED")
+        return None
+    if _jaccard(plain_check, text) > 0.92:
+        record_event(cfg, "failed", words=words, elapsed=elapsed, error="NEAR_UNCHANGED")
         return None
     record_event(
         cfg,

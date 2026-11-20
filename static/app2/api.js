@@ -136,8 +136,8 @@
       if (rich) body.html = rich;
       // Free and Pro are separate counters + word caps — always send which one the UI selected.
       if (opts && opts.mode) body.mode = opts.mode;
-      // Opt-in sampling profile: "fast" | "quality" (default). Not the Free/Pro billing mode.
-      if (opts && opts.quality) body.quality = opts.quality;
+      // Sampling profile: default "fast" (fewer candidates). Pass quality:"quality" for heavier rewrite.
+      body.quality = (opts && opts.quality) ? opts.quality : 'fast';
       const run = () => (opts && opts.stream && typeof opts.onParagraph === 'function')
         ? this.humanizeStream(body, opts)
         : request('POST', '/api/browser/providers/stealthwriter/humanize', { json: body, timeoutMs: opts && opts.timeoutMs });

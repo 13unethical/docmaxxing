@@ -172,7 +172,7 @@
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ text: text, source: 'landing', mode: 'free' }),
+        body: JSON.stringify({ text: text, source: 'landing', mode: 'free', quality: 'fast' }),
         signal: ctl ? ctl.signal : undefined
       }).then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (data) {
