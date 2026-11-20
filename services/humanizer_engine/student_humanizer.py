@@ -68,6 +68,13 @@ MAX_CANDIDATES = 16
 # pick="detector": a chunk whose best variant the AI detector still scores above this gets
 # ``refine_sampling`` more variants before the final choice.
 REFINE_ABOVE = 0.3
+# When pick=detector: stop sampling more variants once the best score is at/below this.
+# 0 disables early stop. Cuts GPU on easy chunks without changing hard ones.
+EARLY_STOP_BELOW = 0.15
+# Default pool: one temperature (higher rewrite diversity). Mix 1.0+1.2 was rarely winning on 1.0.
+DEFAULT_SAMPLING = ((1.2, 8),)
+# Extra variants for conclusion paragraphs (Turnitin flags them ~2–3× more often).
+DEFAULT_CONCLUSION_SAMPLING = ((1.2, 16),)
 # Fast mode (opt-in): fewer candidates, refine only when the chunk still looks AI.
 FAST_SAMPLING = ((1.2, 4),)
 FAST_REFINE_SAMPLING = ((1.2, 12),)
@@ -122,6 +129,8 @@ class StudentConfig:
     refine_sampling: tuple[tuple[float, int], ...] = ()
     # Extra variants always sampled for conclusion paragraphs (Turnitin flags ~2/3 of them vs ~1/4 of the rest).
     conclusion_sampling: tuple[tuple[float, int], ...] = ()
+    # Detector pick: skip remaining waves / refine when best AI prob is already this low (0 = off).
+    early_stop_below: float = EARLY_STOP_BELOW
     doc_rounds: int = DOC_ROUNDS
     doc_budget: float = DOC_BUDGET_SECONDS
 
@@ -165,13 +174,19 @@ def student_config() -> StudentConfig:
         events_log=(os.environ.get("HUMANIZER_STUDENT_EVENTS_LOG") or "").strip(),
         temperature=max(0.1, min(2.0, _float("HUMANIZER_STUDENT_TEMPERATURE", TEMPERATURE))),
         candidates=max(1, min(MAX_CANDIDATES, int(_float("HUMANIZER_STUDENT_CANDIDATES", 1)))),
-        pick=(os.environ.get("HUMANIZER_STUDENT_PICK") or "detector").strip().lower(),
-        # Empty SAMPLING + candidates=1 often echoes the source; default to a small diverse pool.
+        pick=(os.environ.get("HUMANIZER_STUDENT_PICK") or "document").strip().lower(),
+        # document mode one-shots regardless; detector mode defaults to a diverse 1.2 pool.
         sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_SAMPLING") or "")
-        or ((1.0, 4), (1.2, 4)),
+        or (
+            ((1.2, 1),)
+            if (os.environ.get("HUMANIZER_STUDENT_PICK") or "document").strip().lower() == "document"
+            else DEFAULT_SAMPLING
+        ),
         refine_above=_float("HUMANIZER_STUDENT_REFINE_ABOVE", REFINE_ABOVE),
         refine_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_REFINE_SAMPLING") or ""),
-        conclusion_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_CONCLUSION_SAMPLING") or ""),
+        conclusion_sampling=parse_sampling(os.environ.get("HUMANIZER_STUDENT_CONCLUSION_SAMPLING") or "")
+        or DEFAULT_CONCLUSION_SAMPLING,
+        early_stop_below=max(0.0, _float("HUMANIZER_STUDENT_EARLY_STOP", EARLY_STOP_BELOW)),
         doc_rounds=max(0, int(_float("HUMANIZER_STUDENT_DOC_ROUNDS", DOC_ROUNDS))),
         doc_budget=max(0.0, _float("HUMANIZER_STUDENT_DOC_BUDGET", DOC_BUDGET_SECONDS)),
     )
@@ -681,7 +696,18 @@ class StudentTextHumanizer:
 
         for attempt in range(1, ATTEMPTS + 1):
             try:
-                variants = self._candidates(source)
+                if self.config.pick == "detector":
+                    text = self._detector_sample(source, conclusion)
+                    if text is not None:
+                        return _with_marker(text)
+                    problem = "NO_VARIANTS"
+                    continue
+                # pick=document: one write per chunk; extra variants only when _fix_flagged/_refit runs.
+                if self.config.pick == "document":
+                    temperature = (self.config.sampling_plan or ((self.config.temperature, 1),))[0][0]
+                    variants = self._candidates(source, ((temperature, 1),))
+                else:
+                    variants = self._candidates(source)
             except (requests.RequestException, StudentHumanizerError, KeyError, ValueError, IndexError) as exc:
                 problem = f"REQUEST_FAILED: {exc}"
                 log.info("student humanizer attempt %s failed: %s", attempt, problem)
@@ -690,8 +716,6 @@ class StudentTextHumanizer:
             if light is not None and (lightest is None or light[0] < lightest[0]):
                 lightest = (light[0], _with_marker(light[1]))
             if usable:
-                if self.config.pick == "detector":
-                    return _with_marker(self._pick_by_detector(source, usable, conclusion))
                 return _with_marker(pick_candidate(source, usable, self.config.pick).text)
             log.info("student humanizer attempt %s failed: %s", attempt, problem)
         if lightest is not None:
@@ -720,9 +744,69 @@ class StudentTextHumanizer:
                     lightest = (similarity, output)
         return usable, problem, lightest
 
+    def _sampling_waves(
+        self, plan: tuple[tuple[float, int], ...]
+    ) -> list[tuple[float, int]]:
+        """Split the plan into waves so early-stop can skip later GPU work.
+
+        A single large ``n`` becomes two half-batches; multi-temperature plans stay one wave each.
+        """
+        waves: list[tuple[float, int]] = []
+        early = self.config.early_stop_below > 0
+        for temperature, n in plan:
+            if early and len(plan) == 1 and n >= 4:
+                first = (n + 1) // 2
+                waves.append((temperature, first))
+                if n - first > 0:
+                    waves.append((temperature, n - first))
+            else:
+                waves.append((temperature, n))
+        return waves
+
+    def _detector_sample(self, chunk: str, conclusion: bool = False) -> str | None:
+        """Sample in waves, pick lowest AI score; early-stop skips later waves/refine when clean."""
+        cfg = self.config
+        scored: list[tuple[Candidate, float]] = []
+        lightest: tuple[float, str] | None = None
+        waves = self._sampling_waves(cfg.sampling_plan)
+        for temperature, n in waves:
+            usable, problem, light = self._usable(chunk, self._candidates(chunk, ((temperature, n),)))
+            if light is not None and (lightest is None or light[0] < lightest[0]):
+                lightest = light
+            if not usable:
+                log.info("student humanizer detector wave empty: %s", problem)
+                continue
+            try:
+                scored += list(zip(usable, self._score_fn([c.text for c in usable])))
+            except Exception as exc:  # noqa: BLE001
+                log.info("AI detector unavailable for student pick: %s", exc)
+                return pick_candidate(chunk, usable, "changed").text
+            best = pick_least_ai(chunk, scored)
+            # Conclusions still get their dedicated extras even when already clean.
+            if (
+                cfg.early_stop_below > 0
+                and best[1] <= cfg.early_stop_below
+                and not conclusion
+            ):
+                return best[0].text
+        if not scored:
+            return lightest[1] if lightest is not None else None
+        best = pick_least_ai(chunk, scored)
+        more = cfg.conclusion_sampling if conclusion else ()
+        if not more and best[1] > cfg.refine_above:
+            more = cfg.refine_sampling
+        if more:
+            try:
+                extra, _, _ = self._usable(chunk, self._candidates(chunk, more))
+                if extra:
+                    scored += list(zip(extra, self._score_fn([c.text for c in extra])))
+                    best = pick_least_ai(chunk, scored)
+            except Exception as exc:  # noqa: BLE001
+                log.info("student humanizer refine failed: %s", exc)
+        return best[0].text
+
     def _pick_by_detector(self, chunk: str, usable: list[Candidate], conclusion: bool = False) -> str:
-        """Lowest AI-detector score; still-flagged chunks and conclusions get extra variants.
-        Without the detector, "changed"."""
+        """Lowest AI-detector score among ``usable``; refine/conclusion extras when still flagged."""
         cfg = self.config
         try:
             scored = list(zip(usable, self._score_fn([c.text for c in usable])))
@@ -730,6 +814,8 @@ class StudentTextHumanizer:
             log.info("AI detector unavailable for student pick: %s", exc)
             return pick_candidate(chunk, usable, "changed").text
         best = pick_least_ai(chunk, scored)
+        if cfg.early_stop_below > 0 and best[1] <= cfg.early_stop_below and not conclusion:
+            return best[0].text
         more = cfg.conclusion_sampling if conclusion else ()
         if not more and best[1] > cfg.refine_above:
             more = cfg.refine_sampling

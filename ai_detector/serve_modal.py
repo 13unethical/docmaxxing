@@ -165,3 +165,16 @@ class Detector:
                     "threshold": self.threshold}
 
         return web
+
+
+# Same peak window as the humanizer (Tashkent 09:00–01:00): detector cold start is ~11s alone.
+@app.function(schedule=modal.Cron("0 9 * * *", timezone="Asia/Tashkent"))
+def peak_warm_pool() -> str:
+    Detector.autoscaler.update(min_containers=1)  # type: ignore[attr-defined]
+    return "min_containers=1"
+
+
+@app.function(schedule=modal.Cron("0 1 * * *", timezone="Asia/Tashkent"))
+def offpeak_scale_to_zero() -> str:
+    Detector.autoscaler.update(min_containers=0)  # type: ignore[attr-defined]
+    return "min_containers=0"

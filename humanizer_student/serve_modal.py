@@ -244,3 +244,17 @@ class Humanizer:
     @modal.exit()
     def stop(self) -> None:
         self.proc.terminate()
+
+
+# Peak warm pool (Tashkent): keep one container up 09:00–01:00, scale to zero overnight.
+# Complements scripts/keep_humanizer_warm_peak.sh (HTTP ping); min_containers avoids cold restore.
+@app.function(schedule=modal.Cron("0 9 * * *", timezone="Asia/Tashkent"))
+def peak_warm_pool() -> str:
+    Humanizer.autoscaler.update(min_containers=1)  # type: ignore[attr-defined]
+    return "min_containers=1"
+
+
+@app.function(schedule=modal.Cron("0 1 * * *", timezone="Asia/Tashkent"))
+def offpeak_scale_to_zero() -> str:
+    Humanizer.autoscaler.update(min_containers=0)  # type: ignore[attr-defined]
+    return "min_containers=0"

@@ -52,21 +52,32 @@ jobs:
             else
               echo 'HUMANIZER_STUDENT_CHUNK_WORDS=600' >> .env
             fi
+            # document: one rewrite per chunk, then only re-sample flagged spans (refine).
             if grep -q '^HUMANIZER_STUDENT_PICK=' .env 2>/dev/null; then
-              sed -i 's/^HUMANIZER_STUDENT_PICK=.*/HUMANIZER_STUDENT_PICK=detector/' .env
+              sed -i 's/^HUMANIZER_STUDENT_PICK=.*/HUMANIZER_STUDENT_PICK=document/' .env
             else
-              echo 'HUMANIZER_STUDENT_PICK=detector' >> .env
+              echo 'HUMANIZER_STUDENT_PICK=document' >> .env
             fi
             if grep -q '^HUMANIZER_STUDENT_SAMPLING=' .env 2>/dev/null; then
-              sed -i 's/^HUMANIZER_STUDENT_SAMPLING=.*/HUMANIZER_STUDENT_SAMPLING=1.0:4,1.2:4/' .env
+              sed -i 's/^HUMANIZER_STUDENT_SAMPLING=.*/HUMANIZER_STUDENT_SAMPLING=1.2:1/' .env
             else
-              echo 'HUMANIZER_STUDENT_SAMPLING=1.0:4,1.2:4' >> .env
+              echo 'HUMANIZER_STUDENT_SAMPLING=1.2:1' >> .env
             fi
-            # Extra variants when the best pick is still above refine_above (0.3).
+            # Extra variants only for whole-doc flagged chunks.
             if grep -q '^HUMANIZER_STUDENT_REFINE_SAMPLING=' .env 2>/dev/null; then
               sed -i 's/^HUMANIZER_STUDENT_REFINE_SAMPLING=.*/HUMANIZER_STUDENT_REFINE_SAMPLING=1.2:12/' .env
             else
               echo 'HUMANIZER_STUDENT_REFINE_SAMPLING=1.2:12' >> .env
+            fi
+            if grep -q '^HUMANIZER_STUDENT_CONCLUSION_SAMPLING=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_CONCLUSION_SAMPLING=.*/HUMANIZER_STUDENT_CONCLUSION_SAMPLING=1.2:16/' .env
+            else
+              echo 'HUMANIZER_STUDENT_CONCLUSION_SAMPLING=1.2:16' >> .env
+            fi
+            if grep -q '^HUMANIZER_STUDENT_EARLY_STOP=' .env 2>/dev/null; then
+              sed -i 's/^HUMANIZER_STUDENT_EARLY_STOP=.*/HUMANIZER_STUDENT_EARLY_STOP=0.15/' .env
+            else
+              echo 'HUMANIZER_STUDENT_EARLY_STOP=0.15' >> .env
             fi
             # Cite pilot pages require these files next to the /cite route.
             test -f services/cite_guides.py

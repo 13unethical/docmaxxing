@@ -6,7 +6,8 @@
 # Install (VPS):
 #   */1 * * * * /root/docmaxxing/scripts/keep_humanizer_warm_peak.sh
 #
-# Cost (Modal L4 @ $0.000222/s ≈ $0.80/h): 16 h/day × 30 ≈ 480 GPU-h ≈ $384/mo GPU only.
+# Cost floor with min_containers=1 on L40S (~$1.95/h): 16 h/day × 30 ≈ $940/mo GPU only.
+# Prefer Modal Cron peak_warm_pool / offpeak_scale_to_zero on serve_modal.py; this ping is backup.
 set -euo pipefail
 # UTC hour 4..19 inclusive = Tashkent 09:00–00:59
 hour_utc=$(date -u +%H)

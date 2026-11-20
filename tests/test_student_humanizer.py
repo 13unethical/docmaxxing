@@ -467,6 +467,32 @@ def _ai_if_moreover(texts):
     return [0.95 if "Moreover" in t else 0.05 for t in texts]
 
 
+def test_document_pick_first_pass_requests_one_candidate(monkeypatch):
+    sent = []
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, n):
+            self.n = n
+
+        def json(self):
+            return {"choices": [{"message": {"content": _rewrite(PARA)}} for _ in range(self.n)]}
+
+    def fake_post(url, headers, json, timeout):
+        sent.append((json["temperature"], json["n"]))
+        return _Resp(json["n"])
+
+    monkeypatch.setattr(sh.requests, "post", fake_post)
+    # Even with a wide sampling plan, document mode must one-shot the first pass.
+    engine = StudentTextHumanizer(
+        _config(pick="document", sampling=((1.2, 8),), refine_sampling=((1.2, 4),)),
+        score_fn=lambda texts: [0.05] * len(texts),
+    )
+    engine.humanize(PARA)
+    assert sent == [(1.2, 1)]
+
+
 def test_document_pick_rewrites_only_the_chunks_the_whole_text_check_flags(monkeypatch):
     from services import ai_detector
 
@@ -547,17 +573,79 @@ def test_sampling_plan_survives_one_failed_temperature(monkeypatch):
 
 def test_student_config_reads_detector_settings(monkeypatch):
     monkeypatch.setenv("HUMANIZER_STUDENT_PICK", "detector")
-    monkeypatch.setenv("HUMANIZER_STUDENT_SAMPLING", "1.0:4,1.2:4")
+    monkeypatch.setenv("HUMANIZER_STUDENT_SAMPLING", "1.2:8")
     monkeypatch.setenv("HUMANIZER_STUDENT_REFINE_SAMPLING", "1.0:12,1.2:12")
     monkeypatch.setenv("HUMANIZER_STUDENT_REFINE_ABOVE", "0.25")
+    monkeypatch.setenv("HUMANIZER_STUDENT_CONCLUSION_SAMPLING", "1.2:16")
+    monkeypatch.setenv("HUMANIZER_STUDENT_EARLY_STOP", "0.15")
     monkeypatch.setenv("HUMANIZER_STUDENT_DOC_ROUNDS", "2")
     monkeypatch.setenv("HUMANIZER_STUDENT_DOC_BUDGET", "30")
     cfg = sh.student_config()
     assert cfg.pick == "detector"
-    assert cfg.sampling_plan == ((1.0, 4), (1.2, 4))
+    assert cfg.sampling_plan == ((1.2, 8),)
     assert cfg.refine_sampling == ((1.0, 12), (1.2, 12))
+    assert cfg.conclusion_sampling == ((1.2, 16),)
     assert cfg.refine_above == 0.25
+    assert cfg.early_stop_below == 0.15
     assert (cfg.doc_rounds, cfg.doc_budget) == (2, 30.0)
+
+
+def test_student_config_defaults_document_one_shot(monkeypatch):
+    for key in (
+        "HUMANIZER_STUDENT_PICK",
+        "HUMANIZER_STUDENT_SAMPLING",
+        "HUMANIZER_STUDENT_CONCLUSION_SAMPLING",
+        "HUMANIZER_STUDENT_EARLY_STOP",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    cfg = sh.student_config()
+    assert cfg.pick == "document"
+    assert cfg.sampling_plan == ((1.2, 1),)
+    assert cfg.conclusion_sampling == sh.DEFAULT_CONCLUSION_SAMPLING
+    assert cfg.early_stop_below == sh.EARLY_STOP_BELOW
+
+
+def test_detector_early_stop_skips_second_wave(monkeypatch):
+    outputs = iter(_variants(8))
+    probs = dict(zip(_variants(8), [0.05, 0.2, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4]))
+    calls = []
+
+    def score(texts):
+        calls.append(len(texts))
+        return [probs[t] for t in texts]
+
+    engine = StudentTextHumanizer(
+        _config(sampling=((1.2, 8),), pick="detector", early_stop_below=0.15, refine_sampling=((1.2, 4),)),
+        complete_fn=lambda _c: next(outputs),
+        score_fn=score,
+    )
+    assert engine.humanize(PARA) == _variants(8)[0]
+    assert calls == [4]  # first half only; second wave + refine skipped
+
+
+def test_detector_early_stop_disabled_runs_full_plan_then_refine():
+    more = _variants(6)
+    outputs = iter(more)
+    probs = dict(zip(more, [0.4, 0.5, 0.35, 0.6, 0.1, 0.9]))
+    tracked = []
+
+    def score(texts):
+        tracked.append(len(texts))
+        return [probs[t] for t in texts]
+
+    engine = StudentTextHumanizer(
+        _config(
+            sampling=((1.2, 4),),
+            pick="detector",
+            early_stop_below=0.0,
+            refine_above=0.3,
+            refine_sampling=((1.2, 2),),
+        ),
+        complete_fn=lambda _c: next(outputs),
+        score_fn=score,
+    )
+    assert engine.humanize(PARA) == more[4]
+    assert tracked == [4, 2]
 
 
 def test_candidates_are_read_from_every_choice_with_logprobs(monkeypatch):
