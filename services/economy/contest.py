@@ -711,13 +711,16 @@ def leaderboard(*, limit: int = 30) -> list[dict[str, Any]]:
         for s in scores:
             u = users.get(s["user_id"])
             prize = resolve_prize(s["rank"], s["pts"])
-            label = prize["label"]
-            if prize["kind"] == "credits":
+            # Board always shows the place's prize tier (e.g. $700 for #1), not the
+            # provisional credits fallback when mins aren't met yet.
+            tier_label = _tier_prize_label(s["rank"])
+            if tier_label:
+                label = tier_label
+            elif prize["kind"] == "credits":
                 share = _credits_share(s["pts"], pool_pts or 1)
                 label = f"{'' if phase == 'results' else '~'}{share:,} credits"
-            elif prize["kind"] == "none":
-                # Prize slots 1–30 always show the tier prize on the board.
-                label = _tier_prize_label(s["rank"]) or "—"
+            else:
+                label = prize["label"]
             out.append(
                 {
                     "rank": s["rank"],

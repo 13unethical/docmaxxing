@@ -3586,7 +3586,8 @@ function raceRows() {
         rank,
         name: isMe ? 'You' : (L.name || '—'),
         pts: pts > 0 ? pts : null,
-        prize: (L.prize && L.prize !== '—') ? L.prize : prize,
+        // Always the place prize ($700 / Max / …), never provisional credits.
+        prize,
         me: isMe,
         empty: false,
       });
