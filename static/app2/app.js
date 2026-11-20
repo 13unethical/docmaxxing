@@ -145,20 +145,20 @@ const CONFIG = {
     },
   },
 
-  // Earn & Share: referral program, same rules as docmaxxing.com/earn. MOCK numbers for the prototype.
+  // Earn & Share: referral program. Code/link come from /api/contest/me and Earn APIs — never hardcode a real user code.
   earn: {
     linkBase: 'https://docmaxxing.com/register?ref=',
-    code: 'DMVMRFLV6U',
+    code: '',
     giveCredits: 100, cashbackPct: 40, convertBonus: 1.2,
-    creditsPerDollar: 40,          // MOCK: rate used for "Convert to credits" before the 1.2× bonus
+    creditsPerDollar: 40,
     minWithdraw: 50, qualifyDeposit: 10,
-    balance: 18.4,                 // MOCK wallet balance, $
-    freeTurnitin: 1,
+    balance: 0,
+    freeTurnitin: 0,
     milestones: [
-      { friends: 1, reward: 'Free Turnitin' },
-      { friends: 3, reward: '1,000 credits' },
-      { friends: 5, reward: '3,000 credits' },
-      { friends: 10, reward: 'Pro status' },
+      { friends: 1, prize: 'Free Turnitin' },
+      { friends: 3, prize: '1,000 credits' },
+      { friends: 5, prize: '3,000 credits' },
+      { friends: 10, prize: 'Pro status' },
     ],
     share: [
       { label: 'Telegram', icon: 'telegram', url: 'https://t.me/share/url?url={link}&text={text}' },
@@ -167,12 +167,7 @@ const CONFIG = {
       { label: 'Email', icon: 'mail', url: 'mailto:?subject=DocMaxxing&body={text}%20{link}' },
     ],
     shareText: 'Get 100 free credits on DocMaxxing',
-    // IDs only, no emails. deposits: [date, amount $]
-    referrals: [
-      { id: 'U-48213', joined: '2026-10-02', deposits: [['2026-10-02', 19], ['2026-10-16', 9]] },
-      { id: 'U-51907', joined: '2026-10-09', deposits: [['2026-10-10', 18]] },
-      { id: 'U-55340', joined: '2026-10-18', deposits: [] },
-    ],
+    referrals: [],
   },
 
 
@@ -3504,15 +3499,17 @@ const raceState = () => (state._race ||= { loaded: false, data: null, busy: fals
 async function raceLoad(force = false) {
   const s = raceState();
   if (s.busy) return s.data;
-  // Refetch when we only have a failed/empty placeholder so the board can heal after deploy.
+  // Refetch guest/empty payloads after sign-in, or when the board never filled.
+  const guestWhileSignedIn = s.loaded && state.signedIn && (!s.data?.me || s.data.state === 'guest');
   const staleEmpty = s.loaded && Array.isArray(s.data?.top) && s.data.top.length === 0
-    && (!s.data?.me || s.data.me.kind === 'nohum');
-  if (s.loaded && !force && !staleEmpty) return s.data;
+    && (!s.data?.me || s.data.me.kind === 'nohum' || s.data.state === 'need_humanize');
+  if (s.loaded && !force && !guestWhileSignedIn && !staleEmpty) return s.data;
   s.busy = true;
   try {
     const data = await API.contest.me();
     s.data = data;
     s.loaded = true;
+    if (data?.referral_code) CONFIG.earn.code = data.referral_code;
     if (data?.config) Object.assign(CONFIG.race, {
       poolExact: data.config.poolExact || CONFIG.race.poolExact,
       start: data.config.start || CONFIG.race.start,
@@ -3574,7 +3571,8 @@ function raceRows() {
 function raceInviteLink() {
   const d = raceState().data;
   if (d?.invite_link) return d.invite_link;
-  const code = d?.referral_code || CONFIG.earn.code;
+  const code = (d?.referral_code || CONFIG.earn.code || '').trim();
+  if (!code) return `${location.origin}/register`;
   return `${location.origin}/register?ref=${code}`;
 }
 
