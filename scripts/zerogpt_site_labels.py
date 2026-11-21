@@ -72,8 +72,27 @@ def _row_key(row: dict) -> str:
     return f"{row.get('essay','')}:{row.get('candidate_i','')}:{hash(text)}:{hash(src)}"
 
 
-def _load_done_keys(path: Path) -> set[str]:
-    return {_row_key(r) for r in _load_jsonl(path)}
+def _labeled_paths(out_dir: Path, shard_index: int | None, shard_count: int) -> list[Path]:
+    paths = [out_dir / "labeled_site.jsonl"]
+    if shard_count > 1:
+        paths.append(out_dir / f"labeled_site_shard_{shard_index}.jsonl")
+    paths.extend(sorted(out_dir.glob("labeled_site_shard_*.jsonl")))
+    return list(dict.fromkeys(paths))
+
+
+def _load_done_keys(out_dir: Path) -> set[str]:
+    done: set[str] = set()
+    for path in out_dir.glob("labeled_site*.jsonl"):
+        done.update(_row_key(r) for r in _load_jsonl(path))
+    return done
+
+
+def _merge_labeled_rows(out_dir: Path) -> list[dict]:
+    by_key: dict[str, dict] = {}
+    for path in sorted(out_dir.glob("labeled_site*.jsonl")):
+        for row in _load_jsonl(path):
+            by_key[_row_key(row)] = row
+    return list(by_key.values())
 
 
 def _user_assistant_from_sft(path: Path, *, limit: int) -> list[dict]:
@@ -128,11 +147,52 @@ def main() -> int:
         ],
     )
     p.add_argument("--sft-assistant", type=int, default=0, help="label assistant turns from --sft (no Modal)")
+    p.add_argument("--shard-index", type=int, default=0, help="shard id 0..shard-count-1")
+    p.add_argument("--shard-count", type=int, default=1, help="parallel workers split the pending queue")
+    p.add_argument(
+        "--merge-pairs-only",
+        action="store_true",
+        help="build pairs from all labeled_site*.jsonl and exit",
+    )
     args = p.parse_args()
 
     out_dir = args.out_dir
     out_dir.mkdir(parents=True, exist_ok=True)
-    labeled_path = out_dir / "labeled_site.jsonl"
+    if args.shard_count > 1:
+        labeled_path = out_dir / f"labeled_site_shard_{args.shard_index}.jsonl"
+    else:
+        labeled_path = out_dir / "labeled_site.jsonl"
+
+    if args.merge_pairs_only:
+        all_labeled = _merge_labeled_rows(out_dir)
+        if not all_labeled:
+            print("no labeled rows", file=sys.stderr)
+            return 1
+        import humanizer_student.dpo as dpo_mod
+
+        old_chosen, old_rej = dpo_mod.CHOSEN_MAX_FRAC, dpo_mod.REJECTED_MIN_FRAC
+        dpo_mod.CHOSEN_MAX_FRAC = args.chosen_max
+        dpo_mod.REJECTED_MIN_FRAC = args.rejected_min
+        try:
+            pairs = build_pairs(all_labeled, max_per_source=4, seed=args.pair_seed)
+        finally:
+            dpo_mod.CHOSEN_MAX_FRAC, dpo_mod.REJECTED_MIN_FRAC = old_chosen, old_rej
+        train, val = split_by_essay(pairs, val_share=0.12)
+        for name, rows in (("pairs_train.jsonl", train), ("pairs_val.jsonl", val)):
+            with (out_dir / name).open("w", encoding="utf-8") as fh:
+                for row in rows:
+                    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        full = {
+            "labeled": len(all_labeled),
+            "pairs": len(pairs),
+            "pairs_train": len(train),
+            "pairs_val": len(val),
+            "chosen_max": args.chosen_max,
+            "rejected_min": args.rejected_min,
+        }
+        (out_dir / "summary.json").write_text(json.dumps(full, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(full, indent=2), flush=True)
+        return 0
 
     pending: list[dict] = []
     collect = _load_collect_module()
@@ -178,8 +238,13 @@ def main() -> int:
         print("no input rows", file=sys.stderr)
         return 1
 
-    done: set[str] = _load_done_keys(labeled_path) if args.resume else set()
+    done: set[str] = _load_done_keys(out_dir) if args.resume else set()
     queue = [r for r in pending if _row_key(r) not in done]
+    if args.shard_count > 1:
+        if not 0 <= args.shard_index < args.shard_count:
+            print("shard-index must be in 0..shard-count-1", file=sys.stderr)
+            return 2
+        queue = [row for i, row in enumerate(queue) if i % args.shard_count == args.shard_index]
     if args.limit > 0:
         queue = queue[: args.limit]
 
@@ -187,8 +252,11 @@ def main() -> int:
         json.dumps(
             {
                 "pending": len(queue),
-                "skipped_done": len(pending) - len(queue),
+                "skipped_done": len(pending) - len(done),
+                "shard_index": args.shard_index,
+                "shard_count": args.shard_count,
                 "out_dir": str(out_dir),
+                "labeled_path": str(labeled_path),
             }
         ),
         flush=True,
@@ -196,9 +264,15 @@ def main() -> int:
     if not queue:
         print("nothing to label", flush=True)
     else:
+        import os
+
         cfg = ZeroGPTSiteConfig()
         if args.headless is not None:
             cfg.headless = args.headless
+        if args.shard_count > 1:
+            base = os.environ.get("ZEROGPT_SITE_CHROME_DIR") or "browser_profiles/zerogpt_site_chrome"
+            cfg.user_data_dir = f"{base}_shard_{args.shard_index}"
+            cfg.cooldown_s = max(0.8, cfg.cooldown_s)
 
         def _on_result(row: dict) -> None:
             row.setdefault("ts", datetime.now(timezone.utc).replace(microsecond=0).isoformat())
@@ -219,7 +293,7 @@ def main() -> int:
     if args.build_pairs:
         import humanizer_student.dpo as dpo_mod
 
-        all_labeled = _load_jsonl(labeled_path)
+        all_labeled = _merge_labeled_rows(out_dir)
         if not all_labeled:
             print("no labeled rows for pairs", file=sys.stderr)
             return 1
