@@ -723,14 +723,15 @@ class StudentTextHumanizer:
                 # If the pool DRIFTED/echoes, pull refine_sampling in the same attempt.
                 if self.config.pick == "document":
                     plan = self.config.sampling_plan or DOCUMENT_SAMPLING
-                    temperature = plan[0][0]
                     variants = self._candidates(source, plan)
                     usable, problem, light = self._usable(source, variants)
                     if light is not None and (lightest is None or light[0] < lightest[0]):
                         lightest = (light[0], _with_marker(light[1]))
                     rescue = self.config.refine_sampling or DOCUMENT_REFINE_SAMPLING
+                    # Near-echo against the least-AI pick (not "most changed") — otherwise a
+                    # larger pool can look fine while the score-winner is still an echo.
                     need_rescue = not usable or (
-                        usable and _jaccard(source, pick_candidate(source, usable, "changed").text) > 0.92
+                        usable and _jaccard(source, self._least_ai_or_changed(source, usable)) > 0.92
                     )
                     if need_rescue:
                         log.info(
@@ -749,6 +750,10 @@ class StudentTextHumanizer:
             if light is not None and (lightest is None or light[0] < lightest[0]):
                 lightest = (light[0], _with_marker(light[1]))
             if usable:
+                # document: score the pool (least AI), then refine if still hot — never
+                # "most changed", which made larger first-pass pools score worse on detectors.
+                if self.config.pick == "document":
+                    return _with_marker(self._pick_by_detector(source, usable, conclusion=False))
                 return _with_marker(pick_candidate(source, usable, self.config.pick).text)
             log.info("student humanizer attempt %s failed: %s", attempt, problem)
         if lightest is not None:
@@ -837,6 +842,15 @@ class StudentTextHumanizer:
             except Exception as exc:  # noqa: BLE001
                 log.info("student humanizer refine failed: %s", exc)
         return best[0].text
+
+    def _least_ai_or_changed(self, chunk: str, usable: list[Candidate]) -> str:
+        """Lowest AI score among ``usable``, or most-changed if the detector is down."""
+        try:
+            scored = list(zip(usable, self._score_fn([c.text for c in usable])))
+            return pick_least_ai(chunk, scored)[0].text
+        except Exception as exc:  # noqa: BLE001
+            log.info("AI detector unavailable for document first pick: %s", exc)
+            return pick_candidate(chunk, usable, "changed").text
 
     def _pick_by_detector(self, chunk: str, usable: list[Candidate], conclusion: bool = False) -> str:
         """Lowest AI-detector score among ``usable``; refine/conclusion extras when still flagged."""

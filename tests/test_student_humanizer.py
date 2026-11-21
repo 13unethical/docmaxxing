@@ -491,11 +491,38 @@ def test_document_pick_first_pass_uses_sampling_plan(monkeypatch):
             refine_sampling=((1.2, 4),),
             doc_flag_above=0.99,
             doc_rounds=0,
+            early_stop_below=0.15,
         ),
         score_fn=lambda texts: [0.05] * len(texts),
     )
     engine.humanize(PARA)
     assert sent == [(1.2, 4)]
+
+
+def test_document_pick_first_pass_keeps_least_ai_not_most_changed():
+    """Larger document pools must not prefer 'most rewritten' when it scores higher AI."""
+    mild = _rewrite(PARA)
+    heavy = (
+        "This paper looks into remote-work productivity shifts among 42 companies during 2021. "
+        "Authors showed that production grew by 13 percent whereas meetings fell steeply (Smith, 2020)."
+    )
+    assert sh._jaccard(PARA, heavy) < sh._jaccard(PARA, mild)
+    texts = iter([mild, heavy, mild, heavy])
+
+    engine = StudentTextHumanizer(
+        _config(
+            pick="document",
+            sampling=((1.2, 4),),
+            refine_sampling=((1.2, 2),),
+            doc_flag_above=0.99,
+            doc_rounds=0,
+            early_stop_below=0.15,
+            refine_above=0.9,
+        ),
+        complete_fn=lambda _c: next(texts),
+        score_fn=lambda batch: [0.08 if t == mild else 0.85 for t in batch],
+    )
+    assert engine.humanize(PARA) == mild
 
 
 def test_document_pick_rescues_drifted_first_pass_with_refine_pool(monkeypatch):
