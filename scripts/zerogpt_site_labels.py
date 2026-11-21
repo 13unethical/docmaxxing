@@ -27,8 +27,20 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+
+def _load_collect_module():
+    import importlib.util
+
+    path = ROOT / "scripts" / "collect_zerogpt_dpo_run.py"
+    spec = importlib.util.spec_from_file_location("collect_zerogpt_dpo_run", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 from humanizer_student.dpo import build_pairs, split_by_essay  # noqa: E402
-from scripts.collect_zerogpt_dpo_run import load_sources, sample_candidates  # noqa: E402
 from services.humanizer_training.judge.zerogpt_site import (  # noqa: E402
     ZeroGPTSiteConfig,
     ZeroGPTSiteJudge,
@@ -123,6 +135,8 @@ def main() -> int:
     labeled_path = out_dir / "labeled_site.jsonl"
 
     pending: list[dict] = []
+    collect = _load_collect_module()
+
     if args.candidates:
         pending.extend(_load_jsonl(args.candidates))
     if args.sft_assistant > 0:
@@ -134,8 +148,7 @@ def main() -> int:
     if args.gen_sources > 0:
         import os
 
-        from scripts.collect_zerogpt_dpo_run import _load_dotenv
-
+        _load_dotenv = collect._load_dotenv
         _load_dotenv(ROOT / ".env")
         url = (os.environ.get("HUMANIZER_STUDENT_URL") or "").strip().rstrip("/")
         key = (os.environ.get("HUMANIZER_STUDENT_KEY") or "").strip()
@@ -144,8 +157,8 @@ def main() -> int:
             print("HUMANIZER_STUDENT_URL and HUMANIZER_STUDENT_KEY required for --gen-sources", file=sys.stderr)
             return 2
         paths = [ROOT / rel for rel in args.sft]
-        sources = load_sources(paths, limit=args.gen_sources, seed=args.pair_seed)
-        generated = sample_candidates(
+        sources = collect.load_sources(paths, limit=args.gen_sources, seed=args.pair_seed)
+        generated = collect.sample_candidates(
             sources,
             url=url,
             api_key=key,
