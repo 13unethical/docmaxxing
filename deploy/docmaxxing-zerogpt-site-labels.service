@@ -1,0 +1,16 @@
+[Unit]
+Description=DocMaxxing humanizer: label training candidates on ZeroGPT free site
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/root/docmaxxing
+Environment=ZEROGPT_SITE_HEADLESS=1
+Environment=ZEROGPT_SITE_COOLDOWN_S=1.5
+# Resumable; tune --limit per run if the site rate-limits.
+ExecStart=/root/docmaxxing/venv/bin/python /root/docmaxxing/scripts/zerogpt_site_labels.py \
+    --candidates /root/docmaxxing/data/zerogpt_dpo_run1/candidates.jsonl \
+    --out-dir /root/docmaxxing/data/zerogpt_site_dpo \
+    --limit 80 --resume --build-pairs
+Nice=10
